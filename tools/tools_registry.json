@@ -219,6 +219,28 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "repo.git.diff": {
+      "description": "Get structured working tree diff: per-file additions, deletions, and excerpts. Read-only.",
+      "args_schema": {
+        "path": {
+          "type": "string",
+          "required": false,
+          "description": "Optional file path to scope the diff. Omit for full working tree diff."
+        }
+      },
+      "returns": {
+        "files": "array — [{path, additions, deletions, excerpt}] per changed file",
+        "total_files": "integer — number of files with diffs",
+        "total_additions": "integer — total added lines across all files",
+        "total_deletions": "integer — total deleted lines across all files",
+        "empty": "boolean — true if no changes"
+      },
+      "safety": [
+        "Read-only operation. Does not modify the repository.",
+        "Path argument is sanitized — flags disguised as paths are rejected.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {

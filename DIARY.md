@@ -6,11 +6,11 @@ Reverse-chronological. Each entry covers one working session.
 
 ## 2026-03-02 (Session 6) — Phase 2 Tool Abstraction Layer (Semantic Adapters)
 
-**Session span:** ~15:00–16:00 UTC
+**Session span:** ~15:00–17:00 UTC
 
 ### What was built
 
-#### Phase 2 — Tool Abstraction Layer (Steps 1–3)
+#### Phase 2 — Tool Abstraction Layer (Steps 1–4)
 
 Replaced raw shell/git stdout parsing with structured JSON tool adapters. Agents now interact with semantic APIs instead of parsing terminal output.
 
@@ -44,13 +44,23 @@ Created `tools/adapters/git_repo.py`:
 - Staged/modified files include status code (`A`, `M`, `D`, etc.) and path
 - `MM` files correctly appear in both staged and modified lists
 
+#### Step 4 — `repo.git.diff` (read-only)
+
+Extended `tools/adapters/git_repo.py`:
+- `parse_diff(output)` — parses `git diff --unified=3` output into per-file records
+- `git_diff(path=None)` → structured dict with `files`, `total_files`, `total_additions`, `total_deletions`, `empty`
+- Each file entry contains `path`, `additions`, `deletions`, `excerpt` (first ~20 lines)
+- Counts exclude `+++`/`---` header lines (only real content changes)
+- Optional `path` argument scopes diff to a single file (uses `--` separator to prevent flag injection)
+- Paths starting with `-` are rejected as potential flag injection
+
 ### Test results
 
 | Test suite | Tests | Status |
 |---|---|---|
 | `tests/test_system_service.py` | 15 | All passing |
-| `tests/test_git_repo.py` | 12 | All passing |
-| **Total** | **27** | **All passing** |
+| `tests/test_git_repo.py` | 21 | All passing |
+| **Total** | **36** | **All passing** |
 
 All tests use mocked subprocess output — no systemd or git repo required.
 
@@ -60,13 +70,13 @@ All tests use mocked subprocess output — no systemd or git repo required.
 |---|---|
 | `tools/adapters/__init__.py` | Created (package) |
 | `tools/adapters/system_service.py` | Created (status + restart adapters) |
-| `tools/adapters/git_repo.py` | Created (git status adapter) |
-| `tools/tools_registry.json` | Created (code-owned, 3 new tools registered) |
+| `tools/adapters/git_repo.py` | Created (git status + diff adapters) |
+| `tools/tools_registry.json` | Created (code-owned, 4 new tools registered) |
 | `tools/registry.py` | Modified — default path → `tools/tools_registry.json` |
 | `tools/runner.py` | Modified — dispatch for 3 new tool names |
 | `tests/__init__.py` | Created (package) |
 | `tests/test_system_service.py` | Created (15 tests) |
-| `tests/test_git_repo.py` | Created (12 tests) |
+| `tests/test_git_repo.py` | Created (21 tests) |
 
 ### Git history (session 6)
 
@@ -74,7 +84,8 @@ All tests use mocked subprocess output — no systemd or git repo required.
 |---|---|
 | `c21426b` | feat: Phase 2 add system.service.status adapter |
 | `75d4f87` | feat: Phase 2 add system.service.restart adapter |
-| (pending) | feat: Phase 2 add repo.git.status adapter |
+| `9463bf3` | feat: Phase 2 add repo.git.status adapter |
+| (pending) | feat: Phase 2 add repo.git.diff adapter |
 
 ### Semantic tool namespace (current state)
 
@@ -83,6 +94,7 @@ All tests use mocked subprocess output — no systemd or git repo required.
 | `system.service.status` | Read-only | `system_service.py` |
 | `system.service.restart` | State-changing (gated) | `system_service.py` |
 | `repo.git.status` | Read-only | `git_repo.py` |
+| `repo.git.diff` | Read-only | `git_repo.py` |
 
 ---
 

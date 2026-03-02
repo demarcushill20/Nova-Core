@@ -1,8 +1,7 @@
-"""Adapter: repo.git.status — structured Git status.
+"""Adapters: repo.git.status / repo.git.diff — structured Git queries.
 
-Returns a dict with parsed branch, ahead/behind, and file lists
-instead of raw porcelain output.
-Delegates execution to the existing runner infrastructure.
+Return dicts with parsed fields instead of raw stdout.
+Delegate execution to the existing runner infrastructure.
 """
 
 import re
@@ -109,6 +108,104 @@ def git_status(sandbox: Path | None = None) -> dict:
         }
 
     parsed = parse_porcelain(result["stdout"])
+    return {
+        "ok": True,
+        "exit_code": 0,
+        "stderr": "",
+        **parsed,
+    }
+
+
+# --- Diff parsing -----------------------------------------------------------
+
+_DIFF_HEADER_RE = re.compile(r"^diff --git a/(.+) b/(.+)$")
+_EXCERPT_LINES = 20
+
+
+def parse_diff(output: str) -> dict:
+    """Parse `git diff --unified=3` output into structured per-file records."""
+    files = []
+    current = None
+
+    for line in output.splitlines():
+        hdr = _DIFF_HEADER_RE.match(line)
+        if hdr:
+            if current:
+                files.append(current)
+            current = {
+                "path": hdr.group(2),
+                "additions": 0,
+                "deletions": 0,
+                "excerpt": [],
+            }
+            continue
+
+        if current is None:
+            continue
+
+        if len(current["excerpt"]) < _EXCERPT_LINES:
+            current["excerpt"].append(line)
+
+        if line.startswith("+") and not line.startswith("+++"):
+            current["additions"] += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            current["deletions"] += 1
+
+    if current:
+        files.append(current)
+
+    # Convert excerpt lists to strings
+    for f in files:
+        f["excerpt"] = "\n".join(f["excerpt"])
+
+    total_add = sum(f["additions"] for f in files)
+    total_del = sum(f["deletions"] for f in files)
+
+    return {
+        "files": files,
+        "total_files": len(files),
+        "total_additions": total_add,
+        "total_deletions": total_del,
+        "empty": len(files) == 0,
+    }
+
+
+def git_diff(path: str | None = None, sandbox: Path | None = None) -> dict:
+    """Get structured diff of the working tree.
+
+    Args:
+        path: optional file path to scope the diff
+        sandbox: working directory (defaults to cwd)
+
+    Returns:
+        dict with keys: files, total_files, total_additions,
+        total_deletions, empty
+    """
+    cwd = sandbox or Path.cwd()
+    cmd = ["git", "diff", "--unified=3"]
+
+    if path:
+        # Sanitize: reject flags disguised as paths
+        if path.startswith("-"):
+            raise ValueError(f"Invalid path (looks like a flag): {path!r}")
+        cmd.append("--")
+        cmd.append(path)
+
+    result = run_subprocess(cmd, cwd=cwd, timeout=15)
+
+    if result["exit_code"] != 0:
+        return {
+            "ok": False,
+            "exit_code": result["exit_code"],
+            "stderr": result["stderr"],
+            "files": [],
+            "total_files": 0,
+            "total_additions": 0,
+            "total_deletions": 0,
+            "empty": True,
+        }
+
+    parsed = parse_diff(result["stdout"])
     return {
         "ok": True,
         "exit_code": 0,

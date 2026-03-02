@@ -1,11 +1,16 @@
-"""Tests for tools.adapters.git_repo — parse_porcelain + git_status.
+"""Tests for tools.adapters.git_repo — status + diff adapters.
 
 These tests mock subprocess output so they work in any environment.
 """
 
 from unittest.mock import patch
 
-from tools.adapters.git_repo import parse_porcelain, git_status
+from tools.adapters.git_repo import (
+    git_diff,
+    git_status,
+    parse_diff,
+    parse_porcelain,
+)
 
 
 # --- Porcelain output samples ------------------------------------------------
@@ -182,6 +187,157 @@ def test_git_status_json_shape(mock_run):
     assert isinstance(result["staged"], list)
 
 
+# --- Diff output samples -----------------------------------------------------
+
+SINGLE_FILE_DIFF = """\
+diff --git a/tools/runner.py b/tools/runner.py
+index 466a0a1..b7eaba5 100644
+--- a/tools/runner.py
++++ b/tools/runner.py
+@@ -220,6 +220,8 @@ def run_tool(
+             result = _run_shell(args, sandbox)
+         elif tool_name == "git.run":
+             result = _run_git(args, sandbox)
++        elif tool_name == "repo.git.diff":
++            result = _run_repo_git_diff(args, sandbox)
+         elif tool_name.startswith("files."):
+             result = _run_files(tool_name, args, registry)
+"""
+
+MULTI_FILE_DIFF = """\
+diff --git a/README.md b/README.md
+index abc1234..def5678 100644
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,5 @@
+ # NovaCore
++## Overview
++NovaCore is an autonomous AI runtime.
+
+-Old description here.
++New description here.
+diff --git a/tools/runner.py b/tools/runner.py
+index 111aaaa..222bbbb 100644
+--- a/tools/runner.py
++++ b/tools/runner.py
+@@ -10,7 +10,7 @@ import json
+-_MAX_OUTPUT = 100 * 1024
++_MAX_OUTPUT = 200 * 1024
+"""
+
+NO_CHANGES_DIFF = ""
+
+LARGE_FILE_DIFF = "diff --git a/big.py b/big.py\nindex aaa..bbb 100644\n--- a/big.py\n+++ b/big.py\n@@ -1,5 +1,30 @@\n" + "\n".join(
+    f"+line {i}" for i in range(1, 51)
+)
+
+
+# --- Tests for parse_diff ---------------------------------------------------
+
+
+def test_parse_single_file():
+    result = parse_diff(SINGLE_FILE_DIFF)
+    assert result["total_files"] == 1
+    assert result["files"][0]["path"] == "tools/runner.py"
+    assert result["files"][0]["additions"] == 2
+    assert result["files"][0]["deletions"] == 0
+    assert result["total_additions"] == 2
+    assert result["total_deletions"] == 0
+    assert result["empty"] is False
+
+
+def test_parse_multi_file():
+    result = parse_diff(MULTI_FILE_DIFF)
+    assert result["total_files"] == 2
+    paths = [f["path"] for f in result["files"]]
+    assert "README.md" in paths
+    assert "tools/runner.py" in paths
+    # README: +3 additions (Overview, description line, New description), -1 deletion (Old description)
+    readme = next(f for f in result["files"] if f["path"] == "README.md")
+    assert readme["additions"] == 3
+    assert readme["deletions"] == 1
+    # runner: +1 addition, -1 deletion
+    runner = next(f for f in result["files"] if f["path"] == "tools/runner.py")
+    assert runner["additions"] == 1
+    assert runner["deletions"] == 1
+    assert result["total_additions"] == 4
+    assert result["total_deletions"] == 2
+
+
+def test_parse_no_changes():
+    result = parse_diff(NO_CHANGES_DIFF)
+    assert result["total_files"] == 0
+    assert result["files"] == []
+    assert result["empty"] is True
+
+
+def test_parse_excerpt_truncation():
+    result = parse_diff(LARGE_FILE_DIFF)
+    assert result["total_files"] == 1
+    assert result["files"][0]["additions"] == 50
+    # Excerpt should be limited to ~20 lines
+    excerpt_lines = result["files"][0]["excerpt"].splitlines()
+    assert len(excerpt_lines) == 20
+
+
+# --- Tests for git_diff (mocked subprocess) ----------------------------------
+
+
+@patch("tools.adapters.git_repo.run_subprocess")
+def test_git_diff_full(mock_run):
+    mock_run.return_value = {"exit_code": 0, "stdout": MULTI_FILE_DIFF, "stderr": ""}
+    result = git_diff()
+    assert result["ok"] is True
+    assert result["total_files"] == 2
+    assert result["empty"] is False
+    call_args = mock_run.call_args
+    assert call_args[0][0] == ["git", "diff", "--unified=3"]
+
+
+@patch("tools.adapters.git_repo.run_subprocess")
+def test_git_diff_scoped_path(mock_run):
+    mock_run.return_value = {"exit_code": 0, "stdout": SINGLE_FILE_DIFF, "stderr": ""}
+    result = git_diff(path="tools/runner.py")
+    assert result["ok"] is True
+    assert result["total_files"] == 1
+    call_args = mock_run.call_args
+    assert call_args[0][0] == ["git", "diff", "--unified=3", "--", "tools/runner.py"]
+
+
+@patch("tools.adapters.git_repo.run_subprocess")
+def test_git_diff_empty(mock_run):
+    mock_run.return_value = {"exit_code": 0, "stdout": "", "stderr": ""}
+    result = git_diff()
+    assert result["ok"] is True
+    assert result["empty"] is True
+    assert result["total_files"] == 0
+
+
+def test_git_diff_rejects_flag_path():
+    try:
+        git_diff(path="--staged")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "flag" in str(e).lower()
+
+
+@patch("tools.adapters.git_repo.run_subprocess")
+def test_git_diff_json_shape(mock_run):
+    mock_run.return_value = {"exit_code": 0, "stdout": SINGLE_FILE_DIFF, "stderr": ""}
+    result = git_diff()
+    required_keys = {"ok", "exit_code", "stderr", "files", "total_files", "total_additions", "total_deletions", "empty"}
+    assert required_keys.issubset(set(result.keys())), f"Missing: {required_keys - set(result.keys())}"
+    assert isinstance(result["files"], list)
+    assert isinstance(result["empty"], bool)
+    assert isinstance(result["total_additions"], int)
+    # Verify file object shape
+    f = result["files"][0]
+    assert "path" in f
+    assert "additions" in f
+    assert "deletions" in f
+    assert "excerpt" in f
+
+
 # --- Run as script -----------------------------------------------------------
 
 if __name__ == "__main__":
@@ -198,6 +354,15 @@ if __name__ == "__main__":
         test_git_status_dirty,
         test_git_status_not_a_repo,
         test_git_status_json_shape,
+        test_parse_single_file,
+        test_parse_multi_file,
+        test_parse_no_changes,
+        test_parse_excerpt_truncation,
+        test_git_diff_full,
+        test_git_diff_scoped_path,
+        test_git_diff_empty,
+        test_git_diff_rejects_flag_path,
+        test_git_diff_json_shape,
     ]
     passed = 0
     for t in tests:
