@@ -1,52 +1,101 @@
 ---
 name: file-ops
-description: "Create, read, edit, move, and rename files and directories within the nova-core sandbox. Deletions restricted by default."
+description: "Safely create, read, edit, move, and rename files within the nova-core sandbox using a diff-first, read-before-write workflow."
 activation:
   keywords:
     - file
     - read
     - write
     - edit
-    - move
-    - rename
-    - directory
-    - mkdir
+    - diff
+    - patch
+    - path
+    - .py
+    - .md
+    - .json
+    - .yaml
+    - .yml
+    - .txt
+    - .csv
+    - .toml
+    - .cfg
+    - .ini
+    - .sh
+  when:
+    - Task requires creating, reading, editing, or moving files
+    - Task involves generating code, configs, or documentation
+    - Task references specific file paths or extensions
+    - Organizing outputs, logs, or memory artifacts
+tool_doctrine:
+  files:
+    workflow:
+      - read_before_write
+      - diff_first
+      - verify_after_write
+output_contract:
+  required:
+    - summary
+    - files_changed
+    - verification
 ---
 
-# file-ops
+# When To Use
 
-## When to use
-
-- A task requires creating, reading, editing, moving, or renaming files.
+- A task requires creating, reading, editing, moving, or renaming files inside `~/nova-core`.
+- Generating new code, configuration, or documentation files.
 - Organizing outputs, logs, or memory artifacts.
-- Generating new code or configuration files.
 - Cleaning up `LOGS/backups/` (the only location where deletions are allowed without explicit user approval).
 
-## Rules / Safety
+# Workflow
+
+1. **Validate path** — confirm the target resolves within `~/nova-core`. Reject any path that escapes the sandbox.
+2. **Read first** — always read the existing file before writing or editing. No blind overwrites.
+3. **Diff first** — compute the intended change as a minimal diff before applying it.
+4. **Apply change** — write, edit, move, or rename the file.
+5. **Verify after write** — re-read the file to confirm the change landed correctly.
+6. **Log mutation** — log any state-changing operation to `LOGS/`.
+
+For details on edge cases (missing files, large files, binary files, conflicts), see `reference.md`.
+
+# Tool Usage Rules
 
 - All paths must resolve within `~/nova-core`. Reject any path that escapes the sandbox.
 - Never overwrite a file without reading it first.
 - Prefer editing existing files over creating new ones.
-- **No deletions by default.** Deletions are permitted only inside `LOGS/backups/` or with explicit user approval.
+- Produce minimal diffs — change only what is necessary, preserve surrounding formatting.
+- **No deletions by default.** Permitted only inside `LOGS/backups/` or with explicit user approval.
 - Before any destructive operation, back up the original to `LOGS/backups/`.
 - Do not modify `.claude/` internals except through sanctioned skill updates.
+- Never delete a file in `.inprogress` state.
 
-## Workflow
+# Verification
 
-1. Validate that the target path is within `~/nova-core`.
-2. For reads: return file contents.
-3. For writes/edits: read existing content first (diff-first), apply changes, write result.
-4. For moves/renames: verify destination does not collide, then rename.
-5. For deletes: **refuse** unless the target is inside `LOGS/backups/` or explicit user approval was given. Never delete a file in `.inprogress` state.
-6. Log the operation to `LOGS/` if it mutates state.
+After every write or edit:
 
-## Output format
+1. Re-read the modified file to confirm contents match intent.
+2. If the file existed before, confirm the diff is minimal and correct.
+3. If creating a new file, confirm it exists at the expected path with non-zero size.
+4. For moves/renames, confirm the source is gone and the destination exists.
 
-Action confirmation with the absolute path and a one-line summary:
+# Failure Handling
+
+- **File not found on read**: report the missing path clearly; do not create a placeholder.
+- **Path escapes sandbox**: refuse the operation and explain why.
+- **Write conflict** (file changed between read and write): re-read, re-diff, and re-apply.
+- **Binary file detected**: refuse to edit in-place; report the file type and suggest alternatives.
+- **Partial edit failure**: restore from `LOGS/backups/` if a backup was created.
+- **Permission denied**: report the error; do not attempt `chmod` or `sudo` workarounds.
+
+# Output Contract
+
+Every file-ops execution must end with a machine-checkable contract:
 
 ```
-[file-ops] CREATED ~/nova-core/OUTPUT/report.md
-[file-ops] EDITED  ~/nova-core/SKILLS/foo/SKILL.md (added workflow section)
-[file-ops] MOVED   ~/nova-core/LOGS/old.log → ~/nova-core/LOGS/backups/old.log
-[file-ops] DELETED ~/nova-core/LOGS/backups/old.log (permitted — inside LOGS/backups/)
+## CONTRACT
+summary: <one-line description of what was done>
+files_changed:
+  - <path> (<action>)
+verification: <how correctness was confirmed>
 ```
+
+See `examples.md` for concrete instances.
