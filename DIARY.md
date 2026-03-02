@@ -4,6 +4,102 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-02 (Session 5) — Phase 1 Skill Standardization (All 5 Skills)
+
+**Session span:** ~10:20–15:00 UTC
+
+### What was built
+
+#### Phase 1 — Skill Standardization (Foundation Layer)
+
+Brought all 5 skills into a standardized format following Anthropic-aligned skill doctrine. Each skill now has:
+
+- **Proper YAML frontmatter** with `name`, `description`, `activation.when`, `tool_doctrine`, and `output_contract`
+- **6 mandatory sections** in exact order: `When To Use`, `Workflow`, `Tool Usage Rules`, `Verification`, `Failure Handling`, `Output Contract`
+- **Progressive disclosure docs**: `reference.md` (deep detail, edge cases) and `examples.md` (concrete workflows with machine-checkable contracts)
+
+#### Skills standardized (in order)
+
+| Skill | Commit | Files | Key reference.md topics |
+|---|---|---|---|
+| `file-ops` | `a3205c0` | 3 (292 ins) | Edge cases (missing file, large file, binary, conflicts), style rules (minimal diffs, atomic edits, no silent overwrite) |
+| `shell-ops` | `2a51570` | 3 (322 ins) | Deny pattern philosophy, confirmation override (`NOVACORE_CONFIRM`), safe command patterns, exit code interpretation |
+| `git-ops` | `09ae19e` | 3 (321 ins) | Git as audit trail, forbidden operations table, safe operation sequence, commit message discipline, divergence handling |
+| `task-execution` | `1c4734e` | 3 (346 ins) | Lifecycle states/transitions, atomic rename philosophy, crash recovery, output naming conventions, idempotency, never-deletion |
+| `self-verification` | `95061b9` | 3 (339 ins) | Verification philosophy (never assume success), read-after-write principle, exit code discipline, confidence scoring, false-positive patterns |
+
+#### Output Contract standard
+
+Every skill now ends with a machine-checkable contract. Each skill defines its own required fields:
+
+| Skill | Contract fields |
+|---|---|
+| `file-ops` | `summary`, `files_changed`, `verification` |
+| `shell-ops` | `summary`, `commands_executed`, `verification` |
+| `git-ops` | `summary`, `git_commands_executed`, `verification` |
+| `task-execution` | `summary`, `task_id`, `status`, `verification` |
+| `self-verification` | `summary`, `checks_performed`, `result`, `confidence` |
+
+#### Tool doctrine standard
+
+Each skill declares its behavioral workflow rules in frontmatter:
+
+| Skill | Doctrine key | Workflow rules |
+|---|---|---|
+| `file-ops` | `tool_doctrine.files.workflow` | `read_before_write`, `diff_first`, `verify_after_write` |
+| `shell-ops` | `tool_doctrine.runtime.workflow` | `sandbox_only`, `never_bypass_runner`, `respect_deny_patterns`, `require_confirmation_for_sensitive` |
+| `git-ops` | `tool_doctrine.repo.workflow` | `prefer_status_diff_first`, `no_force_push`, `no_rebase`, `no_reset_hard`, `no_clean_fd` |
+| `task-execution` | `tool_doctrine.runtime.workflow` | `read_task_before_execute`, `atomic_state_transition`, `write_output_before_done`, `never_delete_task_files` |
+| `self-verification` | `tool_doctrine.runtime.workflow` | `check_expected_state`, `confirm_no_errors`, `validate_contract_fields`, `prefer_read_after_write` |
+
+### Verification discipline
+
+Each step followed a spot-check protocol before commit:
+- YAML frontmatter parsed with `python3 -c "import yaml; ..."` to confirm validity
+- `grep -n "## CONTRACT"` on examples.md to confirm all examples have contract blocks
+- `git status --short` to confirm only the target skill directory was modified
+- `git diff --stat` to confirm no runtime code changed
+
+### Files created or modified
+
+| File | Action |
+|---|---|
+| `.claude/skills/file-ops/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/file-ops/reference.md` | Created |
+| `.claude/skills/file-ops/examples.md` | Created |
+| `.claude/skills/shell-ops/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/shell-ops/reference.md` | Created |
+| `.claude/skills/shell-ops/examples.md` | Created |
+| `.claude/skills/git-ops/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/git-ops/reference.md` | Created |
+| `.claude/skills/git-ops/examples.md` | Created |
+| `.claude/skills/task-execution/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/task-execution/reference.md` | Created |
+| `.claude/skills/task-execution/examples.md` | Created |
+| `.claude/skills/self-verification/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/self-verification/reference.md` | Created |
+| `.claude/skills/self-verification/examples.md` | Created |
+
+**Total:** 15 files (5 rewritten, 10 created), ~1,620 lines added.
+
+### Git history (session 5)
+
+| Commit | Message |
+|---|---|
+| `a3205c0` | feat: Phase 1 standardize file-ops skill |
+| `2a51570` | feat: Phase 1 standardize shell-ops skill |
+| `09ae19e` | feat: Phase 1 standardize git-ops skill |
+| `1c4734e` | feat: Phase 1 standardize task-execution skill |
+| `95061b9` | feat: Phase 1 standardize self-verification skill |
+
+### Design decisions
+
+- **No runtime code changes:** Phase 1 is purely cognitive — skills guide agent behavior, runner enforces safety. The two layers evolve independently.
+- **Progressive disclosure (SKILL.md → reference.md → examples.md):** Keeps the injected prompt concise while providing deep detail when needed. Mirrors Anthropic's internal skill playbook structure.
+- **Machine-checkable contracts over freeform output:** Enables future Phase 3 contract validation (automated verification that agent outputs meet spec).
+
+---
+
 ## 2026-03-02 (Session 4) — Runner Safety Hardening & Shell Skill Smoke Test
 
 **Session span:** ~09:10–09:45 UTC
