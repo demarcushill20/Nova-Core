@@ -14,6 +14,7 @@ import time
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tools.skills import load_skills, select_skills, render_append_prompt
 
 # --- Configuration ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -216,6 +217,26 @@ def dispatch(task_path: Path):
         cancel_marker.unlink(missing_ok=True)
         return
 
+    # --- Read task text for skill selection (cap 50 KB) ---
+    try:
+        task_text = inprogress_path.read_text(encoding="utf-8")[:50 * 1024]
+    except Exception as exc:
+        logger.warning("Could not read task file for skill selection: %s", exc)
+        task_text = ""
+
+    # --- Skill activation ---
+    all_skills = load_skills()
+    selected = select_skills(task_text, all_skills)
+    selected_names = [s.name for s in selected]
+    logger.info("SKILLS SELECTED: %s", ", ".join(selected_names) or "(none)")
+
+    skill_injection_path = WORK_DIR / f"skill_injection_{stem}.txt"
+    append_prompt_content = render_append_prompt(selected)
+    if append_prompt_content:
+        skill_injection_path.write_text(append_prompt_content, encoding="utf-8")
+        logger.info("SKILL INJECTION: %s (%d bytes)",
+                     skill_injection_path.name, len(append_prompt_content.encode("utf-8")))
+
     # --- Build prompt ---
     prompt = DISPATCH_PROMPT_TEMPLATE.format(
         task_path=inprogress_path,
@@ -226,11 +247,16 @@ def dispatch(task_path: Path):
     )
 
     # --- Deterministic worker log ---
-    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", prompt]
+    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions"]
+    if append_prompt_content and skill_injection_path.exists():
+        cmd += ["--append-system-prompt", append_prompt_content]
+    cmd.append(prompt)
     worker_log = LOGS_DIR / f"worker_{stem}.log"
     LOGS_DIR.mkdir(exist_ok=True)
 
-    logger.info("COMMAND: %s -p --verbose --dangerously-skip-permissions <prompt>", CLAUDE_BIN)
+    skill_flag_note = f" --append-system-prompt <{len(selected_names)} skills>" if selected_names else ""
+    logger.info("COMMAND: %s -p --verbose --dangerously-skip-permissions%s <prompt>",
+                CLAUDE_BIN, skill_flag_note)
     logger.info("WORKER LOG: %s", worker_log)
     prompt_header = "\n".join(prompt.splitlines()[:20])
     logger.info("PROMPT (first 20 lines):\n%s", prompt_header)
@@ -245,7 +271,8 @@ def dispatch(task_path: Path):
     with open(worker_log, "w") as wf:
         wf.write(f"=== WORKER LOG: {stem} ===\n")
         wf.write(f"=== START: {start_utc} ===\n")
-        wf.write(f"=== COMMAND: {CLAUDE_BIN} -p --verbose --dangerously-skip-permissions <prompt> ===\n\n")
+        wf.write(f"=== SKILLS: {', '.join(selected_names) or '(none)'} ===\n")
+        wf.write(f"=== COMMAND: {CLAUDE_BIN} -p --verbose --dangerously-skip-permissions{skill_flag_note} <prompt> ===\n\n")
 
     try:
         # Strip CLAUDECODE so the child doesn't refuse to start

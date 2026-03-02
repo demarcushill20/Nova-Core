@@ -1,6 +1,16 @@
 ---
 name: shell-ops
 description: "Execute shell commands safely within the nova-core sandbox for system tasks, script execution, and environment inspection."
+activation:
+  keywords:
+    - bash
+    - shell
+    - sudo
+    - pip
+    - python
+    - script
+    - command
+    - process
 ---
 
 # shell-ops

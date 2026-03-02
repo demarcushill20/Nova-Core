@@ -1,6 +1,16 @@
 ---
 name: git-ops
 description: "Manage git operations within nova-core: init, stage, commit, branch, diff, log, and status."
+activation:
+  keywords:
+    - git
+    - commit
+    - branch
+    - merge
+    - push
+    - pull
+    - stage
+    - checkout
 ---
 
 # git-ops

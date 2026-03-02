@@ -1,6 +1,16 @@
 ---
 name: file-ops
 description: "Create, read, edit, move, and rename files and directories within the nova-core sandbox. Deletions restricted by default."
+activation:
+  keywords:
+    - file
+    - read
+    - write
+    - edit
+    - move
+    - rename
+    - directory
+    - mkdir
 ---
 
 # file-ops

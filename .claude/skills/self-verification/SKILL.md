@@ -1,6 +1,13 @@
 ---
 name: self-verification
 description: "Verify nova-core integrity: check directory structure, validate task states, confirm logs exist, and run health diagnostics."
+activation:
+  keywords:
+    - verify
+    - health
+    - check
+    - diagnose
+    - integrity
 ---
 
 # self-verification

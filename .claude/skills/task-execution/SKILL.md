@@ -1,6 +1,12 @@
 ---
 name: task-execution
 description: "Read tasks from TASKS/, execute them, write results to OUTPUT/, and manage task lifecycle (.md -> .inprogress -> .done/.failed)."
+activation:
+  keywords:
+    - task
+    - execute
+    - dispatch
+    - lifecycle
 ---
 
 # task-execution
