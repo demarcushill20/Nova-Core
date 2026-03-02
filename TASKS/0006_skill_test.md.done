@@ -1,0 +1,6 @@
+# Skill Activation Test
+
+## Instruction
+
+Write "skill_engine_ok" to WORK/skill_engine_ok.txt.
+This is a simple file write test to confirm the skill injection pipeline works.
