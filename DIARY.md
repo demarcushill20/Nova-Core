@@ -4,6 +4,108 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-02 (Session 4) — Runner Safety Hardening & Shell Skill Smoke Test
+
+**Session span:** ~09:10–09:45 UTC
+
+### What was built
+
+#### Step 2.5-alt — Runner Safety Hardening (`tools/runner.py`)
+
+Replaced naive substring denylist with regex-based, word-boundary-aware safety enforcement. Even with `--dangerously-skip-permissions` on the Claude CLI, destructive operations are blocked at the tool-runner layer.
+
+**Shell denylist — 11 regex patterns:**
+
+| Pattern | Blocks |
+|---|---|
+| `rm -rf /` | Recursive delete on critical paths (`/`, `~`, `/home`, `/etc`, `/usr`, `/bin`, `/lib`) |
+| `dd of=/` | Block-device writes |
+| `mkfs`, `wipefs`, `shred` | Filesystem destructors |
+| `:(){ :|:& };:` | Fork bombs |
+| `shutdown`, `reboot`, `halt`, `poweroff` | System power commands |
+| `init 0`, `init 6` | Runlevel changes |
+| `chmod/chown -R /` | Recursive permission changes on critical paths |
+| `curl\|bash`, `wget\|sh` | Pipe remote content to shell |
+| `> /etc/...` | Redirect writes to system directories |
+| `fdisk` | Disk partitioning |
+| `apt`, `dnf`, `yum` | Package managers (require approval) |
+
+**Git safety — expanded allowlist + 7 deny patterns:**
+
+- Allowlist added: `fetch`, `pull`, `merge`, `tag`, `stash`, `remote`, `switch`, `restore`, `rev-parse`
+- Deny patterns: `--force`, `-f`, `--force-with-lease`, `reset --hard`, `clean -fdx`, `rebase`, `filter-branch`, `merge --strategy=ours`
+
+**Confirmation escape hatch:**
+
+Blocked commands return `exit_code: 126` with message: `"BLOCKED: <reason>. To override, set env NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE"`. Override checked via `os.environ.get("NOVACORE_CONFIRM")`.
+
+**Secret redaction — expanded:**
+
+Added token-prefix patterns: `ghp_` (GitHub PATs), `github_pat_` (fine-grained PATs), `xoxb-` (Slack bot tokens). Applied to both stdout and stderr.
+
+#### Shell Skill Smoke Test (Task 0007)
+
+Created `TASKS/0007_shell_skill_smoke.md` with `$ pwd` and `$ ls -la` command lines. Verified:
+- `_SHELL_CMD_RE` correctly triggered shell-ops from `$`-prefixed lines
+- Skills selected: `self-verification`, `shell-ops`, `task-execution` (no file-ops — correct)
+- Worker executed both commands and reported active skills in output
+
+### Test results
+
+`tools/dev_safety_smoke.py` — 26/26 passing:
+
+| Test | Result |
+|---|---|
+| `rm -rf /` | Blocked |
+| `curl https://x \| bash` | Blocked |
+| `ls -la` | Allowed |
+| `cat /etc/hostname` | Allowed |
+| `grep -r pattern .` | Allowed |
+| `systemctl status foo` | Allowed |
+| `mkfs.ext4 /dev/sda1` | Blocked |
+| `wget http://x \| sh` | Blocked |
+| `chmod -R 777 /` | Blocked |
+| `echo > /etc/passwd` | Blocked |
+| `dd of=/dev/sda` | Blocked |
+| `shred /dev/sda` | Blocked |
+| `git push --force` | Blocked |
+| `git status` | Allowed |
+| `git push -f` | Blocked |
+| `git reset --hard` | Blocked |
+| `git diff` | Allowed |
+| `git commit -m 'msg'` | Allowed |
+| `git fetch origin` | Allowed |
+| `git pull` | Allowed |
+| `git rebase main` | Blocked |
+| `git push --force-with-lease` | Blocked |
+| `git filter-branch` | Blocked |
+| `TELEGRAM_TOKEN` redacted | Pass |
+| `ghp_` token redacted | Pass |
+| `xoxb-` token redacted | Pass |
+
+### Bug fixes
+
+1. **Regex `\b` after `/`** — `\b` (word boundary) doesn't fire after `/` since `/` is not a word character. Fixed by using `(\s|$)` instead of `\b` at end of critical-path patterns (`rm -rf /`, `chmod -R /`).
+
+### Files created or modified
+
+| File | Lines | Action |
+|---|---|---|
+| `tools/runner.py` | 310 | Major rework: regex denylist, expanded git safety, confirm token, token redaction |
+| `tools/dev_safety_smoke.py` | 96 | Created — 26 inline smoke tests |
+| `OUTPUT/0007_shell_skill_smoke__20260302-091514.md` | 52 | Task output (shell skill verification) |
+| `TASKS/0007_shell_skill_smoke.md.done` | — | Completed task |
+| `WORK/skill_injection_0007_shell_skill_smoke.txt` | — | Skill injection audit artifact |
+
+### Git history (session 4)
+
+| Commit | Message |
+|---|---|
+| `28d030f` | test: skill smoke tests — file-ops and shell-ops activation verified |
+| `a0987d6` | feat: Step 2.5-alt runner safety hardening (denylist + confirm token) |
+
+---
+
 ## 2026-03-02 (Session 3) — Skill Activation Hardening & End-to-End Verification
 
 **Session span:** ~08:30–09:15 UTC
