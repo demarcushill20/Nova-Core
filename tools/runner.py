@@ -12,6 +12,7 @@ Return format (consistent across all tools):
 """
 
 import json
+import os
 import re
 import subprocess
 import time
@@ -38,39 +39,72 @@ _SECRET_RE = re.compile(
     r"""([=:]["']?\s*)(\S+)""",
 )
 
-_SHELL_DENYLIST = (
-    "rm -rf /",
-    "mkfs",
-    "dd if=",
-    "fdisk",
-    "shutdown",
-    "reboot",
-    "halt",
-    "poweroff",
-    "init 0",
-    "init 6",
-    ":(){ ",
-    ":(){",
-    "clean -fd",
-    "clean -fx",
-)
+# Token-prefix patterns (GitHub PATs, Slack bot tokens, etc.)
+_TOKEN_PREFIX_RE = re.compile(r"\b(ghp_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,}|xoxb-[A-Za-z0-9\-]+)")
+
+_CONFIRM_TOKEN = "ALLOW_DESTRUCTIVE"
+
+# --- Shell denylist (regex-based, word-boundary aware) -----------------------
+
+# High-risk destructive commands (always blocked unless confirmed)
+_SHELL_DENY_PATTERNS = [
+    # rm -rf / or ~ or /home etc.  (no \b after / — not a word char)
+    (re.compile(r"\brm\s+(-\w*[rf]\w*\s+)*(\/|~|\$HOME|\/home|\/etc|\/usr|\/bin|\/lib)(\s|$)"),
+     "rm -rf on critical path"),
+    # dd writing to block devices or system paths
+    (re.compile(r"\bdd\b.*\bof\s*=\s*\/"),
+     "dd write to system path"),
+    # Filesystem destructors
+    (re.compile(r"\b(mkfs|wipefs|shred)\b"),
+     "filesystem destructive command"),
+    # Fork bomb
+    (re.compile(r":\(\)\s*\{|:\(\){"),
+     "fork bomb pattern"),
+    # System power commands
+    (re.compile(r"\b(shutdown|reboot|halt|poweroff)\b"),
+     "system power command"),
+    (re.compile(r"\binit\s+[06]\b"),
+     "init runlevel change"),
+    # chmod/chown -R on critical paths (no \b after / — not a word char)
+    (re.compile(r"\b(chmod|chown)\b.*-[Rr].*\s+(\/|\/home|\/etc|\/usr|\/bin|\/lib)(\s|$)"),
+     "recursive permission change on critical path"),
+    # Pipe to shell (curl|bash, wget|sh, etc.)
+    (re.compile(r"\b(curl|wget)\b.*\|\s*(bash|sh|zsh)\b"),
+     "pipe remote content to shell"),
+    # Redirect writes into system directories
+    (re.compile(r">\s*\/(etc|bin|usr|lib)\/"),
+     "redirect write to system directory"),
+    # fdisk
+    (re.compile(r"\bfdisk\b"),
+     "disk partition command"),
+]
 
 _PKG_MANAGERS = ("apt ", "apt-get ", "dnf ", "yum ")
 
-_GIT_ALLOWED = frozenset(
-    ("status", "diff", "log", "add", "commit", "branch", "checkout", "show")
-)
+# --- Git safety (expanded allowlist + forbidden patterns) --------------------
 
-_GIT_FORBIDDEN_ARGS = (
-    "--force",
-    "reset",
-    "--hard",
-    "clean",
-    "-fd",
-    "-fx",
-    "rebase",
-    "filter-branch",
-)
+_GIT_ALLOWED = frozenset((
+    "status", "diff", "log", "add", "commit", "branch", "checkout", "show",
+    "switch", "restore", "fetch", "pull", "merge", "tag", "rev-parse",
+    "stash", "remote",
+))
+
+_GIT_DENY_PATTERNS = [
+    (re.compile(r"\b--force\b|(?<!\w)-f\b"),
+     "force push/operation"),
+    (re.compile(r"\breset\b.*--hard\b"),
+     "hard reset"),
+    (re.compile(r"\bclean\b.*-[a-z]*[fdx]"),
+     "git clean (destructive)"),
+    (re.compile(r"\brebase\b"),
+     "rebase"),
+    (re.compile(r"\bfilter-branch\b"),
+     "filter-branch (history rewrite)"),
+    (re.compile(r"\b--force-with-lease\b"),
+     "force push with lease"),
+    (re.compile(r"\bmerge\b.*--strategy[= ]ours\b"),
+     "merge strategy=ours (discards changes)"),
+]
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -78,7 +112,9 @@ _GIT_FORBIDDEN_ARGS = (
 
 def redact_secrets(text: str) -> str:
     """Replace secret values with <REDACTED>, preserving key names."""
-    return _SECRET_RE.sub(r"\1\2<REDACTED>", text)
+    text = _SECRET_RE.sub(r"\1\2<REDACTED>", text)
+    text = _TOKEN_PREFIX_RE.sub("<REDACTED>", text)
+    return text
 
 
 def append_audit(audit_path: Path, record: dict) -> None:
@@ -119,31 +155,53 @@ def run_subprocess(command: list[str], cwd: Path, timeout: int) -> dict:
 # --- Safety enforcement -----------------------------------------------------
 
 
+def _is_confirmed() -> bool:
+    """Check if the destructive-action override token is set."""
+    return os.environ.get("NOVACORE_CONFIRM") == _CONFIRM_TOKEN
+
+
 def enforce_shell_safety(cmd: str) -> None:
-    """Raise ValueError if cmd matches the denylist."""
+    """Raise ValueError if cmd matches deny patterns.
+
+    Override: set NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE in environment.
+    """
+    for pattern, reason in _SHELL_DENY_PATTERNS:
+        if pattern.search(cmd):
+            if _is_confirmed():
+                return
+            raise ValueError(
+                f"BLOCKED: {reason}. "
+                f"To override, set env NOVACORE_CONFIRM={_CONFIRM_TOKEN}"
+            )
     lower = cmd.lower()
-    for pattern in _SHELL_DENYLIST:
-        if pattern in lower:
-            raise ValueError(f"Blocked by shell denylist: {pattern!r}")
     for mgr in _PKG_MANAGERS:
         if mgr in lower:
+            if _is_confirmed():
+                return
             raise ValueError(
-                f"System package manager ({mgr.strip()}) requires explicit user approval"
+                f"BLOCKED: package manager ({mgr.strip()}) requires approval. "
+                f"To override, set env NOVACORE_CONFIRM={_CONFIRM_TOKEN}"
             )
 
 
 def enforce_git_safety(subcommand: str, args: list[str]) -> None:
-    """Raise ValueError if git subcommand or args are forbidden."""
+    """Raise ValueError if git subcommand or args are forbidden.
+
+    Override: set NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE in environment.
+    """
     if subcommand not in _GIT_ALLOWED:
         raise ValueError(
-            f"Git subcommand {subcommand!r} not in allowlist: "
+            f"BLOCKED: git subcommand {subcommand!r} not in allowlist: "
             + ", ".join(sorted(_GIT_ALLOWED))
         )
-    combined = " ".join(args)
-    for forbidden in _GIT_FORBIDDEN_ARGS:
-        if forbidden in combined:
+    combined = " ".join([subcommand] + args)
+    for pattern, reason in _GIT_DENY_PATTERNS:
+        if pattern.search(combined):
+            if _is_confirmed():
+                return
             raise ValueError(
-                f"Blocked git argument: {forbidden!r} requires explicit user approval"
+                f"BLOCKED: {reason}. "
+                f"To override, set env NOVACORE_CONFIRM={_CONFIRM_TOKEN}"
             )
 
 
@@ -171,7 +229,8 @@ def run_tool(
         else:
             raise ValueError(f"Tool {tool_name!r} is not implemented in runner")
     except ValueError as exc:
-        result = {"ok": False, "exit_code": -1, "stdout": "", "stderr": str(exc)}
+        code = 126 if str(exc).startswith("BLOCKED:") else -1
+        result = {"ok": False, "exit_code": code, "stdout": "", "stderr": str(exc)}
 
     elapsed_ms = round((time.time() - t0) * 1000, 1)
 
