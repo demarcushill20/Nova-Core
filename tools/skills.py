@@ -19,14 +19,22 @@ ALWAYS_INCLUDE = {"task-execution", "self-verification"}
 # --- Built-in keyword rules (checked case-insensitively) ---
 _BUILTIN_RULES: dict[str, list[str]] = {
     "git-ops":   ["git", "commit", "branch", "merge"],
-    "shell-ops": ["bash", "shell", "sudo", "pip install"],
     "file-ops":  ["file", "read", "write", "edit", "diff", "patch", "path",
                   ".py", ".md", ".json", ".yaml", ".yml", ".txt", ".csv",
                   ".toml", ".cfg", ".ini", ".sh"],
 }
 
-# Regex for lines that look like shell commands (e.g. "$ ls -la", "sudo apt ...")
-_SHELL_CMD_RE = re.compile(r"(?m)^\s*(?:\$|sudo)\s+\S")
+# shell-ops: word-boundary matching to avoid substring false positives
+# (e.g. "lines" should NOT match "ls", "include" should NOT match "run")
+_SHELL_OPS_RE = re.compile(
+    r"\b(?:bash|shell|sudo|terminal|command|execute|run"
+    r"|ls|cat|grep|sed|tail|head"
+    r"|journalctl|systemctl|chmod|chown|apt|pip|python)\b",
+    re.IGNORECASE,
+)
+
+# Regex for $-prefixed command lines (e.g. "$ ls -la")
+_SHELL_CMD_RE = re.compile(r"(?m)^\s*\$\s+\S")
 
 
 @dataclass
@@ -156,15 +164,15 @@ def select_skills(task_text: str, skills: list[Skill] | None = None) -> list[Ski
     text_lower = task_text.lower()
     selected_names: set[str] = set(ALWAYS_INCLUDE)
 
-    # Built-in keyword rules
+    # Built-in keyword rules (substring match — safe for longer tokens)
     for skill_name, keywords in _BUILTIN_RULES.items():
         for kw in keywords:
             if kw.lower() in text_lower:
                 selected_names.add(skill_name)
                 break
 
-    # Shell-command regex heuristic
-    if _SHELL_CMD_RE.search(task_text):
+    # Shell-ops: word-boundary regex + $-prefixed command lines
+    if _SHELL_OPS_RE.search(task_text) or _SHELL_CMD_RE.search(task_text):
         selected_names.add("shell-ops")
 
     # Activation keywords from frontmatter
