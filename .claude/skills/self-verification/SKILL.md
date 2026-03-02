@@ -1,6 +1,6 @@
 ---
 name: self-verification
-description: "Verify nova-core integrity: check directory structure, validate task states, confirm logs exist, and run health diagnostics."
+description: "Validate tool results and skill outputs to ensure correctness, completeness, and contract compliance before finalizing a task."
 activation:
   keywords:
     - verify
@@ -8,45 +8,88 @@ activation:
     - check
     - diagnose
     - integrity
+    - contract
+    - validate
+    - confirm
+  when:
+    - Task execution completed
+    - File modification performed
+    - Git operation completed
+    - Shell command executed
+    - Output contract required
+tool_doctrine:
+  runtime:
+    workflow:
+      - check_expected_state
+      - confirm_no_errors
+      - validate_contract_fields
+      - prefer_read_after_write
+output_contract:
+  required:
+    - summary
+    - checks_performed
+    - result
+    - confidence
 ---
 
-# self-verification
-
-## When to use
+# When To Use
 
 - After completing a task, to confirm outputs and logs are correct.
+- After any file modification, to verify the change landed as intended.
+- After git operations, to confirm commit, push, or branch state.
+- After shell commands, to validate exit codes and expected side effects.
+- Before reporting task completion — never mark `.done` without verification.
 - Periodic health checks of the nova-core environment.
-- When the watcher restarts or a failure is detected.
-- Before reporting task completion.
 
-## Rules / Safety
+# Workflow
 
-- Read-only by default. Do not modify files during verification unless repairing a known inconsistency.
+1. **Identify expected state** — determine what success looks like before checking.
+2. **Read after write** — re-read any file that was modified to confirm contents.
+3. **Check exit codes** — verify shell and git commands returned expected codes.
+4. **Validate contract fields** — confirm all required fields are present and non-empty.
+5. **Cross-reference** — check that related artifacts exist (e.g., `.done` task has output file).
+6. **Score confidence** — assign `high`, `medium`, or `low` based on check coverage.
+7. **Report** — emit a structured verification result.
+
+For verification philosophy, confidence scoring, and false-positive guidance, see `reference.md`.
+
+# Tool Usage Rules
+
+- **Read-only by default.** Do not modify files during verification unless repairing a known, deterministic inconsistency.
 - All checks scoped to `~/nova-core`.
-- Report anomalies but do not auto-fix unless the fix is safe and deterministic.
+- Never assume success — always confirm with an independent read or status check.
+- Do not trust exit code 0 alone — also inspect stdout/stderr for warnings.
+- Report anomalies clearly but do not auto-fix unless the fix is safe and deterministic.
+- Prefer concrete checks (file exists, content matches) over heuristic checks (output "looks right").
 
-## Workflow
+# Verification
 
-1. Verify **required** directories exist: `TASKS/`, `OUTPUT/`, `LOGS/`.
-2. Check for `WORK/` — required if it already exists in the repo, otherwise optional (do not fail).
-3. Check **optional** directories (do not fail if missing): `MEMORY/`, `AGENTS/`, `SKILLS/`.
-4. Verify `.claude/skills/` always exists (fail if missing).
-5. Check for orphaned `.inprogress` tasks (started but never completed).
-6. For each `.done` task, confirm a corresponding output file exists in `OUTPUT/`.
-7. Confirm `LOGS/` contains recent entries (not stale beyond threshold).
-8. Validate `CLAUDE.md` exists and is parseable.
-9. Return a health report.
+Self-verification verifies other skills. Its own verification is:
 
-## Output format
+1. Confirm the verification report was generated with all required fields.
+2. Confirm `checks_performed` lists at least one concrete check.
+3. Confirm `result` is one of: `pass`, `fail`, `partial`.
+4. Confirm `confidence` is one of: `high`, `medium`, `low`.
+
+# Failure Handling
+
+- **Expected file missing**: report the missing path and mark result as `fail`.
+- **Exit code mismatch**: report expected vs. actual code, mark `fail`.
+- **Contract field missing**: report which fields are absent, mark `fail`.
+- **Partial success**: some checks pass, some fail. Mark result as `partial`, lower confidence.
+- **Verification itself errors**: report the error clearly. Do not suppress exceptions to fake a `pass`.
+
+# Output Contract
+
+Every self-verification execution must end with a machine-checkable contract:
 
 ```
-[self-verification] HEALTH CHECK — <timestamp>
-  Required dirs:  OK | MISSING: <list>        (TASKS/, OUTPUT/, LOGS/, WORK/ if present)
-  Optional dirs:  OK | ABSENT: <list>         (MEMORY/, AGENTS/, SKILLS/ — informational only)
-  .claude/skills: OK | MISSING                (always required)
-  Orphaned tasks: NONE | <list>
-  Output match:   OK | MISSING: <list>
-  Logs freshness: OK | STALE (last entry: <date>)
-  CLAUDE.md:      OK | MISSING
-  Status:         PASS | FAIL
+## CONTRACT
+summary: <one-line description of what was verified>
+checks_performed:
+  - <check description> (<pass | fail>)
+result: <pass | fail | partial>
+confidence: <high | medium | low>
 ```
+
+See `examples.md` for concrete instances.
