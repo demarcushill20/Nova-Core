@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"\nimport importlib.util\nspec = importlib.util.spec_from_file_location\\('watcher', 'watcher.py'\\)\nmod = importlib.util.module_from_spec\\(spec\\)\nspec.loader.exec_module\\(mod\\)\n\n# Test scan — should find 0 pending \\(only .done exists\\)\npending = mod.get_pending_tasks\\(\\)\nprint\\(f'Pending tasks: {[p.name for p in pending]}'\\)\nprint\\(f'Dispatched set: {mod._dispatched}'\\)\nprint\\('Module loaded and scan logic OK.'\\)\n\")",
+      "Bash(python3 -m py_compile /home/nova/nova-core/watcher.py && echo \"COMPILE OK\")",
+      "Bash(python3 -m py_compile /home/nova/nova-core/telegram_bot.py /home/nova/nova-core/watcher.py && echo \"COMPILE OK\")",
+      "Bash(sudo systemctl restart novacore-telegram.service && echo \"telegram restarted\")",
+      "Bash(pgrep -af \"telegram_bot.py\")",
+      "Bash(pgrep -af \"watcher.py\")"
+    ]
+  }
+}

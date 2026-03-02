@@ -1,0 +1,7 @@
+# Telegram Task (20260301-205935 UTC)
+
+Source: Telegram
+
+## Instruction
+
+SLEEP TEST 2: wait 180 seconds then write done to WORK/cancel_test2.txt

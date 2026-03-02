@@ -1,0 +1,4 @@
+# Task 0005 — systemd service test
+
+Create WORK/service_mode_ok.txt containing:
+Watcher is running under systemd and dispatch is working.

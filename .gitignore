@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+
+# Runtime state (secrets, locks, audit logs)
+STATE/telegram_bot.lock
+STATE/tool_audit.jsonl
+STATE/notified/
+
+# Logs
+LOGS/
+
+# Environment
+*.env
+.env
+
+# OS
+.DS_Store
