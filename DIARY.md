@@ -4,6 +4,89 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-02 (Session 2) — Skill Activation Engine, Git Init, First Push
+
+**Session span:** ~07:00–08:00 UTC
+
+### What was built
+
+#### Git Repository Init & First Push
+
+- Initialized git repo in `~/nova-core`
+- Created `.gitignore` (excludes `.venv/`, `__pycache__/`, `LOGS/`, lock files, audit logs, env files)
+- Configured git identity (Demarcus Hill)
+- Generated SSH deploy key (ed25519), added to GitHub as read/write deploy key
+- Initial commit: 91 files, 5,051 lines → pushed to `github.com:demarcushill20/Nova-Core.git`
+
+#### Step 2.4 — Skill Activation Engine
+
+Created `tools/skills.py` (160 lines) — discovers, selects, and renders SKILL.md files for injection into Claude worker prompts.
+
+| Function | Purpose |
+|---|---|
+| `load_skills()` | Scans `.claude/skills/*/SKILL.md`, parses YAML frontmatter (name, description, tags, version, activation.keywords) |
+| `select_skills(task_text)` | Selects relevant skills based on task content — always includes `task-execution` + `self-verification`, then keyword-matches `git-ops`, `shell-ops`, `file-ops` via built-in rules + frontmatter `activation.keywords` + shell-command regex heuristic |
+| `render_append_prompt(skills)` | Concatenates skill bodies under `## ACTIVE SKILLS` header in deterministic name order; 60KB hard cap with truncation note |
+
+**Skill selection rules:**
+
+| Skill | Triggered by |
+|---|---|
+| `task-execution` | Always on |
+| `self-verification` | Always on |
+| `git-ops` | "git", "commit", "branch", "merge", "push", "pull", "stage", "checkout" |
+| `shell-ops` | "bash", "shell", "sudo", "pip", "python", "script", "command", "process", or lines matching `^\s*(\$\|sudo)\s+` |
+| `file-ops` | "file", "read", "write", "edit", "diff", "patch", "path", or file extensions (.py .md .json .yaml .yml .txt .csv .toml .cfg .ini .sh) |
+
+**Watcher integration** — patched `watcher.py` (4 changes):
+1. Imports `tools.skills`
+2. Before building Claude command: reads task file (50KB cap), calls `select_skills()`, writes `WORK/skill_injection_<stem>.txt`, adds `--append-system-prompt <content>` to the `cmd` list
+3. Worker log header now includes `=== SKILLS: ... ===` line
+4. Command log reflects skill count
+
+**SKILL.md frontmatter updates** — all 5 skills gained `activation.keywords` lists for content-based matching beyond the built-in rules.
+
+**Dev tool** — `tools/dev_check_skills.py` (52 lines): CLI self-test that prints selected skills for any task file or stdin text. Supports `--render` flag for full prompt output.
+
+### Verified behavior
+
+| Test input | Skills selected |
+|---|---|
+| Task mentioning files/paths | task-execution, self-verification, file-ops |
+| "commit and push to git" | task-execution, self-verification, git-ops |
+| `$ sudo apt install...` | task-execution, self-verification, file-ops, shell-ops |
+| "health check" (no keywords) | task-execution, self-verification (always-on only) |
+| "create a .py file and commit it via git" | task-execution, self-verification, file-ops, git-ops |
+
+### Files created or modified
+
+| File | Lines | Action |
+|---|---|---|
+| `.gitignore` | 14 | Created |
+| `tools/skills.py` | 160 | Created |
+| `tools/dev_check_skills.py` | 52 | Created |
+| `watcher.py` | 401 | Modified (+33 lines) — skill injection integration |
+| `.claude/skills/task-execution/SKILL.md` | 48 | Modified — added activation.keywords |
+| `.claude/skills/self-verification/SKILL.md` | 53 | Modified — added activation.keywords |
+| `.claude/skills/file-ops/SKILL.md` | 53 | Modified — added activation.keywords |
+| `.claude/skills/shell-ops/SKILL.md` | 51 | Modified — added activation.keywords |
+| `.claude/skills/git-ops/SKILL.md` | 49 | Modified — added activation.keywords |
+
+### Git history
+
+| Commit | Message |
+|---|---|
+| `5fc18b3` | Initial commit: NovaCore agent runtime (91 files, 5,051 lines) |
+| `8a6c9e1` | feat: add Skill Activation Engine (Step 2.4) (8 files, +350 lines) |
+
+### Design decisions
+
+- **`--append-system-prompt` (inline string) over file-based injection:** Claude CLI only supports `--append-system-prompt <string>`, not a file variant. Linux `ARG_MAX` is 2MB on this VPS; 60KB skill payloads are safe.
+- **No PyYAML dependency:** Frontmatter parser is hand-rolled (handles simple key-value and nested list syntax) to avoid adding a pip dependency for 5 small files.
+- **Skill injection files written to `WORK/`:** Persisted as `WORK/skill_injection_<stem>.txt` for debugging/auditability, not cleaned up automatically.
+
+---
+
 ## 2026-03-02 — Infrastructure Build-Out: Skills, Tools, Telegram Protocol, Bot Hardening
 
 **Session span:** ~00:00–05:00 UTC (across two Claude Code context windows)
