@@ -1,0 +1,121 @@
+## ACTIVE SKILLS
+
+--- file-ops ---
+# file-ops
+
+## When to use
+
+- A task requires creating, reading, editing, moving, or renaming files.
+- Organizing outputs, logs, or memory artifacts.
+- Generating new code or configuration files.
+- Cleaning up `LOGS/backups/` (the only location where deletions are allowed without explicit user approval).
+
+## Rules / Safety
+
+- All paths must resolve within `~/nova-core`. Reject any path that escapes the sandbox.
+- Never overwrite a file without reading it first.
+- Prefer editing existing files over creating new ones.
+- **No deletions by default.** Deletions are permitted only inside `LOGS/backups/` or with explicit user approval.
+- Before any destructive operation, back up the original to `LOGS/backups/`.
+- Do not modify `.claude/` internals except through sanctioned skill updates.
+
+## Workflow
+
+1. Validate that the target path is within `~/nova-core`.
+2. For reads: return file contents.
+3. For writes/edits: read existing content first (diff-first), apply changes, write result.
+4. For moves/renames: verify destination does not collide, then rename.
+5. For deletes: **refuse** unless the target is inside `LOGS/backups/` or explicit user approval was given. Never delete a file in `.inprogress` state.
+6. Log the operation to `LOGS/` if it mutates state.
+
+## Output format
+
+Action confirmation with the absolute path and a one-line summary:
+
+```
+[file-ops] CREATED ~/nova-core/OUTPUT/report.md
+[file-ops] EDITED  ~/nova-core/SKILLS/foo/SKILL.md (added workflow section)
+[file-ops] MOVED   ~/nova-core/LOGS/old.log → ~/nova-core/LOGS/backups/old.log
+[file-ops] DELETED ~/nova-core/LOGS/backups/old.log (permitted — inside LOGS/backups/)
+```
+--- end file-ops ---
+
+--- self-verification ---
+# self-verification
+
+## When to use
+
+- After completing a task, to confirm outputs and logs are correct.
+- Periodic health checks of the nova-core environment.
+- When the watcher restarts or a failure is detected.
+- Before reporting task completion.
+
+## Rules / Safety
+
+- Read-only by default. Do not modify files during verification unless repairing a known inconsistency.
+- All checks scoped to `~/nova-core`.
+- Report anomalies but do not auto-fix unless the fix is safe and deterministic.
+
+## Workflow
+
+1. Verify **required** directories exist: `TASKS/`, `OUTPUT/`, `LOGS/`.
+2. Check for `WORK/` — required if it already exists in the repo, otherwise optional (do not fail).
+3. Check **optional** directories (do not fail if missing): `MEMORY/`, `AGENTS/`, `SKILLS/`.
+4. Verify `.claude/skills/` always exists (fail if missing).
+5. Check for orphaned `.inprogress` tasks (started but never completed).
+6. For each `.done` task, confirm a corresponding output file exists in `OUTPUT/`.
+7. Confirm `LOGS/` contains recent entries (not stale beyond threshold).
+8. Validate `CLAUDE.md` exists and is parseable.
+9. Return a health report.
+
+## Output format
+
+```
+[self-verification] HEALTH CHECK — <timestamp>
+  Required dirs:  OK | MISSING: <list>        (TASKS/, OUTPUT/, LOGS/, WORK/ if present)
+  Optional dirs:  OK | ABSENT: <list>         (MEMORY/, AGENTS/, SKILLS/ — informational only)
+  .claude/skills: OK | MISSING                (always required)
+  Orphaned tasks: NONE | <list>
+  Output match:   OK | MISSING: <list>
+  Logs freshness: OK | STALE (last entry: <date>)
+  CLAUDE.md:      OK | MISSING
+  Status:         PASS | FAIL
+```
+--- end self-verification ---
+
+--- task-execution ---
+# task-execution
+
+## When to use
+
+- A new `.md` file appears in `TASKS/`.
+- The watcher or user requests processing of a specific task.
+- Re-processing a previously failed task.
+
+## Rules / Safety
+
+- All operations must stay within `~/nova-core`.
+- Rename task to `.inprogress` before starting work.
+- On success, rename to `.done` and write output to `OUTPUT/`.
+- On failure, rename to `.failed` and log the error to `LOGS/`.
+- Never delete a task file; only rename it.
+- Log every major action to `LOGS/`.
+
+## Workflow
+
+1. List `TASKS/*.md` to find pending work.
+2. Parse the task file for instructions.
+3. Rename `TASKS/<name>.md` → `TASKS/<name>.inprogress`.
+4. Execute the task, delegating to other skills as needed via `/file-ops`, `/shell-ops`, `/git-ops`, `/self-verification`.
+5. Write results to `OUTPUT/<name>_<timestamp>.md`.
+6. Rename `TASKS/<name>.inprogress` → `TASKS/<name>.done`.
+7. Log summary to `LOGS/task_<name>.log`.
+
+## Output format
+
+```
+OUTPUT/<task_stem>_<YYYYMMDD_HHMMSS>.md
+```
+
+Contents: task title, status (success/failure), summary of actions taken, any artifacts produced.
+--- end task-execution ---
