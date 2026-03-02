@@ -24,17 +24,37 @@ _BUILTIN_RULES: dict[str, list[str]] = {
                   ".toml", ".cfg", ".ini", ".sh"],
 }
 
-# shell-ops: word-boundary matching to avoid substring false positives
-# (e.g. "lines" should NOT match "ls", "include" should NOT match "run")
-_SHELL_OPS_RE = re.compile(
-    r"\b(?:bash|shell|sudo|terminal|command|execute|run"
+# Regex for $-prefixed command lines (e.g. "$ ls -la")
+_SHELL_CMD_RE = re.compile(r"(?m)^\s*\$\s+\S")
+
+# shell-ops: explicit command names (word-boundary, safe — no false positives)
+_SHELL_CMDS_RE = re.compile(
+    r"\b(?:bash|sudo"
     r"|ls|cat|grep|sed|tail|head"
     r"|journalctl|systemctl|chmod|chown|apt|pip|python)\b",
     re.IGNORECASE,
 )
 
-# Regex for $-prefixed command lines (e.g. "$ ls -la")
-_SHELL_CMD_RE = re.compile(r"(?m)^\s*\$\s+\S")
+# shell-ops: intent words — only trigger when paired with action context
+# "shell" alone in "no shell commands" should NOT match; require e.g. "run shell"
+_SHELL_INTENT_RE = re.compile(
+    r"\b(?:run|execute|use|open|launch|start)\b"
+    r".*\b(?:terminal|command|shell)\b"
+    r"|\b(?:terminal|command|shell)\b"
+    r".*\b(?:run|execute|use|open|launch|start)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_shell_intent(text: str) -> bool:
+    """Return True if text shows explicit shell/command intent."""
+    if _SHELL_CMD_RE.search(text):
+        return True
+    if _SHELL_CMDS_RE.search(text):
+        return True
+    if _SHELL_INTENT_RE.search(text):
+        return True
+    return False
 
 
 @dataclass
@@ -171,8 +191,8 @@ def select_skills(task_text: str, skills: list[Skill] | None = None) -> list[Ski
                 selected_names.add(skill_name)
                 break
 
-    # Shell-ops: word-boundary regex + $-prefixed command lines
-    if _SHELL_OPS_RE.search(task_text) or _SHELL_CMD_RE.search(task_text):
+    # Shell-ops: token-based intent matching
+    if _has_shell_intent(task_text):
         selected_names.add("shell-ops")
 
     # Activation keywords from frontmatter
