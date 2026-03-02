@@ -201,6 +201,24 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "repo.git.status": {
+      "description": "Get structured Git status: branch, ahead/behind, staged, modified, untracked files. Read-only.",
+      "args_schema": {},
+      "returns": {
+        "branch": "string — current branch name",
+        "remote": "string — remote tracking branch",
+        "ahead": "integer — commits ahead of remote",
+        "behind": "integer — commits behind remote",
+        "staged": "array — [{status, path}] files staged for commit",
+        "modified": "array — [{status, path}] modified but unstaged files",
+        "untracked": "array — [path] untracked files",
+        "clean": "boolean — true if working tree has no changes"
+      },
+      "safety": [
+        "Read-only operation. Does not modify the repository.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {
