@@ -1,13 +1,16 @@
-"""Adapter: system.service.status — structured systemd service status.
+"""Adapters: system.service.status / system.service.restart
 
-Returns a dict with parsed fields instead of raw stdout.
-Delegates shell execution to the existing runner infrastructure.
+Return structured dicts instead of raw stdout.
+Delegate shell execution to the existing runner infrastructure.
 """
 
+import os
 import re
 from pathlib import Path
 
 from tools.runner import run_subprocess
+
+_CONFIRM_TOKEN = "ALLOW_DESTRUCTIVE"
 
 # --- Parsing helpers --------------------------------------------------------
 
@@ -61,6 +64,14 @@ def parse_status_output(stdout: str) -> dict:
     }
 
 
+def _validate_name(name: str) -> None:
+    """Validate and sanitize a service unit name."""
+    if not name or not isinstance(name, str):
+        raise ValueError("service name is required (str)")
+    if not re.match(r"^[a-zA-Z0-9._@-]+$", name):
+        raise ValueError(f"Invalid service name: {name!r}")
+
+
 def service_status(name: str, sandbox: Path | None = None) -> dict:
     """Get structured status of a systemd service.
 
@@ -72,12 +83,7 @@ def service_status(name: str, sandbox: Path | None = None) -> dict:
         dict with keys: service, loaded, active_summary, active_state,
         sub_state, main_pid, raw_excerpt
     """
-    if not name or not isinstance(name, str):
-        raise ValueError("system.service.status requires 'name' (str)")
-
-    # Sanitize: only allow alphanumeric, dash, underscore, dot, @
-    if not re.match(r"^[a-zA-Z0-9._@-]+$", name):
-        raise ValueError(f"Invalid service name: {name!r}")
+    _validate_name(name)
 
     cwd = sandbox or Path.cwd()
     result = run_subprocess(
@@ -98,4 +104,78 @@ def service_status(name: str, sandbox: Path | None = None) -> dict:
         "exit_code": exit_code,
         "stderr": result["stderr"],
         **parsed,
+    }
+
+
+def service_restart(name: str, sandbox: Path | None = None) -> dict:
+    """Restart a systemd service and verify the result.
+
+    Requires NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE to be set.
+
+    Args:
+        name: service unit name (e.g. "novacore-watcher")
+        sandbox: working directory for subprocess (defaults to cwd)
+
+    Returns:
+        dict with keys: service, action, success, active_state, sub_state,
+        main_pid, verification, and optionally blocked/reason
+    """
+    _validate_name(name)
+
+    # Confirmation gate — restart is a state-changing operation
+    if os.environ.get("NOVACORE_CONFIRM") != _CONFIRM_TOKEN:
+        return {
+            "service": name,
+            "action": "restart",
+            "success": False,
+            "blocked": True,
+            "reason": (
+                "BLOCKED: service restart requires approval. "
+                "Set env NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE to override."
+            ),
+            "active_state": "",
+            "sub_state": "",
+            "main_pid": None,
+            "verification": "not attempted — blocked by confirmation policy",
+        }
+
+    cwd = sandbox or Path.cwd()
+    result = run_subprocess(
+        ["sudo", "systemctl", "restart", name],
+        cwd=cwd,
+        timeout=30,
+    )
+
+    if result["exit_code"] != 0:
+        return {
+            "service": name,
+            "action": "restart",
+            "success": False,
+            "blocked": False,
+            "reason": result["stderr"] or f"systemctl restart exited {result['exit_code']}",
+            "active_state": "",
+            "sub_state": "",
+            "main_pid": None,
+            "verification": "restart command failed",
+        }
+
+    # Verify via status check
+    status = service_status(name, sandbox=sandbox)
+
+    active_state = status.get("active_state", "")
+    sub_state = status.get("sub_state", "")
+    main_pid = status.get("main_pid")
+    is_running = active_state == "active" and sub_state == "running"
+
+    return {
+        "service": name,
+        "action": "restart",
+        "success": is_running,
+        "active_state": active_state,
+        "sub_state": sub_state,
+        "main_pid": main_pid,
+        "verification": (
+            f"active (running), PID {main_pid}" if is_running
+            else f"post-restart state: {active_state} ({sub_state})"
+        ),
     }

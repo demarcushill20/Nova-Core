@@ -1,11 +1,15 @@
-"""Tests for tools.adapters.system_service — parse_status_output + service_status.
+"""Tests for tools.adapters.system_service — status + restart.
 
 These tests mock subprocess output so they run without systemd present.
 """
 
 from unittest.mock import patch
 
-from tools.adapters.system_service import parse_status_output, service_status
+from tools.adapters.system_service import (
+    parse_status_output,
+    service_restart,
+    service_status,
+)
 
 
 # --- Realistic systemctl status output samples --------------------------------
@@ -152,7 +156,107 @@ def test_service_status_empty_name():
         service_status("")
         assert False, "Should have raised ValueError"
     except ValueError as e:
-        assert "requires 'name'" in str(e)
+        assert "required" in str(e)
+
+
+# --- Samples for restart post-status -----------------------------------------
+
+RESTARTED_ACTIVE_OUTPUT = """\
+● novacore-watcher.service - NovaCore Watcher
+     Loaded: loaded (/etc/systemd/system/novacore-watcher.service; enabled; vendor preset: enabled)
+     Active: active (running) since Mon 2026-03-02 15:30:00 UTC; 1s ago
+   Main PID: 200100 (python3)
+      Tasks: 2 (limit: 4556)
+     Memory: 30.1M
+Mar 02 15:30:00 nova systemd[1]: Started NovaCore Watcher.
+"""
+
+RESTARTED_INACTIVE_OUTPUT = """\
+● novacore-watcher.service - NovaCore Watcher
+     Loaded: loaded (/etc/systemd/system/novacore-watcher.service; enabled; vendor preset: enabled)
+     Active: inactive (dead) since Mon 2026-03-02 15:30:05 UTC; 0s ago
+   Main PID: 200100 (code=exited, status=1/FAILURE)
+Mar 02 15:30:05 nova systemd[1]: novacore-watcher.service: Main process exited, code=exited, status=1/FAILURE
+"""
+
+
+# --- Tests for service_restart ------------------------------------------------
+
+
+@patch.dict("os.environ", {"NOVACORE_CONFIRM": "ALLOW_DESTRUCTIVE"})
+@patch("tools.adapters.system_service.run_subprocess")
+def test_restart_success(mock_run):
+    # First call: restart command; second call: status check
+    mock_run.side_effect = [
+        {"exit_code": 0, "stdout": "", "stderr": ""},
+        {"exit_code": 0, "stdout": RESTARTED_ACTIVE_OUTPUT, "stderr": ""},
+    ]
+    result = service_restart("novacore-watcher")
+    assert result["service"] == "novacore-watcher"
+    assert result["action"] == "restart"
+    assert result["success"] is True
+    assert result["active_state"] == "active"
+    assert result["sub_state"] == "running"
+    assert result["main_pid"] == 200100
+    assert "200100" in result["verification"]
+    assert "blocked" not in result
+
+
+@patch.dict("os.environ", {}, clear=True)
+def test_restart_blocked_no_confirm():
+    result = service_restart("novacore-watcher")
+    assert result["success"] is False
+    assert result["blocked"] is True
+    assert "BLOCKED" in result["reason"]
+    assert "NOVACORE_CONFIRM" in result["reason"]
+    assert result["active_state"] == ""
+    assert result["main_pid"] is None
+
+
+@patch.dict("os.environ", {"NOVACORE_CONFIRM": "ALLOW_DESTRUCTIVE"})
+@patch("tools.adapters.system_service.run_subprocess")
+def test_restart_inactive_after(mock_run):
+    mock_run.side_effect = [
+        {"exit_code": 0, "stdout": "", "stderr": ""},
+        {"exit_code": 3, "stdout": RESTARTED_INACTIVE_OUTPUT, "stderr": ""},
+    ]
+    result = service_restart("novacore-watcher")
+    assert result["success"] is False
+    assert result["active_state"] == "inactive"
+    assert result["sub_state"] == "dead"
+    assert "inactive" in result["verification"]
+
+
+@patch.dict("os.environ", {"NOVACORE_CONFIRM": "ALLOW_DESTRUCTIVE"})
+@patch("tools.adapters.system_service.run_subprocess")
+def test_restart_command_fails(mock_run):
+    mock_run.return_value = {
+        "exit_code": 5,
+        "stdout": "",
+        "stderr": "Failed to restart: unit not found",
+    }
+    result = service_restart("nonexistent")
+    assert result["success"] is False
+    assert result["blocked"] is False
+    assert "unit not found" in result["reason"]
+
+
+# --- JSON shape validation ---------------------------------------------------
+
+
+@patch.dict("os.environ", {"NOVACORE_CONFIRM": "ALLOW_DESTRUCTIVE"})
+@patch("tools.adapters.system_service.run_subprocess")
+def test_restart_json_shape(mock_run):
+    mock_run.side_effect = [
+        {"exit_code": 0, "stdout": "", "stderr": ""},
+        {"exit_code": 0, "stdout": RESTARTED_ACTIVE_OUTPUT, "stderr": ""},
+    ]
+    result = service_restart("novacore-watcher")
+    required_keys = {"service", "action", "success", "active_state", "sub_state", "main_pid", "verification"}
+    assert required_keys.issubset(set(result.keys())), f"Missing keys: {required_keys - set(result.keys())}"
+    assert isinstance(result["success"], bool)
+    assert isinstance(result["service"], str)
+    assert isinstance(result["verification"], str)
 
 
 # --- Run as script -----------------------------------------------------------
@@ -169,6 +273,11 @@ if __name__ == "__main__":
         test_service_status_not_found,
         test_service_status_invalid_name,
         test_service_status_empty_name,
+        test_restart_success,
+        test_restart_blocked_no_confirm,
+        test_restart_inactive_after,
+        test_restart_command_fails,
+        test_restart_json_shape,
     ]
     passed = 0
     for t in tests:

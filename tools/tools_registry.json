@@ -174,6 +174,33 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "system.service.restart": {
+      "description": "Restart a systemd service unit and verify it came back active. Requires confirmation.",
+      "args_schema": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Systemd service unit name (e.g. 'novacore-watcher')."
+        }
+      },
+      "returns": {
+        "service": "string — the service name",
+        "action": "string — always 'restart'",
+        "success": "boolean — true if service is active (running) after restart",
+        "blocked": "boolean|absent — true if blocked by confirmation policy",
+        "reason": "string|absent — explanation if blocked or failed",
+        "active_state": "string — post-restart state (e.g. 'active', 'failed')",
+        "sub_state": "string — post-restart sub-state (e.g. 'running', 'dead')",
+        "main_pid": "integer|null — new Main PID after restart",
+        "verification": "string — how the restart result was confirmed"
+      },
+      "safety": [
+        "Requires NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE environment variable.",
+        "Service name is sanitized to alphanumeric, dash, underscore, dot, @.",
+        "Post-restart status check verifies the service came back up.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {

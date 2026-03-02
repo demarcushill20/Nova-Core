@@ -226,6 +226,8 @@ def run_tool(
             result = _run_git(args, sandbox)
         elif tool_name == "system.service.status":
             result = _run_system_service_status(args, sandbox)
+        elif tool_name == "system.service.restart":
+            result = _run_system_service_restart(args, sandbox)
         elif tool_name.startswith("files."):
             result = _run_files(tool_name, args, registry)
         else:
@@ -331,3 +333,9 @@ def _run_system_service_status(args: dict, sandbox: Path) -> dict:
     """Execute system.service.status via the adapter."""
     from tools.adapters.system_service import service_status
     return service_status(args.get("name", ""), sandbox=sandbox)
+
+
+def _run_system_service_restart(args: dict, sandbox: Path) -> dict:
+    """Execute system.service.restart via the adapter."""
+    from tools.adapters.system_service import service_restart
+    return service_restart(args.get("name", ""), sandbox=sandbox)
