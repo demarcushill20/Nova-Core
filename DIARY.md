@@ -4,6 +4,69 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-02 (Session 3) — Skill Activation Hardening & End-to-End Verification
+
+**Session span:** ~08:30–09:15 UTC
+
+### What was built
+
+#### Skill Injection CLI Flag Fix
+
+Resolved the `--append-system-prompt-file` vs `--append-system-prompt` mismatch:
+- The Claude CLI (`/usr/bin/claude -p --help`) only supports `--append-system-prompt <prompt>` (inline string), not a file-based variant.
+- An intermediate attempt added feature-detection (`claude_supports_append_prompt_file()`) but this was unnecessary complexity.
+- Final state: inline `--append-system-prompt` with content passed directly. Skill injection files still written to `WORK/` for auditability.
+
+#### Shell-ops False Positive Elimination (Two Rounds)
+
+**Round 1 — Substring → word-boundary:** Moved shell-ops keywords from naive substring matching (`"ls" in text`) to `\b` word-boundary regex. Fixed "lines" matching "ls" and "include" matching "run".
+
+**Round 2 — Word-boundary → intent-based:** Discovered `\bshell\b` still matched "no shell commands" in plain English. Split shell-ops matching into three layers:
+
+| Layer | Pattern | Example |
+|---|---|---|
+| `_SHELL_CMD_RE` | `^\s*\$\s+\S` (multiline) | `$ ls -la` |
+| `_SHELL_CMDS_RE` | `\b(ls\|sudo\|systemctl\|...)\b` | `sudo apt install htop` |
+| `_SHELL_INTENT_RE` | action verb + intent word pairing | `run this command in terminal` |
+
+Key insight: intent words like "shell", "terminal", "command" only trigger when paired with action verbs ("run", "execute", "use", "open", "launch", "start"). This prevents false positives from sentences like "no shell commands" while still matching "run this command in terminal".
+
+#### End-to-End Verification
+
+- Killed stale watcher process (PID 147234 — old code from before skill patches)
+- Tasks 0006 + 0007 confirmed skill injection pipeline works
+- Task 0006_skill_smoke confirmed worker reports active skills in output
+
+### Bug fixes
+
+1. **Stale watcher process** — Two watcher.py processes running simultaneously (old PID 147234 pre-dating skill patches, new PID 179373 from restart). Old process dispatched task 0006 without skill injection. Killed stale process; subsequent tasks used correct code.
+
+2. **shell-ops false positive (round 1)** — Substring match `"ls" in text_lower` matched "lines", "false", etc. Fixed with `\b` word-boundary regex.
+
+3. **shell-ops false positive (round 2)** — `\bshell\b` matched "no shell commands" in plain English. Fixed by requiring intent words to co-occur with action verbs via `_SHELL_INTENT_RE`.
+
+### Test matrix (final state)
+
+| Input | shell-ops? | Correct? |
+|---|---|---|
+| "This line mentions lines and include but no shell commands." | No | Yes |
+| `$ ls -la` | Yes | Yes |
+| `sudo apt install htop` | Yes | Yes |
+| `run this command in terminal` | Yes | Yes |
+| `use systemctl to restart the service` | Yes | Yes |
+| `show the first 15 lines` | No | Yes |
+| `List the directory` | No | Yes |
+
+### Git history (session 3)
+
+| Commit | Message |
+|---|---|
+| `ac8f0d6` | test: verify skill activation engine end-to-end |
+| `8408e63` | fix: prevent accidental shell-ops activation (word-boundary matching) |
+| `e9f926f` | fix: eliminate shell-ops false positives (token-based intent matching) |
+
+---
+
 ## 2026-03-02 (Session 2) — Skill Activation Engine, Git Init, First Push
 
 **Session span:** ~07:00–08:00 UTC
