@@ -1,7 +1,7 @@
 """Tool registry loader and validator for NovaCore.
 
-Reads STATE/tools_registry.json and provides typed access
-to tool definitions, sandbox root, and audit log paths.
+Reads tools/tools_registry.json (code-owned, authoritative) and provides
+typed access to tool definitions, sandbox root, and audit log paths.
 """
 
 import json
@@ -10,10 +10,12 @@ import pathlib
 _REQUIRED_TOP_KEYS = ("sandbox_root", "audit_log", "tools")
 _REQUIRED_TOOL_KEYS = ("description", "args_schema", "returns", "safety")
 
+_DEFAULT_REGISTRY = pathlib.Path(__file__).parent / "tools_registry.json"
 
-def load_registry(path: str = "STATE/tools_registry.json") -> dict:
+
+def load_registry(path: str | pathlib.Path | None = None) -> dict:
     """Load and validate the tool registry from disk."""
-    p = pathlib.Path(path)
+    p = pathlib.Path(path) if path else _DEFAULT_REGISTRY
     if not p.exists():
         raise FileNotFoundError(f"Registry not found: {p}")
     with p.open() as f:

@@ -1,0 +1,205 @@
+{
+  "sandbox_root": "~/nova-core",
+  "audit_log": "STATE/tool_audit.jsonl",
+  "tools": {
+    "files.read": {
+      "description": "Read the contents of a file. Returns the full text or a line range.",
+      "args_schema": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Absolute or sandbox-relative path to the file."
+        },
+        "offset": {
+          "type": "integer",
+          "required": false,
+          "description": "Line number to start reading from (1-based)."
+        },
+        "limit": {
+          "type": "integer",
+          "required": false,
+          "description": "Maximum number of lines to return."
+        }
+      },
+      "returns": {
+        "content": "string — file contents (or requested line range)",
+        "path": "string — resolved absolute path",
+        "lines": "integer — total lines in file"
+      },
+      "safety": [
+        "Path must resolve within sandbox_root. Reject traversal (../) that escapes.",
+        "Symlinks must resolve within sandbox_root.",
+        "Binary files should be rejected or truncated."
+      ]
+    },
+    "files.write": {
+      "description": "Create or overwrite a file with the given content.",
+      "args_schema": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Absolute or sandbox-relative path to the file."
+        },
+        "content": {
+          "type": "string",
+          "required": true,
+          "description": "Full text content to write."
+        },
+        "create_dirs": {
+          "type": "boolean",
+          "required": false,
+          "description": "Create parent directories if they do not exist. Default: false."
+        }
+      },
+      "returns": {
+        "path": "string — resolved absolute path of written file",
+        "bytes": "integer — bytes written"
+      },
+      "safety": [
+        "Path must resolve within sandbox_root.",
+        "Overwriting an existing file requires that the caller has read it first.",
+        "Do not write to .claude/ internals except through sanctioned skill updates.",
+        "No deletions — this tool creates or overwrites only."
+      ]
+    },
+    "files.list": {
+      "description": "List files and directories matching a glob pattern within the sandbox.",
+      "args_schema": {
+        "pattern": {
+          "type": "string",
+          "required": true,
+          "description": "Glob pattern relative to sandbox_root (e.g. 'TASKS/*.md')."
+        },
+        "recursive": {
+          "type": "boolean",
+          "required": false,
+          "description": "Enable recursive glob (**). Default: false."
+        }
+      },
+      "returns": {
+        "entries": "array of string — matching paths relative to sandbox_root",
+        "count": "integer — number of matches"
+      },
+      "safety": [
+        "Pattern must not escape sandbox_root.",
+        "Results are capped at 1000 entries to prevent memory issues."
+      ]
+    },
+    "files.diff": {
+      "description": "Compute a unified diff between two files or between file content and a string.",
+      "args_schema": {
+        "path_a": {
+          "type": "string",
+          "required": true,
+          "description": "Path to the first file (or 'current' file)."
+        },
+        "path_b": {
+          "type": "string",
+          "required": false,
+          "description": "Path to the second file. Mutually exclusive with 'content_b'."
+        },
+        "content_b": {
+          "type": "string",
+          "required": false,
+          "description": "String to compare against path_a. Mutually exclusive with 'path_b'."
+        },
+        "context_lines": {
+          "type": "integer",
+          "required": false,
+          "description": "Number of context lines around changes. Default: 3."
+        }
+      },
+      "returns": {
+        "diff": "string — unified diff output",
+        "changed": "boolean — true if files differ"
+      },
+      "safety": [
+        "Both paths must resolve within sandbox_root.",
+        "Read-only operation; does not modify any files."
+      ]
+    },
+    "shell.run": {
+      "description": "Execute a shell command in the sandbox. Captures stdout, stderr, and exit code.",
+      "args_schema": {
+        "command": {
+          "type": "string",
+          "required": true,
+          "description": "The shell command to execute."
+        },
+        "timeout": {
+          "type": "integer",
+          "required": false,
+          "description": "Timeout in seconds. Default: 120. Max: 600."
+        },
+        "cwd": {
+          "type": "string",
+          "required": false,
+          "description": "Working directory (must be within sandbox_root). Default: sandbox_root."
+        }
+      },
+      "returns": {
+        "exit_code": "integer — process exit code",
+        "stdout": "string — standard output (truncated at 100KB)",
+        "stderr": "string — standard error (truncated at 100KB)"
+      },
+      "safety": [
+        "Working directory must resolve within sandbox_root.",
+        "Denylist — reject commands containing: rm -rf /, mkfs, dd if=, fdisk, shutdown, reboot, halt, poweroff, init 0, init 6, :(){ :|:& };:",
+        "Do not allow commands that modify files outside sandbox_root.",
+        "Do not install system packages (apt, dnf, yum) without explicit user approval.",
+        "All invocations are logged to audit_log."
+      ]
+    },
+    "system.service.status": {
+      "description": "Get structured status of a systemd service unit. Read-only.",
+      "args_schema": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Systemd service unit name (e.g. 'novacore-watcher')."
+        }
+      },
+      "returns": {
+        "service": "string — the service name queried",
+        "loaded": "string — Loaded line from systemctl",
+        "active_summary": "string — full Active line",
+        "active_state": "string — e.g. 'active', 'inactive', 'failed'",
+        "sub_state": "string — e.g. 'running', 'dead', 'exited'",
+        "main_pid": "integer|null — Main PID if present",
+        "raw_excerpt": "string — last ~10 lines of status output"
+      },
+      "safety": [
+        "Read-only operation. Does not start, stop, or restart services.",
+        "Service name is sanitized to alphanumeric, dash, underscore, dot, @.",
+        "All invocations are logged to audit_log."
+      ]
+    },
+    "git.run": {
+      "description": "Run an allowlisted git subcommand within the sandbox repository.",
+      "args_schema": {
+        "subcommand": {
+          "type": "string",
+          "required": true,
+          "description": "Git subcommand. Must be one of the allowlist."
+        },
+        "args": {
+          "type": "array",
+          "required": false,
+          "description": "Array of string arguments passed to the git subcommand."
+        }
+      },
+      "returns": {
+        "exit_code": "integer — git exit code",
+        "stdout": "string — command output",
+        "stderr": "string — error output"
+      },
+      "safety": [
+        "Repository root must be sandbox_root.",
+        "Allowlisted subcommands: status, diff, log, add, commit, branch, checkout, show.",
+        "Forbidden without explicit user approval: push --force, reset --hard, clean -fd/-fx, rebase, filter-branch.",
+        "Do not commit files matching: .env, credentials.*, *.pem, *.key.",
+        "All invocations are logged to audit_log."
+      ]
+    }
+  }
+}

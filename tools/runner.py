@@ -224,6 +224,8 @@ def run_tool(
             result = _run_shell(args, sandbox)
         elif tool_name == "git.run":
             result = _run_git(args, sandbox)
+        elif tool_name == "system.service.status":
+            result = _run_system_service_status(args, sandbox)
         elif tool_name.startswith("files."):
             result = _run_files(tool_name, args, registry)
         else:
@@ -323,3 +325,9 @@ def _run_git(args: dict, sandbox: Path) -> dict:
     )
     result["ok"] = result["exit_code"] == 0
     return result
+
+
+def _run_system_service_status(args: dict, sandbox: Path) -> dict:
+    """Execute system.service.status via the adapter."""
+    from tools.adapters.system_service import service_status
+    return service_status(args.get("name", ""), sandbox=sandbox)
