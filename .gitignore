@@ -16,5 +16,8 @@ LOGS/
 *.env
 .env
 
+# Playwright MCP cache
+.playwright-mcp/
+
 # OS
 .DS_Store

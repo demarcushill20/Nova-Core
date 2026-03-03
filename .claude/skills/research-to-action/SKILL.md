@@ -1,7 +1,7 @@
 ---
 name: research-to-action
 description: "Workflow skill chaining web-research, http-fetch, and browser-automation with a strict decision tree for tool escalation. Invoke explicitly via /research-to-action."
-disable-model-invocation: true
+disable-model-invocation: false
 allowed-tools:
   - mcp__brave-search__brave_web_search
   - mcp__brave-search__brave_news_search
@@ -21,8 +21,8 @@ allowed-tools:
 
 # Research-to-Action
 
-Operator workflow that chains search → fetch → browse using a strict decision tree.
-Only runs when explicitly invoked.
+Workflow that chains search → fetch → browse using a strict decision tree.
+Auto-invoked when a task requires multi-phase research, or invokable explicitly via /research-to-action.
 
 ## When to use
 - Complex research tasks that may require multiple tool types
