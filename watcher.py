@@ -14,6 +14,7 @@ import time
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tools.contracts import validate_contract
 from tools.skills import load_skills, select_skills, render_append_prompt
 
 # --- Configuration ---
@@ -167,7 +168,14 @@ def verify_artifacts(stem: str) -> tuple[bool, list[str]]:
         messages.append(f"OUTPUT missing: no recent file matching '{stem}' in {OUTPUT_DIR}")
         passed = False
 
-    # 2. Task-specific: 0004 requires WORK/real_autonomy_confirmed.txt
+    # 2. Contract validation gate
+    if output_file:
+        contract_ok, contract_msgs = _check_contract(output_file)
+        messages.extend(contract_msgs)
+        if not contract_ok:
+            passed = False
+
+    # 3. Task-specific: 0004 requires WORK/real_autonomy_confirmed.txt
     if stem.startswith("0004"):
         confirm_file = WORK_DIR / "real_autonomy_confirmed.txt"
         if confirm_file.exists():
@@ -177,6 +185,50 @@ def verify_artifacts(stem: str) -> tuple[bool, list[str]]:
             passed = False
 
     return passed, messages
+
+
+def _check_contract(output_file: Path) -> tuple[bool, list[str]]:
+    """Validate the ## CONTRACT block in an output file.
+
+    Returns (ok, list_of_messages).  If invalid, appends a failure
+    section to the output file.
+    """
+    messages: list[str] = []
+    text = output_file.read_text(encoding="utf-8")
+    result = validate_contract(text)
+
+    if result["valid"]:
+        messages.append("CONTRACT validated: all required fields present")
+        return True, messages
+
+    # Contract invalid — append failure report to output file
+    messages.append("CONTRACT FAILED: output missing valid ## CONTRACT")
+    for err in result["errors"]:
+        messages.append(f"  contract error: {err}")
+    for warn in result["warnings"]:
+        messages.append(f"  contract warning: {warn}")
+
+    failure_section = (
+        "\n\n---\n## CONTRACT VALIDATION FAILED\n\n"
+        "The output did not contain a valid ## CONTRACT block.\n\n"
+        "**Errors:**\n"
+    )
+    for err in result["errors"]:
+        failure_section += f"- {err}\n"
+    if result["warnings"]:
+        failure_section += "\n**Warnings:**\n"
+        for warn in result["warnings"]:
+            failure_section += f"- {warn}\n"
+    failure_section += (
+        "\n**Suggestion:** Fix output to include ## CONTRACT "
+        "with required fields: summary, verification, confidence, "
+        "and at least one action detail field.\n"
+    )
+
+    with output_file.open("a", encoding="utf-8") as f:
+        f.write(failure_section)
+
+    return False, messages
 
 
 def dispatch(task_path: Path):
