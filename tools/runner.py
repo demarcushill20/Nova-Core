@@ -234,6 +234,8 @@ def run_tool(
             result = _run_repo_git_diff(args, sandbox)
         elif tool_name == "repo.git.commit":
             result = _run_repo_git_commit(args, sandbox)
+        elif tool_name == "contracts.validate":
+            result = _run_contracts_validate(args)
         elif tool_name.startswith("files."):
             result = _run_files(tool_name, args, registry)
         else:
@@ -367,3 +369,13 @@ def _run_repo_git_commit(args: dict, sandbox: Path) -> dict:
         paths=args.get("paths"),
         sandbox=sandbox,
     )
+
+
+def _run_contracts_validate(args: dict) -> dict:
+    """Execute contracts.validate tool."""
+    from tools.contracts import validate_contract
+    text = args.get("text", "")
+    if not isinstance(text, str):
+        raise ValueError("contracts.validate requires 'text' (str)")
+    result = validate_contract(text)
+    return {"ok": True, "exit_code": 0, "stdout": "", "stderr": "", "result": result}

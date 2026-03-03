@@ -272,6 +272,27 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "contracts.validate": {
+      "description": "Validate a skill output's ## CONTRACT block. Checks required fields, confidence value, and action-detail presence. Deterministic — no LLM calls.",
+      "args_schema": {
+        "text": {
+          "type": "string",
+          "required": true,
+          "description": "Full skill output text containing a ## CONTRACT section."
+        }
+      },
+      "returns": {
+        "valid": "boolean — true if the contract passes all checks",
+        "errors": "array — list of validation error strings",
+        "warnings": "array — list of warning strings",
+        "contract": "object — parsed key/value pairs from the contract block"
+      },
+      "safety": [
+        "Read-only operation. Does not modify any files.",
+        "Deterministic string parsing — no LLM or network calls.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {
