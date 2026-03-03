@@ -4,6 +4,122 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-03 (Session 8) — MCP Server Setup + MCP Skills (Web/Fetch/Browser/Research)
+
+**Session span:** ~14:00–15:00 UTC
+
+### What was built
+
+#### MCP Server Integration (4 servers)
+
+Added 4 Model Context Protocol servers to Claude Code, providing web search, HTTP fetch, and browser automation capabilities.
+
+**Discovery & fixes:**
+- All 4 were initially configured with wrong package names (`@anthropic-ai/mcp-server-*` — doesn't exist on npm)
+- Learned that MCP servers must be registered via `claude mcp add` into `~/.claude.json`, NOT manually in `~/.claude/settings.json`
+- Each server required iterative debugging across multiple Claude Code restarts
+
+| Server | Wrong package | Correct package | Notes |
+|---|---|---|---|
+| brave-search | `@anthropic-ai/mcp-server-brave-search` | `@brave/brave-search-mcp-server` | API key moved from env var to `--brave-api-key` CLI flag |
+| tavily | (correct from start) | `tavily-mcp@latest` | Worked on first try |
+| fetch | `@anthropic-ai/mcp-server-fetch` (npm) | `mcp-server-fetch` (Python via `uv tool run`) | Official server is Python-only, not npm |
+| playwright | `@anthropic-ai/mcp-server-playwright` | `@playwright/mcp` | Required `--headless --no-sandbox --executable-path` flags |
+
+#### Playwright System Dependencies (no-sudo workaround)
+
+Chromium binary requires GTK/ATK system libraries not present on the headless VPS. Without sudo access:
+
+1. Downloaded 24 `.deb` packages via `apt-get download` (no sudo needed)
+2. Extracted shared libraries to `~/.local/usr/lib/x86_64-linux-gnu/` via `dpkg-deb -x`
+3. Configured `LD_LIBRARY_PATH` env var in the MCP server config
+4. Final config: `--headless --no-sandbox --executable-path /home/nova/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome`
+
+Missing libs resolved: `libatk-1.0`, `libatk-bridge-2.0`, `libcups2`, `libxkbcommon0`, `libatspi2.0`, `libxcomposite1`, `libxdamage1`, `libxrandr2`, `libcairo2`, `libpango-1.0`, `libasound2`, + transitive deps.
+
+#### MCP Skills (4 new skills under `.claude/skills/`)
+
+Built Anthropic-style Claude Code Skills teaching correct MCP tool usage:
+
+| Skill | Path | Purpose | Mode | Tools |
+|---|---|---|---|---|
+| `web-research` | `.claude/skills/web-research/` | Multi-engine search with citations & query log | Auto-invoked | 4 (brave_web_search, brave_news_search, tavily_search, tavily_research) |
+| `http-fetch` | `.claude/skills/http-fetch/` | Deterministic URL retrieval with parsing patterns | Auto-invoked | 2 (fetch, tavily_extract) |
+| `browser-automation` | `.claude/skills/browser-automation/` | Playwright automation with failure handling | Auto-invoked | 17 playwright tools |
+| `research-to-action` | `.claude/skills/research-to-action/` | Workflow chaining search→fetch→browse | Operator (`/research-to-action`) | 14 (union of key tools) |
+
+**Skill conventions (Anthropic-style):**
+- YAML frontmatter: `name`, `description`, `disable-model-invocation`, `allowed-tools`
+- Each SKILL.md contains: When to use, Inputs, Workflow, Tool usage rules, Outputs/contract, 2 Examples
+- Reference files linked one level deep (no nesting)
+
+**Supporting reference files:**
+- `web-research/reference/SOURCES_RUBRIC.md` — 4-tier source quality rubric + conflict resolution rules
+- `http-fetch/reference/PARSING_PATTERNS.md` — HTML/JSON/text parsing patterns + failure handling table
+
+**Key design: research-to-action decision tree:**
+```
+SEARCH (always start here)
+  → found answer in snippet? → SYNTHESIZE
+  → found URL? → FETCH
+  → nothing? → retry once → REPORT GAP
+
+FETCH
+  → got content? → SYNTHESIZE
+  → empty/JS-rendered? → BROWSE (only if depth=full)
+  → failed? → try tavily_extract → REPORT CONSTRAINT
+
+BROWSE (last resort)
+  → got content? → close browser → SYNTHESIZE
+  → login/captcha? → STOP → REPORT CONSTRAINT
+```
+
+### Tool inventory (MCP tools discovered)
+
+| Server | Tool count | Key tools |
+|---|---|---|
+| brave-search | 6 | `brave_web_search`, `brave_news_search`, `brave_local_search`, `brave_video_search`, `brave_image_search`, `brave_summarizer` |
+| tavily | 5 | `tavily_search`, `tavily_extract`, `tavily_crawl`, `tavily_map`, `tavily_research` |
+| fetch | 1 | `fetch` |
+| playwright | 22 | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_evaluate`, + 17 more |
+
+All tool names use MCP qualified format: `mcp__<server>__<tool_name>`
+
+### Files created
+
+| File | Action |
+|---|---|
+| `.claude/skills/web-research/SKILL.md` | Created — web research skill |
+| `.claude/skills/web-research/reference/SOURCES_RUBRIC.md` | Created — source quality rubric |
+| `.claude/skills/http-fetch/SKILL.md` | Created — HTTP fetch skill |
+| `.claude/skills/http-fetch/reference/PARSING_PATTERNS.md` | Created — parsing patterns |
+| `.claude/skills/browser-automation/SKILL.md` | Created — browser automation skill |
+| `.claude/skills/research-to-action/SKILL.md` | Created — workflow chaining skill |
+
+**Also modified (infrastructure):**
+| File | Action |
+|---|---|
+| `~/.claude.json` | MCP servers registered (brave-search, tavily, fetch, playwright) |
+| `~/.claude/settings.json` | Cleaned up stale `mcpServers` key |
+| `~/.local/usr/lib/x86_64-linux-gnu/` | 47 shared libraries extracted for Playwright |
+
+### Packages installed
+
+| Package | Method | Purpose |
+|---|---|---|
+| `uv` (0.10.7) | `pip3 install uv` | Python tool runner for mcp-server-fetch |
+| Chromium 145.0.7632.6 | `npx playwright install chromium` | Browser for Playwright MCP |
+| 24 .deb packages | `apt-get download` + `dpkg-deb -x` | System libs for Chromium |
+
+### Design decisions
+
+- **`claude mcp add` over manual JSON editing**: Claude Code reads MCP config from `~/.claude.json`, not `~/.claude/settings.json`. The `claude mcp add -s user` CLI is the canonical way to register servers.
+- **Local lib extraction over sudo**: Extracted .deb packages to `~/.local/` and used `LD_LIBRARY_PATH` rather than requiring root access. Makes the setup portable and non-destructive.
+- **Separate skills over one mega-skill**: Each MCP capability (search, fetch, browse) gets its own skill with minimal tool lists. The `research-to-action` workflow skill chains them but is operator-invoked only (`disable-model-invocation: true`).
+- **Anthropic frontmatter style for new skills**: Used `allowed-tools` + `disable-model-invocation` format (Anthropic convention) rather than the existing `activation.keywords` + `tool_doctrine` format used by Phase 1 skills. Both formats coexist — Phase 1 skills teach behavior, MCP skills teach tool selection.
+
+---
+
 ## 2026-03-03 (Session 7) — Phase 2 Completion + Phase 3 Contract Enforcement
 
 **Session span:** ~14:00–16:00 UTC

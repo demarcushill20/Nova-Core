@@ -6,7 +6,8 @@
       "Bash(python3 -m py_compile /home/nova/nova-core/telegram_bot.py /home/nova/nova-core/watcher.py && echo \"COMPILE OK\")",
       "Bash(sudo systemctl restart novacore-telegram.service && echo \"telegram restarted\")",
       "Bash(pgrep -af \"telegram_bot.py\")",
-      "Bash(pgrep -af \"watcher.py\")"
+      "Bash(pgrep -af \"watcher.py\")",
+      "Bash(pip3 list)"
     ]
   }
 }
