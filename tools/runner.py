@@ -205,6 +205,46 @@ def enforce_git_safety(subcommand: str, args: list[str]) -> None:
             )
 
 
+# --- Execution audit envelope ------------------------------------------------
+
+
+def _execute_with_audit(
+    tool_name: str, func, registry: dict, **kwargs
+) -> dict:
+    """Wrap a tool execution in a structured audit envelope.
+
+    Validates that *tool_name* is registered before calling *func*.
+    Returns::
+
+        {
+            "tool": "<tool_name>",
+            "ok": true/false,
+            "duration_ms": <int>,
+            "result": { ... original tool output ... }
+        }
+
+    Raises ValueError if *tool_name* is not present in the registry.
+    """
+    tools = registry.get("tools", {})
+    if tool_name not in tools:
+        available = ", ".join(sorted(tools)) or "(none)"
+        raise ValueError(
+            f"Unregistered tool {tool_name!r}. Available: {available}"
+        )
+
+    start_time = time.time()
+    result = func(**kwargs)
+    end_time = time.time()
+    duration_ms = round((end_time - start_time) * 1000)
+
+    return {
+        "tool": tool_name,
+        "ok": result.get("ok", False),
+        "duration_ms": duration_ms,
+        "result": result,
+    }
+
+
 # --- Main entry point --------------------------------------------------------
 
 
@@ -217,57 +257,71 @@ def run_tool(
 
     sandbox = resolve_sandbox_root(registry)
     audit_path = resolve_audit_log(registry)
-    t0 = time.time()
 
     try:
+        # Registry gate: reject unregistered tools before dispatch
+        reg_tools = registry.get("tools", {})
+        if tool_name not in reg_tools:
+            available = ", ".join(sorted(reg_tools)) or "(none)"
+            raise ValueError(
+                f"Unregistered tool {tool_name!r}. Available: {available}"
+            )
+
         if tool_name == "shell.run":
-            result = _run_shell(args, sandbox)
+            func = lambda: _run_shell(args, sandbox)
         elif tool_name == "git.run":
-            result = _run_git(args, sandbox)
+            func = lambda: _run_git(args, sandbox)
         elif tool_name == "system.service.status":
-            result = _run_system_service_status(args, sandbox)
+            func = lambda: _run_system_service_status(args, sandbox)
         elif tool_name == "system.service.restart":
-            result = _run_system_service_restart(args, sandbox)
+            func = lambda: _run_system_service_restart(args, sandbox)
         elif tool_name == "repo.git.status":
-            result = _run_repo_git_status(sandbox)
+            func = lambda: _run_repo_git_status(sandbox)
         elif tool_name == "repo.git.diff":
-            result = _run_repo_git_diff(args, sandbox)
+            func = lambda: _run_repo_git_diff(args, sandbox)
         elif tool_name == "repo.git.commit":
-            result = _run_repo_git_commit(args, sandbox)
+            func = lambda: _run_repo_git_commit(args, sandbox)
         elif tool_name == "contracts.validate":
-            result = _run_contracts_validate(args)
+            func = lambda: _run_contracts_validate(args)
         elif tool_name.startswith("files."):
-            result = _run_files(tool_name, args, registry)
+            func = lambda: _run_files(tool_name, args, registry)
         else:
             raise ValueError(f"Tool {tool_name!r} is not implemented in runner")
+
+        envelope = _execute_with_audit(tool_name, func, registry)
+
     except ValueError as exc:
         code = 126 if str(exc).startswith("BLOCKED:") else -1
-        result = {"ok": False, "exit_code": code, "stdout": "", "stderr": str(exc)}
-
-    elapsed_ms = round((time.time() - t0) * 1000, 1)
+        inner = {"ok": False, "exit_code": code, "stdout": "", "stderr": str(exc)}
+        envelope = {
+            "tool": tool_name,
+            "ok": False,
+            "duration_ms": 0,
+            "result": inner,
+        }
 
     # Sanitize args for audit (strip content that might contain secrets)
     safe_args = {k: (redact_secrets(str(v)) if isinstance(v, str) else v)
                  for k, v in args.items()}
 
     audit_record = {
-        "ts": t0,
+        "ts": time.time(),
         "tool": tool_name,
         "args": safe_args,
-        "ok": result.get("ok", False),
-        "exit_code": result.get("exit_code", -1),
-        "elapsed_ms": elapsed_ms,
+        "ok": envelope["ok"],
+        "exit_code": envelope["result"].get("exit_code", -1),
+        "elapsed_ms": envelope["duration_ms"],
     }
 
     # For files.* tools, include a compact summary of the structured result
-    if tool_name.startswith("files.") and "result" in result:
+    if tool_name.startswith("files.") and "result" in envelope["result"]:
         audit_record["result_summary"] = _summarize_files_result(
-            tool_name, result["result"]
+            tool_name, envelope["result"]["result"]
         )
 
     append_audit(audit_path, audit_record)
 
-    return result
+    return envelope
 
 
 # --- Tool implementations ---------------------------------------------------
