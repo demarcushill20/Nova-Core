@@ -241,6 +241,37 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "repo.git.commit": {
+      "description": "Stage specified files and create a git commit with audit discipline. No amend, force, or no-verify.",
+      "args_schema": {
+        "message": {
+          "type": "string",
+          "required": true,
+          "description": "Commit message. Must not contain forbidden flags (--amend, --no-verify, --force)."
+        },
+        "paths": {
+          "type": "array",
+          "required": false,
+          "description": "File paths to stage before committing. If omitted, commits whatever is already staged."
+        }
+      },
+      "returns": {
+        "action": "string — always 'commit'",
+        "message": "string — the commit message used",
+        "commit_hash": "string — short hash of the new commit",
+        "files": "array — list of committed file paths",
+        "success": "boolean — true if commit succeeded",
+        "verification": "string — how the commit was confirmed",
+        "reason": "string|absent — explanation if commit failed"
+      },
+      "safety": [
+        "Forbidden flags (--amend, --no-verify, --force, -a) are rejected.",
+        "Paths starting with '-' are rejected as potential flag injection.",
+        "Pre-commit status check ensures repo is in a valid state.",
+        "Post-commit verification via git log confirms the commit hash.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {

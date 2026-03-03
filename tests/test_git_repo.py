@@ -6,6 +6,7 @@ These tests mock subprocess output so they work in any environment.
 from unittest.mock import patch
 
 from tools.adapters.git_repo import (
+    git_commit,
     git_diff,
     git_status,
     parse_diff,
@@ -338,6 +339,113 @@ def test_git_diff_json_shape(mock_run):
     assert "excerpt" in f
 
 
+# --- Tests for git_commit (mocked subprocess) --------------------------------
+
+
+@patch("tools.adapters.git_repo.run_subprocess")
+def test_commit_success(mock_run):
+    mock_run.side_effect = [
+        # 1. git status --porcelain=v1
+        {"exit_code": 0, "stdout": "M  tools/runner.py\n", "stderr": ""},
+        # 2. git add -- tools/runner.py
+        {"exit_code": 0, "stdout": "", "stderr": ""},
+        # 3. git diff --cached --name-only
+        {"exit_code": 0, "stdout": "tools/runner.py\n", "stderr": ""},
+        # 4. git commit -m ...
+        {"exit_code": 0, "stdout": "[main abc1234] fix: update runner\n", "stderr": ""},
+        # 5. git log -1 --oneline
+        {"exit_code": 0, "stdout": "abc1234 fix: update runner\n", "stderr": ""},
+    ]
+    result = git_commit("fix: update runner", paths=["tools/runner.py"])
+    assert result["success"] is True
+    assert result["action"] == "commit"
+    assert result["commit_hash"] == "abc1234"
+    assert result["message"] == "fix: update runner"
+    assert "tools/runner.py" in result["files"]
+    assert "abc1234" in result["verification"]
+
+
+@patch("tools.adapters.git_repo.run_subprocess")
+def test_commit_nothing_to_commit(mock_run):
+    mock_run.side_effect = [
+        # 1. git status
+        {"exit_code": 0, "stdout": "", "stderr": ""},
+        # 2. git diff --cached --name-only (nothing staged)
+        {"exit_code": 0, "stdout": "", "stderr": ""},
+    ]
+    result = git_commit("chore: empty")
+    assert result["success"] is False
+    assert "nothing to commit" in result["reason"]
+    assert result["commit_hash"] == ""
+
+
+@patch("tools.adapters.git_repo.run_subprocess")
+def test_commit_with_staging(mock_run):
+    mock_run.side_effect = [
+        # 1. git status
+        {"exit_code": 0, "stdout": "?? new.py\n?? other.py\n", "stderr": ""},
+        # 2. git add -- new.py
+        {"exit_code": 0, "stdout": "", "stderr": ""},
+        # 3. git add -- other.py
+        {"exit_code": 0, "stdout": "", "stderr": ""},
+        # 4. git diff --cached --name-only
+        {"exit_code": 0, "stdout": "new.py\nother.py\n", "stderr": ""},
+        # 5. git commit -m ...
+        {"exit_code": 0, "stdout": "[main def5678] feat: add files\n", "stderr": ""},
+        # 6. git log -1 --oneline
+        {"exit_code": 0, "stdout": "def5678 feat: add files\n", "stderr": ""},
+    ]
+    result = git_commit("feat: add files", paths=["new.py", "other.py"])
+    assert result["success"] is True
+    assert result["commit_hash"] == "def5678"
+    assert len(result["files"]) == 2
+
+    # Verify git add was called for each path
+    add_calls = [c for c in mock_run.call_args_list if c[0][0][0:2] == ["git", "add"]]
+    assert len(add_calls) == 2
+
+
+def test_commit_rejects_amend():
+    try:
+        git_commit("--amend this commit")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "forbidden" in str(e).lower()
+
+
+def test_commit_rejects_flag_path():
+    try:
+        git_commit("good message", paths=["--no-verify"])
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "flag" in str(e).lower()
+
+
+def test_commit_rejects_empty_message():
+    try:
+        git_commit("")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "message" in str(e).lower()
+
+
+@patch("tools.adapters.git_repo.run_subprocess")
+def test_commit_json_shape(mock_run):
+    mock_run.side_effect = [
+        {"exit_code": 0, "stdout": "M  x.py\n", "stderr": ""},
+        {"exit_code": 0, "stdout": "", "stderr": ""},
+        {"exit_code": 0, "stdout": "x.py\n", "stderr": ""},
+        {"exit_code": 0, "stdout": "[main aaa1111] test\n", "stderr": ""},
+        {"exit_code": 0, "stdout": "aaa1111 test\n", "stderr": ""},
+    ]
+    result = git_commit("test", paths=["x.py"])
+    required_keys = {"action", "message", "commit_hash", "files", "success", "verification"}
+    assert required_keys.issubset(set(result.keys())), f"Missing: {required_keys - set(result.keys())}"
+    assert isinstance(result["success"], bool)
+    assert isinstance(result["files"], list)
+    assert isinstance(result["commit_hash"], str)
+
+
 # --- Run as script -----------------------------------------------------------
 
 if __name__ == "__main__":
@@ -363,6 +471,13 @@ if __name__ == "__main__":
         test_git_diff_empty,
         test_git_diff_rejects_flag_path,
         test_git_diff_json_shape,
+        test_commit_success,
+        test_commit_nothing_to_commit,
+        test_commit_with_staging,
+        test_commit_rejects_amend,
+        test_commit_rejects_flag_path,
+        test_commit_rejects_empty_message,
+        test_commit_json_shape,
     ]
     passed = 0
     for t in tests:

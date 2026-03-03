@@ -232,6 +232,8 @@ def run_tool(
             result = _run_repo_git_status(sandbox)
         elif tool_name == "repo.git.diff":
             result = _run_repo_git_diff(args, sandbox)
+        elif tool_name == "repo.git.commit":
+            result = _run_repo_git_commit(args, sandbox)
         elif tool_name.startswith("files."):
             result = _run_files(tool_name, args, registry)
         else:
@@ -355,3 +357,13 @@ def _run_repo_git_diff(args: dict, sandbox: Path) -> dict:
     """Execute repo.git.diff via the adapter."""
     from tools.adapters.git_repo import git_diff
     return git_diff(path=args.get("path"), sandbox=sandbox)
+
+
+def _run_repo_git_commit(args: dict, sandbox: Path) -> dict:
+    """Execute repo.git.commit via the adapter."""
+    from tools.adapters.git_repo import git_commit
+    return git_commit(
+        message=args.get("message", ""),
+        paths=args.get("paths"),
+        sandbox=sandbox,
+    )
