@@ -293,6 +293,33 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "logs.tail": {
+      "description": "Tail journalctl logs for a systemd service. Read-only.",
+      "args_schema": {
+        "service": {
+          "type": "string",
+          "required": true,
+          "description": "Systemd service unit name (e.g. 'novacore-watcher')."
+        },
+        "lines": {
+          "type": "integer",
+          "required": false,
+          "description": "Number of log lines to retrieve. Default: 200. Clamped to 1–500."
+        }
+      },
+      "returns": {
+        "service": "string — the service name queried",
+        "lines": "integer — number of entries returned",
+        "entries": "array of string — log lines in short-iso format",
+        "truncated": "boolean — true if output was truncated due to buffer limit"
+      },
+      "safety": [
+        "Read-only operation. Does not modify logs or services.",
+        "Service name is sanitized to alphanumeric, dash, underscore, dot, @.",
+        "Output is capped at 100KB to prevent memory issues.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {

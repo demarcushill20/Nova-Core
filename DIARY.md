@@ -4,6 +4,81 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-03 (Session 9) — Phase 3 Completion + Phase 4 Execution Audit & logs.tail
+
+**Session span:** ~15:50–16:30 UTC
+
+### What was built
+
+#### Phase 3 / Step 4 — Observability Metrics
+
+Added lightweight metrics tracking to `STATE/metrics.json` for contract validation and retry outcomes.
+
+- `_update_metrics(event, tool_name)` helper in `watcher.py` — increments counters, never throws, never blocks
+- 5 tracked events: `contract_success`, `contract_failure`, `retry_issued`, `retry_success`, `retry_failed`
+- Per-stem breakdown with `_total` rollup
+- Corruption-safe: invalid JSON or non-dict resets silently
+- Wired into `verify_artifacts()` (success/failure + retry outcomes) and `_maybe_create_retry()` (retry_issued)
+- `STATE/metrics.json` added to `.gitignore` (runtime state)
+- 15 tests in `tests/test_metrics.py`
+
+#### Phase 4 / Step 1 — Execution Audit Envelope
+
+Added `_execute_with_audit()` wrapper to `tools/runner.py` that wraps every tool execution in a structured envelope.
+
+- Validates tool exists in `tools_registry.json` before execution
+- Times execution, returns `{tool, ok, duration_ms, result}` envelope
+- Unregistered tools raise `ValueError` immediately — function never called
+- `run_tool()` refactored: registry gate at top, all dispatches go through wrapper
+- Error cases (blocked commands, unregistered tools) still return well-formed envelopes
+- 10 tests in `tests/test_runner_audit.py`
+
+#### Phase 4 / Step 2 — Semantic Tool: logs.tail
+
+Added read-only log tailing for systemd services via journalctl.
+
+- New adapter: `tools/adapters/logs_tool.py` — `logs_tail(service, lines)` function
+- Runs `journalctl -u <service> -n <lines> --no-pager -o short-iso`
+- Lines clamped to 1–500, output capped at 100KB
+- Service name sanitized (alphanumeric, dash, underscore, dot, @)
+- Returns structured dict: `{service, lines, entries[], truncated}`
+- Registered in `tools/tools_registry.json` as `logs.tail`
+- Wired into runner dispatch via `_run_logs_tail()`
+- 13 tests in `tests/test_logs_tail.py`
+
+### Test suite
+
+| File | Tests |
+|------|-------|
+| test_contract_gate.py | 13/13 |
+| test_contract_retry.py | 17/17 |
+| test_contracts.py | 14/14 |
+| test_git_repo.py | 28/28 |
+| test_logs_tail.py | 13/13 |
+| test_metrics.py | 15/15 |
+| test_runner_audit.py | 10/10 |
+| test_system_service.py | 15/15 |
+| **Total** | **125/125** |
+
+### Files changed
+
+- `watcher.py` — metrics helper + wiring (+43 lines)
+- `.gitignore` — added `STATE/metrics.json`
+- `tools/runner.py` — audit envelope wrapper, registry gate, logs.tail dispatch (+86 lines)
+- `tools/tools_registry.json` — added `logs.tail` entry
+- `tools/adapters/logs_tool.py` — new adapter
+- `tests/test_metrics.py` — new (15 tests)
+- `tests/test_runner_audit.py` — new (10 tests)
+- `tests/test_logs_tail.py` — new (13 tests)
+
+### Commits
+
+- `c85efc2` — Phase 3 Step 4: observability metrics
+- `d71f688` — Phase 4 Step 1: execution audit envelope
+- (pending) — Phase 4 Step 2: logs.tail semantic tool
+
+---
+
 ## 2026-03-03 (Session 8) — MCP Server Setup + MCP Skills (Web/Fetch/Browser/Research)
 
 **Session span:** ~14:00–15:00 UTC

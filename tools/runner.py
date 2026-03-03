@@ -281,6 +281,8 @@ def run_tool(
             func = lambda: _run_repo_git_diff(args, sandbox)
         elif tool_name == "repo.git.commit":
             func = lambda: _run_repo_git_commit(args, sandbox)
+        elif tool_name == "logs.tail":
+            func = lambda: _run_logs_tail(args, sandbox)
         elif tool_name == "contracts.validate":
             func = lambda: _run_contracts_validate(args)
         elif tool_name.startswith("files."):
@@ -421,6 +423,16 @@ def _run_repo_git_commit(args: dict, sandbox: Path) -> dict:
     return git_commit(
         message=args.get("message", ""),
         paths=args.get("paths"),
+        sandbox=sandbox,
+    )
+
+
+def _run_logs_tail(args: dict, sandbox: Path) -> dict:
+    """Execute logs.tail via the adapter."""
+    from tools.adapters.logs_tool import logs_tail
+    return logs_tail(
+        service=args.get("service", ""),
+        lines=args.get("lines", 200),
         sandbox=sandbox,
     )
 
