@@ -8,6 +8,7 @@ __pycache__/
 STATE/telegram_bot.lock
 STATE/tool_audit.jsonl
 STATE/notified/
+STATE/metrics.json
 
 # Logs
 LOGS/

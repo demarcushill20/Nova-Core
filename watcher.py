@@ -6,6 +6,7 @@ non-interactive Claude subprocess, and verifies output artifacts
 before marking tasks as done.
 """
 
+import json
 import os
 import signal
 import subprocess
@@ -31,6 +32,7 @@ POLL_INTERVAL = 60   # seconds between scans
 TASK_TIMEOUT = 300   # max seconds per task execution
 ARTIFACT_WINDOW = 600  # seconds — OUTPUT file must be this recent
 
+METRICS_FILE = STATE_DIR / "metrics.json"
 CLAUDE_BIN = "/usr/bin/claude"
 
 DISPATCH_PROMPT_TEMPLATE = """\
@@ -166,6 +168,38 @@ def _original_stem(stem: str) -> str:
     return stem[:idx] if idx != -1 else stem
 
 
+def _update_metrics(event: str, tool_name: str | None = None):
+    """Increment a counter in STATE/metrics.json.
+
+    Never throws, never blocks.  If the file is corrupt or missing,
+    it resets to an empty dict and continues.
+    """
+    try:
+        data: dict = {}
+        if METRICS_FILE.exists():
+            try:
+                raw = METRICS_FILE.read_text(encoding="utf-8")
+                data = json.loads(raw)
+                if not isinstance(data, dict):
+                    data = {}
+            except (json.JSONDecodeError, ValueError, OSError):
+                data = {}
+
+        if event not in data or not isinstance(data[event], dict):
+            data[event] = {"_total": 0}
+
+        data[event]["_total"] = data[event].get("_total", 0) + 1
+
+        key = tool_name or "unknown"
+        data[event][key] = data[event].get(key, 0) + 1
+
+        METRICS_FILE.write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
+    except Exception:
+        pass  # Never throw, never block
+
+
 def _create_retry_task(stem: str, output_file: Path, errors: list[str],
                        warnings: list[str]) -> Path:
     """Create a retry TASK file that asks the agent to repair the contract.
@@ -245,8 +279,15 @@ def verify_artifacts(stem: str) -> tuple[bool, list[str]]:
     if output_file:
         contract_ok, contract_msgs = _check_contract(output_file)
         messages.extend(contract_msgs)
-        if not contract_ok:
+        if contract_ok:
+            _update_metrics("contract_success", stem)
+            if _is_retry_task(stem):
+                _update_metrics("retry_success", stem)
+        else:
             passed = False
+            _update_metrics("contract_failure", stem)
+            if _is_retry_task(stem):
+                _update_metrics("retry_failed", stem)
             # --- Retry logic: create ONE retry task if eligible ---
             _maybe_create_retry(stem, output_file, contract_msgs)
 
@@ -290,6 +331,7 @@ def _maybe_create_retry(stem: str, output_file: Path,
                 for m in contract_msgs if m.startswith("  contract warning:")]
 
     retry_path = _create_retry_task(stem, output_file, errors, warnings)
+    _update_metrics("retry_issued", stem)
     logger.info("RETRY CREATED: %s → %s", stem, retry_path.name)
 
 
