@@ -4,6 +4,96 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-03 (Session 7) — Phase 2 Completion + Phase 3 Contract Enforcement
+
+**Session span:** ~14:00–16:00 UTC
+
+### What was built
+
+#### Phase 2 / Step 5 — `repo.git.commit` (state-changing, safety-enforced)
+
+Extended `tools/adapters/git_repo.py`:
+- `git_commit(message, paths=None)` → structured dict with `action`, `message`, `commit_hash`, `files`, `success`, `verification`
+- **Forbidden flag rejection**: regex blocks `--amend`, `--no-verify`, `--force`, `--allow-empty`, `-a` in commit messages
+- **Flag injection prevention**: paths starting with `-` are rejected; `--` separator used before path args
+- **5-step workflow**: status check → stage paths → verify staging (`git diff --cached --name-only`) → commit → verify via `git log -1 --oneline`
+- Runner dispatch wired via lazy import in `_run_repo_git_commit()`
+
+**Phase 2 complete.** All 5 semantic tool adapters built and tested:
+
+| Tool | Type | Adapter |
+|---|---|---|
+| `system.service.status` | Read-only | `system_service.py` |
+| `system.service.restart` | State-changing (gated) | `system_service.py` |
+| `repo.git.status` | Read-only | `git_repo.py` |
+| `repo.git.diff` | Read-only | `git_repo.py` |
+| `repo.git.commit` | State-changing (safety-enforced) | `git_repo.py` |
+
+#### Phase 3 / Step 1 — `contracts.validate` tool
+
+Created `tools/contracts.py`:
+- `validate_contract(text)` → `{valid, errors, warnings, contract}`
+- Locates the **last** `## CONTRACT` header in text, parses `key: value` pairs below it
+- Required fields: `summary`, `verification`, `confidence`
+- Requires at least one action-detail field: `files_changed`, `commands_executed`, `git_commands_executed`, `task_id`, `status`, `checks_performed`
+- Confidence validation: accepts `0.0–1.0` float or `low`/`medium`/`high`
+- Code fences inside CONTRACT blocks are skipped (content inside ``` ignored)
+- Deterministic — no LLM calls, pure string parsing
+
+Registered as `contracts.validate` in `tools/tools_registry.json`. Runner dispatch via `_run_contracts_validate()`.
+
+#### Phase 3 / Step 2 — Contract enforcement gate on task completion
+
+Modified `watcher.py` `verify_artifacts()`:
+- After finding the OUTPUT file, calls `_check_contract(output_file)` which runs `validate_contract(text)`
+- **Valid contract** → proceeds to `.done` as before
+- **Invalid contract** → `passed = False` → task becomes `.failed`
+- Failure appends a `## CONTRACT VALIDATION FAILED` section to the output file with:
+  - List of validation errors
+  - List of warnings (if any)
+  - Suggestion to fix output with required fields
+
+Flow: OUTPUT found → contract validated → `.done` **or** contract invalid → failure section appended → `.failed`
+
+### Test results
+
+| Test suite | Tests | Status |
+|---|---|---|
+| `tests/test_git_repo.py` | 28 | All passing |
+| `tests/test_system_service.py` | 15 | All passing |
+| `tests/test_contracts.py` | 14 | All passing |
+| `tests/test_contract_gate.py` | 13 | All passing |
+| **Total** | **70** | **All passing** |
+
+### Files created or modified
+
+| File | Action |
+|---|---|
+| `tools/adapters/git_repo.py` | Extended — `git_commit()` added |
+| `tools/contracts.py` | Created — contract validator |
+| `tools/runner.py` | Modified — dispatch for `repo.git.commit` + `contracts.validate` |
+| `tools/tools_registry.json` | Modified — 2 new tool entries |
+| `watcher.py` | Modified — `_check_contract()` + contract gate in `verify_artifacts()` |
+| `tests/test_git_repo.py` | Extended — 7 commit tests |
+| `tests/test_contracts.py` | Created — 14 validator tests |
+| `tests/test_contract_gate.py` | Created — 13 gate tests |
+
+### Git history (session 7)
+
+| Commit | Message |
+|---|---|
+| `cce37f2` | feat: Phase 2 add repo.git.commit adapter |
+| `4b72994` | feat: Phase 3 add contracts.validate tool |
+| `e64523d` | feat: Phase 3 add contract enforcement gate on task completion |
+
+### Design decisions
+
+- **Gate at `verify_artifacts()`, not at file write time**: The contract gate runs after Claude finishes and the OUTPUT file exists. This means Claude's raw output is preserved (the failure section is appended, not replacing). The gate is the single chokepoint before `.done` transition.
+- **Last CONTRACT block wins**: If an output has multiple `## CONTRACT` sections (e.g., from retries), only the last one is validated. This supports iterative correction within a single output.
+- **Failure report appended to output file**: Rather than creating a separate error file, the validation failure is appended to the existing OUTPUT file. This keeps the full context (original output + why it failed) in one place.
+
+---
+
 ## 2026-03-02 (Session 6) — Phase 2 Tool Abstraction Layer (Semantic Adapters)
 
 **Session span:** ~15:00–17:00 UTC
