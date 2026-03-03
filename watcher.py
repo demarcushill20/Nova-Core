@@ -152,6 +152,79 @@ def get_pending_tasks() -> list[Path]:
     )
 
 
+def _is_retry_task(stem: str) -> bool:
+    """Check if a task stem is already a retry task (contains __retry1)."""
+    return "__retry1" in stem
+
+
+def _original_stem(stem: str) -> str:
+    """Extract the original task stem from a retry stem.
+
+    '0012_broken__retry1' -> '0012_broken'
+    """
+    idx = stem.find("__retry1")
+    return stem[:idx] if idx != -1 else stem
+
+
+def _create_retry_task(stem: str, output_file: Path, errors: list[str],
+                       warnings: list[str]) -> Path:
+    """Create a retry TASK file that asks the agent to repair the contract.
+
+    Returns the path to the created retry task file.
+    """
+    retry_stem = f"{stem}__retry1"
+    retry_path = TASKS_DIR / f"{retry_stem}.md"
+
+    error_text = "\n".join(f"- {e}" for e in errors)
+    warning_text = "\n".join(f"- {w}" for w in warnings) if warnings else "(none)"
+
+    content = f"""\
+# Retry: Repair Contract for {stem}
+
+## Context
+The original task `{stem}` completed execution but its output failed
+contract validation. Your job is to repair the output file by adding a
+valid `## CONTRACT` block.
+
+## Original task stem
+{stem}
+
+## Output file to repair
+{output_file}
+
+## Validation errors
+{error_text}
+
+## Validation warnings
+{warning_text}
+
+## Instructions
+
+1. Read the output file at `{output_file}`.
+2. Analyse the existing content to understand what was done.
+3. Append a valid `## CONTRACT` block at the end of the file with ALL of
+   these required fields:
+   - `summary`: one-line summary of what the original task accomplished
+   - `verification`: describe how the result was verified (re-run tests,
+     check file existence, inspect output, etc.)
+   - `confidence`: a value of `low`, `medium`, or `high` (or a float 0.0–1.0)
+   - At least ONE action-detail field from: `files_changed`,
+     `commands_executed`, `git_commands_executed`, `task_id`, `status`,
+     `checks_performed`
+4. If verification requires re-running tests or checking status, do so
+   and record the results in the `verification` field.
+5. Do NOT change the original output content unless strictly necessary.
+   The primary goal is contract + verification repair.
+6. Create an output report at:
+     {OUTPUT_DIR}/{retry_stem}__<YYYYMMDD-HHMMSS>.md
+   that summarises the repair. This report MUST also contain a valid
+   `## CONTRACT` block.
+"""
+
+    retry_path.write_text(content, encoding="utf-8")
+    return retry_path
+
+
 def verify_artifacts(stem: str) -> tuple[bool, list[str]]:
     """Check that required artifacts exist after execution.
 
@@ -174,6 +247,8 @@ def verify_artifacts(stem: str) -> tuple[bool, list[str]]:
         messages.extend(contract_msgs)
         if not contract_ok:
             passed = False
+            # --- Retry logic: create ONE retry task if eligible ---
+            _maybe_create_retry(stem, output_file, contract_msgs)
 
     # 3. Task-specific: 0004 requires WORK/real_autonomy_confirmed.txt
     if stem.startswith("0004"):
@@ -185,6 +260,37 @@ def verify_artifacts(stem: str) -> tuple[bool, list[str]]:
             passed = False
 
     return passed, messages
+
+
+def _maybe_create_retry(stem: str, output_file: Path,
+                        contract_msgs: list[str]):
+    """Create a retry task if this is the first contract failure for stem.
+
+    Does nothing if:
+    - stem is already a retry task (__retry1)
+    - a retry task already exists (pending, inprogress, done, or failed)
+    """
+    # Already a retry — never chain further
+    if _is_retry_task(stem):
+        logger.info("RETRY SKIP: %s is already a retry task — no further retry.", stem)
+        return
+
+    retry_stem = f"{stem}__retry1"
+
+    # Check if any lifecycle variant of the retry task already exists
+    for suffix in (".md", ".md.inprogress", ".md.done", ".md.failed", ".md.cancelled"):
+        if (TASKS_DIR / f"{retry_stem}{suffix}").exists():
+            logger.info("RETRY SKIP: %s already exists — no duplicate retry.", retry_stem)
+            return
+
+    # Extract errors and warnings from contract messages
+    errors = [m.replace("  contract error: ", "")
+              for m in contract_msgs if m.startswith("  contract error:")]
+    warnings = [m.replace("  contract warning: ", "")
+                for m in contract_msgs if m.startswith("  contract warning:")]
+
+    retry_path = _create_retry_task(stem, output_file, errors, warnings)
+    logger.info("RETRY CREATED: %s → %s", stem, retry_path.name)
 
 
 def _check_contract(output_file: Path) -> tuple[bool, list[str]]:

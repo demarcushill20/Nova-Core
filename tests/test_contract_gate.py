@@ -177,7 +177,11 @@ def test_verify_artifacts_valid_contract(tmp_path):
 def test_verify_artifacts_missing_contract_fails(tmp_path):
     stem = "0012_broken"
     out_dir, out_file = _make_recent_output(tmp_path, stem, MISSING_CONTRACT)
-    with patch("watcher._find_recent_output", return_value=out_file):
+    tasks_dir = tmp_path / "TASKS"
+    tasks_dir.mkdir(exist_ok=True)
+    with patch("watcher._find_recent_output", return_value=out_file), \
+         patch("watcher.TASKS_DIR", tasks_dir), \
+         patch("watcher.OUTPUT_DIR", out_dir):
         passed, msgs = verify_artifacts(stem)
     assert passed is False
     assert any("CONTRACT FAILED" in m for m in msgs)
@@ -189,7 +193,11 @@ def test_verify_artifacts_missing_contract_fails(tmp_path):
 def test_verify_artifacts_bad_confidence_fails(tmp_path):
     stem = "0013_bad_conf"
     out_dir, out_file = _make_recent_output(tmp_path, stem, BAD_CONFIDENCE)
-    with patch("watcher._find_recent_output", return_value=out_file):
+    tasks_dir = tmp_path / "TASKS"
+    tasks_dir.mkdir(exist_ok=True)
+    with patch("watcher._find_recent_output", return_value=out_file), \
+         patch("watcher.TASKS_DIR", tasks_dir), \
+         patch("watcher.OUTPUT_DIR", out_dir):
         passed, msgs = verify_artifacts(stem)
     assert passed is False
 
