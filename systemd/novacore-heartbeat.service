@@ -1,0 +1,14 @@
+[Unit]
+Description=NovaCore Heartbeat Health Check
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/nova/nova-core/heartbeat.py
+WorkingDirectory=/home/nova/nova-core
+User=nova
+EnvironmentFile=/etc/novacore/telegram.env
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

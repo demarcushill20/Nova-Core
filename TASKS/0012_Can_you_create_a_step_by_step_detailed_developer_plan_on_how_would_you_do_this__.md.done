@@ -1,0 +1,77 @@
+
+Answer: Heartbeat first. Here's the full analysis.
+
+---
+
+## Current State Assessment
+
+| Capability | Status | What Exists |
+
+| Heartbeat | Nothing | Zero health-check, no timer, no proactive self-monitoring |
+
+---
+
+## Recommendation: Build the Heartbeat First
+
+### Why Heartbeat Wins Priority
+
+1. Survivability before intelligence. A heartbeat makes Nova-Core self-aware of its own health. Without it, a silent failure in watcher.py or the Telegram bridge goes unnoticed until the user checks manually. Memory is useless if the system is dead and nobody knows.
+
+2. Smallest useful increment. A heartbeat is a single systemd timer + a lightweight Python script. It can ship in 30 minutes. Persistent memory requires modifying the dispatch prompt template, designing a retrieval strategy, and testing injection into subprocess calls — a multi-session effort.
+
+3. Unlocks monitoring for everything else. Once we have a heartbeat, it becomes the anchor for all future proactive behaviors: memory compaction, task queue health, disk space, service uptime, API quota tracking. Memory is one consumer of the heartbeat, not the other way around.
+
+4. OpenClaw validated this order. The OpenClaw project (our closest reference architecture) built their HEARTBEAT.md pattern first and runs it every 30 minutes. Their memory system came later. We documented this in MEMORY/openclaw_research.md.
+
+5. Failure mode asymmetry. Without heartbeat: silent death, missed tasks, stale state — user discovers hours later. Without memory: tasks still execute correctly, just without cross-session context — a quality-of-life gap, not a reliability gap.
+
+---
+
+## Heartbeat: Implementation Sketch
+
+### Architecture
+novacore-heartbeat.timer (systemd, every 30min)
+    |
+    v
+novacore-heartbeat.service
+    ExecStart: /usr/bin/python3 /home/nova/nova-core/heartbeat.py
+    |
+    v
+heartbeat.py:
+    1. Check service health (watcher, telegram, notifier)
+    2. Check disk space, task queue depth, orphaned .inprogress files
+    3. Check last OUTPUT timestamp (stale worker detection)
+    4. Write HEARTBEAT.md with timestamped checklist
+    5. If anything is unhealthy → send Telegram alert
+    6. Optionally: inject a synthetic "health-check" task for self-repair
+
+### Heartbeat Checklist (HEARTBEAT.md)
+# NovaCore Heartbeat
+Last check: 2026-03-05T16:30:00Z
+
+- [x] novacore-watcher: active (pid 12345, uptime 2h)
+- [x] novacore-telegram: active (pid 12346, uptime 2h)
+- [x] novacore-telegram-notifier: active (pid 12347, uptime 2h)
+- [x] Disk: 45% used (12GB free)
+- [x] Task queue: 0 pending, 0 orphaned .inprogress
+- [x] Last output: 3 min ago
+- [x] Claude binary: /usr/bin/claude accessible
+
+### Files to Create
+
+| File | Purpose |
+
+| heartbeat.py | Health-check script |
+| HEARTBEAT.md | Last-known status (overwritten each run) |
+| /etc/systemd/system/novacore-heartbeat.timer | 30-minute trigger |
+| /etc/systemd/system/novacore-heartbeat.service | Service unit |
+
+### Estimated Effort: ~1 task (30-60 min of Claude time)
+
+---
+
+## Persistent Memory: What Comes After
+
+Once the heartbeat is stable, memory is the next priority. The plan:
+
+1. Memory injection into watcher.py — when dispatching a task, read relevant MEMORY/*.md files and append them to the prompt via --append-system-prompt.
