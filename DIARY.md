@@ -4,6 +4,61 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-05 (Session 11) — Heartbeat Health Monitoring System
+
+**Session span:** ~16:35–17:45 UTC
+
+### What was built
+
+#### heartbeat.py — proactive health monitoring
+
+Standalone stdlib-only script (~240 lines) that runs 9 health checks and reports status. Designed as a systemd oneshot triggered every 30 minutes.
+
+**Health checks:**
+1. `service:novacore-watcher` — systemd is-active + PID/uptime
+2. `service:novacore-telegram` — same
+3. `service:novacore-telegram-notifier` — same
+4. `disk` — `os.statvfs`, warns at >85% usage
+5. `claude_binary` — `/usr/bin/claude` exists and is executable
+6. `task_queue` — pending count (warns >10), orphaned `.inprogress` files (>15min)
+7. `last_output` — most recent OUTPUT/ file age (informational)
+8. `stale_workers` — dead PIDs in `STATE/running/*.pid`
+9. `metrics` — `STATE/metrics.json` failure rate (warns >50%)
+
+**Outputs:**
+- Writes `HEARTBEAT.md` with timestamped checklist
+- Appends to `LOGS/heartbeat.log`
+- Sends Telegram alert on failure (via `TELEGRAM_BOT_TOKEN` + `ALLOWED_CHAT_ID`)
+- Injects self-repair tasks into `TASKS/` for service failures (rate-limited)
+
+**Metrics parsing fix:** `contract_failure`/`contract_success` in `metrics.json` are dicts with `_total` keys, not plain ints. Added `isinstance(cf, dict)` dispatch.
+
+#### systemd timer deployment
+
+- `systemd/novacore-heartbeat.service` — Type=oneshot, EnvironmentFile=/etc/novacore/telegram.env
+- `systemd/novacore-heartbeat.timer` — OnBootSec=2min, OnUnitActiveSec=30min
+- Deployed to `/etc/systemd/system/`, enabled, verified firing
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `heartbeat.py` | **NEW** | 9 health checks, HEARTBEAT.md writer, Telegram alerter, self-repair injector |
+| `tests/test_heartbeat.py` | **NEW** | 30 tests covering all checks, edge cases, integration |
+| `systemd/novacore-heartbeat.service` | **NEW** | Oneshot service unit |
+| `systemd/novacore-heartbeat.timer` | **NEW** | 30-minute timer unit |
+| `HEARTBEAT.md` | **NEW** | Auto-generated health status (gitignored runtime artifact) |
+
+### Test results
+
+194 total (164 existing + 30 new), all passing.
+
+### First live run
+
+Timer fired immediately on enable. All services healthy, disk at 17.3%, only flag was metrics at 62.5% failure rate (5/8 historical contract failures) — will normalize as task volume grows.
+
+---
+
 ## 2026-03-05 (Session 10) — Production Incident Recovery + Chat Mode
 
 **Session span:** ~15:37–16:35 UTC
