@@ -1,0 +1,127 @@
+## ACTIVE SKILLS
+
+--- self-verification ---
+# When To Use
+
+- After completing a task, to confirm outputs and logs are correct.
+- After any file modification, to verify the change landed as intended.
+- After git operations, to confirm commit, push, or branch state.
+- After shell commands, to validate exit codes and expected side effects.
+- Before reporting task completion — never mark `.done` without verification.
+- Periodic health checks of the nova-core environment.
+
+# Workflow
+
+1. **Identify expected state** — determine what success looks like before checking.
+2. **Read after write** — re-read any file that was modified to confirm contents.
+3. **Check exit codes** — verify shell and git commands returned expected codes.
+4. **Validate contract fields** — confirm all required fields are present and non-empty.
+5. **Cross-reference** — check that related artifacts exist (e.g., `.done` task has output file).
+6. **Score confidence** — assign `high`, `medium`, or `low` based on check coverage.
+7. **Report** — emit a structured verification result.
+
+For verification philosophy, confidence scoring, and false-positive guidance, see `reference.md`.
+
+# Tool Usage Rules
+
+- **Read-only by default.** Do not modify files during verification unless repairing a known, deterministic inconsistency.
+- All checks scoped to `~/nova-core`.
+- Never assume success — always confirm with an independent read or status check.
+- Do not trust exit code 0 alone — also inspect stdout/stderr for warnings.
+- Report anomalies clearly but do not auto-fix unless the fix is safe and deterministic.
+- Prefer concrete checks (file exists, content matches) over heuristic checks (output "looks right").
+
+# Verification
+
+Self-verification verifies other skills. Its own verification is:
+
+1. Confirm the verification report was generated with all required fields.
+2. Confirm `checks_performed` lists at least one concrete check.
+3. Confirm `result` is one of: `pass`, `fail`, `partial`.
+4. Confirm `confidence` is one of: `high`, `medium`, `low`.
+
+# Failure Handling
+
+- **Expected file missing**: report the missing path and mark result as `fail`.
+- **Exit code mismatch**: report expected vs. actual code, mark `fail`.
+- **Contract field missing**: report which fields are absent, mark `fail`.
+- **Partial success**: some checks pass, some fail. Mark result as `partial`, lower confidence.
+- **Verification itself errors**: report the error clearly. Do not suppress exceptions to fake a `pass`.
+
+# Output Contract
+
+Every self-verification execution must end with a machine-checkable contract:
+
+```
+## CONTRACT
+summary: <one-line description of what was verified>
+checks_performed:
+  - <check description> (<pass | fail>)
+result: <pass | fail | partial>
+confidence: <high | medium | low>
+```
+
+See `examples.md` for concrete instances.
+--- end self-verification ---
+
+--- task-execution ---
+# When To Use
+
+- A new `.md` file appears in `TASKS/`.
+- The watcher or user requests processing of a specific task.
+- Re-processing a previously failed task.
+- A task needs lifecycle management (state transitions, output writing).
+
+# Workflow
+
+1. **Discover** — scan `TASKS/*.md` for pending work.
+2. **Read** — parse the task file for instructions before doing anything else.
+3. **Claim** — atomically rename `TASKS/<name>.md` to `TASKS/<name>.inprogress`.
+4. **Execute** — perform the work, delegating to other skills as needed (`file-ops`, `shell-ops`, `git-ops`, `self-verification`).
+5. **Write output** — write results to `OUTPUT/<name>_<YYYYMMDD_HHMMSS>.md` before marking done.
+6. **Complete** — rename `TASKS/<name>.inprogress` to `TASKS/<name>.done`.
+7. **Log** — write summary to `LOGS/task_<name>.log`.
+
+For lifecycle details, crash recovery, and naming conventions, see `reference.md`.
+
+# Tool Usage Rules
+
+- All operations must stay within `~/nova-core`.
+- Always read the task file before executing — never act on filename alone.
+- State transitions must be atomic renames, not copy-then-delete.
+- Write the output file **before** renaming to `.done` — ensures output exists if the process crashes after rename.
+- Never delete a task file. Only rename between lifecycle states.
+- Never skip the `.inprogress` state — it signals to the watcher that the task is claimed.
+- Log every major action to `LOGS/`.
+
+# Verification
+
+After every task execution:
+
+1. Confirm the task file is in the correct terminal state (`.done` or `.failed`).
+2. Confirm the output file exists in `OUTPUT/` with non-zero size.
+3. Confirm the log file exists in `LOGS/` with execution details.
+4. Verify no `.md` file with the same stem remains in `TASKS/` (would indicate a failed rename).
+
+# Failure Handling
+
+- **Task execution fails**: rename to `TASKS/<name>.failed`, log the error to `LOGS/`, and write a failure report to `OUTPUT/`.
+- **Invalid task format**: rename to `.failed` with a log entry explaining the parse error. Do not attempt execution.
+- **Crash during execution**: on restart, the watcher detects orphaned `.inprogress` files. These can be retried or manually triaged.
+- **Output write fails**: keep the task as `.inprogress` (do not mark `.done`). Log the write failure.
+- **Duplicate task stem**: append a counter or timestamp to avoid collision. Never overwrite existing output.
+
+# Output Contract
+
+Every task-execution must end with a machine-checkable contract:
+
+```
+## CONTRACT
+summary: <one-line description of what was done>
+task_id: <task stem, e.g., 0008_deploy_fix>
+status: <done | failed>
+verification: <how correctness was confirmed>
+```
+
+See `examples.md` for concrete instances.
+--- end task-execution ---

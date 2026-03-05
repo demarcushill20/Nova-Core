@@ -4,6 +4,72 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-05 (Session 10) — Production Incident Recovery + Chat Mode
+
+**Session span:** ~15:37–16:35 UTC
+
+### Production incident: Telegram bot silent
+
+**Root cause 1 — Conflict loop:** After a network disruption on Mar 3, the bot entered a `telegram.error.Conflict` loop (overlapping `getUpdates` requests). Fixed by SIGTERM + systemd respawn.
+
+**Root cause 2 — Notifier only processed `tg_*` files:** The notifier filtered on `tg_*.md` output files (legacy naming). New numbered tasks (`0009_Wow_ok`) were never notified. Fixed by broadening the glob from `tg_*.md` to `*.md`.
+
+**Hardening applied:**
+- `drop_pending_updates=True` on `run_polling()` to avoid stale update conflicts on restart
+- Error handler that calls `os._exit(1)` on Conflict errors → clean systemd restart
+- Added structured logging (`_log = logging.getLogger("telegram_bot")`) with MSG/ACTION/PARSE_ERR/SKIP lines to stdout
+
+### Feature: plain text as task
+
+Previously only `/commands` were processed; plain text was silently ignored. Now any plain text message is routed through `_parse_run()` as a task — users can type conversationally.
+
+### Feature: chat mode (intent-based output formatting)
+
+**Problem:** Telegram replies were over-structured — CONTRACT blocks, Files Referenced, Security Notes, tool audit tables, `notifier_pid` telemetry, metadata lines. Normal questions deserve clean answers.
+
+**Solution:** Intent classification + report stripping, applied at the notifier layer (single source of truth).
+
+**Intent classification** (`classify_intent()` in `telegram/parse.py`):
+- Plain text → `chat` (default)
+- `/run`, `/status`, other commands → `task`
+- `/chat <text>` → forced `chat`
+- `/report <text>` → forced `task`
+- Text containing "report", "contract", "verbose", "audit", "debug", "show files", "detailed" → `task`
+
+**Report stripping** (`strip_report_sections()` in `telegram/format.py`):
+- Truncates from first `## CONTRACT` / `## Files Referenced` / `## Security Notes` through EOF
+- Removes metadata lines (`**Task:**`, `**Completed:**`, `**Source:**`)
+- Removes title line (`# Task NNNN: ...`)
+- Removes `notifier_pid=` / `host=` footer
+- Removes CONTRACT field lines (`task_id:`, `status:`, `verification:`)
+- Preserves all answer content including tables and code blocks
+
+**Pipeline:** Bot stores intent in `STATE/intents/{stem}.intent` → notifier reads it → chat intent uses `strip_report_sections()`, task intent uses existing `build_message()`.
+
+### Import shim fix
+
+Initial implementation put `classify_intent()` in `telegram/format.py`, but `from telegram.format import ...` resolved to the python-telegram-bot library (not our local dir) due to the sys.path shim. Moved `classify_intent()` into `telegram/parse.py` which is already registered in `sys.modules` via the import shim in `telegram_bot.py`.
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `telegram/format.py` | **NEW** | `strip_report_sections()` — report section stripper |
+| `telegram/parse.py` | Modified | Added `classify_intent()`, `/chat`, `/report` commands, plain-text-as-task routing |
+| `telegram_bot.py` | Modified | Intent storage (`STATE/intents/`), logging, Conflict handler, `drop_pending_updates`, help text |
+| `telegram_notifier.py` | Modified | Intent-aware formatting, broadened `*.md` glob, chat-mode message builder |
+| `tests/test_chat_format.py` | **NEW** | 39 tests for classify_intent + strip_report_sections |
+
+### Test results
+
+164 total (125 existing + 39 new), all passing.
+
+### Verified end-to-end
+
+Task 0011 "Should we give Nova-Core a heartbeat first or persistent memory?" — classified as `chat`, worker produced 5232-char structured report, notifier stripped to 4737-char clean answer, delivered to Telegram without CONTRACT/metadata/footer.
+
+---
+
 ## 2026-03-03 (Session 9) — Phase 3 Completion + Phase 4 Execution Audit & logs.tail
 
 **Session span:** ~15:50–16:30 UTC

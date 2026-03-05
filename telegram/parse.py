@@ -6,6 +6,8 @@ per PROTOCOL/telegram_commands.md v1.1.
 No file I/O. No side effects. Pure parsing only.
 """
 
+import re as _re
+
 _MAX_MSG_LEN = 4096
 _MAX_TITLE_LEN = 200
 _TAIL_DEFAULT = 50
@@ -13,7 +15,8 @@ _TAIL_MAX = 200
 _VALID_MODES = ("compact", "normal", "verbose")
 
 _KNOWN_COMMANDS = frozenset(
-    ("run", "status", "last", "get", "tail", "cancel", "mode", "help")
+    ("run", "status", "last", "get", "tail", "cancel", "mode", "help",
+     "chat", "report")
 )
 
 
@@ -153,24 +156,84 @@ def _parse_help(chat_id: str, ts: float) -> dict:
     return _ok(_base("show_help", chat_id, ts))
 
 
+def _parse_chat(rest: str, chat_id: str, ts: float) -> dict:
+    """Parse /chat <text> — force chat-mode task."""
+    result = _parse_run(rest, chat_id, ts)
+    if result.get("ok"):
+        result["action"]["intent"] = "chat"
+    return result
+
+
+def _parse_report(rest: str, chat_id: str, ts: float) -> dict:
+    """Parse /report <text> — force full-report task."""
+    result = _parse_run(rest, chat_id, ts)
+    if result.get("ok"):
+        result["action"]["intent"] = "task"
+    return result
+
+
+# --- Intent classification ---------------------------------------------------
+
+_TASK_KEYWORDS = _re.compile(
+    r"\b(report|contract|full output|debug|verbose|audit"
+    r"|show sources|show files|detailed)\b",
+    _re.IGNORECASE,
+)
+
+
+def classify_intent(message: str) -> str:
+    """Classify a raw user message as 'chat' or 'task'.
+
+    Priority:
+      1. /chat  prefix  → chat
+      2. /report prefix → task
+      3. /run prefix     → task
+      4. Other / commands → task
+      5. Task keywords in plain text → task
+      6. Default plain text → chat
+    """
+    text = message.strip()
+    if not text:
+        return "chat"
+
+    low = text.lower()
+
+    if low.startswith("/chat"):
+        return "chat"
+    if low.startswith("/report"):
+        return "task"
+    if text.startswith("/"):
+        return "task"
+    if _TASK_KEYWORDS.search(text):
+        return "task"
+
+    return "chat"
+
+
 # --- Main entry point --------------------------------------------------------
 
 
 def parse_message(text: str, chat_id: str, ts: float) -> dict | None:
     """Parse a raw Telegram message into a canonical action dict.
 
+    Plain text (no leading ``/``) is treated as ``/run <text>`` so users
+    can queue tasks conversationally.
+
     Returns:
         {"ok": True,  "action": <dict>}  — parsed successfully
         {"ok": False, "error": <str>}    — parse error with message
-        None                             — non-command, silently ignore
     """
     text = text.strip()
 
-    if not text.startswith("/"):
-        return None
-
     if len(text) > _MAX_MSG_LEN:
         return _err(f"Error: message too long (max {_MAX_MSG_LEN} chars)")
+
+    # Plain text (no leading /) → treat as /run with auto-classified intent
+    if not text.startswith("/"):
+        result = _parse_run(text, chat_id, ts)
+        if result.get("ok"):
+            result["action"]["intent"] = classify_intent(text)
+        return result
 
     cmd, rest = normalize_command(text)
 
@@ -193,5 +256,9 @@ def parse_message(text: str, chat_id: str, ts: float) -> dict | None:
         return _parse_mode(rest, chat_id, ts)
     if cmd == "help":
         return _parse_help(chat_id, ts)
+    if cmd == "chat":
+        return _parse_chat(rest, chat_id, ts)
+    if cmd == "report":
+        return _parse_report(rest, chat_id, ts)
 
     return None  # unreachable but defensive

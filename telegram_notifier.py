@@ -18,6 +18,7 @@ ROOT = Path("/home/nova/nova-core")
 OUTPUT = ROOT / "OUTPUT"
 LOGS = ROOT / "LOGS"
 STATE = ROOT / "STATE"
+INTENTS_DIR = STATE / "intents"
 STATE.mkdir(parents=True, exist_ok=True)
 
 SENT_LOG = STATE / "tg_sent_outputs.txt"  # legacy; kept for backward compat reads
@@ -374,6 +375,33 @@ def worker_log_for_output(output_path: Path, task_id: str | None = None) -> Path
 
     return None
 
+def _load_intent(output_path: Path) -> str:
+    """Load the intent (chat/task) for an output file. Default: task."""
+    # Output filenames: {stem}__YYYYMMDD-HHMMSS.md
+    # Intent files: STATE/intents/{stem}.intent
+    name = output_path.stem  # e.g. "0010_foo__20260305-160249"
+    # Strip the timestamp suffix to get the task stem
+    m = re.match(r"^(.+?)__\d{8}-\d{6}$", name)
+    stem = m.group(1) if m else name
+    try:
+        return (INTENTS_DIR / f"{stem}.intent").read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, OSError):
+        return "task"
+
+
+def _build_chat_message(output_path: Path) -> str:
+    """Build a clean, stripped chat-mode message — answer content only."""
+    # Import here to avoid circular imports at module level
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location(
+        "telegram.format", str(ROOT / "telegram" / "format.py"))
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+
+    txt = output_path.read_text(encoding="utf-8", errors="replace")
+    return _mod.strip_report_sections(txt)
+
+
 def build_message(output_path: Path) -> str:
     txt = output_path.read_text(encoding="utf-8", errors="replace")
     info = parse_task_report(txt, output_name=output_path.name)
@@ -443,8 +471,8 @@ def build_message(output_path: Path) -> str:
     return verbose_full
 
 def maybe_notify(path: Path) -> None:
-    # Only report Telegram-origin outputs
-    if not (path.suffix.lower() == ".md" and path.name.startswith("tg_")):
+    # Notify for all .md output files (numbered tasks + legacy tg_ tasks)
+    if path.suffix.lower() != ".md":
         return
 
     # Fast pre-check before expensive work
@@ -461,15 +489,19 @@ def maybe_notify(path: Path) -> None:
     time.sleep(0.6)
 
     try:
-        msg = build_message(path)
-        # Append source identity footer for duplicate debugging
-        footer = (
-            f"\n---\nnotifier_pid={os.getpid()}"
-            f" host={platform.node()}"
-        )
-        msg += footer
+        intent = _load_intent(path)
+        if intent == "chat":
+            msg = _build_chat_message(path)
+        else:
+            msg = build_message(path)
+            # Append source identity footer only in task/report mode
+            footer = (
+                f"\n---\nnotifier_pid={os.getpid()}"
+                f" host={platform.node()}"
+            )
+            msg += footer
         send_message_chunked(msg)
-        log(f"Sent notification for {path.name} (mode={get_mode()}, pid={os.getpid()})")
+        log(f"Sent notification for {path.name} (intent={intent}, mode={get_mode()}, pid={os.getpid()})")
     except Exception as e:
         # Send failed — remove marker so next attempt can retry
         unclaim_send(path.name)
@@ -478,7 +510,7 @@ def maybe_notify(path: Path) -> None:
 
 def catch_up_latest() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    candidates = sorted(OUTPUT.glob("tg_*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates = sorted(OUTPUT.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
     for p in candidates[:8]:
         if not already_sent(p.name):
             log(f"Catch-up: sending latest unsent output {p.name}")
@@ -536,7 +568,7 @@ def main() -> None:
     obs = Observer()
     obs.schedule(Handler(), str(OUTPUT), recursive=False)
     obs.start()
-    log("Watching OUTPUT/ for tg_*.md files")
+    log("Watching OUTPUT/ for *.md files")
 
     try:
         while True:

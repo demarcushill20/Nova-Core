@@ -5,6 +5,7 @@ import fcntl
 import functools
 import importlib.util
 import json
+import logging
 import os
 import re
 import signal
@@ -48,24 +49,34 @@ STATE = ROOT / "STATE"
 
 CANCEL_DIR = STATE / "cancel"
 RUNNING_DIR = STATE / "running"
+INTENTS_DIR = STATE / "intents"
 CHAT_MODES_FILE = STATE / "chat_modes.json"
 
-for _d in (TASKS, OUTPUT, LOGS, STATE, CANCEL_DIR, RUNNING_DIR):
+for _d in (TASKS, OUTPUT, LOGS, STATE, CANCEL_DIR, RUNNING_DIR, INTENTS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
+# --- Logging setup ---
+_log = logging.getLogger("telegram_bot")
+_log.setLevel(logging.INFO)
+_log_handler = logging.StreamHandler(sys.stdout)
+_log_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(message)s"))
+_log.addHandler(_log_handler)
 
 # --- Protocol constants (from PROTOCOL/telegram_commands.md v1.1) ---
 
 _HELP_TEXT = (
     "NovaCore Commands:\n"
-    "/run <title>  \u2014 queue a new task (body on next lines)\n"
-    "/status       \u2014 show recent tasks and their status\n"
-    "/last         \u2014 show most recent task details\n"
-    "/get <file>   \u2014 retrieve output file (/get <file> 2 for page 2)\n"
-    "/tail <id>    \u2014 tail worker log (/tail <id> 100 for 100 lines)\n"
-    "/cancel <id>  \u2014 soft-cancel a task (/cancel last for newest)\n"
-    "/mode <level> \u2014 set verbosity: compact|normal|verbose\n"
-    "/help         \u2014 this message"
+    "Just type anything \u2014 casual questions get a clean reply.\n\n"
+    "/run <title>   \u2014 queue a task (full structured output)\n"
+    "/chat <text>   \u2014 force clean chat reply (no report junk)\n"
+    "/report <text> \u2014 force full structured report\n"
+    "/status        \u2014 show recent tasks and their status\n"
+    "/last          \u2014 show most recent task details\n"
+    "/get <file>    \u2014 retrieve output file (/get <file> 2 for page 2)\n"
+    "/tail <id>     \u2014 tail worker log (/tail <id> 100 for 100 lines)\n"
+    "/cancel <id>   \u2014 soft-cancel a task (/cancel last for newest)\n"
+    "/mode <level>  \u2014 set notifier verbosity: compact|normal|verbose\n"
+    "/help          \u2014 this message"
 )
 
 _STATUS_LIMITS = {"compact": 5, "normal": 10, "verbose": 20}
@@ -296,7 +307,22 @@ def _next_task_number() -> str:
     return f"{highest + 1:04d}"
 
 
-def handle_run_task(chat_id: str, title: str, body: str = "") -> str:
+def _store_intent(stem: str, intent: str) -> None:
+    """Persist task intent (chat/task) for the notifier to read later."""
+    INTENTS_DIR.mkdir(parents=True, exist_ok=True)
+    (INTENTS_DIR / f"{stem}.intent").write_text(intent, encoding="utf-8")
+
+
+def load_intent(stem: str) -> str:
+    """Read stored intent for a task stem. Default: 'task'."""
+    try:
+        return (INTENTS_DIR / f"{stem}.intent").read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, OSError):
+        return "task"
+
+
+def handle_run_task(chat_id: str, title: str, body: str = "",
+                    intent: str = "task") -> str:
     """Create a task file from a run_task action. Returns the response string."""
     sanitized = _sanitize_title(title)
     number = _next_task_number()
@@ -305,9 +331,11 @@ def handle_run_task(chat_id: str, title: str, body: str = "") -> str:
 
     path.write_text(body, encoding="utf-8")
 
-    ts_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    stem = f"{number}_{sanitized}"
+    _store_intent(stem, intent)
+    persist_last_task_id(stem)
 
-    persist_last_task_id(f"{number}_{sanitized}")
+    ts_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     return f"Queued: {filename} ({ts_str} UTC)"
 
 
@@ -572,19 +600,23 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     chat_id = str(update.effective_chat.id)
     ts = time.time()
 
+    _log.info("MSG chat=%s len=%d text=%r", chat_id, len(text), text[:80])
+
     result = parse_message(text, chat_id, ts)
 
-    # Non-command: silently ignore
     if result is None:
+        _log.info("SKIP chat=%s (parse returned None)", chat_id)
         return
 
     # Parse error: reply with the error string
     if not result["ok"]:
+        _log.info("PARSE_ERR chat=%s error=%s", chat_id, result["error"])
         await update.message.reply_text(result["error"])
         return
 
     action = result["action"]
     action_type = action["action"]
+    _log.info("ACTION chat=%s type=%s", chat_id, action_type)
 
     # Dispatch all actions — extract explicit args from the parsed action dict
     if action_type == "show_help":
@@ -592,7 +624,8 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     elif action_type == "get_status":
         reply = handle_status(chat_id)
     elif action_type == "run_task":
-        reply = handle_run_task(chat_id, action["title"], action.get("body", ""))
+        reply = handle_run_task(chat_id, action["title"], action.get("body", ""),
+                                intent=action.get("intent", "task"))
     elif action_type == "get_last":
         reply = handle_get_last(chat_id)
     elif action_type == "get_output":
@@ -656,7 +689,15 @@ def main() -> None:
     # parse_message handles routing; non-commands return None (ignored).
     app.add_handler(MessageHandler(filters.TEXT, on_message))
 
-    app.run_polling(close_loop=False)
+    async def _on_error(update, context):
+        from telegram.error import Conflict
+        _log.error("Unhandled: %s", context.error, exc_info=context.error)
+        if isinstance(context.error, Conflict):
+            _log.error("Conflict detected — exiting for systemd restart")
+            os._exit(1)
+    app.add_error_handler(_on_error)
+
+    app.run_polling(drop_pending_updates=True, close_loop=False)
 
 
 if __name__ == "__main__":
