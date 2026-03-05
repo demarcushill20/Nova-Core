@@ -1,0 +1,17 @@
+[Unit]
+Description=NovaCore Telegram Bridge (Telegram -> TASKS)
+After=network.target
+
+[Service]
+Type=simple
+User=nova
+WorkingDirectory=/home/nova/nova-core
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/etc/novacore/telegram.env
+ExecStart=/home/nova/nova-core/.venv/bin/python /home/nova/nova-core/telegram_bot.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

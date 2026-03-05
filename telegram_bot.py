@@ -697,7 +697,7 @@ def main() -> None:
             os._exit(1)
     app.add_error_handler(_on_error)
 
-    app.run_polling(drop_pending_updates=True, close_loop=False)
+    app.run_polling(close_loop=False)
 
 
 if __name__ == "__main__":

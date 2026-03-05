@@ -1,8 +1,0 @@
-# Shell Skill Smoke Test
-
-Please run these commands safely and report results:
-
-$ pwd
-$ ls -la
-
-Then include the active skills from the worker log header.

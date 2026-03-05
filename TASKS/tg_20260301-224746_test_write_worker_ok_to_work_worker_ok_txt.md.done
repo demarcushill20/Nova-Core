@@ -1,7 +1,0 @@
-# Telegram Task (20260301-224746 UTC)
-
-Source: Telegram
-
-## Instruction
-
-TEST: write "worker ok" to WORK/worker_ok.txt

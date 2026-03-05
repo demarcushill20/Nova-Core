@@ -4,18 +4,34 @@ A persistent autonomous AI runtime on a VPS. Claude operates as an executive age
 
 ## Directory Structure
 
+The repository separates **source code** (tracked in git) from **runtime state** (gitignored, created at execution time).
+
+### Source (version-controlled)
+
+```
+telegram_bot.py       Telegram → TASKS bridge
+telegram_notifier.py  OUTPUT → Telegram notifier
+watcher.py            TASKS → Claude worker dispatcher
+heartbeat.py          Periodic health monitoring
+telegram/             Command parser (parse.py) and output formatter (format.py)
+tools/                Tool runner, file ops, registry
+systemd/              Systemd service and timer units
+PROTOCOL/             Specification documents
+SKILLS/               Reusable workflows and capabilities
+AGENTS/               Agent configurations
+MEMORY/               Persistent notes and learned context
+.claude/skills/       Anthropic-style SKILL.md definitions
+```
+
+### Runtime (gitignored, created at execution time)
+
 ```
 TASKS/          Incoming work items (.md → .inprogress → .done/.failed/.skip)
 OUTPUT/         Completed results with timestamps
+WORK/           Scratch space for worker artifacts
 LOGS/           Execution logs (worker, task, shell, git)
-STATE/          Runtime state (chat modes, tool audit, lock files, registries)
-MEMORY/         Persistent notes and learned context
-SKILLS/         Reusable workflows and capabilities
-AGENTS/         Agent configurations
-PROTOCOL/       Specification documents
-tools/          Python tool runner, file ops, registry
-telegram/       Telegram command parser (parse.py)
-.claude/skills/ Anthropic-style SKILL.md definitions
+STATE/          Runtime state (intents, chat modes, lock files, metrics, PID files)
+HEARTBEAT.md    Auto-generated health status (written by heartbeat.py)
 ```
 
 ---
@@ -27,8 +43,9 @@ NovaCore exposes a Telegram interface with three cooperating systemd services:
 | Service | Script | Role |
 |---|---|---|
 | `novacore-telegram.service` | `telegram_bot.py` | Telegram → TASKS bridge (polls `getUpdates`, parses commands, creates task files) |
-| `novacore-telegram-notifier.service` | `telegram_notifier.py` | OUTPUT → Telegram (watches `OUTPUT/` for `tg_*.md`, sends notifications) |
+| `novacore-telegram-notifier.service` | `telegram_notifier.py` | OUTPUT → Telegram (watches `OUTPUT/` for `*.md`, sends notifications) |
 | `novacore-watcher.service` | `watcher.py` | TASKS → Claude (picks up `.md` tasks, dispatches Claude workers) |
+| `novacore-heartbeat.timer` | `heartbeat.py` | Periodic health monitoring (every 30min, writes HEARTBEAT.md, alerts on failure) |
 
 ### Telegram Command Protocol (v1.1)
 
@@ -44,16 +61,23 @@ Supported commands:
 | `/get <file> [page]` | Retrieve output file | 3000 chars/page, max 20 pages; prefix matching supported |
 | `/tail <id> [lines]` | Tail worker log | Default 50 lines, max 200; 3000-char response cap |
 | `/cancel <id\|last>` | Soft-cancel a task | Queued: `.md` → `.skip`; in-progress: marker file `TASKS/.<stem>.cancel_requested` |
+| `/chat <text>` | Force chat-mode reply | Output stripped of report sections (CONTRACT, metadata, etc.) |
+| `/report <text>` | Force structured report | Full structured output regardless of intent classification |
 | `/mode [level]` | Get/set verbosity | `compact`, `normal`, `verbose`; persisted in `STATE/chat_modes.json` |
 | `/help` | Show command list | |
 
 Key behaviors:
 
-- Non-command messages (no `/` prefix) are silently ignored — no response sent.
+- Non-command messages (plain text) are classified by intent and queued as tasks:
+  - **Chat intent** (default): plain conversational text → worker runs, notifier strips report sections (CONTRACT, metadata, telemetry) → clean answer delivered
+  - **Task intent**: messages containing keywords like "report", "debug", "verbose", "audit", "detailed" → full structured output preserved
+  - Override with `/chat <text>` (force chat) or `/report <text>` (force structured)
+- Intent is persisted in `STATE/intents/{stem}.intent` for the notifier to read
 - Unknown `/command` returns an error with a `/help` hint.
 - Task ID normalization: both `#0005` and `0005` accepted; `#` stripped during parsing.
 - All timestamps in responses are UTC-labelled.
 - Parser lives in `telegram/parse.py` — pure functions, no I/O, no side effects.
+- Report stripping lives in `telegram/format.py` — `strip_report_sections()` removes CONTRACT blocks, Files Referenced, Security Notes, metadata lines, tool audit tables, and notifier telemetry.
 
 ### Import Shim
 
@@ -77,7 +101,7 @@ The local `telegram/` directory shadows the `python-telegram-bot` library's `tel
 
 3. **TimeoutStopSec=20** — caps the graceful shutdown window at 20 seconds before systemd escalates to SIGKILL.
 
-**Warning:** Do NOT enable `drop_pending_updates=True` in `run_polling()`. This parameter tells the Telegram API to discard all queued updates on every startup. Any `/run` command sent while the service is restarting would be permanently lost with no feedback to the user. Telegram retains unacknowledged updates for 24 hours — the bot will pick them up on restart without this flag.
+4. **No `drop_pending_updates`** — `run_polling()` does NOT use `drop_pending_updates=True`. Telegram retains unacknowledged updates for 24 hours; the bot picks them up on restart. This ensures no user commands are lost during restarts.
 
 ### Verification Commands
 
@@ -93,9 +117,6 @@ journalctl -u novacore-telegram.service -n 50 --no-pager
 # Confirm exactly one poller process
 pgrep -af 'python.*telegram_bot.py'
 
-# Confirm drop_pending_updates is NOT in the code (expect: 0)
-grep -c 'drop_pending_updates' telegram_bot.py
-
 # Confirm lock file exists and PID matches running process
 cat STATE/telegram_bot.lock
 pgrep -f 'python.*telegram_bot.py'
@@ -105,7 +126,6 @@ Expected results:
 - Process count: exactly 1
 - No `Conflict` errors in recent journal
 - Lock file PID matches `pgrep` output
-- `drop_pending_updates` grep count: 0
 
 ### Parser Sanity Test
 
@@ -234,11 +254,14 @@ systemctl status novacore-watcher.service --no-pager
 ### Task Lifecycle
 
 ```
-User sends /run via Telegram
-  → telegram_bot.py creates TASKS/NNNN_title.md
+User sends message or /run via Telegram
+  → telegram_bot.py classifies intent (chat/task), creates TASKS/NNNN_title.md
+    → stores intent in STATE/intents/{stem}.intent
     → watcher.py picks it up, renames to .inprogress, spawns Claude worker
       → Worker writes OUTPUT/..._YYYYMMDD-HHMMSS.md, renames task to .done
-        → telegram_notifier.py detects tg_*.md in OUTPUT/, sends notification
+        → telegram_notifier.py detects *.md in OUTPUT/, reads intent
+          → chat intent: strips report sections → clean answer
+          → task intent: full structured output
 ```
 
 Cancel flow: `/cancel` on a queued task renames `.md` → `.skip`. On an in-progress task, creates `TASKS/.<stem>.cancel_requested` marker (worker checks for it; no process killing).

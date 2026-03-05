@@ -4,11 +4,19 @@ __pycache__/
 *.so
 .venv/
 
-# Runtime state (secrets, locks, audit logs)
-STATE/telegram_bot.lock
-STATE/tool_audit.jsonl
-STATE/notified/
-STATE/metrics.json
+# Runtime directories — all contents are transient; keep .gitkeep placeholders
+TASKS/*
+!TASKS/.gitkeep
+OUTPUT/*
+!OUTPUT/.gitkeep
+WORK/*
+!WORK/.gitkeep
+STATE/*
+!STATE/.gitkeep
+!STATE/tools_registry.json
+
+# Runtime artifacts
+HEARTBEAT.md
 
 # Logs
 LOGS/

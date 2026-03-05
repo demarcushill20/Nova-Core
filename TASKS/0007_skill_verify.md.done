@@ -1,6 +1,0 @@
-# Skill Verify
-
-## Instruction
-
-Write "skills_ok" to WORK/skills_verified.txt.
-This tests that the skill activation engine injects skills into the worker prompt.

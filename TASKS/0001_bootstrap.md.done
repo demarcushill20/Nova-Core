@@ -1,7 +1,0 @@
-# Task 0001 — Bootstrap NovaCore runtime
-
-Goal:
-- Confirm task runner reads TASKS and writes OUTPUT + LOGS.
-
-Deliverable:
-- An output file in OUTPUT acknowledging this task.
