@@ -4,6 +4,44 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-05 (Session 13) — Security Audit & Guardrails
+
+**Session span:** ~18:10–18:45 UTC
+
+### What was done
+
+Full security audit of working tree and all 36 commits in git history, followed by guardrail implementation to prevent recurrence.
+
+#### Secret scan results
+
+**No real secrets found.** Scanned for Telegram bot tokens, GitHub PATs, AWS keys, Slack tokens, OpenAI/Anthropic keys, and generic TOKEN= assignments across both the working tree and full git history. Only matches were intentional test fixtures in `tools/dev_safety_smoke.py` (redaction system tests). The Telegram bot token lives in `/etc/novacore/telegram.env` (never committed).
+
+#### Runtime artifact inventory
+
+115 files found in git history across TASKS/ (35), OUTPUT/ (33), WORK/ (33), STATE/ (12), HEARTBEAT.md (2). No secrets in any of them — just task titles, worker outputs, and runtime state. These were already untracked in Session 12; history rewrite plan prepared but not executed (low urgency since no credentials exposed).
+
+#### Guardrails implemented
+
+- `scripts/check-guardrails.sh` — blocks runtime artifacts and secret patterns from being committed; never prints secret values, only file paths + line numbers + pattern types
+- `scripts/install-hooks.sh` — installs local pre-commit hook
+- `.github/workflows/guardrails.yml` — CI on push/PR to main (guardrails + test suite)
+- `docs/security.md` — token rotation checklist, history rewrite procedure with rollback plan
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `scripts/check-guardrails.sh` | **NEW** | Runtime artifact + secret pattern blocker |
+| `scripts/install-hooks.sh` | **NEW** | Pre-commit hook installer |
+| `.github/workflows/guardrails.yml` | **NEW** | CI guardrails + tests |
+| `docs/security.md` | **NEW** | Security docs, rotation checklist, rewrite procedure |
+
+### Test results
+
+194 total, all passing. Guardrails verified: catches force-added runtime artifacts and simulated secret patterns, blocks commit with exit code 1.
+
+---
+
 ## 2026-03-05 (Session 12) — Repository Hygiene & Telegram Reliability
 
 **Session span:** ~17:45–18:10 UTC
