@@ -4,6 +4,55 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-05 (Session 12) — Repository Hygiene & Telegram Reliability
+
+**Session span:** ~17:45–18:10 UTC
+
+### What was fixed
+
+Four targeted fixes applied — no new features, minimal diffs, all existing behavior preserved.
+
+#### 1. Runtime artifacts untracked from git
+
+`TASKS/`, `OUTPUT/`, `WORK/`, `STATE/*`, and `HEARTBEAT.md` were all committed to git, polluting history with transient runtime state. Updated `.gitignore` to exclude them while preserving `.gitkeep` placeholders and `STATE/tools_registry.json` (config, not runtime). Removed 100+ runtime files from the git index; all remain on disk.
+
+#### 2. Telegram message reliability
+
+Removed `drop_pending_updates=True` from `telegram_bot.py`. This flag discarded all queued Telegram updates on every startup — any `/run` command sent during a restart was permanently lost. The existing `fcntl` process lock already guarantees single-instance. Updated systemd unit to `RestartSec=10` (was 3) and added `TimeoutStopSec=20` to let Telegram's server-side long-poll expire before the new process starts.
+
+#### 3. README accuracy
+
+Corrected several stale docs:
+- Notifier glob: `tg_*.md` → `*.md`
+- Non-command messages: "silently ignored" → documents chat intent classification
+- Added `/chat` and `/report` commands to command table
+- Updated task lifecycle diagram to show intent flow
+- Fixed verification section (removed contradictory `drop_pending_updates` check)
+- Added heartbeat timer to services table
+
+#### 4. Repository structure documented
+
+README now separates "Source (version-controlled)" from "Runtime (gitignored)" with clear directory tables.
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `.gitignore` | Modified | Exclude TASKS/, OUTPUT/, WORK/, STATE/*, HEARTBEAT.md; keep .gitkeep |
+| `telegram_bot.py` | Modified | Removed `drop_pending_updates=True` (1 line) |
+| `systemd/novacore-telegram.service` | **NEW** | Repo copy with RestartSec=10, TimeoutStopSec=20 |
+| `README.md` | Modified | Fixed inaccuracies, documented repo structure separation |
+| `TASKS/.gitkeep` | **NEW** | Directory placeholder |
+| `OUTPUT/.gitkeep` | **NEW** | Directory placeholder |
+| `WORK/.gitkeep` | **NEW** | Directory placeholder |
+| `STATE/.gitkeep` | **NEW** | Directory placeholder |
+
+### Test results
+
+194 total, all passing. No behavioral changes.
+
+---
+
 ## 2026-03-05 (Session 11) — Heartbeat Health Monitoring System
 
 **Session span:** ~16:35–17:45 UTC
