@@ -510,9 +510,9 @@ def _run_repo_search(args: dict, sandbox: Path) -> dict:
 
 def _run_contracts_validate(args: dict) -> dict:
     """Execute contracts.validate tool."""
-    from tools.contracts import validate_contract
+    from tools.adapters.contracts_validate import contracts_validate
     text = args.get("text", "")
     if not isinstance(text, str):
         raise ValueError("contracts.validate requires 'text' (str)")
-    result = validate_contract(text)
+    result = contracts_validate(text)
     return {"ok": True, "exit_code": 0, "stdout": "", "stderr": "", "result": result}

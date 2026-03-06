@@ -26,8 +26,8 @@ tool_rules:
 
 output_contract:
   - summary
-  - checks_performed
-  - result
+  - files_changed
+  - verification
   - confidence
 ```
 
@@ -52,10 +52,10 @@ Do **not** use for:
 ### 1. Receive step result
 
 Accept the StepResult from the orchestrator, including:
-- `success` flag
+- `status` field (success, failed, error, skipped)
 - `contract_valid` flag
-- `output` dict (the skill's produced output)
-- `error` string (if any)
+- `validation_errors` list
+- `retry_count` integer
 
 ### 2. Validate output contract
 
@@ -152,8 +152,7 @@ Every system_supervisor evaluation must end with:
 ```
 ## CONTRACT
 summary: <one-line description of what was evaluated>
-checks_performed:
-  - <check description> (<pass | fail>)
-result: <pass | fail | partial>
+files_changed: none
+verification: <checks performed and their pass/fail results>
 confidence: <high | medium | low>
 ```

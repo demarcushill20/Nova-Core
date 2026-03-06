@@ -31,6 +31,15 @@ def history_store(tmp_path: Path) -> SkillHistoryStore:
 
 @pytest.fixture
 def orch(tmp_state: Path, history_store: SkillHistoryStore) -> Orchestrator:
+    return Orchestrator(
+        history_store=history_store,
+        step_executor=_executor_always_valid,
+    )
+
+
+@pytest.fixture
+def no_executor_orch(tmp_state: Path, history_store: SkillHistoryStore) -> Orchestrator:
+    """Orchestrator without step executor — tests honest skipped behavior."""
     return Orchestrator(history_store=history_store)
 
 
@@ -58,7 +67,7 @@ def test_sequential_execution(orch: Orchestrator):
     assert len(result["steps"]) == 2
     assert result["steps"][0]["step_id"] == "s1"
     assert result["steps"][1]["step_id"] == "s2"
-    # Default stub: both succeed with valid contract
+    # Executor produces valid contract → both succeed
     assert result["steps"][0]["status"] == "success"
     assert result["steps"][1]["status"] == "success"
     assert result["steps"][0]["contract_valid"] is True
@@ -100,6 +109,7 @@ def test_plan_state_snapshot_has_required_fields(orch: Orchestrator, tmp_state: 
     assert "plan" in data
     assert "step_results" in data
     assert "decisions" in data
+    assert "step_durations" in data
     assert "saved_at" in data
     assert isinstance(data["saved_at"], float)
 
@@ -245,7 +255,7 @@ def test_history_records_success(orch: Orchestrator, history_store: SkillHistory
     assert history_store.get_success_rate("file_ops") == 1.0
 
 
-# -- run_step stub behavior ---------------------------------------------------
+# -- run_step with executor ---------------------------------------------------
 
 def test_run_step_returns_step_result(orch: Orchestrator):
     step = PlanStep(step_id="s1", skill_name="file_ops", goal="Create file")
@@ -507,3 +517,217 @@ def test_result_includes_plan_and_task_id(orch: Orchestrator):
     result = orch.run_plan(plan)
     assert result["plan_id"] == "plan_t555"
     assert result["task_id"] == "t555"
+
+
+# =============================================================================
+# Phase 5.2B hardening tests
+# =============================================================================
+
+# -- no executor (honest skipped behavior) ------------------------------------
+
+
+def test_no_executor_returns_skipped(no_executor_orch: Orchestrator):
+    """run_step without executor returns honest 'skipped' status."""
+    step = PlanStep(step_id="s1", skill_name="file_ops", goal="Create file")
+    result = no_executor_orch.run_step(step)
+    assert isinstance(result, StepResult)
+    assert result.step_id == "s1"
+    assert result.status == "skipped"
+    assert result.contract_valid is False
+    assert "No step executor configured" in result.validation_errors
+
+
+def test_no_executor_does_not_falsely_succeed(no_executor_orch: Orchestrator):
+    """No-executor path must never report success."""
+    step = PlanStep(step_id="s1", skill_name="file_ops", goal="Create file")
+    result = no_executor_orch.run_step(step)
+    assert result.status != "success"
+    assert result.contract_valid is not True
+
+
+def test_no_executor_plan_escalates(no_executor_orch: Orchestrator):
+    """Plan with no executor escalates immediately, plan fails."""
+    plan = _plan(steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")])
+    result = no_executor_orch.run_plan(plan)
+    assert result["status"] == "failed"
+    assert result["decisions"][0]["action"] == "escalate"
+    assert result["decisions"][0]["retry_allowed"] is False
+    assert result["steps"][0]["status"] == "skipped"
+
+
+def test_no_executor_step_status_set(no_executor_orch: Orchestrator):
+    """Step status should be set to 'skipped' when no executor."""
+    step = PlanStep(step_id="s1", skill_name="file_ops", goal="Create")
+    assert step.status == "queued"
+    no_executor_orch.run_step(step)
+    assert step.status == "skipped"
+
+
+def test_no_executor_does_not_retry(no_executor_orch: Orchestrator):
+    """No-executor path must not retry — it escalates immediately."""
+    plan = _plan(steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")])
+    result = no_executor_orch.run_plan(plan)
+    assert result["steps"][0]["retry_count"] == 0
+
+
+# -- real duration_ms ---------------------------------------------------------
+
+
+def test_real_duration_ms_recorded(orch: Orchestrator, history_store: SkillHistoryStore):
+    """History store records non-zero or zero duration from real timing."""
+    plan = _plan(steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")])
+    orch.run_plan(plan)
+    stats = history_store.get_stats("code_improve")
+    assert isinstance(stats["avg_duration_ms"], int)
+    # Real measurement — not a placeholder like -1 or 999999
+    assert stats["avg_duration_ms"] >= 0
+
+
+def test_real_duration_ms_with_retries(history_store: SkillHistoryStore, tmp_state: Path):
+    """Duration includes retry time — multi-attempt steps take longer."""
+    import time as _time
+
+    call_count = 0
+
+    def slow_then_valid(step: PlanStep) -> tuple[str, bool, str]:
+        nonlocal call_count
+        call_count += 1
+        _time.sleep(0.01)  # 10ms per attempt
+        if call_count <= 1:
+            return INVALID_CONTRACT, True, ""
+        return VALID_CONTRACT, True, ""
+
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=slow_then_valid,
+    )
+    plan = _plan(steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")])
+    result = orch.run_plan(plan)
+    assert result["status"] == "done"
+    # Duration covers both attempts (~20ms+)
+    stats = history_store.get_stats("code_improve")
+    assert stats["avg_duration_ms"] >= 15
+
+
+def test_step_durations_in_plan_result(orch: Orchestrator):
+    """run_plan result includes step_durations dict."""
+    plan = _plan()
+    result = orch.run_plan(plan)
+    assert "step_durations" in result
+    assert "s1" in result["step_durations"]
+    assert "s2" in result["step_durations"]
+    assert isinstance(result["step_durations"]["s1"], int)
+
+
+def test_step_durations_in_persisted_state(orch: Orchestrator, tmp_state: Path):
+    """Persisted plan state includes step_durations."""
+    plan = _plan(task_id="t_dur")
+    orch.run_plan(plan)
+    plan_file = tmp_state / "plans" / "plan_t_dur.json"
+    data = json.loads(plan_file.read_text())
+    assert "step_durations" in data
+    assert isinstance(data["step_durations"], dict)
+    assert "s1" in data["step_durations"]
+
+
+# -- plan state completeness --------------------------------------------------
+
+
+def test_plan_state_includes_full_history(orch: Orchestrator, tmp_state: Path):
+    """Persisted plan state has complete reconstruction data."""
+    plan = _plan(task_id="t_full")
+    orch.run_plan(plan)
+    data = json.loads((tmp_state / "plans" / "plan_t_full.json").read_text())
+
+    # Plan metadata
+    assert data["plan"]["plan_id"] == "plan_t_full"
+    assert data["plan"]["task_id"] == "t_full"
+    assert data["plan"]["strategy"] == "multi_skill"
+    assert data["plan"]["status"] == "done"
+
+    # Ordered steps
+    assert len(data["plan"]["steps"]) == 2
+    assert data["plan"]["steps"][0]["step_id"] == "s1"
+    assert data["plan"]["steps"][1]["step_id"] == "s2"
+
+    # Step results
+    assert len(data["step_results"]) == 2
+    for sr in data["step_results"]:
+        assert "step_id" in sr
+        assert "status" in sr
+        assert "contract_valid" in sr
+        assert "validation_errors" in sr
+        assert "retry_count" in sr
+
+    # Decisions
+    assert len(data["decisions"]) == 2
+    for d in data["decisions"]:
+        assert "step_id" in d
+        assert "action" in d
+        assert "reason" in d
+        assert "retry_allowed" in d
+        assert "followup_task" in d
+
+    # Durations
+    assert len(data["step_durations"]) == 2
+
+    # Timestamp
+    assert isinstance(data["saved_at"], float)
+
+
+def test_plan_state_with_retry_has_decision_history(
+    history_store: SkillHistoryStore, tmp_state: Path
+):
+    """Plan state after retries shows final decision per step."""
+    executor = _executor_valid_after_n(1)
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=executor,
+    )
+    plan = _plan(
+        task_id="t_retry_hist",
+        steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")],
+    )
+    orch.run_plan(plan)
+    data = json.loads((tmp_state / "plans" / "plan_t_retry_hist.json").read_text())
+
+    # Should show the final successful result (after retry)
+    assert data["step_results"][0]["retry_count"] == 1
+    assert data["step_results"][0]["contract_valid"] is True
+    assert data["decisions"][0]["action"] == "continue"
+    # Duration recorded
+    assert data["step_durations"]["s1"] >= 0
+
+
+# -- contract validation errors observable ------------------------------------
+
+
+def test_invalid_contract_populates_validation_errors(
+    history_store: SkillHistoryStore, tmp_state: Path
+):
+    """Invalid contract produces specific validation_errors in StepResult."""
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=_executor_always_invalid,
+    )
+    plan = _plan(steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")])
+    result = orch.run_plan(plan)
+    errors = result["steps"][0]["validation_errors"]
+    assert len(errors) > 0
+    # Should mention missing contract or fields
+    assert any("CONTRACT" in e or "Missing" in e or "contract" in e for e in errors)
+
+
+def test_supervisor_consumes_contract_invalid_correctly(
+    history_store: SkillHistoryStore, tmp_state: Path
+):
+    """Supervisor produces escalate decision for persistent contract invalidity."""
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=_executor_always_invalid,
+    )
+    plan = _plan(steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")])
+    result = orch.run_plan(plan)
+    assert result["decisions"][0]["action"] == "escalate"
+    assert result["decisions"][0]["retry_allowed"] is False
+    assert result["decisions"][0]["followup_task"] is not None

@@ -57,9 +57,14 @@ class Orchestrator:
         plan.status = "running"
         step_results: list[StepResult] = []
         decisions: list[dict[str, Any]] = []
+        step_durations: dict[str, int] = {}
 
         for step in plan.steps:
+            t0 = time.monotonic()
             result, decision = self._execute_with_supervision(step)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            step_durations[step.step_id] = duration_ms
+
             step_results.append(result)
 
             # Build decision record with optional followup
@@ -75,19 +80,19 @@ class Orchestrator:
                 "followup_task": followup,
             })
 
-            # Record history
+            # Record history with real measured duration
             self.history_store.record_run(
                 skill_name=step.skill_name,
                 success=(
                     result.status == "success"
                     and result.contract_valid is True
                 ),
-                duration_ms=0,  # v1: no timing
+                duration_ms=duration_ms,
                 retries=result.retry_count,
             )
 
             # Save incremental state
-            self.save_plan_state(plan, step_results, decisions)
+            self.save_plan_state(plan, step_results, decisions, step_durations)
 
             # Handle supervisor decision
             if decision.action in ("escalate", "fail", "abort"):
@@ -102,7 +107,7 @@ class Orchestrator:
             plan.status = "done"
 
         # Final save
-        self.save_plan_state(plan, step_results, decisions)
+        self.save_plan_state(plan, step_results, decisions, step_durations)
 
         return {
             "plan_id": plan.plan_id,
@@ -110,6 +115,7 @@ class Orchestrator:
             "status": plan.status,
             "steps": [_result_to_dict(r) for r in step_results],
             "decisions": decisions,
+            "step_durations": step_durations,
         }
 
     def run_step(self, step: PlanStep) -> StepResult:
@@ -124,12 +130,13 @@ class Orchestrator:
         if self._step_executor is not None:
             return self._run_with_executor(step)
 
-        # Default stub (v1): always succeeds with a valid contract.
-        step.status = "done"
+        # No executor: honest result — step was not executed.
+        step.status = "skipped"
         return StepResult(
             step_id=step.step_id,
-            status="success",
-            contract_valid=True,
+            status="skipped",
+            contract_valid=False,
+            validation_errors=["No step executor configured"],
         )
 
     def save_plan_state(
@@ -137,6 +144,7 @@ class Orchestrator:
         plan: ExecutionPlan,
         step_results: list[StepResult],
         decisions: list[dict[str, Any]] | None = None,
+        step_durations: dict[str, int] | None = None,
     ) -> None:
         """Persist a plan snapshot to STATE/plans/<plan_id>.json."""
         PLANS_DIR.mkdir(parents=True, exist_ok=True)
@@ -145,6 +153,7 @@ class Orchestrator:
             "plan": _plan_to_dict(plan),
             "step_results": [_result_to_dict(r) for r in step_results],
             "decisions": decisions or [],
+            "step_durations": step_durations or {},
             "saved_at": time.time(),
         }
         tmp = path.with_suffix(".tmp")
@@ -165,6 +174,15 @@ class Orchestrator:
         retry_count = 0
         while True:
             result = self.run_step(step)
+
+            # No executor: step was not executed — escalate immediately
+            if result.status == "skipped":
+                return result, SupervisorDecision(
+                    action="escalate",
+                    reason="Step not executed: no step executor configured",
+                    retry_allowed=False,
+                )
+
             result.retry_count = retry_count
             decision = self.supervisor.evaluate_step(step, result)
 

@@ -4,6 +4,85 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-06 (Session 17) — Phase 5.2B Planner/Orchestrator Hardening
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Targeted hardening pass on the Phase 5.2 planner/orchestrator subsystem. No architectural changes — purely runtime correctness and production readiness improvements.
+
+#### Requirement 1: Real execution timing
+
+- `time.monotonic()` now wraps each step execution in `run_plan()`, including retries
+- Real `duration_ms` (integer) passed to `SkillHistoryStore.record_run()` instead of hardcoded `0`
+- Duration covers the full supervision cycle per step (all retry attempts)
+
+#### Requirement 2: Honest no-executor behavior
+
+- Default stub changed from `status="success", contract_valid=True` to `status="skipped", contract_valid=False, validation_errors=["No step executor configured"]`
+- `_execute_with_supervision` detects `status="skipped"` and escalates immediately (no retry loop)
+- No false success reporting when no real execution occurred
+
+#### Requirement 3: Contract-validation compatibility
+
+- Verified `_run_with_executor` validates output through `contracts_validate()` for all 4 required fields (summary, files_changed, verification, confidence)
+- Invalid contracts populate `StepResult.validation_errors` with specific error messages
+- Supervisor correctly consumes `contract_valid=False` results → retry → escalate
+
+#### Requirement 4: Plan-state persistence completeness
+
+- Added `step_durations: dict[str, int]` to persisted plan state snapshot
+- Added `step_durations` to `run_plan()` return value
+- Persisted state now contains: plan metadata, ordered steps, step results (with retry_count), supervisor decisions (with followup_task), step durations, timestamp
+
+#### Requirement 5: System supervisor SKILL.md alignment
+
+- Changed `output_contract` from `[summary, checks_performed, result, confidence]` to `[summary, files_changed, verification, confidence]`
+- Updated StepResult field references from old API (`success`, `output`, `error`) to current (`status`, `contract_valid`, `validation_errors`, `retry_count`)
+- Updated Output Contract example to use `files_changed: none` and `verification:`
+
+#### Requirement 6: Tests
+
+Added 13 new tests proving each hardening change:
+
+| Test | Proves |
+|------|--------|
+| `test_no_executor_returns_skipped` | Honest skipped status |
+| `test_no_executor_does_not_falsely_succeed` | Never reports success without execution |
+| `test_no_executor_plan_escalates` | Immediate escalation, no retry |
+| `test_no_executor_step_status_set` | Step status = "skipped" |
+| `test_no_executor_does_not_retry` | retry_count stays 0 |
+| `test_real_duration_ms_recorded` | Non-placeholder integer duration |
+| `test_real_duration_ms_with_retries` | Duration includes retry time (≥15ms for 2×10ms) |
+| `test_step_durations_in_plan_result` | step_durations in return dict |
+| `test_step_durations_in_persisted_state` | step_durations in JSON file |
+| `test_plan_state_includes_full_history` | Complete reconstruction data |
+| `test_plan_state_with_retry_has_decision_history` | Retry + decision history persisted |
+| `test_invalid_contract_populates_validation_errors` | Errors observable in StepResult |
+| `test_supervisor_consumes_contract_invalid_correctly` | Supervisor escalates correctly |
+
+### Files changed
+
+| File | Lines | Change |
+|------|-------|--------|
+| planner/orchestrator.py | 263 | Timing, honest stub, step_durations |
+| SKILLS/system_supervisor/SKILL.md | 159 | Contract field alignment |
+| tests/test_orchestrator.py | 689 | Fixture update + 13 new tests |
+| tools/runner.py | 520 | Fix contracts_validate import path |
+
+### Test results
+
+```
+404 passed in 0.85s
+```
+
+### Architecture preserved
+
+No dataclass changes. No method signature changes (except `save_plan_state` gaining optional `step_durations` param). Same class names, field names, and data shapes as Phase 5.2.
+
+---
+
 ## 2026-03-06 (Session 16) — Phase 5.2 Planner/Orchestrator Upgrade
 
 **Session span:** Mar 6 UTC
