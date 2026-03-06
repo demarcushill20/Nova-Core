@@ -109,3 +109,31 @@ class PlanEvaluation:
     summary: str
     followup_recommended: bool
     followup_reason: str | None = None
+
+
+@dataclass
+class ContractAuditRecord:
+    """Audit record for a single output file's contract compliance."""
+
+    output_file: str
+    task_id: str | None = None
+    has_contract: bool = False
+    valid_contract: bool = False
+    missing_fields: list[str] = field(default_factory=list)
+    detected_timestamp: str | None = None
+    classification: str = "unknown"
+
+
+@dataclass
+class ContractAuditSummary:
+    """Aggregate summary of a contract compliance audit run."""
+
+    audit_id: str
+    total_outputs: int
+    valid_contracts: int
+    invalid_contracts: int
+    no_contract: int
+    compliance_rate: float
+    missing_field_counts: dict[str, int] = field(default_factory=dict)
+    records: list[ContractAuditRecord] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)

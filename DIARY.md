@@ -4,6 +4,48 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-06 (Session 19) — Phase 5.3D Live Contract Compliance Audit
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Added a live contract compliance audit scanner that mechanically evaluates all OUTPUT/ files against the contract validator. Deterministic, no LLM — pure regex + field checking.
+
+#### Contract audit scanner (`planner/contract_audit.py`)
+- Scans OUTPUT/*.md, extracts contract blocks via `tools/contracts.py` validator
+- Classifies outputs: `legacy_pre_contract` (task <25), `no_contract_detected`, `post_contract_valid`, `post_contract_invalid`
+- Conservative legacy classification — if uncertain, assumes post-contract
+- Produces `ContractAuditRecord` per file, `ContractAuditSummary` aggregate
+
+#### Schemas (`planner/schemas.py`)
+- Added `ContractAuditRecord` and `ContractAuditSummary` dataclasses
+
+#### Validator strengthening (`tools/contracts.py`)
+- Promoted `files_changed` from optional action-detail to required field
+- Updated all test fixtures to match strengthened rules
+
+#### Persisted audit artifacts (`STATE/audits/`)
+- Initial audit saved: 46 outputs, 3 valid (6.52%), 23 legacy, 16 invalid (missing `files_changed`/`confidence`)
+
+#### Worker contract enforcement (`watcher.py`)
+- Dispatch template now includes mandatory CONTRACT instruction
+- Output rejected without valid contract; retry task auto-created on first failure
+
+#### Tests
+- `tests/test_contract_audit.py`: 27 tests (scan, classify, summarize, persist, integration)
+- `tests/test_worker_contract_emission.py`: 25 tests (dispatch prompt, compliance, cross-validator, evaluator/supervisor compat)
+- Fixed 5 existing tests in `test_contracts.py` and `test_contract_gate.py` to match strengthened `files_changed` requirement
+
+#### Files changed
+- New: `planner/contract_audit.py`, `tests/test_contract_audit.py`, `tests/test_worker_contract_emission.py`
+- Modified: `planner/schemas.py`, `tools/contracts.py`, `watcher.py`, `tests/test_contracts.py`, `tests/test_contract_gate.py`
+- Artifact: `STATE/audits/phase-5.3d-initial.json`
+
+**Total tests passing: 512**
+
+---
+
 ## 2026-03-06 (Session 18) — Phase 5.3 Deterministic Execution Evaluation
 
 **Session span:** Mar 6 UTC

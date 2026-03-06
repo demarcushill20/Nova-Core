@@ -32,6 +32,7 @@ output_contract:
     - summary
     - git_commands_executed
     - verification
+    - confidence
 ---
 
 # When To Use
@@ -89,6 +90,7 @@ summary: <one-line description of what was done>
 git_commands_executed:
   - <command> (exit <code>)
 verification: <how correctness was confirmed>
+confidence: <high | medium | low>
 ```
 
 See `examples.md` for concrete instances.

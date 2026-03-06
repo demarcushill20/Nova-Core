@@ -33,6 +33,7 @@ Deployed service.
 summary: Deployed novacore-watcher to production
 verification: systemctl status shows active
 confidence: 0.95
+files_changed: none
 commands_executed: systemctl restart novacore-watcher
 status: active
 """

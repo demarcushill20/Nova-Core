@@ -27,6 +27,7 @@ output_contract:
     - summary
     - commands_executed
     - verification
+    - confidence
 ---
 
 # When To Use
@@ -85,6 +86,7 @@ summary: <one-line description of what was done>
 commands_executed:
   - <command> (exit <code>)
 verification: <how correctness was confirmed>
+confidence: <high | medium | low>
 ```
 
 See `examples.md` for concrete instances.

@@ -1,8 +1,8 @@
 """Contract validator for skill outputs.
 
 Parses the LAST ``## CONTRACT`` block in a text body and checks that
-required fields are present, confidence is valid, and at least one
-action-detail field exists.
+required fields (summary, files_changed, verification, confidence) are
+present and confidence is valid.
 
 No LLM calls — purely deterministic string parsing.
 """
@@ -11,10 +11,9 @@ import re
 
 # --- Constants ---------------------------------------------------------------
 
-_REQUIRED_FIELDS = ("summary", "verification", "confidence")
+_REQUIRED_FIELDS = ("summary", "files_changed", "verification", "confidence")
 
 _ACTION_DETAIL_FIELDS = frozenset((
-    "files_changed",
     "commands_executed",
     "git_commands_executed",
     "task_id",
@@ -66,14 +65,6 @@ def validate_contract(text: str) -> dict:
     for field in _REQUIRED_FIELDS:
         if field not in contract:
             errors.append(f"missing required field: {field}")
-
-    # At least one action-detail field
-    has_action = any(k in _ACTION_DETAIL_FIELDS for k in contract)
-    if not has_action:
-        errors.append(
-            "missing action detail field (need at least one of: "
-            + ", ".join(sorted(_ACTION_DETAIL_FIELDS)) + ")"
-        )
 
     # Confidence validation
     if "confidence" in contract:

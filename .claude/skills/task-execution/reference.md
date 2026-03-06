@@ -79,7 +79,9 @@ Rules:
 summary: <one-line>
 task_id: <stem>
 status: <done | failed>
+files_changed: <comma-separated paths, or "none">
 verification: <confirmation method>
+confidence: <high | medium | low>
 ```
 
 ## Idempotency Discipline

@@ -37,6 +37,7 @@ output_contract:
     - summary
     - files_changed
     - verification
+    - confidence
 ---
 
 # When To Use
@@ -96,6 +97,7 @@ summary: <one-line description of what was done>
 files_changed:
   - <path> (<action>)
 verification: <how correctness was confirmed>
+confidence: <high | medium | low>
 ```
 
 See `examples.md` for concrete instances.

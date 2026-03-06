@@ -22,6 +22,7 @@ Service restarted.
 summary: Restarted novacore-watcher service
 verification: systemctl status shows active (running)
 confidence: 0.95
+files_changed: none
 commands_executed: systemctl restart novacore-watcher
 status: active
 """
@@ -33,6 +34,7 @@ Committed changes.
 summary: Committed 3 files to main
 verification: git log confirms abc1234
 confidence: medium
+files_changed: src/main.py, lib/utils.py, README.md
 git_commands_executed: git add, git commit
 """
 
@@ -90,6 +92,7 @@ summary: This is inside a fence and should be ignored
 summary: Actual summary outside fence
 verification: tests pass
 confidence: high
+files_changed: none
 checks_performed: lint, unit tests
 """
 
@@ -169,9 +172,10 @@ def test_code_fences_ignored():
 
 
 def test_missing_action_detail():
+    """files_changed is now required — missing it is the primary error."""
     result = validate_contract(MISSING_ACTION_DETAIL)
     assert result["valid"] is False
-    assert any("action detail" in e for e in result["errors"])
+    assert any("files_changed" in e for e in result["errors"])
 
 
 def test_empty_string():

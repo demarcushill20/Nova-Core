@@ -31,6 +31,7 @@ LOG_FILE = LOGS_DIR / "watcher.log"
 POLL_INTERVAL = 60   # seconds between scans
 TASK_TIMEOUT = 300   # max seconds per task execution
 ARTIFACT_WINDOW = 600  # seconds — OUTPUT file must be this recent
+MAX_SUPERVISOR_ATTEMPTS = 2  # total attempts per task (1 original + up to 1 retry)
 
 METRICS_FILE = STATE_DIR / "metrics.json"
 CLAUDE_BIN = "/usr/bin/claude"
@@ -67,6 +68,23 @@ REQUIRED STEPS — complete every one, in order:
    - List the contents of {output_dir}/ and confirm your report file exists.
    - List the contents of {work_dir}/ and confirm any work artifacts exist.
    - If any required file is missing, create it NOW before exiting.
+
+7. CONTRACT BLOCK (mandatory — your output report WILL BE REJECTED without this):
+   Your output report MUST end with a ## CONTRACT block containing ALL of these fields.
+   Copy this template and fill in every field — do not omit any:
+
+   ## CONTRACT
+   summary: <one-line description of what was done>
+   files_changed: <comma-separated list of files created or modified, or "none" if no files changed>
+   verification: <how you confirmed correctness — e.g. "ran tests: 10/10 pass", "confirmed file exists", or "not run" if unable>
+   confidence: <low | medium | high>
+
+   Rules:
+   - The ## CONTRACT heading must appear at the END of your output report.
+   - Every field above is REQUIRED. Never omit a field.
+   - If no files were changed, write: files_changed: none
+   - If verification was not possible, write: verification: not run
+   - Do not fabricate data. Use honest values.
 
 Begin immediately. Do not ask questions or wait for prompts."""
 
@@ -239,12 +257,11 @@ valid `## CONTRACT` block.
 3. Append a valid `## CONTRACT` block at the end of the file with ALL of
    these required fields:
    - `summary`: one-line summary of what the original task accomplished
+   - `files_changed`: comma-separated list of files created or modified,
+     or "none" if no files changed
    - `verification`: describe how the result was verified (re-run tests,
      check file existence, inspect output, etc.)
    - `confidence`: a value of `low`, `medium`, or `high` (or a float 0.0–1.0)
-   - At least ONE action-detail field from: `files_changed`,
-     `commands_executed`, `git_commands_executed`, `task_id`, `status`,
-     `checks_performed`
 4. If verification requires re-running tests or checking status, do so
    and record the results in the `verification` field.
 5. Do NOT change the original output content unless strictly necessary.
@@ -377,6 +394,121 @@ def _check_contract(output_file: Path) -> tuple[bool, list[str]]:
         f.write(failure_section)
 
     return False, messages
+
+
+def _quick_contract_check(stem: str) -> tuple[bool, list[str]]:
+    """Quick contract validation for the supervisor retry loop.
+
+    Returns (valid, error_messages).
+    Does NOT modify the output file or update metrics — that happens in
+    verify_artifacts() after the retry loop exits.
+    """
+    output_file = _find_recent_output(stem)
+    if not output_file:
+        return False, ["No recent output file found"]
+    text = output_file.read_text(encoding="utf-8")
+    result = validate_contract(text)
+    if result["valid"]:
+        return True, []
+    return False, result.get("errors", [])
+
+
+def _execute_worker(
+    stem: str,
+    cmd: list[str],
+    worker_log: Path,
+    selected_names: list[str],
+    skill_flag_note: str,
+    attempt: int,
+    max_attempts: int,
+) -> int:
+    """Execute a Claude worker subprocess.
+
+    Returns the process exit code (-1 on timeout/error).
+    Appends to *worker_log*; on attempt > 1, writes a retry separator first.
+    """
+    logger.info(
+        "EXECUTION STARTED: %s (attempt %d/%d)", stem, attempt, max_attempts
+    )
+    start_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    exit_code = -1
+    pid_file = RUNNING_DIR / f"{stem}.pid"
+
+    log_mode = "w" if attempt == 1 else "a"
+    with open(worker_log, log_mode) as wf:
+        if attempt > 1:
+            wf.write(f"\n{'=' * 60}\n")
+            wf.write(f"=== SUPERVISOR RETRY: attempt {attempt}/{max_attempts} ===\n")
+            wf.write(f"{'=' * 60}\n")
+        wf.write(f"=== WORKER LOG: {stem} ===\n")
+        wf.write(f"=== START: {start_utc} ===\n")
+        wf.write(f"=== SKILLS: {', '.join(selected_names) or '(none)'} ===\n")
+        wf.write(
+            f"=== COMMAND: {CLAUDE_BIN} -p --verbose"
+            f" --dangerously-skip-permissions{skill_flag_note} <prompt> ===\n\n"
+        )
+
+    try:
+        child_env = os.environ.copy()
+        child_env.pop("CLAUDECODE", None)
+
+        proc = subprocess.Popen(
+            cmd,
+            cwd="/home/nova/nova-core",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=child_env,
+        )
+
+        pid_file.write_text(str(proc.pid), encoding="utf-8")
+        logger.info("Worker PID %d written to %s", proc.pid, pid_file)
+
+        try:
+            stdout, stderr = proc.communicate(timeout=TASK_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            logger.error("EXECUTION TIMEOUT: %s (exceeded %ds)", stem, TASK_TIMEOUT)
+            with open(worker_log, "a") as wf:
+                wf.write(f"=== TIMEOUT after {TASK_TIMEOUT}s ===\n")
+                if stdout:
+                    wf.write("\n=== STDOUT (partial) ===\n")
+                    wf.write(stdout)
+                if stderr:
+                    wf.write("\n=== STDERR (partial) ===\n")
+                    wf.write(stderr)
+                wf.write(f"\n=== EXIT CODE: -1 (timeout) ===\n")
+                wf.write(f"=== END: {end_utc} ===\n")
+            return -1
+
+        exit_code = proc.returncode
+        end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        with open(worker_log, "a") as wf:
+            wf.write("=== STDOUT ===\n")
+            wf.write(stdout or "(empty)\n")
+            wf.write("\n=== STDERR ===\n")
+            wf.write(stderr or "(empty)\n")
+            wf.write(f"\n=== EXIT CODE: {exit_code} ===\n")
+            wf.write(f"=== END: {end_utc} ===\n")
+
+        logger.info("Claude exited with code %d for %s", exit_code, stem)
+        logger.info("Worker log: %s (%d bytes)", worker_log, worker_log.stat().st_size)
+
+    except Exception as exc:
+        end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        logger.exception("EXECUTION ERROR: %s", stem)
+        with open(worker_log, "a") as wf:
+            wf.write(f"\n=== EXCEPTION: {exc} ===\n")
+            wf.write(f"=== EXIT CODE: -1 (error) ===\n")
+            wf.write(f"=== END: {end_utc} ===\n")
+
+    finally:
+        pid_file.unlink(missing_ok=True)
+        logger.info("PID file removed: %s", pid_file)
+
+    return exit_code
 
 
 def dispatch(task_path: Path):

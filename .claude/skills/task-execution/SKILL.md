@@ -28,6 +28,7 @@ output_contract:
     - task_id
     - status
     - verification
+    - confidence
 ---
 
 # When To Use
@@ -85,7 +86,9 @@ Every task-execution must end with a machine-checkable contract:
 summary: <one-line description of what was done>
 task_id: <task stem, e.g., 0008_deploy_fix>
 status: <done | failed>
+files_changed: <comma-separated paths, or "none">
 verification: <how correctness was confirmed>
+confidence: <low | medium | high>
 ```
 
 See `examples.md` for concrete instances.
