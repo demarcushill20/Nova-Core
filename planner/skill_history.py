@@ -123,6 +123,23 @@ class SkillHistoryStore:
         except (ValueError, TypeError):
             return 0.5
 
+    def get_evaluation_stats(self, skill_name: str) -> dict:
+        """Return evaluation-friendly stats derived from existing history data.
+
+        Does NOT extend the persisted JSON shape — computes from existing fields.
+        """
+        stats = self.get_stats(skill_name)
+        if not stats or stats.get("runs", 0) == 0:
+            return {"known": False}
+        return {
+            "known": True,
+            "success_rate": self.get_success_rate(skill_name),
+            "avg_duration_ms": stats.get("avg_duration_ms", 0),
+            "avg_retries_per_run": round(
+                stats["total_retries"] / stats["runs"], 2
+            ),
+        }
+
     def get_success_rate(self, skill_name: str) -> float:
         """Return success rate for a skill (0.0–1.0).
 

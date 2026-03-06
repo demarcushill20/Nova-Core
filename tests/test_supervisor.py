@@ -2,7 +2,13 @@
 
 import pytest
 
-from planner.schemas import PlanStep, StepResult, SupervisorDecision
+from planner.schemas import (
+    ExecutionEvaluation,
+    PlanEvaluation,
+    PlanStep,
+    StepResult,
+    SupervisorDecision,
+)
 from planner.supervisor import Supervisor
 
 
@@ -260,3 +266,110 @@ def test_decision_retry_allowed_type(sup: Supervisor):
 
 def test_max_retries_is_two():
     assert Supervisor.MAX_RETRIES == 2
+
+
+# =============================================================================
+# Phase 5.3 — recommend_followup_from_evaluation
+# =============================================================================
+
+
+def _plan_eval(
+    plan_id: str = "plan_t001",
+    aggregate_score: float = 1.0,
+    grade: str = "A",
+    followup_recommended: bool = False,
+    followup_reason: str | None = None,
+) -> PlanEvaluation:
+    return PlanEvaluation(
+        plan_id=plan_id,
+        step_evaluations=[],
+        aggregate_score=aggregate_score,
+        grade=grade,
+        summary="test summary",
+        followup_recommended=followup_recommended,
+        followup_reason=followup_reason,
+    )
+
+
+def test_followup_none_for_grade_A(sup: Supervisor):
+    """A grade with no issues → no followup."""
+    pe = _plan_eval(grade="A", followup_recommended=False)
+    assert sup.recommend_followup_from_evaluation(pe) is None
+
+
+def test_followup_high_for_grade_D(sup: Supervisor):
+    """D grade → high-priority followup."""
+    pe = _plan_eval(
+        grade="D", aggregate_score=0.55, followup_recommended=True
+    )
+    rec = sup.recommend_followup_from_evaluation(pe)
+    assert rec is not None
+    assert rec["priority"] == "high"
+    assert rec["source"] == "supervisor"
+
+
+def test_followup_high_for_grade_F(sup: Supervisor):
+    """F grade → high-priority followup."""
+    pe = _plan_eval(
+        grade="F", aggregate_score=0.15, followup_recommended=True
+    )
+    rec = sup.recommend_followup_from_evaluation(pe)
+    assert rec is not None
+    assert rec["priority"] == "high"
+
+
+def test_followup_medium_for_grade_B_with_issues(sup: Supervisor):
+    """B grade with followup_recommended → medium-priority followup."""
+    pe = _plan_eval(
+        grade="B",
+        aggregate_score=0.80,
+        followup_recommended=True,
+        followup_reason="1 contract invalid",
+    )
+    rec = sup.recommend_followup_from_evaluation(pe)
+    assert rec is not None
+    assert rec["priority"] == "medium"
+
+
+def test_followup_medium_for_grade_C_with_issues(sup: Supervisor):
+    """C grade with followup_recommended → medium-priority followup."""
+    pe = _plan_eval(
+        grade="C",
+        aggregate_score=0.65,
+        followup_recommended=True,
+        followup_reason="retries high",
+    )
+    rec = sup.recommend_followup_from_evaluation(pe)
+    assert rec is not None
+    assert rec["priority"] == "medium"
+
+
+def test_followup_none_for_grade_B_no_issues(sup: Supervisor):
+    """B grade without followup_recommended → no followup."""
+    pe = _plan_eval(grade="B", aggregate_score=0.85, followup_recommended=False)
+    assert sup.recommend_followup_from_evaluation(pe) is None
+
+
+def test_followup_dict_shape_exact(sup: Supervisor):
+    """Returned followup dict has exactly the required keys."""
+    pe = _plan_eval(
+        plan_id="plan_x",
+        grade="D",
+        aggregate_score=0.45,
+        followup_recommended=True,
+    )
+    rec = sup.recommend_followup_from_evaluation(pe)
+    assert rec is not None
+    assert set(rec.keys()) == {
+        "title", "description", "priority", "source", "related_plan_id"
+    }
+    assert rec["related_plan_id"] == "plan_x"
+    assert rec["source"] == "supervisor"
+
+
+def test_followup_includes_plan_id_in_title(sup: Supervisor):
+    """Followup title references the plan ID."""
+    pe = _plan_eval(plan_id="plan_abc", grade="F", aggregate_score=0.10)
+    rec = sup.recommend_followup_from_evaluation(pe)
+    assert rec is not None
+    assert "plan_abc" in rec["title"]

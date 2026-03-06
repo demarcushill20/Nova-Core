@@ -15,7 +15,7 @@ Rules:
 
 from __future__ import annotations
 
-from planner.schemas import PlanStep, StepResult, SupervisorDecision
+from planner.schemas import PlanEvaluation, PlanStep, StepResult, SupervisorDecision
 
 # Markers for non-retryable runtime anomalies
 _ANOMALY_MARKERS = ("permission denied", "sandbox", "blocked", "timeout")
@@ -107,6 +107,57 @@ class Supervisor:
             "priority": "high",
             "source": "supervisor",
         }
+
+    def recommend_followup_from_evaluation(
+        self,
+        plan_eval: PlanEvaluation,
+    ) -> dict | None:
+        """Generate a follow-up recommendation based on plan evaluation.
+
+        Rules:
+        - A grade, no failures → None
+        - B or C grade with followup_recommended → medium-priority dict
+        - D or F grade → high-priority dict
+        - Otherwise → None
+
+        Does NOT auto-submit. Returns the structured recommendation only.
+        """
+        if plan_eval.grade == "A" and not plan_eval.followup_recommended:
+            return None
+
+        if plan_eval.grade in ("D", "F"):
+            return {
+                "title": (
+                    f"Improve plan {plan_eval.plan_id}: "
+                    f"grade {plan_eval.grade}"
+                ),
+                "description": (
+                    f"Plan {plan_eval.plan_id} scored "
+                    f"{plan_eval.aggregate_score:.2f} "
+                    f"({plan_eval.grade}). {plan_eval.summary}"
+                ),
+                "priority": "high",
+                "source": "supervisor",
+                "related_plan_id": plan_eval.plan_id,
+            }
+
+        if plan_eval.grade in ("B", "C") and plan_eval.followup_recommended:
+            return {
+                "title": (
+                    f"Review plan {plan_eval.plan_id}: "
+                    f"grade {plan_eval.grade}"
+                ),
+                "description": (
+                    f"Plan {plan_eval.plan_id} scored "
+                    f"{plan_eval.aggregate_score:.2f} "
+                    f"({plan_eval.grade}). {plan_eval.followup_reason}"
+                ),
+                "priority": "medium",
+                "source": "supervisor",
+                "related_plan_id": plan_eval.plan_id,
+            }
+
+        return None
 
     def _escalation_reason(self, result: StepResult) -> str:
         """Build an escalation reason from the result."""

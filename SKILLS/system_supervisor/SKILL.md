@@ -12,7 +12,8 @@ name: system_supervisor
 version: 1.0.0
 description: >
   Validate each execution step's output contract, decide whether to continue,
-  retry, or escalate, and emit a structured supervisor contract block.
+  retry, or escalate, evaluate execution quality with deterministic grading,
+  and emit a structured supervisor contract block.
 
 tools:
   - contracts.validate
@@ -108,7 +109,19 @@ When escalating, produce a structured follow-up task dict:
 - `priority`: high
 - `source`: supervisor
 
-### 6. Emit contract
+### 6. Evaluate execution quality
+
+After all steps complete (or execution stops), the Evaluator grades each step
+and the overall plan:
+
+- **Step scoring**: execution_success (0.40) + contract_bonus (0.25) + verification_score (0.20) + duration_score (0.15) - retry_penalty (0.05/retry)
+- **Grade mapping**: A (≥0.90), B (≥0.75), C (≥0.60), D (≥0.40), F (<0.40)
+- **Follow-up recommendation**: D/F → high priority, B/C with issues → medium priority, A → none
+
+The evaluation is persisted in the plan state JSON and is available for
+downstream decisions and self-improvement.
+
+### 7. Emit contract
 
 Produce the final supervisor contract block.
 

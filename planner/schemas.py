@@ -1,6 +1,7 @@
 """Data classes for the NovaCore planner subsystem.
 
 Exact field shapes per Phase 5.2 specification.
+Phase 5.3 adds ExecutionEvaluation and PlanEvaluation.
 """
 
 from __future__ import annotations
@@ -76,3 +77,35 @@ class SupervisorDecision:
     action: str  # continue | retry | escalate | fail
     reason: str
     retry_allowed: bool
+
+
+@dataclass
+class ExecutionEvaluation:
+    """Evaluation of a single executed plan step.
+
+    Distinguishes execution outcome, validation outcome, and quality score.
+    """
+
+    step_id: str
+    execution_success: bool
+    contract_valid: bool
+    tests_passed: bool | None = None
+    retry_penalty: float = 0.0
+    duration_score: float = 0.0
+    verification_score: float = 0.0
+    total_score: float = 0.0
+    grade: str = "unknown"
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PlanEvaluation:
+    """Aggregate evaluation of a complete execution plan."""
+
+    plan_id: str
+    step_evaluations: list[ExecutionEvaluation]
+    aggregate_score: float
+    grade: str
+    summary: str
+    followup_recommended: bool
+    followup_reason: str | None = None

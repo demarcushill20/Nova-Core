@@ -4,6 +4,75 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-06 (Session 18) — Phase 5.3 Deterministic Execution Evaluation
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Added a deterministic execution evaluation and outcome grading layer to the planner subsystem. Fully mechanical scoring — no LLM, no embeddings, no external services.
+
+#### Req 1–2: ExecutionEvaluation, PlanEvaluation schemas + Evaluator module
+
+- Added `ExecutionEvaluation` and `PlanEvaluation` dataclasses to `planner/schemas.py`
+- Created `planner/evaluator.py` with `Evaluator` class
+- **Step scoring formula**: `execution_base (0.40) + contract_bonus (0.25) + verification_score (0.20) + duration_score (0.15) - retry_penalty (0.05/retry, cap 0.15)`
+- **Grade boundaries**: A (≥0.90), B (≥0.75), C (≥0.60), D (≥0.40), F (<0.40)
+- **Duration thresholds**: <1s → 0.15, <5s → 0.10, <30s → 0.05, ≥30s → 0.00
+- **tests_passed inference**: True if contract_valid, False if failed/error/skipped, None otherwise
+- Machine-readable `reasons` list for auditability
+
+#### Req 3: Orchestrator integration
+
+- After execution loop: `Evaluator.evaluate_plan()` runs on all step results
+- `evaluation_data` dict included in both `run_plan()` return and persisted plan state JSON
+- Added `_eval_to_dict()` serialization helper, `evaluation` param to `save_plan_state()`
+
+#### Req 4: Supervisor followup from evaluation
+
+- Added `Supervisor.recommend_followup_from_evaluation(plan_eval)` method
+- Rules: A+clean → None, D/F → high-priority dict, B/C with issues → medium-priority dict
+- Dict shape: `{title, description, priority, source, related_plan_id}`
+
+#### Req 5: Skill history evaluation stats
+
+- Added `SkillHistoryStore.get_evaluation_stats()` — derives `success_rate`, `avg_duration_ms`, `avg_retries_per_run` from existing JSON fields
+- No change to persisted JSON shape
+
+#### Req 6: SKILL.md alignment
+
+- Updated `SKILLS/system_supervisor/SKILL.md` with evaluation workflow step, scoring formula, grade mapping, and follow-up recommendation logic
+
+#### Req 7: Tests
+
+- Created `tests/test_evaluator.py` — 40 tests: perfect step, retry penalty, invalid contract, all grade boundaries, score bounds, reasons, tests_passed inference, duration/verification scoring, grade mapping, plan evaluation aggregate/mixed/empty, followup thresholds
+- Added 9 evaluation persistence tests to `tests/test_orchestrator.py`
+- Added 8 `recommend_followup_from_evaluation` tests to `tests/test_supervisor.py`
+
+### Test results
+
+- **459 tests passed**, 0 failures
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `planner/schemas.py` | +33 lines — ExecutionEvaluation, PlanEvaluation dataclasses |
+| `planner/evaluator.py` | NEW — 170 lines — deterministic scoring engine |
+| `planner/orchestrator.py` | +46 lines — evaluation integration + persistence |
+| `planner/supervisor.py` | +53 lines — recommend_followup_from_evaluation |
+| `planner/skill_history.py` | +17 lines — get_evaluation_stats query method |
+| `SKILLS/system_supervisor/SKILL.md` | +17 lines — evaluation workflow docs |
+| `tests/test_evaluator.py` | NEW — 480 lines — 40 evaluator tests |
+| `tests/test_orchestrator.py` | +94 lines — 9 evaluation persistence tests |
+| `tests/test_supervisor.py` | +115 lines — 8 followup recommendation tests |
+
+### Blockers
+
+None.
+
+---
+
 ## 2026-03-06 (Session 17) — Phase 5.2B Planner/Orchestrator Hardening
 
 **Session span:** Mar 6 UTC

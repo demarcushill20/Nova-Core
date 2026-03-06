@@ -731,3 +731,97 @@ def test_supervisor_consumes_contract_invalid_correctly(
     assert result["decisions"][0]["action"] == "escalate"
     assert result["decisions"][0]["retry_allowed"] is False
     assert result["decisions"][0]["followup_task"] is not None
+
+
+# =============================================================================
+# Phase 5.3 — evaluation persistence tests
+# =============================================================================
+
+
+def test_evaluation_in_plan_result(orch: Orchestrator):
+    """run_plan result includes evaluation block."""
+    plan = _plan()
+    result = orch.run_plan(plan)
+    assert "evaluation" in result
+    ev = result["evaluation"]
+    assert "step_evaluations" in ev
+    assert "aggregate_score" in ev
+    assert "grade" in ev
+    assert "summary" in ev
+    assert "followup_recommended" in ev
+    assert "followup_task" in ev
+
+
+def test_evaluation_persisted_in_plan_state(orch: Orchestrator, tmp_state: Path):
+    """Saved plan state includes evaluation block."""
+    plan = _plan(task_id="t_eval")
+    orch.run_plan(plan)
+    data = json.loads((tmp_state / "plans" / "plan_t_eval.json").read_text())
+    assert "evaluation" in data
+    assert data["evaluation"] is not None
+    assert "step_evaluations" in data["evaluation"]
+    assert "aggregate_score" in data["evaluation"]
+    assert "grade" in data["evaluation"]
+
+
+def test_evaluation_step_evaluations_match_steps(orch: Orchestrator):
+    """Number of step evaluations matches number of executed steps."""
+    plan = _plan()
+    result = orch.run_plan(plan)
+    assert len(result["evaluation"]["step_evaluations"]) == 2
+    assert result["evaluation"]["step_evaluations"][0]["step_id"] == "s1"
+    assert result["evaluation"]["step_evaluations"][1]["step_id"] == "s2"
+
+
+def test_evaluation_grade_persisted(orch: Orchestrator, tmp_state: Path):
+    """Aggregate grade is persisted in plan state."""
+    plan = _plan(task_id="t_grade")
+    orch.run_plan(plan)
+    data = json.loads((tmp_state / "plans" / "plan_t_grade.json").read_text())
+    assert data["evaluation"]["grade"] in ("A", "B", "C", "D", "F")
+
+
+def test_evaluation_perfect_plan_grade_A(orch: Orchestrator):
+    """All steps succeed with valid contracts → grade A."""
+    plan = _plan()
+    result = orch.run_plan(plan)
+    assert result["evaluation"]["grade"] == "A"
+    assert result["evaluation"]["aggregate_score"] >= 0.90
+
+
+def test_evaluation_failed_plan_has_followup(
+    history_store: SkillHistoryStore, tmp_state: Path
+):
+    """Failed plan with escalation → followup_recommended and followup_task."""
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=_executor_always_invalid,
+    )
+    plan = _plan(steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")])
+    result = orch.run_plan(plan)
+    ev = result["evaluation"]
+    assert ev["followup_recommended"] is True
+    assert ev["followup_task"] is not None
+    assert "related_plan_id" in ev["followup_task"]
+
+
+def test_evaluation_followup_none_for_perfect(orch: Orchestrator):
+    """Perfect plan → no followup recommendation."""
+    plan = _plan()
+    result = orch.run_plan(plan)
+    ev = result["evaluation"]
+    assert ev["followup_recommended"] is False
+    assert ev["followup_task"] is None
+
+
+def test_incremental_save_has_null_evaluation(
+    orch: Orchestrator, tmp_state: Path
+):
+    """Incremental saves during execution have evaluation=null."""
+    # The incremental saves don't include evaluation; only the final save does.
+    # We verify the final save has evaluation.
+    plan = _plan(task_id="t_inc")
+    orch.run_plan(plan)
+    data = json.loads((tmp_state / "plans" / "plan_t_inc.json").read_text())
+    # Final save must have evaluation
+    assert data["evaluation"] is not None

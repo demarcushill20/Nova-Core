@@ -13,7 +13,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from planner.evaluator import Evaluator
 from planner.schemas import (
+    ExecutionEvaluation,
     ExecutionPlan,
     PlanStep,
     StepResult,
@@ -106,8 +108,30 @@ class Orchestrator:
             # All steps completed without escalation
             plan.status = "done"
 
-        # Final save
-        self.save_plan_state(plan, step_results, decisions, step_durations)
+        # Evaluate execution quality
+        evaluator = Evaluator()
+        plan_eval = evaluator.evaluate_plan(
+            plan, step_results, step_durations
+        )
+        eval_followup = self.supervisor.recommend_followup_from_evaluation(
+            plan_eval
+        )
+        evaluation_data = {
+            "step_evaluations": [
+                _eval_to_dict(e) for e in plan_eval.step_evaluations
+            ],
+            "aggregate_score": plan_eval.aggregate_score,
+            "grade": plan_eval.grade,
+            "summary": plan_eval.summary,
+            "followup_recommended": plan_eval.followup_recommended,
+            "followup_reason": plan_eval.followup_reason,
+            "followup_task": eval_followup,
+        }
+
+        # Final save with evaluation
+        self.save_plan_state(
+            plan, step_results, decisions, step_durations, evaluation_data
+        )
 
         return {
             "plan_id": plan.plan_id,
@@ -116,6 +140,7 @@ class Orchestrator:
             "steps": [_result_to_dict(r) for r in step_results],
             "decisions": decisions,
             "step_durations": step_durations,
+            "evaluation": evaluation_data,
         }
 
     def run_step(self, step: PlanStep) -> StepResult:
@@ -145,6 +170,7 @@ class Orchestrator:
         step_results: list[StepResult],
         decisions: list[dict[str, Any]] | None = None,
         step_durations: dict[str, int] | None = None,
+        evaluation: dict[str, Any] | None = None,
     ) -> None:
         """Persist a plan snapshot to STATE/plans/<plan_id>.json."""
         PLANS_DIR.mkdir(parents=True, exist_ok=True)
@@ -154,6 +180,7 @@ class Orchestrator:
             "step_results": [_result_to_dict(r) for r in step_results],
             "decisions": decisions or [],
             "step_durations": step_durations or {},
+            "evaluation": evaluation,
             "saved_at": time.time(),
         }
         tmp = path.with_suffix(".tmp")
@@ -248,6 +275,21 @@ def _plan_to_dict(plan: ExecutionPlan) -> dict:
         ],
         "success_criteria": plan.success_criteria,
         "status": plan.status,
+    }
+
+
+def _eval_to_dict(e: ExecutionEvaluation) -> dict:
+    return {
+        "step_id": e.step_id,
+        "execution_success": e.execution_success,
+        "contract_valid": e.contract_valid,
+        "tests_passed": e.tests_passed,
+        "retry_penalty": e.retry_penalty,
+        "duration_score": e.duration_score,
+        "verification_score": e.verification_score,
+        "total_score": e.total_score,
+        "grade": e.grade,
+        "reasons": e.reasons,
     }
 
 
