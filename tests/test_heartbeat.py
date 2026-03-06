@@ -258,23 +258,59 @@ class TestWriteHeartbeat:
 # send_telegram_alert
 # ---------------------------------------------------------------------------
 
-class TestTelegramAlert:
+class TestSendTelegram:
     def test_skips_without_creds(self, capsys):
         with mock.patch.dict(os.environ, {}, clear=True):
-            heartbeat.send_telegram_alert([{"ok": False, "name": "x", "detail": "y"}])
+            heartbeat._send_telegram("test message")
         assert "WARN" in capsys.readouterr().out
 
-    def test_sends_alert(self):
-        checks = [
-            {"name": "service:watcher", "ok": False, "detail": "NOT ACTIVE"},
-        ]
+    def test_sends_message(self):
         with mock.patch.dict(os.environ, {
             "TELEGRAM_BOT_TOKEN": "test",
             "ALLOWED_CHAT_ID": "123",
         }):
             with mock.patch("urllib.request.urlopen") as m:
-                heartbeat.send_telegram_alert(checks)
+                heartbeat._send_telegram("hello")
         m.assert_called_once()
+
+
+class TestTelegramAlert:
+    def test_sends_alert(self):
+        checks = [
+            {"name": "service:watcher", "ok": False, "detail": "NOT ACTIVE"},
+        ]
+        with mock.patch("heartbeat._send_telegram") as m:
+            heartbeat.send_telegram_alert(checks)
+        m.assert_called_once()
+        msg = m.call_args[0][0]
+        assert "UNHEALTHY" in msg
+        assert "service:watcher" in msg
+
+
+class TestTelegramHeartbeat:
+    def test_healthy_pulse(self):
+        checks = [
+            {"name": "svc", "ok": True, "detail": "ok"},
+            {"name": "disk", "ok": True, "detail": "ok"},
+        ]
+        with mock.patch("heartbeat._send_telegram") as m:
+            heartbeat.send_telegram_heartbeat(checks)
+        m.assert_called_once()
+        msg = m.call_args[0][0]
+        assert "HEALTHY" in msg
+        assert "2/2" in msg
+
+    def test_unhealthy_pulse(self):
+        checks = [
+            {"name": "svc", "ok": True, "detail": "ok"},
+            {"name": "disk", "ok": False, "detail": "full"},
+        ]
+        with mock.patch("heartbeat._send_telegram") as m:
+            heartbeat.send_telegram_heartbeat(checks)
+        m.assert_called_once()
+        msg = m.call_args[0][0]
+        assert "UNHEALTHY" in msg
+        assert "disk" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +359,8 @@ class TestMain:
         _make_tmp_base(tmp_path)
         with mock.patch("heartbeat.check_service") as m_svc, \
              mock.patch("heartbeat.check_disk") as m_disk, \
-             mock.patch("heartbeat.check_claude_binary") as m_claude:
+             mock.patch("heartbeat.check_claude_binary") as m_claude, \
+             mock.patch("heartbeat.send_telegram_heartbeat") as m_hb:
             m_svc.return_value = {"name": "svc", "ok": True, "detail": "ok"}
             m_disk.return_value = {"name": "disk", "ok": True, "detail": "ok"}
             m_claude.return_value = {"name": "claude", "ok": True, "detail": "ok"}
@@ -331,18 +368,19 @@ class TestMain:
         assert code == 0
         assert heartbeat.HEARTBEAT_FILE.exists()
         assert (heartbeat.LOGS_DIR / "heartbeat.log").exists()
+        m_hb.assert_called_once()
 
     def test_unhealthy_run(self, tmp_path):
         _make_tmp_base(tmp_path)
         with mock.patch("heartbeat.check_service") as m_svc, \
              mock.patch("heartbeat.check_disk") as m_disk, \
              mock.patch("heartbeat.check_claude_binary") as m_claude, \
-             mock.patch("heartbeat.send_telegram_alert") as m_alert, \
+             mock.patch("heartbeat.send_telegram_heartbeat") as m_hb, \
              mock.patch("heartbeat.inject_repair_task") as m_repair:
             m_svc.return_value = {"name": "svc", "ok": False, "detail": "dead"}
             m_disk.return_value = {"name": "disk", "ok": True, "detail": "ok"}
             m_claude.return_value = {"name": "claude", "ok": True, "detail": "ok"}
             code = heartbeat.main()
         assert code == 1
-        m_alert.assert_called_once()
+        m_hb.assert_called_once()
         m_repair.assert_called_once()

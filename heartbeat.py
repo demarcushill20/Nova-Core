@@ -214,27 +214,48 @@ def write_heartbeat(checks: list) -> None:
 # --- Alerting ----------------------------------------------------------------
 
 
-def send_telegram_alert(checks: list) -> None:
-    """Send Telegram message listing failed checks. Only called when unhealthy."""
+def _send_telegram(text: str) -> None:
+    """Send a message to the configured Telegram chat."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("ALLOWED_CHAT_ID", "")
     if not token or not chat_id:
         print("WARN: TELEGRAM_BOT_TOKEN or ALLOWED_CHAT_ID not set, skipping alert")
         return
 
-    failed = [c for c in checks if not c["ok"]]
-    lines = ["⚠️ NovaCore Heartbeat — UNHEALTHY", ""]
-    for c in failed:
-        lines.append(f"❌ {c['name']}: {c['detail']}")
-
-    text = "\n".join(lines)
     data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         req = urllib.request.Request(url, data=data, method="POST")
         urllib.request.urlopen(req, timeout=15)
     except Exception as e:
-        print(f"WARN: Telegram alert failed: {e}")
+        print(f"WARN: Telegram send failed: {e}")
+
+
+def send_telegram_alert(checks: list) -> None:
+    """Send Telegram message listing failed checks. Only called when unhealthy."""
+    failed = [c for c in checks if not c["ok"]]
+    lines = ["⚠️ NovaCore Heartbeat — UNHEALTHY", ""]
+    for c in failed:
+        lines.append(f"❌ {c['name']}: {c['detail']}")
+    _send_telegram("\n".join(lines))
+
+
+def send_telegram_heartbeat(checks: list) -> None:
+    """Send a compact heartbeat pulse to Telegram on every run."""
+    all_ok = all(c["ok"] for c in checks)
+    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    fail_count = len([c for c in checks if not c["ok"]])
+
+    if all_ok:
+        text = f"💚 Heartbeat {now} — HEALTHY ({len(checks)}/{len(checks)} checks passed)"
+    else:
+        failed = [c for c in checks if not c["ok"]]
+        lines = [f"🔴 Heartbeat {now} — UNHEALTHY ({fail_count} failed)"]
+        for c in failed:
+            lines.append(f"  ❌ {c['name']}: {c['detail']}")
+        text = "\n".join(lines)
+
+    _send_telegram(text)
 
 
 # --- Self-repair -------------------------------------------------------------
@@ -301,11 +322,13 @@ def main() -> int:
 
     all_ok = all(c["ok"] for c in checks)
 
+    # Always send heartbeat pulse to Telegram
+    send_telegram_heartbeat(checks)
+
     if all_ok:
         print("[heartbeat] All checks passed. HEALTHY.")
     else:
         print("[heartbeat] Some checks FAILED. Alerting...")
-        send_telegram_alert(checks)
         inject_repair_task(checks)
 
     # Append to heartbeat log

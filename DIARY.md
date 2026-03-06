@@ -4,6 +4,58 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-06 (Session 14) — Semantic File Ops & Heartbeat Telegram Pulse
+
+**Session span:** ~ongoing (Mar 6 UTC)
+
+### What was done
+
+Extended the NovaCore semantic tool layer with file-write and file-patch operations, refactored heartbeat alerting to include always-on Telegram pulses, and hardened the test suite.
+
+#### repo.files.write & repo.files.patch — New Semantic Tools
+
+Added two new sandboxed file-operation tools to the semantic layer:
+
+- **`repo.files.write`** — Atomic file writing with post-write verification. Writes via `tempfile` + `os.replace` to prevent partial writes. Auto-creates parent directories. Returns structured output with `ok`, `bytes_written`, `created`, `overwritten`, `verified` fields.
+- **`repo.files.patch`** — Structured patch operations (`replace` with count control, `append`) on existing files. Same atomic-write + verification guarantees. Supports `create_if_missing` flag. Returns `operations_applied` count.
+
+Both tools enforce the same sandbox rules as `repo.files.read`: path must resolve within the repo root, `../` traversal is blocked, absolute paths outside sandbox are rejected. The `_sandbox` parameter is internal-only (prefixed with underscore) and never exposed through runner args.
+
+#### Heartbeat Telegram pulse
+
+Refactored heartbeat alerting from alert-on-failure to always-send:
+
+- Extracted `_send_telegram()` helper from `send_telegram_alert()` to eliminate duplication
+- Added `send_telegram_heartbeat()` — sends a compact status line on every cron run: `💚 Heartbeat HH:MM UTC — HEALTHY (N/N checks passed)` or `🔴 ... UNHEALTHY (N failed)` with per-check details
+- Removed the unhealthy-only `send_telegram_alert()` call from `main()` — now every heartbeat run sends a pulse, giving positive confirmation the system is alive
+
+#### Runner integration
+
+- `runner.py` gained `_run_repo_files_write()` and `_run_repo_files_patch()` dispatch functions
+- `tools_registry.json` updated with full schemas for both new tools
+
+#### Test coverage expansion
+
+- **`test_repo_files.py`**: Expanded from ~27 lines to ~562 lines. Comprehensive coverage for write (atomic write, overwrite, make_dirs, sandbox escape, empty content, binary, verified flag) and patch (replace, append, count control, missing file, create_if_missing, multi-op, sandbox escape, empty ops). All using temp-dir sandboxing.
+- **`test_heartbeat.py`**: Added tests for `send_telegram_heartbeat()` — healthy pulse, unhealthy pulse with details, missing env var skip.
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `tools/adapters/repo_files.py` | **MODIFIED** | Added `repo_write()`, `repo_patch()`, `_resolve_and_check()` helper |
+| `tools/runner.py` | **MODIFIED** | Added dispatch for `repo.files.write` and `repo.files.patch` |
+| `tools/tools_registry.json` | **MODIFIED** | Schemas for both new tools |
+| `heartbeat.py` | **MODIFIED** | Extracted `_send_telegram()`, added `send_telegram_heartbeat()`, always-send pulse |
+| `tests/test_repo_files.py` | **MODIFIED** | Comprehensive write + patch test coverage (~562 lines) |
+| `tests/test_heartbeat.py` | **MODIFIED** | Tests for heartbeat Telegram pulse |
+
+### Test results
+
+240 total, all passing. Coverage includes sandbox enforcement, atomic writes, patch operations, and heartbeat Telegram output.
+
+---
+
 ## 2026-03-05 (Session 13) — Security Audit & Guardrails
 
 **Session span:** ~18:10–18:45 UTC

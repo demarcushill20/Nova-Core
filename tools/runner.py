@@ -285,6 +285,10 @@ def run_tool(
             func = lambda: _run_logs_tail(args, sandbox)
         elif tool_name == "repo.files.read":
             func = lambda: _run_repo_files_read(args, sandbox)
+        elif tool_name == "repo.files.write":
+            func = lambda: _run_repo_files_write(args, sandbox)
+        elif tool_name == "repo.files.patch":
+            func = lambda: _run_repo_files_patch(args, sandbox)
         elif tool_name == "contracts.validate":
             func = lambda: _run_contracts_validate(args)
         elif tool_name.startswith("files."):
@@ -445,7 +449,37 @@ def _run_repo_files_read(args: dict, sandbox: Path) -> dict:
     return repo_read(
         path=args.get("path", ""),
         max_bytes=args.get("max_bytes", 200_000),
-        sandbox=sandbox,
+        _sandbox=sandbox,
+    )
+
+
+def _run_repo_files_write(args: dict, sandbox: Path) -> dict:
+    """Execute repo.files.write via the adapter.
+
+    Only path, content, and make_dirs are accepted from tool-call args.
+    The _sandbox parameter is set internally — never from args.
+    """
+    from tools.adapters.repo_files import repo_write
+    return repo_write(
+        path=args.get("path", ""),
+        content=args.get("content", ""),
+        make_dirs=args.get("make_dirs", True),
+        _sandbox=sandbox,
+    )
+
+
+def _run_repo_files_patch(args: dict, sandbox: Path) -> dict:
+    """Execute repo.files.patch via the adapter.
+
+    Only path, operations, and create_if_missing are accepted from tool-call args.
+    The _sandbox parameter is set internally — never from args.
+    """
+    from tools.adapters.repo_files import repo_patch
+    return repo_patch(
+        path=args.get("path", ""),
+        operations=args.get("operations", []),
+        create_if_missing=args.get("create_if_missing", False),
+        _sandbox=sandbox,
     )
 
 

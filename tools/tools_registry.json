@@ -320,6 +320,42 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "repo.files.write": {
+      "description": "Write a file inside the repo sandbox with atomic write, post-write verification, and structured output.",
+      "args_schema": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Relative path within the repo (e.g. 'OUTPUT/result.md')."
+        },
+        "content": {
+          "type": "string",
+          "required": true,
+          "description": "String content to write to the file."
+        },
+        "make_dirs": {
+          "type": "boolean",
+          "required": false,
+          "description": "Create parent directories if they do not exist. Default: true."
+        }
+      },
+      "returns": {
+        "ok": "boolean — true if file was written and verified successfully",
+        "path": "string — normalized repo-relative path",
+        "bytes_written": "integer — number of bytes written",
+        "created": "boolean — true if this was a new file",
+        "overwritten": "boolean — true if an existing file was replaced",
+        "verified": "boolean — true if post-write verification passed",
+        "message": "string — human-readable status or error reason"
+      },
+      "safety": [
+        "Path must resolve within sandbox_root. Rejects traversal (../) that escapes.",
+        "Absolute paths outside sandbox are rejected.",
+        "Writes atomically via temp file + os.replace to prevent partial writes.",
+        "Post-write verification re-reads and confirms exact content match.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "repo.files.read": {
       "description": "Read a file inside the repo sandbox with structured output. Safe, sandboxed, read-only.",
       "args_schema": {
@@ -345,6 +381,42 @@
         "Read-only operation. Does not modify any files.",
         "Path must resolve within sandbox_root. Rejects traversal (../) that escapes.",
         "Absolute paths outside sandbox are rejected.",
+        "All invocations are logged to audit_log."
+      ]
+    },
+    "repo.files.patch": {
+      "description": "Apply structured patch operations (replace, append) to a file inside the repo sandbox with atomic write and post-write verification.",
+      "args_schema": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Relative path within the repo (e.g. 'config.yaml')."
+        },
+        "operations": {
+          "type": "array",
+          "required": true,
+          "description": "List of operations: {type:'replace', old:'...', new:'...', count:N} or {type:'append', text:'...'}."
+        },
+        "create_if_missing": {
+          "type": "boolean",
+          "required": false,
+          "description": "Create the file if it does not exist. Default: false."
+        }
+      },
+      "returns": {
+        "ok": "boolean — true if all operations applied and verified",
+        "path": "string — normalized repo-relative path",
+        "operations_applied": "integer — number of operations successfully applied",
+        "created": "boolean — true if the file was newly created",
+        "verified": "boolean — true if post-write verification passed",
+        "message": "string — human-readable summary or error reason"
+      },
+      "safety": [
+        "Path must resolve within sandbox_root. Rejects traversal (../) that escapes.",
+        "Absolute paths outside sandbox are rejected.",
+        "Writes atomically via temp file + os.replace to prevent partial writes.",
+        "Post-write verification re-reads and confirms exact content match.",
+        "Does not implement full unified-diff parsing.",
         "All invocations are logged to audit_log."
       ]
     },
