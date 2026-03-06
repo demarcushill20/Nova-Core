@@ -420,6 +420,67 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "repo.search": {
+      "description": "Search for a substring across repository files. Returns structured matches with path, line number, and snippet.",
+      "args_schema": {
+        "query": {
+          "type": "string",
+          "required": true,
+          "description": "Substring to search for (case-sensitive)."
+        },
+        "path": {
+          "type": "string",
+          "required": false,
+          "description": "Optional subdirectory to restrict the search to."
+        },
+        "max_results": {
+          "type": "integer",
+          "required": false,
+          "description": "Maximum matches to return. Default: 50. Clamped to 1–100."
+        }
+      },
+      "returns": {
+        "ok": "boolean — true if search completed successfully",
+        "query": "string — the search query",
+        "results": "array — [{path, line, snippet}] matching lines",
+        "count": "integer — number of matches returned"
+      },
+      "safety": [
+        "Path must resolve within sandbox_root. Rejects traversal (../) that escapes.",
+        "Skips binary files and files larger than 1 MB.",
+        "Read-only operation. Does not modify any files.",
+        "All invocations are logged to audit_log."
+      ]
+    },
+    "repo.diff": {
+      "description": "Get structured diff for a single file: uncommitted changes or against a safe git ref. Read-only.",
+      "args_schema": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Relative path within the repo to diff."
+        },
+        "against": {
+          "type": "string",
+          "required": false,
+          "description": "Optional git ref to diff against (e.g. HEAD, branch name). Default: uncommitted working-tree changes."
+        }
+      },
+      "returns": {
+        "ok": "boolean — true if diff completed successfully",
+        "path": "string — normalized repo-relative path",
+        "changed": "boolean — true if the file has changes",
+        "diff": "string — unified diff text",
+        "summary": "object — {lines_added, lines_removed}"
+      },
+      "safety": [
+        "Path must resolve within sandbox_root. Rejects traversal (../) that escapes.",
+        "Rejects flag injection (paths starting with -).",
+        "against parameter validated against safe character set.",
+        "Read-only operation. Does not modify any files.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {

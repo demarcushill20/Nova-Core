@@ -4,6 +4,62 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-06 (Session 15) — repo.diff & repo.search Semantic Tools
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Added two new read-only semantic tools to the NovaCore tool layer: `repo.diff` for structured git diffs and `repo.search` for substring search across repository files. Both tools follow the established sandbox-enforcement pattern and include comprehensive test suites.
+
+#### repo.diff — Structured Git Diff
+
+New adapter in `tools/adapters/repo_diff.py`:
+
+- Returns structured diff for a single file: uncommitted working-tree changes or against a specified git ref (e.g. `HEAD`, branch name, tag).
+- **Sandbox enforcement**: path must resolve within repo root; `../` traversal and absolute paths outside sandbox are rejected.
+- **Flag injection protection**: paths and `against` refs starting with `-` are rejected. The `against` parameter is validated against a safe character set (`[A-Za-z0-9._/~^-]`).
+- Returns structured output: `ok`, `path` (normalized repo-relative), `changed`, `diff` (unified diff text), `summary` (`lines_added`, `lines_removed`).
+- Uses `subprocess.run` with 15s timeout; gracefully handles timeout and missing git.
+
+#### repo.search — Substring Search Across Files
+
+New adapter in `tools/adapters/repo_search.py`:
+
+- Case-sensitive substring search across all text files in the repository (or a subdirectory).
+- Returns structured matches: `[{path, line, snippet}]` with repo-relative paths.
+- **Sandbox enforcement**: search path must resolve within repo root.
+- **Safety filters**: skips binary files (null-byte heuristic), files over 1 MB, hidden directories (`.git`, etc.), and files that fail UTF-8 decode.
+- `max_results` clamped to 1–100 (default 50) to prevent unbounded output.
+- Pure Python implementation with `os.walk` — no external dependencies.
+
+#### Runner integration
+
+- `runner.py` gained `_run_repo_diff()` and `_run_repo_search()` dispatch functions with lazy imports.
+- `tools_registry.json` updated with full schemas, args, return types, and safety documentation for both tools.
+
+#### Test suites
+
+- **`tests/test_repo_diff.py`** (17 tests): Unchanged file, changed file, empty/None path, traversal rejection, non-file rejection, flag injection in path and against, diff against HEAD, diff against unchanged, unsafe ref rejection, empty against rejection, runner dispatch integration, JSON output shape, summary count accuracy.
+- **`tests/test_repo_search.py`** (16 tests): Basic search, restricted path search, multiple matches, max_results clamping (low/high), limits output, binary file skip, oversized file skip, traversal rejection (direct and mid-path), non-directory path, empty query, decode failure skip, hidden directory skip, runner dispatch integration, JSON output shape.
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `tools/adapters/repo_diff.py` | **CREATED** | Structured git diff adapter with sandbox enforcement |
+| `tools/adapters/repo_search.py` | **CREATED** | Substring search adapter with sandbox enforcement |
+| `tools/runner.py` | **MODIFIED** | Added dispatch for `repo.diff` and `repo.search` |
+| `tools/tools_registry.json` | **MODIFIED** | Full schemas for both new tools |
+| `tests/test_repo_diff.py` | **CREATED** | 17 tests covering diff functionality and safety |
+| `tests/test_repo_search.py` | **CREATED** | 16 tests covering search functionality and safety |
+
+### Test results
+
+33 new tests, all passing. Full suite covers sandbox enforcement, flag injection, traversal rejection, binary/oversized file handling, runner dispatch, and JSON output contracts.
+
+---
+
 ## 2026-03-06 (Session 14) — Semantic File Ops & Heartbeat Telegram Pulse
 
 **Session span:** ~ongoing (Mar 6 UTC)

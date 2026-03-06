@@ -283,6 +283,10 @@ def run_tool(
             func = lambda: _run_repo_git_commit(args, sandbox)
         elif tool_name == "logs.tail":
             func = lambda: _run_logs_tail(args, sandbox)
+        elif tool_name == "repo.diff":
+            func = lambda: _run_repo_diff(args, sandbox)
+        elif tool_name == "repo.search":
+            func = lambda: _run_repo_search(args, sandbox)
         elif tool_name == "repo.files.read":
             func = lambda: _run_repo_files_read(args, sandbox)
         elif tool_name == "repo.files.write":
@@ -479,6 +483,27 @@ def _run_repo_files_patch(args: dict, sandbox: Path) -> dict:
         path=args.get("path", ""),
         operations=args.get("operations", []),
         create_if_missing=args.get("create_if_missing", False),
+        _sandbox=sandbox,
+    )
+
+
+def _run_repo_diff(args: dict, sandbox: Path) -> dict:
+    """Execute repo.diff via the adapter."""
+    from tools.adapters.repo_diff import repo_diff
+    return repo_diff(
+        path=args.get("path", ""),
+        against=args.get("against"),
+        _sandbox=sandbox,
+    )
+
+
+def _run_repo_search(args: dict, sandbox: Path) -> dict:
+    """Execute repo.search via the adapter."""
+    from tools.adapters.repo_search import repo_search
+    return repo_search(
+        query=args.get("query", ""),
+        path=args.get("path"),
+        max_results=args.get("max_results", 50),
         _sandbox=sandbox,
     )
 
