@@ -4,6 +4,61 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-06 (Session 20) — Phase 6 Bounded Self-Improvement Loop
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Built the complete Phase 6 bounded self-improvement loop — an automated health-inspection and improvement-planning subsystem that runs after every plan execution. All logic is deterministic (no LLM). One cycle only, no recursion.
+
+#### ImprovementPlanner (`planner/improvement_planner.py`) — NEW
+- `build_health_findings()`: extracts health findings from plan evaluations across 5 categories:
+  - `low_grade_execution` (grade D/F → high/critical severity)
+  - `repeated_contract_failure` (invalid contracts → medium/high)
+  - `repeated_retry_pattern` (retry penalties → medium)
+  - `slow_execution` (zero duration score on successful steps → low)
+  - `verification_weakness` (verification score < 0.10 on successful steps → medium)
+- Cross-plan pattern detection: 2+ recent D/F grades → critical systemic finding
+- `build_improvement_plan()`: derives bounded plan from findings — capped at 3 steps, 5 files, restricted skill allowlist; critical findings require human review
+- `should_execute()`: deterministic gating (blocks on human review, skipped/non-queued, zero steps)
+- `persist_improvement_run()`: saves full improvement run to `STATE/improvement_runs/` as JSON
+
+#### Schemas (`planner/schemas.py`)
+- Added `VALID_SEVERITIES = ("low", "medium", "high", "critical")` constant
+- `HealthFinding` dataclass with `__post_init__` severity validation
+- `ImprovementPlan` dataclass (bounded fields: max_steps, max_files_changed, allowed_skills, requires_human_review)
+- `ImprovementResult` dataclass (executed, final_status, evaluation linkage, followup flag)
+
+#### Orchestrator integration (`planner/orchestrator.py`)
+- `_run_improvement_cycle()`: runs after plan evaluation — builds findings, creates bounded plan, gates through supervisor review, persists result
+- Non-recursive: exactly one cycle per plan execution
+- Returns improvement data dict in the plan result payload
+
+#### Supervisor review (`planner/supervisor.py`)
+- `review_improvement_plan()`: structured review returning `SupervisorDecision`
+  - `requires_human_review` → escalate
+  - `max_steps > 3` or `max_files_changed > 5` → escalate (exceeds bounds)
+  - No findings → fail
+  - Otherwise → continue
+- `approve_improvement()`: boolean gate with same deterministic rules
+
+#### Repo health check skill (`SKILLS/repo_health_check/SKILL.md`) — NEW
+- Full skill definition with 8-step deterministic workflow, verification checks, failure handling, and severity mapping documentation
+
+#### Tests
+- `tests/test_improvement_planner.py`: 34 tests — build_health_findings (15 tests across all categories, cross-plan patterns, uniqueness), build_improvement_plan (8 tests: bounds, goals, human review, severity escalation), should_execute (6 tests: all gate conditions), persist (3 tests), schema validation (6 tests: severity enforcement)
+- `tests/test_orchestrator.py`: +5 improvement cycle integration tests (persist, gate, supervisor escalate, execute, evaluation linkage)
+- `tests/test_supervisor.py`: +6 review_improvement_plan tests (continue, escalate, fail, bounds, return type)
+
+#### Files changed
+- New: `planner/improvement_planner.py`, `tests/test_improvement_planner.py`, `SKILLS/repo_health_check/SKILL.md`
+- Modified: `planner/schemas.py`, `planner/orchestrator.py`, `planner/supervisor.py`, `tests/test_orchestrator.py`, `tests/test_supervisor.py`
+
+**Total tests passing: 565**
+
+---
+
 ## 2026-03-06 (Session 19) — Phase 5.3D Live Contract Compliance Audit
 
 **Session span:** Mar 6 UTC

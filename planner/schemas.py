@@ -137,3 +137,56 @@ class ContractAuditSummary:
     missing_field_counts: dict[str, int] = field(default_factory=dict)
     records: list[ContractAuditRecord] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+
+
+# =============================================================================
+# Phase 6 — Bounded Self-Improvement Loop
+# =============================================================================
+
+VALID_SEVERITIES = ("low", "medium", "high", "critical")
+
+
+@dataclass
+class HealthFinding:
+    """A single repo/execution health finding from inspection."""
+
+    finding_id: str
+    category: str
+    severity: str
+    summary: str
+    evidence: list[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        if self.severity not in VALID_SEVERITIES:
+            raise ValueError(
+                f"Invalid severity '{self.severity}': "
+                f"must be one of {VALID_SEVERITIES}"
+            )
+
+
+@dataclass
+class ImprovementPlan:
+    """A bounded, auditable improvement plan."""
+
+    improvement_id: str
+    source_plan_id: str | None = None
+    findings: list[HealthFinding] = field(default_factory=list)
+    goals: list[str] = field(default_factory=list)
+    allowed_skills: list[str] = field(default_factory=list)
+    max_steps: int = 0
+    max_files_changed: int = 0
+    requires_human_review: bool = False
+    status: str = "queued"
+
+
+@dataclass
+class ImprovementResult:
+    """Result of executing a bounded improvement cycle."""
+
+    improvement_id: str
+    executed: bool
+    final_status: str
+    evaluation_grade: str | None = None
+    evaluation_score: float | None = None
+    followup_recommended: bool = False
+    notes: list[str] = field(default_factory=list)

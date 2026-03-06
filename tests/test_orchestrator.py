@@ -5,9 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from planner.improvement_planner import ImprovementPlanner
 from planner.orchestrator import Orchestrator
 from planner.schemas import (
     ExecutionPlan,
+    HealthFinding,
+    ImprovementPlan,
     PlanStep,
     StepResult,
     SupervisorDecision,
@@ -825,3 +828,168 @@ def test_incremental_save_has_null_evaluation(
     data = json.loads((tmp_state / "plans" / "plan_t_inc.json").read_text())
     # Final save must have evaluation
     assert data["evaluation"] is not None
+
+
+# =============================================================================
+# Phase 6 — improvement cycle tests
+# =============================================================================
+
+
+@pytest.fixture
+def tmp_improvement_dir(tmp_path: Path, monkeypatch):
+    """Redirect IMPROVEMENT_DIR to a temp directory."""
+    imp_dir = tmp_path / "improvement_runs"
+    monkeypatch.setattr(
+        "planner.improvement_planner.IMPROVEMENT_DIR", imp_dir
+    )
+    return imp_dir
+
+
+def test_improvement_cycle_persists_artifact(
+    history_store: SkillHistoryStore, tmp_state: Path, tmp_improvement_dir: Path
+):
+    """run_plan triggers improvement cycle that persists an artifact."""
+    # Use an executor that produces invalid contracts → low grade → findings
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=_executor_always_invalid,
+    )
+    plan = _plan(
+        task_id="t_imp_persist",
+        steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")],
+    )
+    result = orch.run_plan(plan)
+    # Improvement cycle should have run and persisted
+    assert "improvement" in result
+    if result["improvement"] is not None:
+        imp = result["improvement"]
+        assert "improvement_id" in imp
+        assert "findings_count" in imp
+        assert "executed" in imp
+        assert "final_status" in imp
+        # Check artifact persisted on disk
+        files = list(tmp_improvement_dir.glob("*.json"))
+        assert len(files) >= 1
+
+
+def test_improvement_cycle_stops_when_should_execute_false(
+    history_store: SkillHistoryStore, tmp_state: Path, tmp_improvement_dir: Path
+):
+    """Perfect plan → no findings → improvement cycle returns None or not executed."""
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=_executor_always_valid,
+    )
+    plan = _plan(
+        task_id="t_imp_skip",
+        steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")],
+    )
+    result = orch.run_plan(plan)
+    # Grade A plan → no findings → improvement is None
+    assert result["improvement"] is None
+
+
+def test_improvement_cycle_stops_when_supervisor_escalates(
+    history_store: SkillHistoryStore, tmp_state: Path, tmp_improvement_dir: Path
+):
+    """Critical findings → requires_human_review → supervisor blocks execution."""
+    # Create an improvement planner that always produces critical findings
+    class ForceCriticalPlanner(ImprovementPlanner):
+        def build_health_findings(self, plan_eval, recent=None):
+            return [
+                HealthFinding(
+                    finding_id="hf_001",
+                    category="low_grade_execution",
+                    severity="critical",
+                    summary="Forced critical finding for test",
+                    evidence=["test"],
+                ),
+            ]
+
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=_executor_always_valid,
+        improvement_planner=ForceCriticalPlanner(),
+    )
+    plan = _plan(
+        task_id="t_imp_escalate",
+        steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")],
+    )
+    result = orch.run_plan(plan)
+    imp = result["improvement"]
+    assert imp is not None
+    assert imp["executed"] is False
+    assert imp["requires_human_review"] is True
+
+
+def test_improvement_cycle_executes_one_bounded_plan(
+    history_store: SkillHistoryStore, tmp_state: Path, tmp_improvement_dir: Path
+):
+    """Improvement cycle with actionable findings executes exactly one plan."""
+    class ForceHighPlanner(ImprovementPlanner):
+        def build_health_findings(self, plan_eval, recent=None):
+            return [
+                HealthFinding(
+                    finding_id="hf_001",
+                    category="low_grade_execution",
+                    severity="high",
+                    summary="Grade D",
+                    evidence=["score=0.45"],
+                ),
+            ]
+
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=_executor_always_valid,
+        improvement_planner=ForceHighPlanner(),
+    )
+    plan = _plan(
+        task_id="t_imp_one",
+        steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")],
+    )
+    result = orch.run_plan(plan)
+    imp = result["improvement"]
+    assert imp is not None
+    assert imp["executed"] is True
+    assert imp["final_status"] == "done"
+    assert imp["findings_count"] == 1
+    # Exactly one artifact persisted
+    files = list(tmp_improvement_dir.glob("*.json"))
+    assert len(files) == 1
+
+
+def test_improvement_result_includes_evaluation_fields(
+    history_store: SkillHistoryStore, tmp_state: Path, tmp_improvement_dir: Path
+):
+    """Improvement result dict includes evaluation-related fields."""
+    class ForceHighPlanner(ImprovementPlanner):
+        def build_health_findings(self, plan_eval, recent=None):
+            return [
+                HealthFinding(
+                    finding_id="hf_001",
+                    category="low_grade_execution",
+                    severity="high",
+                    summary="Grade D",
+                    evidence=["score=0.45"],
+                ),
+            ]
+
+    orch = Orchestrator(
+        history_store=history_store,
+        step_executor=_executor_always_valid,
+        improvement_planner=ForceHighPlanner(),
+    )
+    plan = _plan(
+        task_id="t_imp_fields",
+        steps=[PlanStep(step_id="s1", skill_name="code_improve", goal="Fix")],
+    )
+    result = orch.run_plan(plan)
+    imp = result["improvement"]
+    assert imp is not None
+    assert "improvement_id" in imp
+    assert "findings_count" in imp
+    assert "executed" in imp
+    assert "final_status" in imp
+    assert "requires_human_review" in imp
+    assert "goals" in imp
+    assert isinstance(imp["goals"], list)

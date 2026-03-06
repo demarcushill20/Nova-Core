@@ -4,6 +4,8 @@ import pytest
 
 from planner.schemas import (
     ExecutionEvaluation,
+    HealthFinding,
+    ImprovementPlan,
     PlanEvaluation,
     PlanStep,
     StepResult,
@@ -373,3 +375,80 @@ def test_followup_includes_plan_id_in_title(sup: Supervisor):
     rec = sup.recommend_followup_from_evaluation(pe)
     assert rec is not None
     assert "plan_abc" in rec["title"]
+
+
+# =============================================================================
+# Phase 6 — review_improvement_plan
+# =============================================================================
+
+
+def _improvement_plan(
+    findings: list[HealthFinding] | None = None,
+    max_steps: int = 2,
+    max_files_changed: int = 3,
+    requires_human_review: bool = False,
+) -> ImprovementPlan:
+    if findings is None:
+        findings = [
+            HealthFinding(
+                finding_id="hf_001",
+                category="low_grade_execution",
+                severity="high",
+                summary="Grade D",
+            )
+        ]
+    return ImprovementPlan(
+        improvement_id="imp_test",
+        findings=findings,
+        max_steps=max_steps,
+        max_files_changed=max_files_changed,
+        requires_human_review=requires_human_review,
+        status="queued",
+    )
+
+
+def test_review_improvement_plan_continue(sup: Supervisor):
+    """Bounded plan with findings → continue."""
+    plan = _improvement_plan()
+    decision = sup.review_improvement_plan(plan)
+    assert decision.action == "continue"
+    assert decision.retry_allowed is False
+
+
+def test_review_improvement_plan_escalate_human_review(sup: Supervisor):
+    """Plan requiring human review → escalate."""
+    plan = _improvement_plan(requires_human_review=True)
+    decision = sup.review_improvement_plan(plan)
+    assert decision.action == "escalate"
+    assert "human review" in decision.reason.lower()
+
+
+def test_review_improvement_plan_fail_no_findings(sup: Supervisor):
+    """Plan with no findings → fail."""
+    plan = _improvement_plan(findings=[])
+    decision = sup.review_improvement_plan(plan)
+    assert decision.action == "fail"
+    assert "no actionable" in decision.reason.lower()
+
+
+def test_review_improvement_plan_escalate_over_step_limit(sup: Supervisor):
+    """Plan exceeding max_steps > 3 → escalate."""
+    plan = _improvement_plan(max_steps=5)
+    decision = sup.review_improvement_plan(plan)
+    assert decision.action == "escalate"
+    assert "step limit" in decision.reason.lower()
+
+
+def test_review_improvement_plan_escalate_over_file_limit(sup: Supervisor):
+    """Plan exceeding max_files_changed > 5 → escalate."""
+    plan = _improvement_plan(max_files_changed=8)
+    decision = sup.review_improvement_plan(plan)
+    assert decision.action == "escalate"
+    assert "file limit" in decision.reason.lower()
+
+
+def test_review_improvement_plan_returns_supervisor_decision(sup: Supervisor):
+    """Return type is SupervisorDecision."""
+    plan = _improvement_plan()
+    decision = sup.review_improvement_plan(plan)
+    assert isinstance(decision, SupervisorDecision)

@@ -15,7 +15,13 @@ Rules:
 
 from __future__ import annotations
 
-from planner.schemas import PlanEvaluation, PlanStep, StepResult, SupervisorDecision
+from planner.schemas import (
+    ImprovementPlan,
+    PlanEvaluation,
+    PlanStep,
+    StepResult,
+    SupervisorDecision,
+)
 
 # Markers for non-retryable runtime anomalies
 _ANOMALY_MARKERS = ("permission denied", "sandbox", "blocked", "timeout")
@@ -158,6 +164,71 @@ class Supervisor:
             }
 
         return None
+
+    def review_improvement_plan(
+        self, plan: ImprovementPlan
+    ) -> SupervisorDecision:
+        """Review an improvement plan and return a supervisor decision.
+
+        Rules (deterministic):
+        - requires_human_review → escalate
+        - max_steps > 3 or max_files_changed > 5 → escalate (exceeds bounds)
+        - no actionable findings → fail
+        - otherwise → continue
+        """
+        if plan.requires_human_review:
+            return SupervisorDecision(
+                action="escalate",
+                reason="Improvement plan requires human review",
+                retry_allowed=False,
+            )
+
+        if plan.max_steps > 3:
+            return SupervisorDecision(
+                action="escalate",
+                reason=f"Improvement plan exceeds step limit: {plan.max_steps} > 3",
+                retry_allowed=False,
+            )
+
+        if plan.max_files_changed > 5:
+            return SupervisorDecision(
+                action="escalate",
+                reason=f"Improvement plan exceeds file limit: {plan.max_files_changed} > 5",
+                retry_allowed=False,
+            )
+
+        if not plan.findings:
+            return SupervisorDecision(
+                action="fail",
+                reason="Improvement plan has no actionable findings",
+                retry_allowed=False,
+            )
+
+        return SupervisorDecision(
+            action="continue",
+            reason="Improvement plan approved for bounded execution",
+            retry_allowed=False,
+        )
+
+    def approve_improvement(self, plan: ImprovementPlan) -> bool:
+        """Gate an improvement plan before execution.
+
+        Deterministic approval rules:
+        - requires_human_review → False (must be manually approved)
+        - max_steps > 3 → False (exceeds safety bound)
+        - max_files_changed > 5 → False (exceeds safety bound)
+        - no findings → False (nothing to improve)
+        - otherwise → True
+        """
+        if plan.requires_human_review:
+            return False
+        if plan.max_steps > 3:
+            return False
+        if plan.max_files_changed > 5:
+            return False
+        if not plan.findings:
+            return False
+        return True
 
     def _escalation_reason(self, result: StepResult) -> str:
         """Build an escalation reason from the result."""

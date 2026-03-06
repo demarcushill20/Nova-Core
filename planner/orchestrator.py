@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from planner.evaluator import Evaluator
+from planner.improvement_planner import ImprovementPlanner
 from planner.schemas import (
     ExecutionEvaluation,
     ExecutionPlan,
+    ImprovementResult,
     PlanStep,
     StepResult,
     SupervisorDecision,
@@ -43,10 +45,12 @@ class Orchestrator:
         supervisor: Supervisor | None = None,
         history_store: SkillHistoryStore | None = None,
         step_executor: StepExecutor | None = None,
+        improvement_planner: ImprovementPlanner | None = None,
     ):
         self.supervisor = supervisor or Supervisor()
         self.history_store = history_store or SkillHistoryStore()
         self._step_executor = step_executor
+        self.improvement_planner = improvement_planner or ImprovementPlanner()
 
     # -- public API -----------------------------------------------------------
 
@@ -133,6 +137,9 @@ class Orchestrator:
             plan, step_results, decisions, step_durations, evaluation_data
         )
 
+        # Phase 6: bounded self-improvement cycle
+        improvement_data = self._run_improvement_cycle(plan_eval)
+
         return {
             "plan_id": plan.plan_id,
             "task_id": plan.task_id,
@@ -141,6 +148,7 @@ class Orchestrator:
             "decisions": decisions,
             "step_durations": step_durations,
             "evaluation": evaluation_data,
+            "improvement": improvement_data,
         }
 
     def run_step(self, step: PlanStep) -> StepResult:
@@ -187,6 +195,82 @@ class Orchestrator:
         tmp.write_text(json.dumps(snapshot, indent=2))
         tmp.replace(path)
         logger.debug("Saved plan state to %s", path)
+
+    # -- improvement cycle -----------------------------------------------------
+
+    def _run_improvement_cycle(
+        self,
+        plan_eval: "PlanEvaluation",
+        recent_plan_states: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """Run a single bounded self-improvement cycle.
+
+        Returns improvement data dict, or None if no improvement needed.
+        This is non-recursive — exactly one cycle per plan execution.
+        """
+        ip = self.improvement_planner
+
+        # 1. Build health findings
+        findings = ip.build_health_findings(plan_eval, recent_plan_states)
+        if not findings:
+            return None
+
+        # 2. Build bounded improvement plan
+        improvement_plan = ip.build_improvement_plan(
+            findings, source_plan_id=plan_eval.plan_id
+        )
+
+        # 3. Gate execution
+        should_run = ip.should_execute(improvement_plan)
+
+        if should_run:
+            # Ask supervisor for structured review
+            review = self.supervisor.review_improvement_plan(improvement_plan)
+            if review.action != "continue":
+                should_run = False
+
+        # 4. Build result
+        if should_run:
+            improvement_plan.status = "executed"
+            result = ImprovementResult(
+                improvement_id=improvement_plan.improvement_id,
+                executed=True,
+                final_status="done",
+                evaluation_grade=plan_eval.grade,
+                evaluation_score=plan_eval.aggregate_score,
+                followup_recommended=plan_eval.followup_recommended,
+                notes=[f.summary for f in findings],
+            )
+        else:
+            reason = "human_review_required" if improvement_plan.requires_human_review else "not_approved"
+            if not findings:
+                reason = "no_findings"
+            if improvement_plan.status == "skipped":
+                reason = "skipped"
+            improvement_plan.status = improvement_plan.status if improvement_plan.status != "queued" else "blocked"
+            result = ImprovementResult(
+                improvement_id=improvement_plan.improvement_id,
+                executed=False,
+                final_status=reason,
+                notes=[f.summary for f in findings],
+            )
+
+        # 5. Persist
+        ip.persist_improvement_run(improvement_plan, result)
+
+        logger.info(
+            "Improvement cycle for plan %s: executed=%s, status=%s",
+            plan_eval.plan_id, result.executed, result.final_status,
+        )
+
+        return {
+            "improvement_id": improvement_plan.improvement_id,
+            "findings_count": len(findings),
+            "executed": result.executed,
+            "final_status": result.final_status,
+            "requires_human_review": improvement_plan.requires_human_review,
+            "goals": improvement_plan.goals,
+        }
 
     # -- internal -------------------------------------------------------------
 
