@@ -4,6 +4,115 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-06 (Session 16) — Phase 5.2 Planner/Orchestrator Upgrade
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Full implementation of the Phase 5.2 planner/orchestrator subsystem with exact spec conformance. The system introduces 4-component deterministic skill scoring, persistent skill usage history, execution plan building with multi-skill chain rules, a supervisor decision engine, and a sequential orchestrator with retry logic and contract validation.
+
+#### planner/schemas.py — Exact Data Shapes
+
+Six spec-conformant dataclasses:
+
+- **TaskIntent**: `task_id`, `goal`, `source`, `priority="normal"`, `constraints=[]`, `context={}`
+- **SkillScore**: 4-component breakdown — `semantic_match`, `activation_rules`, `recency`, `success_rate`, `total_score`, `reasons[]`
+- **PlanStep**: `step_id`, `skill_name`, `goal`, `inputs={}`, `status="queued"`
+- **ExecutionPlan**: `plan_id`, `task_id`, `strategy`, `steps[]`, `success_criteria[]`, `status="queued"`
+- **StepResult**: `step_id`, `status`, `output_path`, `contract_valid`, `validation_errors[]`, `retry_count`
+- **SupervisorDecision**: `action` (continue|retry|escalate|fail), `reason`, `retry_allowed`
+
+#### planner/skill_history.py — SkillHistoryStore
+
+- Persistent store at `STATE/skill_usage_history.json` with exact JSON shape: `runs`, `successes`, `failures`, `avg_duration_ms`, `last_used_ts` (ISO-8601), `total_retries`
+- Methods: `load()`, `save(data)`, `record_run(skill_name, success, duration_ms, retries)`, `get_stats()`, `get_recency_score()` (exponential decay, 24h half-life), `get_success_rate()`
+- Tolerates empty/corrupt JSON files, creates parent directories on write
+
+#### planner/skill_scorer.py — 4-Component Deterministic Scoring
+
+- Formula: `score = semantic_match(0-0.4) + activation_rules(0-0.2) + recency(0-0.2) + success_rate(0-0.2)`
+- `score_skill(intent, skill_meta, history_store)` — scores one skill, returns SkillScore with all components
+- `rank_skills(intent, skills_catalog, history_store)` — scores all skills, filters zero-signal, sorts descending
+- `DEFAULT_SKILLS_CATALOG`: 8 skills (log_triage, code_improve, service_ops, system_supervisor, task_execution, file_ops, shell_ops, web_research)
+- No embeddings — deterministic word overlap and keyword substring matching only
+
+#### planner/plan_builder.py — Intent Parsing + Plan Generation
+
+- `build_intent(task_id, raw_text, source)` — creates TaskIntent with `goal=raw_text`
+- `build_plan(intent, ranked_skills)` — applies chain rules then falls back to top-ranked single skill
+- Chain rules: diagnose→(log_triage→code_improve→system_supervisor), fix→(code_improve→system_supervisor), service→(service_ops→system_supervisor)
+
+#### planner/supervisor.py — Decision Engine
+
+- `evaluate_step(step, result)` → SupervisorDecision with `retry_allowed` field
+- Rules: contract_valid=True→continue, invalid+retries<2→retry, retries exhausted→escalate, anomaly markers→escalate (no retry)
+- Anomaly markers: permission denied, sandbox, blocked, timeout
+- `generate_followup_task(result)` — separate method returning improvement task dict on failure
+- `should_retry(result)`, `build_retry_reason(result)` — helper methods
+
+#### planner/orchestrator.py — Sequential Plan Execution
+
+- Constructor: `Orchestrator(supervisor, history_store, step_executor)`
+- `run_plan(plan)` — executes steps sequentially with supervisor evaluation after each
+- `_execute_with_supervision(step)` — retry loop (up to 2 retries), tracks retry_count on StepResult
+- `_run_with_executor(step)` — pluggable step executor with contract validation via `contracts_validate()`
+- `save_plan_state()` — atomic JSON persistence to `STATE/plans/<plan_id>.json`
+- History recording via `history_store.record_run()` after each step
+
+#### tools/adapters/contracts_validate.py — Contract Validation
+
+- Validates `## CONTRACT` blocks with required fields: summary, files_changed, verification, confidence
+- Returns structured result: `ok`, `valid`, `found_contract`, `fields`, `missing_fields`, `errors`
+
+#### Test suites — 137 Phase 5.2 tests (391 total)
+
+- **test_skill_history.py** (23 tests): File creation, record success/failure, success rates, recency scores, persistence, corrupt file tolerance, exact JSON shape
+- **test_skill_scorer.py** (20 tests): Semantic match ranking, activation keyword boost, success rate weighting, recency weighting, stable sort, component caps (0.4, 0.2, 0.2, 0.2), total equals sum
+- **test_plan_builder.py** (17 tests): Single-skill plans, multi-skill chain rules, fallback to top-ranked, empty plan, plan IDs, success criteria, build_intent fields, step inputs
+- **test_supervisor.py** (26 tests): Continue on valid contract, retry under limit, escalate on retries exhausted, anomaly escalation (permission denied, sandbox, timeout, blocked), followup task generation, should_retry, build_retry_reason, decision shape
+- **test_orchestrator.py** (31 tests): Sequential execution, plan state persistence, step result shape, decision shape, retry path, supervisor continue/escalate paths, history recording, contract validation via executor, retry counts, multi-step with mixed retries
+- **test_contracts_validate.py** (20 tests): Valid/missing/partial contracts, malformed headers, extra text, duplicate blocks, empty values, runner dispatch, JSON shape
+
+### Architecture
+
+```
+Telegram/Input → PlanBuilder.build_intent()
+              → SkillScorer.rank_skills(intent, catalog, history_store)
+              → PlanBuilder.build_plan(intent, ranked_skills)
+              → Orchestrator.run_plan(plan)
+                → run_step() → contracts_validate() → Supervisor.evaluate_step()
+                → SkillHistoryStore.record_run()
+                → save_plan_state()
+```
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `planner/__init__.py` | **CREATED** | Package init |
+| `planner/schemas.py` | **CREATED** | 6 spec-conformant dataclasses |
+| `planner/skill_history.py` | **CREATED** | SkillHistoryStore with exact JSON shape |
+| `planner/skill_scorer.py` | **CREATED** | 4-component deterministic scoring |
+| `planner/plan_builder.py` | **CREATED** | Intent parsing + chain rules |
+| `planner/supervisor.py` | **CREATED** | Supervisor decision engine |
+| `planner/orchestrator.py` | **CREATED** | Sequential plan executor with retries |
+| `tools/adapters/contracts_validate.py` | **CREATED** | Contract validation adapter |
+| `tests/test_skill_history.py` | **CREATED** | 23 tests |
+| `tests/test_skill_scorer.py` | **CREATED** | 20 tests |
+| `tests/test_plan_builder.py` | **CREATED** | 17 tests |
+| `tests/test_supervisor.py` | **CREATED** | 26 tests |
+| `tests/test_orchestrator.py` | **CREATED** | 31 tests |
+| `tests/test_contracts_validate.py` | **CREATED** | 20 tests |
+
+### Test results
+
+```
+391 passed, 0 failed (0.83s)
+```
+
+---
+
 ## 2026-03-06 (Session 15) — repo.diff & repo.search Semantic Tools
 
 **Session span:** Mar 6 UTC

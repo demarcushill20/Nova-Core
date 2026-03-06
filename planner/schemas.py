@@ -1,0 +1,78 @@
+"""Data classes for the NovaCore planner subsystem.
+
+Exact field shapes per Phase 5.2 specification.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class TaskIntent:
+    """Parsed intent extracted from a raw task description."""
+
+    task_id: str
+    goal: str
+    source: str
+    priority: str = "normal"
+    constraints: list[str] = field(default_factory=list)
+    context: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SkillScore:
+    """A skill's relevance score with 4-component breakdown."""
+
+    skill_name: str
+    semantic_match: float
+    activation_rules: float
+    recency: float
+    success_rate: float
+    total_score: float
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PlanStep:
+    """One step in an execution plan."""
+
+    step_id: str
+    skill_name: str
+    goal: str
+    inputs: dict[str, Any] = field(default_factory=dict)
+    status: str = "queued"
+
+
+@dataclass
+class ExecutionPlan:
+    """A complete execution plan for a task."""
+
+    plan_id: str
+    task_id: str
+    strategy: str
+    steps: list[PlanStep]
+    success_criteria: list[str]
+    status: str = "queued"
+
+
+@dataclass
+class StepResult:
+    """Result of executing a single plan step."""
+
+    step_id: str
+    status: str
+    output_path: str | None = None
+    contract_valid: bool | None = None
+    validation_errors: list[str] = field(default_factory=list)
+    retry_count: int = 0
+
+
+@dataclass
+class SupervisorDecision:
+    """Decision made by the supervisor after evaluating a step result."""
+
+    action: str  # continue | retry | escalate | fail
+    reason: str
+    retry_allowed: bool
