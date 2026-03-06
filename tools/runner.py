@@ -283,6 +283,8 @@ def run_tool(
             func = lambda: _run_repo_git_commit(args, sandbox)
         elif tool_name == "logs.tail":
             func = lambda: _run_logs_tail(args, sandbox)
+        elif tool_name == "repo.files.read":
+            func = lambda: _run_repo_files_read(args, sandbox)
         elif tool_name == "contracts.validate":
             func = lambda: _run_contracts_validate(args)
         elif tool_name.startswith("files."):
@@ -433,6 +435,16 @@ def _run_logs_tail(args: dict, sandbox: Path) -> dict:
     return logs_tail(
         service=args.get("service", ""),
         lines=args.get("lines", 200),
+        sandbox=sandbox,
+    )
+
+
+def _run_repo_files_read(args: dict, sandbox: Path) -> dict:
+    """Execute repo.files.read via the adapter."""
+    from tools.adapters.repo_files import repo_read
+    return repo_read(
+        path=args.get("path", ""),
+        max_bytes=args.get("max_bytes", 200_000),
         sandbox=sandbox,
     )
 

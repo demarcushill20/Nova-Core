@@ -320,6 +320,34 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "repo.files.read": {
+      "description": "Read a file inside the repo sandbox with structured output. Safe, sandboxed, read-only.",
+      "args_schema": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Relative path within the repo (e.g. 'TASKS/0001_bootstrap.md')."
+        },
+        "max_bytes": {
+          "type": "integer",
+          "required": false,
+          "description": "Maximum bytes to read. Default: 200000. Clamped to 1024–500000."
+        }
+      },
+      "returns": {
+        "ok": "boolean — true if file was read successfully",
+        "path": "string — resolved absolute path",
+        "bytes": "integer — total file size in bytes",
+        "truncated": "boolean — true if content was truncated to max_bytes",
+        "content": "string — file content (UTF-8 decoded with replacement)"
+      },
+      "safety": [
+        "Read-only operation. Does not modify any files.",
+        "Path must resolve within sandbox_root. Rejects traversal (../) that escapes.",
+        "Absolute paths outside sandbox are rejected.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {
