@@ -4,6 +4,112 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 22) — Phase 7 Multi-Agent Orchestration System
+
+**Session span:** Mar 7 UTC
+
+### What was done
+
+Built the complete Phase 7 multi-agent orchestration substrate — a hierarchical orchestrator-worker system with blackboard state, lease-based coordination, critic/verifier review gates, centralized policy engine, and feature-flag-gated routing from the watcher. Architecture derived from OpenClaw research analysis.
+
+#### Agent Infrastructure (agents/ directory) — NEW
+
+##### Blackboard (`agents/blackboard.py`)
+- File-based (JSON) central state management for multi-agent coordination
+- Atomic write-to-tmp + rename persistence pattern
+- Managed paths: delegations, agent runtime state, workflows, messages (append-only JSONL), child contracts, budgets
+- Data models: `AgentRuntimeState`, `Delegation`, `WorkflowState`, `ChildContract`
+
+##### Coordination (`agents/coordination.py`)
+- Lease-based node claiming to prevent duplicate execution of subtasks
+- `Lease` model with TTL-based expiration and stale lease recovery
+- Resume/recovery: reconstruct full workflow state after crash
+- Dependency resolution for ready-node identification
+- Checkpoint save/restore for orchestrator progress
+- Coordinated claiming: atomically acquires lease + updates state + updates delegation
+
+##### Critic (`agents/critic.py`)
+- Structured review engine for blocking objections and non-blocking concerns
+- Models: `CriticIssue` (severity levels), `CriticReview` (verdict: pass/objection/needs_revision), `ReplanSignal`
+- Contract validation, deliverable existence checks, actionable remediation hints
+- Auto-emits `ReplanSignal` on objection verdict; persists to STATE/reviews/ and STATE/replans/
+
+##### Verifier (`agents/verifier.py`)
+- Final gate before workflow completion — validates all outputs
+- Checks: artifact existence + non-zero size, contract field validation, maker-checker enforcement, confidence validation
+- Models: `VerificationCheck`, `VerificationReport` (verdict: approved/rejected/incomplete)
+- Persists to STATE/verifications/
+
+##### Workflow Gate (`agents/workflow_gate.py`)
+- Integration layer between orchestrator and critic/verifier
+- `run_critic_review()`, `check_replan_signals()`, `gate_completion()`, `is_completion_allowed()`
+- `RerouteDecision`: maps critic objections to orchestrator actions (retry/reassign/halt)
+
+##### Policy Engine (`agents/policy_engine.py`)
+- Centralized tool access control for all agents
+- Check order: agent exists → allowed_tools → denied_tools → budget → risk class
+- Pattern matching (wildcard suffix), budget checks (max_actions, max_runtime, max_retries)
+- Mutation tools requiring maker-checker: repo.files.write, repo.files.patch, repo.git.commit, shell.run
+
+##### Workflow Engine (`agents/workflow_engine.py`)
+- Orchestrator-facing engine for workflow lifecycle (create → delegate → monitor → synthesize)
+- Phase 7.1 hard limits: max 4 concurrent agents, max spawn depth 1, max 1 retry, 30-min runtime, max 2 memory writes
+- Deterministic halt codes: HALT_BUDGET_EXHAUSTED, HALT_VERIFIER_REJECTED, HALT_DEPENDENCY_LOOP, HALT_CONTRACT_TIMEOUT, HALT_POLICY_VIOLATION, HALT_UNAUTHORIZED_SPAWN, HALT_CRITIC_BLOCKED
+- Two synthesis paths: `synthesize_workflow()` (ungoverned) and `governed_synthesize()` (verifier + maker-checker required)
+
+##### Workflow Graph (`agents/workflow_graph.py`)
+- DAG visualization and rendering of multi-agent workflows
+- Graph builder reads blackboard state (workflows, delegations, contracts, agent states, coordination node_states)
+- Three renderers: `render_markdown()` (table), `render_json()` (machine-parseable), `render_ascii_tree()` (terminal-friendly)
+
+#### Agent Configurations (AGENTS/ directory) — NEW
+
+Seven agent roles with explicit policies:
+- **Orchestrator** (`orchestrator_control`): deterministic DAG execution, spawn specialists, enforce budgets
+- **Planner** (`planner_readonly`): decompose tasks into DAG with dependency maps, read-only
+- **Coder** (`coder_scoped_write`): bounded code implementation, read-before-write, minimal diffs
+- **Critic** (`critic_readonly`): independent review engine, maker-checker "checker" role
+- **Verifier** (`verifier_readonly`): final gate validation, checkpoint verification
+- **Research** (`research_safe`): evidence-focused information gathering, tool escalation chain
+- **Memory** (`memory_scoped_write`): persistent knowledge management, MEMORY/ scoped writes only
+
+#### Task Classifier (`tools/task_classifier.py`) — NEW
+- Classifies tasks into 6 categories via keyword matching: research, code_impl, code_review, system, simple, unknown
+- `should_use_orchestrator()`: feature-flag-gated routing decision
+- `classify_and_route()`: full routing pipeline with fallback reasons
+- Feature flags in STATE/config/feature_flags.json
+
+#### Orchestrator Adapter (`tools/orchestrator_adapter.py`) — NEW
+- Bridge between watcher task dispatch and Phase 7 orchestrator pipeline
+- `build_plan_from_task()`: task text → ExecutionPlan via classifier
+- Class-specific step generation (research, code_impl, code_review, system, simple)
+- Claude subprocess execution of plan steps
+- Output: watcher-compatible markdown with ## CONTRACT block
+- Routing audit logged to LOGS/routing_audit.log
+
+#### Watcher Integration (`watcher.py`)
+- Added task classification and routing before skill activation
+- Orchestrator path: classify → route → execute_via_orchestrator → verify_artifacts → lifecycle rename
+- Fallback to direct worker dispatch on orchestrator error (configurable via feature flag)
+
+#### Tests
+- `tests/test_coordination.py`: 20+ tests — lease acquisition/release/renewal, lock contention, stale recovery, dependency resolution, checkpoint save/restore, workflow recovery
+- `tests/test_phase7_critic_verifier.py`: 30+ tests — critic reviews, blocking objections, replan signals, verifier artifact/contract checks, maker-checker enforcement, workflow gate integration
+- `tests/test_workflow_graph.py`: 15+ tests — graph building from blackboard, node hierarchy, markdown/JSON/ASCII rendering, status icons, coordination state surfacing
+
+### Files changed
+
+- New: `agents/blackboard.py`, `agents/coordination.py`, `agents/critic.py`, `agents/verifier.py`, `agents/workflow_gate.py`, `agents/policy_engine.py`, `agents/workflow_engine.py`, `agents/workflow_graph.py`
+- New: `AGENTS/orchestrator/AGENT.md`, `AGENTS/planner/AGENT.md`, `AGENTS/coder/AGENT.md`, `AGENTS/critic/AGENT.md`, `AGENTS/verifier/AGENT.md`, `AGENTS/research/AGENT.md`, `AGENTS/memory/AGENT.md`
+- New: `tools/task_classifier.py`, `tools/orchestrator_adapter.py`
+- New: `tests/test_coordination.py`, `tests/test_phase7_critic_verifier.py`, `tests/test_workflow_graph.py`
+- New: `MEMORY/agent_patterns/`, `MEMORY/workflow_learnings/`
+- Modified: `watcher.py`
+
+**Total tests passing: 706**
+
+---
+
 ## 2026-03-07 (Session 21) — PDF Generation Tool + Telegram File Delivery
 
 **Session span:** Mar 7 UTC

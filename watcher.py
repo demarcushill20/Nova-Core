@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tools.contracts import validate_contract
 from tools.skills import load_skills, select_skills, render_append_prompt
+from tools.task_classifier import classify_and_route
 
 # --- Configuration ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -555,6 +556,44 @@ def dispatch(task_path: Path):
     except Exception as exc:
         logger.warning("Could not read task file for skill selection: %s", exc)
         task_text = ""
+
+    # --- Task classification & routing ---
+    routing = classify_and_route(task_text)
+    logger.info(
+        "ROUTING: class=%s confidence=%.2f orchestrator=%s reason=%s",
+        routing["task_class"],
+        routing["confidence"],
+        routing["use_orchestrator"],
+        routing.get("fallback_reason", "routed_to_orchestrator"),
+    )
+
+    if routing["use_orchestrator"]:
+        logger.info("ORCHESTRATOR PATH: %s (class=%s)", stem, routing["task_class"])
+        try:
+            from tools.orchestrator_adapter import execute_via_orchestrator
+            orch_result = execute_via_orchestrator(stem, task_text, inprogress_path)
+            # Verify artifacts using standard gate
+            passed, messages = verify_artifacts(stem)
+            for msg in messages:
+                logger.info("VERIFY: %s", msg)
+            if passed:
+                done_path = inprogress_path.with_name(f"{stem}.md.done")
+                inprogress_path.rename(done_path)
+                logger.info("TASK SUCCEEDED (orchestrator): %s → %s", stem, done_path.name)
+            else:
+                failed_path = inprogress_path.with_name(f"{stem}.md.failed")
+                inprogress_path.rename(failed_path)
+                logger.warning("TASK FAILED (orchestrator): %s → %s", stem, failed_path.name)
+            return
+        except Exception as exc:
+            logger.error("ORCHESTRATOR ERROR for %s: %s — falling back to worker", stem, exc)
+            if routing["feature_flags"].get("fallback_to_worker", True):
+                logger.info("FALLBACK: %s → direct worker dispatch", stem)
+            else:
+                failed_path = inprogress_path.with_name(f"{stem}.md.failed")
+                inprogress_path.rename(failed_path)
+                logger.error("TASK FAILED (no fallback): %s", stem)
+                return
 
     # --- Skill activation ---
     all_skills = load_skills()
