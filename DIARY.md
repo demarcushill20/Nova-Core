@@ -4,6 +4,60 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 26) — Phase 7 Full Integration & Failure Simulation Suite
+
+**Session span:** Mar 7 UTC
+
+### What was built
+
+End-to-end validation and adversarial testing for the Phase 7 multi-agent orchestration system. Two comprehensive test files covering 88 new tests across 25 test classes.
+
+1. **Integration test suite** — `tests/test_phase7_integration.py` (24 tests, 10 classes)
+   - Full governed workflow lifecycle: create → delegate → claim → complete → critic → verifier → synthesize → memory
+   - Multi-delegation dependency ordering and parallel execution
+   - Maker-checker enforcement for repo-changing actions
+   - Feature flag fail-closed behavior (missing, corrupt, non-boolean)
+   - Observability metrics, health detection, heartbeat file generation
+   - Coordination layer: lease exclusivity, node completion, resume/recovery
+   - Workflow graph tree rendering with delegation children
+   - Memory capture and keyword-based retrieval
+   - Concurrent agent limits (max 4) and budget exhaustion halt
+
+2. **Failure simulation suite** — `tests/test_phase7_failure_simulation.py` (64 tests, 15 classes)
+   - Child contract missing/empty/whitespace fields → rejection
+   - Verifier rejection blocks synthesis; double rejection halts workflow
+   - Critic objection → replan signal → reroute decision pipeline
+   - Stale lease takeover, max retry exhaustion, recovery reset
+   - Orphaned agent/lease detection via observability
+   - Dependency wait timeout warnings
+   - Policy denial anti-bypass: 10 tests proving role restrictions hold
+   - Budget exhaustion denial + near-exhaustion warnings
+   - Malformed memory artifacts (missing fields, invalid values, oversized, duplicate)
+   - Restart recovery: stale workflows, executing nodes, inprogress tasks, expired leases
+   - Archive cleanup: threshold-based archival, tmp cleanup, active workflow protection
+   - Feature flag fail-closed for all edge cases
+   - Maker-checker anti-bypass: 4 tests proving delegation cannot circumvent critic
+   - Rate limiting: within/exceed/expiry behavior
+   - Approval gate: disabled/enabled/timeout states
+
+3. **Rollout readiness report** — `WORK/phase7_rollout_readiness_report.md`
+   - All 129 Phase 7 tests passing (24 integration + 64 failure + 41 existing)
+   - Verdict: Conditionally ready — one schema gap to resolve
+   - 3 risks identified with mitigations
+   - 3-tier rollout recommendation by task class
+
+### Key finding
+
+ChildContract dataclass lacks `files_changed` and `confidence` top-level fields that `validate_contract_fields()` requires. Tests bridge this with `_enrich_child_contracts()` helper. Documented as RISK-1 in rollout readiness report.
+
+### Outputs
+- `tests/test_phase7_integration.py` — 24 end-to-end integration tests
+- `tests/test_phase7_failure_simulation.py` — 64 failure simulation tests
+- `WORK/phase7_integration_failure_simulation_summary.md` — full test summary
+- `WORK/phase7_rollout_readiness_report.md` — rollout readiness assessment
+
+---
+
 ## 2026-03-07 (Session 25) — Playwright CLI Integration
 
 **Session span:** Mar 7 UTC
