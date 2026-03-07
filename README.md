@@ -155,7 +155,7 @@ EOF
 
 ### Claude Skills (`.claude/skills/`)
 
-Five SKILL.md files define operational discipline for the Claude agent:
+Six SKILL.md files define operational discipline for the Claude agent:
 
 | Skill | File | Purpose |
 |---|---|---|
@@ -164,10 +164,11 @@ Five SKILL.md files define operational discipline for the Claude agent:
 | **shell-ops** | `.claude/skills/shell-ops/SKILL.md` | Safe shell execution; denylist for destructive commands; 120s default timeout |
 | **git-ops** | `.claude/skills/git-ops/SKILL.md` | Allowlisted git subcommands; no force-push or hard-reset without approval |
 | **self-verification** | `.claude/skills/self-verification/SKILL.md` | Health checks: required dirs, orphaned tasks, output matching, log freshness, CLAUDE.md |
+| **generate-pdf-report** | `SKILLS/generate_pdf_report/SKILL.md` | Generate PDF from markdown/text via reportlab and deliver via Telegram Bot API |
 
 ### Tools Registry
 
-`STATE/tools_registry.json` defines six registered tools:
+`tools/tools_registry.json` defines 20 registered tools:
 
 | Tool | Description |
 |---|---|
@@ -177,6 +178,20 @@ Five SKILL.md files define operational discipline for the Claude agent:
 | `files.diff` | Unified diff between two files or file vs string |
 | `shell.run` | Execute shell commands with safety enforcement |
 | `git.run` | Run allowlisted git subcommands |
+| `logs.tail` | Tail log files within the sandbox |
+| `contracts.validate` | Validate output contract fields |
+| `repo.files.read` | Read repo files with sandbox enforcement |
+| `repo.files.write` | Write repo files with sandbox enforcement |
+| `repo.files.patch` | Apply patches to repo files |
+| `repo.diff` | Diff between two files or file vs string |
+| `repo.search` | Search file contents via regex |
+| `repo.git.status` | Git status within the sandbox repo |
+| `repo.git.diff` | Git diff within the sandbox repo |
+| `repo.git.commit` | Git commit within the sandbox repo |
+| `system.service.status` | Check systemd service status |
+| `system.service.restart` | Restart a systemd service |
+| `pdf.generate` | Generate a PDF from markdown/plain text |
+| `telegram.send_file` | Send a file to Telegram via Bot API |
 
 Registry settings:
 - `sandbox_root`: `~/nova-core` — all paths must resolve within this boundary
@@ -211,6 +226,8 @@ Central execution engine. All tool calls pass through `run_tool()`.
 
 - `tools/registry.py` — `load_registry()`, `get_tool()`, `resolve_sandbox_root()`, `resolve_audit_log()`, `validate_registry()`
 - `tools/files.py` — `read_text()`, `write_text()`, `list_glob()`, `unified_diff()`, `dispatch_files_tool()`; binary detection via NUL-byte check in first 8 KB
+- `tools/adapters/pdf_generate.py` — PDF generation from markdown/text via reportlab; path traversal protection, post-write verification
+- `tools/adapters/telegram_send_file.py` — Send files to Telegram via Bot API; sandbox enforcement, credential handling from env vars
 
 ---
 

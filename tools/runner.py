@@ -293,6 +293,10 @@ def run_tool(
             func = lambda: _run_repo_files_write(args, sandbox)
         elif tool_name == "repo.files.patch":
             func = lambda: _run_repo_files_patch(args, sandbox)
+        elif tool_name == "pdf.generate":
+            func = lambda: _run_pdf_generate(args, sandbox)
+        elif tool_name == "telegram.send_file":
+            func = lambda: _run_telegram_send_file(args, sandbox)
         elif tool_name == "contracts.validate":
             func = lambda: _run_contracts_validate(args)
         elif tool_name.startswith("files."):
@@ -504,6 +508,26 @@ def _run_repo_search(args: dict, sandbox: Path) -> dict:
         query=args.get("query", ""),
         path=args.get("path"),
         max_results=args.get("max_results", 50),
+        _sandbox=sandbox,
+    )
+
+
+def _run_pdf_generate(args: dict, sandbox: Path) -> dict:
+    """Execute pdf.generate via the adapter."""
+    from tools.adapters.pdf_generate import pdf_generate
+    return pdf_generate(
+        content=args.get("content", ""),
+        filename=args.get("filename", ""),
+        _sandbox=sandbox,
+    )
+
+
+def _run_telegram_send_file(args: dict, sandbox: Path) -> dict:
+    """Execute telegram.send_file via the adapter."""
+    from tools.adapters.telegram_send_file import telegram_send_file
+    return telegram_send_file(
+        path=args.get("path", ""),
+        caption=args.get("caption", ""),
         _sandbox=sandbox,
     )
 

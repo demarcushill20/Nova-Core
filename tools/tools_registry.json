@@ -481,6 +481,61 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "pdf.generate": {
+      "description": "Generate a PDF file from markdown or plain text. Writes to OUTPUT/ within the sandbox.",
+      "args_schema": {
+        "content": {
+          "type": "string",
+          "required": true,
+          "description": "Markdown or plain text content to render as PDF."
+        },
+        "filename": {
+          "type": "string",
+          "required": true,
+          "description": "Output filename (e.g. 'report.pdf'). Written to OUTPUT/."
+        }
+      },
+      "returns": {
+        "ok": "boolean — true if PDF was generated and verified",
+        "path": "string — sandbox-relative path to generated PDF (e.g. OUTPUT/report.pdf)",
+        "size_bytes": "integer — file size in bytes",
+        "verified": "boolean — true if post-write verification passed"
+      },
+      "safety": [
+        "Output path is always within OUTPUT/ directory.",
+        "Filename is sanitized — path separators stripped to prevent traversal.",
+        "Uses deterministic reportlab library — no shell execution.",
+        "All invocations are logged to audit_log."
+      ]
+    },
+    "telegram.send_file": {
+      "description": "Send a file to Telegram via the Bot API. Uses existing bot configuration from environment.",
+      "args_schema": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Relative or absolute path to the file (must be within sandbox)."
+        },
+        "caption": {
+          "type": "string",
+          "required": false,
+          "description": "Optional caption for the file message (max 1024 chars)."
+        }
+      },
+      "returns": {
+        "ok": "boolean — true if file was sent successfully",
+        "file_sent": "boolean — true if Telegram accepted the file",
+        "telegram_message_id": "string — Telegram message ID of the sent document",
+        "path": "string — the file path that was sent"
+      },
+      "safety": [
+        "File path must resolve within sandbox_root.",
+        "Uses TELEGRAM_BOT_TOKEN and ALLOWED_CHAT_ID from environment — tokens never logged.",
+        "File is verified to exist before upload attempt.",
+        "Caption is truncated to Telegram's 1024-character limit.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {

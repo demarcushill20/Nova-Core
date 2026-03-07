@@ -4,6 +4,60 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 21) — PDF Generation Tool + Telegram File Delivery
+
+**Session span:** Mar 7 UTC
+
+### What was done
+
+Added two new semantic tools (`pdf.generate`, `telegram.send_file`), their adapter implementations, a new skill (`generate-pdf-report`), full test suites, and updated the README to reflect the current state of the project (20 registered tools, 6 skills).
+
+#### PDF Generator (`tools/adapters/pdf_generate.py`) — NEW
+- Converts markdown/plain text to PDF using reportlab (deterministic — no shell execution)
+- `_markdown_to_paragraphs()`: parses headings (H1–H3), bold/italic/code inline markup, bullet/numbered lists, horizontal rules, paragraph grouping
+- `_inline_markup()`: XML-safe conversion of `**bold**`, `*italic*`, `` `code` `` to reportlab XML tags
+- Path traversal protection: filename sanitized via `Path(filename).name`
+- Auto-adds `.pdf` extension if missing
+- Post-write verification: confirms file exists with non-zero size
+- Always writes to `OUTPUT/` within the sandbox
+
+#### Telegram File Sender (`tools/adapters/telegram_send_file.py`) — NEW
+- Sends files to Telegram via Bot API `sendDocument` endpoint
+- Sandbox enforcement: file path must resolve within sandbox root
+- Credentials from environment (`TELEGRAM_BOT_TOKEN`, `ALLOWED_CHAT_ID`) — tokens never logged
+- Caption truncation to Telegram's 1024-character limit
+- Uses httpx with 60s timeout
+- Structured error responses for: missing credentials, file not found, sandbox escape, API errors
+
+#### Runner integration (`tools/runner.py`)
+- Added `pdf.generate` and `telegram.send_file` dispatch entries
+- Lazy imports via adapter pattern (same as existing tools)
+
+#### Registry (`tools/tools_registry.json`)
+- Added `pdf.generate` with full args schema, returns, and safety documentation
+- Added `telegram.send_file` with args schema, returns, and safety notes
+
+#### Skill: generate-pdf-report (`SKILLS/generate_pdf_report/SKILL.md`) — NEW
+- 6-step workflow: prepare content → generate PDF → verify → send Telegram → validate contract → emit contract
+- Confidence scoring: high (both steps confirmed), medium (PDF ok, Telegram failed), low (generation failed)
+- Failure handling for: empty content, generation errors, missing credentials, delivery failures
+
+#### Tests
+- `tests/test_pdf_generate.py`: PDF generation tests — success, empty content, missing filename, sanitization, extension enforcement
+- `tests/test_telegram_send_file.py`: Telegram delivery tests — success, missing path, sandbox escape, file not found, missing credentials, API errors
+
+#### README updates
+- Tools registry section: updated from 6 to 20 tools with full table
+- Skills section: updated from 5 to 6 skills, added generate-pdf-report
+- Supporting modules: added pdf_generate.py and telegram_send_file.py
+
+### Files changed
+
+- New: `tools/adapters/pdf_generate.py`, `tools/adapters/telegram_send_file.py`, `SKILLS/generate_pdf_report/SKILL.md`, `tests/test_pdf_generate.py`, `tests/test_telegram_send_file.py`
+- Modified: `tools/runner.py`, `tools/tools_registry.json`, `README.md`, `DIARY.md`
+
+---
+
 ## 2026-03-06 (Session 20) — Phase 6 Bounded Self-Improvement Loop
 
 **Session span:** Mar 6 UTC
