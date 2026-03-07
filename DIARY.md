@@ -25,14 +25,17 @@ Integrated Microsoft Playwright CLI as a NovaCore tool, adding `browser.screensh
 
 4. **Skill enhancement** — Updated `.claude/skills/browser-automation/SKILL.md` with activation keywords and dual-mode documentation (MCP tools for interactive, CLI tools for workers).
 
+5. **Auto-detection & auto-install** — Replaced hardcoded `chromium-1208` path with glob-based auto-detection (`_find_chromium()`, `_find_ld_library_path()`). If Chromium is missing, `ensure_chromium()` runs `npx playwright install chromium` automatically. Environment variables still override.
+
 ### Tests
 
-41 new tests in `tests/test_playwright_browser.py`, all passing:
+50 tests in `tests/test_playwright_browser.py`, all passing:
 - `TestValidateUrl` (10) — scheme enforcement, length limits, edge cases
 - `TestValidateOutputPath` (10) — traversal, sanitization, extensions
 - `TestBrowserScreenshot` (8) — success/failure flows, CLI args, auto-naming
 - `TestBrowserPdf` (7) — success/failure, paper formats, auto-naming
-- `TestRunPlaywrightCli` (4) — timeout, missing npx, env vars, truncation
+- `TestRunPlaywrightCli` (6) — timeout, missing npx, env vars, truncation, auto-install
+- `TestAutoDetection` (7) — chromium detection, LD path detection, ensure_chromium
 - `TestRunnerDispatch` (1) — registry integrity check
 
 ### E2E verification
@@ -46,7 +49,7 @@ Both tools verified end-to-end against httpbin.org:
 | File | Action | Notes |
 |------|--------|-------|
 | `tools/adapters/playwright_browser.py` | created | Adapter for screenshot + PDF |
-| `tests/test_playwright_browser.py` | created | 41 tests |
+| `tests/test_playwright_browser.py` | created | 50 tests |
 | `tools/tools_registry.json` | modified | Added browser.screenshot + browser.pdf |
 | `tools/runner.py` | modified | Added dispatch for browser tools |
 | `.claude/skills/browser-automation/SKILL.md` | modified | Activation keywords, dual-mode docs |
@@ -55,9 +58,11 @@ Both tools verified end-to-end against httpbin.org:
 
 - Dual-mode architecture: MCP tools for interactive multi-step, CLI adapter for stateless one-shot
 - CLI adapter only covers screenshot + PDF — complex interactions (click, type, snapshot) stay with MCP
-- Chromium binary path and LD_LIBRARY_PATH match existing MCP server config
+- Chromium path auto-detected via glob, survives Playwright version upgrades
+- Auto-install fallback if Chromium binary is missing
 - All outputs sandboxed to OUTPUT/ directory
-- No credential entry or payment interaction safety rules enforced
+- No credential entry or payment interaction — security by design
+- Full suite: 891 tests, all passing
 
 ---
 
