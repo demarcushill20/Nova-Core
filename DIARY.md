@@ -4,6 +4,50 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 23) — Phase 7.5 Memory and Context Routing
+
+**Session span:** Mar 7 UTC (evening)
+
+### What was built
+
+Phase 7.5 — the Memory + Context Routing layer for the multi-agent system. A single new module (`agents/memory_engine.py`) provides:
+
+1. **MemoryArtifact schema** — structured JSON artifact capturing reusable pattern-level learning from completed workflows (task summary, roles, decisions, success/failure patterns, verification outcome, guidance, confidence)
+2. **Validated write path** — bounded, fail-closed writes to `MEMORY/agent_patterns/` and `MEMORY/workflow_learnings/` with atomic tmp→rename, duplicate rejection, size cap (32KB), and field validation
+3. **Workflow summary compaction** — deterministic extraction of reusable patterns from raw workflow state (delegations, contracts, metrics), optimized for future planner usefulness
+4. **Planner retrieval hook** — bounded retrieval of related prior patterns ranked by relevance (task class match, keyword hits, confidence, recency), hard-capped at 5 results, with advisory formatting for planner injection
+
+### Key design decisions
+
+- No LLM calls — all logic is deterministic Python
+- Memory writes are append-only (no overwrite)
+- Retrieval is keyword-based, not vector/embedding (inspectable, auditable)
+- Planner output hard-capped at 4KB with advisory disclaimer
+- Integration via three clean entry points: `capture_workflow_memory()`, `retrieve_related_patterns()`, `format_retrieval_for_planner()`
+
+### Also in this session
+
+- Updated Claude Code from 2.1.63 → 2.1.71 (both global and user-local installs)
+- Changed `CLAUDE_BIN` in watcher.py, heartbeat.py, orchestrator_adapter.py from hardcoded `/usr/bin/claude` to `~/.local/bin/claude` with env override
+- Set up passwordless sudo for novacore service management and npm updates
+
+### Tests
+
+36 new tests in `tests/test_memory_engine.py`, all passing. Full suite: 742 tests, all passing.
+
+### Files created/modified
+
+| File | Action | Notes |
+|---|---|---|
+| `agents/memory_engine.py` | Created | Core Phase 7.5 module |
+| `tests/test_memory_engine.py` | Created | 36 tests covering all acceptance criteria |
+| `WORK/phase7_step_memory_context_routing_summary.md` | Created | Detailed implementation summary |
+| `watcher.py` | Modified | CLAUDE_BIN path update |
+| `heartbeat.py` | Modified | CLAUDE_BIN path update |
+| `tools/orchestrator_adapter.py` | Modified | CLAUDE_BIN path update |
+
+---
+
 ## 2026-03-07 (Session 22) — Phase 7 Multi-Agent Orchestration System
 
 **Session span:** Mar 7 UTC

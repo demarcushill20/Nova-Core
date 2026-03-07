@@ -35,7 +35,7 @@ ARTIFACT_WINDOW = 600  # seconds — OUTPUT file must be this recent
 MAX_SUPERVISOR_ATTEMPTS = 2  # total attempts per task (1 original + up to 1 retry)
 
 METRICS_FILE = STATE_DIR / "metrics.json"
-CLAUDE_BIN = "/usr/bin/claude"
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
 
 DISPATCH_PROMPT_TEMPLATE = """\
 You are the NovaCore Executive Agent. Execute the task described below.

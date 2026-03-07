@@ -28,7 +28,7 @@ OUTPUT_DIR = BASE_DIR / "OUTPUT"
 WORK_DIR = BASE_DIR / "WORK"
 LOGS_DIR = BASE_DIR / "LOGS"
 STATE_DIR = BASE_DIR / "STATE"
-CLAUDE_BIN = "/usr/bin/claude"
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
 TASK_TIMEOUT = 300
 
 

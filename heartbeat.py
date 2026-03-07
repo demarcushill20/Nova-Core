@@ -86,7 +86,7 @@ def check_disk() -> dict:
 
 def check_claude_binary() -> dict:
     """Check that the Claude CLI binary is accessible."""
-    claude_path = Path("/usr/bin/claude")
+    claude_path = Path(os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude"))
     ok = claude_path.exists() and os.access(str(claude_path), os.X_OK)
     detail = "accessible" if ok else "NOT FOUND or not executable"
     return {"name": "claude_binary", "ok": ok, "detail": detail}
