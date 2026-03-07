@@ -78,7 +78,9 @@ def _good_contract_dict() -> dict:
 
 
 def _child_contract(wf_id: str, subtask_id: str, agent_id: str,
-                     role: str = "coder", summary: str = "Done") -> ChildContract:
+                     role: str = "coder", summary: str = "Done",
+                     files_changed: str = "module.py",
+                     confidence: str = "high") -> ChildContract:
     return ChildContract(
         agent_id=agent_id,
         workflow_id=wf_id,
@@ -86,31 +88,11 @@ def _child_contract(wf_id: str, subtask_id: str, agent_id: str,
         role=role,
         status="completed",
         summary=summary,
+        files_changed=files_changed,
+        confidence=confidence,
         artifacts=[],
         verification={"result": "pass", "confidence": "high"},
     )
-
-
-def _enrich_child_contracts(bb: Blackboard, wf_id: str) -> None:
-    """Add files_changed + confidence to persisted child contracts.
-
-    The ChildContract dataclass doesn't include these fields, but
-    validate_contract_fields() requires them for governed synthesis.
-    In production, the orchestrator adapter populates these from the
-    worker's ## CONTRACT block. Here we simulate that post-processing.
-    """
-    contracts_dir = bb.work / "agents" / "contracts"
-    if not contracts_dir.exists():
-        return
-    for f in contracts_dir.glob("*.json"):
-        data = json.loads(f.read_text())
-        if data.get("workflow_id") != wf_id:
-            continue
-        if "files_changed" not in data:
-            data["files_changed"] = data.get("artifacts", ["module.py"]) or ["module.py"]
-        if "confidence" not in data:
-            data["confidence"] = "high"
-        f.write_text(json.dumps(data, indent=2))
 
 
 def _setup_feature_flags(tmp_path: Path, enabled: bool = True) -> None:
@@ -237,10 +219,7 @@ class TestGovernedWorkflowLifecycle:
         engine.complete_delegation("wf_e2e_1", "code", "coder_001", contract2)
         coord.update_node_state("wf_e2e_1", "code", {"status": "completed"})
 
-        # 8. Enrich child contracts for validation
-        _enrich_child_contracts(bb, "wf_e2e_1")
-
-        # 9. Critic review (pass)
+        # 8. Critic review (pass)
         deliverables = {"feature.py": out_file}
         review = gate.run_critic_review(
             "wf_e2e_1", "code", deliverables,
@@ -393,7 +372,6 @@ class TestMakerCheckerIntegrated:
         code_file = _make_file(tmp_path, "OUTPUT/code.py", "print('hi')")
         contract = _child_contract("wf_mc_1", "code", "coder_001")
         engine.complete_delegation("wf_mc_1", "code", "coder_001", contract)
-        _enrich_child_contracts(bb, "wf_mc_1")
 
         # Attempt governed synthesis WITH repo_changes but NO critic review
         synthesis = engine.governed_synthesize(
@@ -417,7 +395,6 @@ class TestMakerCheckerIntegrated:
         contract = _child_contract("wf_mc_2", "code", "coder_001")
         contract.artifacts = [code_file]
         engine.complete_delegation("wf_mc_2", "code", "coder_001", contract)
-        _enrich_child_contracts(bb, "wf_mc_2")
 
         # Run critic review (passes)
         review = gate.run_critic_review(
@@ -775,6 +752,112 @@ class TestBudgetExhaustion:
 
 
 # ===========================================================================
+# 11. ChildContract schema alignment regression (RISK-1 fix)
+# ===========================================================================
+
+class TestChildContractSchemaAlignment:
+    """Proves ChildContract schema includes files_changed and confidence,
+    and that validation accepts properly-filled contracts without enrichment."""
+
+    def test_child_contract_has_files_changed_field(self):
+        c = ChildContract(
+            agent_id="a1", workflow_id="wf1", subtask_id="s1",
+            role="coder", status="completed", summary="Done",
+            files_changed="src/main.py", confidence="high",
+        )
+        d = c.to_dict()
+        assert "files_changed" in d
+        assert d["files_changed"] == "src/main.py"
+
+    def test_child_contract_has_confidence_field(self):
+        c = ChildContract(
+            agent_id="a1", workflow_id="wf1", subtask_id="s1",
+            role="coder", status="completed", summary="Done",
+            files_changed="module.py", confidence="medium",
+        )
+        d = c.to_dict()
+        assert "confidence" in d
+        assert d["confidence"] == "medium"
+
+    def test_filled_contract_passes_validation(self):
+        c = ChildContract(
+            agent_id="a1", workflow_id="wf1", subtask_id="s1",
+            role="coder", status="completed", summary="Implemented feature",
+            files_changed="src/feature.py", confidence="high",
+            verification={"result": "pass"},
+        )
+        valid, errors = validate_contract_fields(c.to_dict())
+        assert valid is True, f"Validation failed: {errors}"
+        assert errors == []
+
+    def test_default_empty_fields_fail_validation(self):
+        """ChildContract defaults (empty strings) correctly fail validation."""
+        c = ChildContract(
+            agent_id="a1", workflow_id="wf1", subtask_id="s1",
+            role="coder", status="completed", summary="Done",
+        )
+        valid, errors = validate_contract_fields(c.to_dict())
+        assert valid is False
+        error_text = " ".join(errors)
+        assert "files_changed" in error_text
+        assert "confidence" in error_text
+
+    def test_persisted_contract_round_trips_with_new_fields(self, tmp_path):
+        """Contract persisted via blackboard retains files_changed/confidence."""
+        bb = _bb(tmp_path)
+        c = ChildContract(
+            agent_id="a1", workflow_id="wf1", subtask_id="s1",
+            role="coder", status="completed", summary="Done",
+            files_changed="output.py", confidence="high",
+        )
+        bb.write_child_contract(c)
+        loaded = bb.get_child_contract("s1")
+        assert loaded["files_changed"] == "output.py"
+        assert loaded["confidence"] == "high"
+        # And it passes validation
+        valid, errors = validate_contract_fields(loaded)
+        assert valid is True, f"Round-tripped contract failed: {errors}"
+
+    def test_governed_synthesis_no_enrichment_needed(self, tmp_path):
+        """Full governed path works when ChildContract has proper fields."""
+        bb = _bb(tmp_path)
+        engine = WorkflowEngine(blackboard=bb)
+        gate = WorkflowGate(blackboard=bb)
+        _setup_feature_flags(tmp_path, enabled=True)
+
+        engine.create_workflow("wf_schema_1", "task_s1")
+        engine.delegate("wf_schema_1", "sub1", "a1", "coder", "Build it")
+        engine.claim_delegation("wf_schema_1", "sub1", "a1")
+
+        out = _make_file(tmp_path, "OUTPUT/result.py", "def main(): pass")
+        contract = ChildContract(
+            agent_id="a1", workflow_id="wf_schema_1", subtask_id="sub1",
+            role="coder", status="completed", summary="Built it",
+            files_changed="result.py", confidence="high",
+            artifacts=[out],
+            verification={"result": "pass", "confidence": "high"},
+        )
+        engine.complete_delegation("wf_schema_1", "sub1", "a1", contract)
+
+        # Critic review
+        review = gate.run_critic_review(
+            "wf_schema_1", "sub1",
+            deliverables={"result.py": out},
+            contract=contract.to_dict(),
+        )
+        assert review.verdict == "pass"
+
+        # Governed synthesis — no enrichment step needed
+        synthesis = engine.governed_synthesize(
+            "wf_schema_1",
+            deliverables={"result.py": out},
+            repo_changes=["result.py"],
+        )
+        assert synthesis.get("governed") is True
+        assert synthesis.get("verification_approved") is True
+
+
+# ===========================================================================
 # Run as script
 # ===========================================================================
 
@@ -794,6 +877,7 @@ if __name__ == "__main__":
         TestMemoryCaptureIntegrated,
         TestConcurrentLimitEnforcement,
         TestBudgetExhaustion,
+        TestChildContractSchemaAlignment,
     ]
 
     passed = 0

@@ -4,6 +4,34 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 27) — RISK-1 ChildContract Schema Fix
+
+**Session span:** Mar 7 UTC
+
+### What was built
+
+Resolved RISK-1 (the sole rollout blocker from Session 26): `ChildContract` dataclass was missing `files_changed` and `confidence` fields that `validate_contract_fields()` requires for governed synthesis.
+
+**Fix**: Added `files_changed: str = ""` and `confidence: str = ""` to `ChildContract` in `agents/blackboard.py`. Empty defaults fail validation (fail-closed) — workers must explicitly populate these. Removed `_enrich_child_contracts()` test workaround.
+
+### Tests
+- Added `TestChildContractSchemaAlignment` (6 regression tests) to `tests/test_phase7_integration.py`
+- All 155 Phase 7 tests pass (30 integration + 64 failure sim + 41 critic/verifier + 20 workflow graph)
+
+### Files changed
+- `agents/blackboard.py` — 2 fields added to ChildContract
+- `tests/test_phase7_integration.py` — helper updated, enrichment removed, 6 tests added
+- `WORK/phase7_risk1_contract_schema_fix_summary.md` — fix summary
+- `WORK/phase7_rollout_readiness_report.md` — RISK-1 marked resolved, verdict updated
+
+### Key decision
+Single contract schema (no child vs workflow distinction). All contracts share the same required fields. Empty defaults = fail-closed for governed paths. Ungoverned paths unaffected.
+
+### Next step
+Enable `phase7_orchestrator` feature flag for Tier 1 (research-only) tasks and monitor first executions.
+
+---
+
 ## 2026-03-07 (Session 26) — Phase 7 Full Integration & Failure Simulation Suite
 
 **Session span:** Mar 7 UTC

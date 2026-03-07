@@ -86,6 +86,8 @@ class ChildContract:
     role: str
     status: str                   # completed|failed
     summary: str
+    files_changed: str = ""       # what files this agent modified (required for governed paths)
+    confidence: str = ""          # agent's confidence in result: high|medium|low (required for governed paths)
     artifacts: list[str] = field(default_factory=list)
     verification: dict = field(default_factory=dict)
     handoff: dict = field(default_factory=dict)
