@@ -4,6 +4,42 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 30) — Obsidian Open Memory Phases O/1/1.5/2
+
+**Session span:** Mar 7 UTC
+
+### What was built
+
+Full Obsidian Open Memory integration across four phases:
+
+**Phase O** — Foundation planning artifacts defining the 3-layer memory model (STATE → MEMORY → Obsidian), vault folder structure, note schemas (ADR, agent-pattern, workflow-learning, research-summary, playbook), MCP rollout plan, and skill family plan. Documentation only.
+
+**Phase 1** — Read-only MCP server (`tools/mcp_vault_server.py`) with 4 tools: `vault_list`, `vault_read`, `vault_search`, `vault_frontmatter`. Created vault at `/home/nova/nova-vault/` with folder structure and 4 seed notes. Registered in Claude Code MCP config. 56 tests.
+
+**Phase 1.5** — Aligned vault to canonical synced model. Added `.nova-vault-config.json` (vault identity), `_meta/human-coexistence.md` (folder ownership, write rules), `vault_info` tool, `validate_vault_path()`, vault config loading. Connected vault to GitHub (`demarcushill20/nova-vault`) and user's phone via Obsidian Git plugin. 21 new tests.
+
+**Phase 2** — Bounded write tools: `vault_write` (9-step fail-closed pipeline), `vault_update` (append-only), `vault_validate` (dry-run). Safety: folder restrictions (5 writable, 6 read-only), frontmatter schema validation (5 note types), sensitive content detection (10 regex patterns), feature flag gating, rate limiting (10/5min), audit logging. 71 new tests.
+
+### Tests
+- 148 vault MCP tests (56 Phase 1 + 21 Phase 1.5 + 71 Phase 2)
+- 1258 total tests passing, zero regressions
+
+### Files changed
+- `tools/mcp_vault_server.py` — MCP server with 8 tools (4 read + 1 info + 3 write)
+- `tests/test_mcp_vault_server.py` — 148 tests across 17 test classes
+- `/home/nova/nova-vault/` — vault with folder structure, 4 seed notes, config, coexistence doc
+- `/home/nova/.claude.json` — `nova-vault` MCP server registration
+- `WORK/obsidian_open_memory_foundation.md` — Phase O planning
+- `WORK/obsidian_vault_structure.md` — folder/naming conventions
+- `WORK/obsidian_note_schemas.md` — frontmatter schemas
+- `WORK/obsidian_mcp_rollout_plan.md` — phased rollout plan
+- `WORK/obsidian_skill_family_plan.md` — skill family roadmap
+- `WORK/obsidian_phase1_readonly_mcp_summary.md` — Phase 1 summary
+- `WORK/obsidian_phase1_5_synced_vault_alignment.md` — Phase 1.5 summary
+- `WORK/obsidian_phase2_bounded_write_summary.md` — Phase 2 summary
+
+---
+
 ## 2026-03-07 (Session 29) — Stage C Low-Risk Coding Rollout
 
 **Session span:** Mar 7 UTC
