@@ -4,6 +4,46 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 24) — Phase 7.7 Production Hardening
+
+**Session span:** Mar 7 UTC
+
+### What was built
+
+Phase 7.7 — production hardening layer. Single new module (`agents/production_hardening.py`) provides:
+
+1. **Feature flags** — `FeatureFlags` class with fail-closed access to `STATE/config/feature_flags.json`. Missing/corrupt/non-bool values default OFF. Added `phase7_hardening` section with `archive_cleanup`, `rate_limiting`, `manual_approval` flags.
+2. **Rate limiting** — `RateLimiter` with deterministic, file-persisted sliding window counters. Limits: 10 workflows/hour, 20 agent spawns/hour. State in `STATE/rate_limits.json`.
+3. **Archive/cleanup** — `ArchiveManager` moves completed/failed/halted workflows and agent runtime to `STATE/archive/` after 24h, cleans expired leases, removes orphan `.tmp` files, caps archives at 100 per category.
+4. **Manual approval hooks** — `ApprovalGate` for high-risk tools (`repo.git.commit`, `system.service.restart`). Feature-flagged OFF by default. Request/approve/deny/timeout lifecycle.
+5. **Policy denial auditing** — `audit_policy_denial()` writes to `STATE/policy_denials.jsonl` (dedicated audit trail).
+6. **Restart recovery** — `RestartRecovery.reconcile()` cleans stale PIDs, recovers expired leases, resets executing nodes to pending (or fails if retries exhausted), requeues orphaned `.inprogress` tasks. Logs to `LOGS/recovery.log`.
+7. **Heartbeat integration** — `heartbeat.py` calls `run_production_hardening()` for cleanup when `archive_cleanup` flag is enabled.
+
+### Tests
+
+61 new tests in `tests/test_production_hardening.py`, all passing. Full suite: 841 tests, all passing.
+
+### Files created/modified
+
+| File | Action | Notes |
+|------|--------|-------|
+| `agents/production_hardening.py` | created | Feature flags, rate limiting, archive, approval, recovery |
+| `tests/test_production_hardening.py` | created | 61 tests across 9 test classes |
+| `heartbeat.py` | modified | Added Phase 7.7 hardening maintenance call |
+| `STATE/config/feature_flags.json` | modified | Added `phase7_hardening` section, version → 2 |
+| `WORK/phase7_step_production_hardening_summary.md` | created | Implementation summary |
+
+### Design decisions
+
+- Single module, no new subsystems — extends existing STATE/ patterns
+- Feature flags fail-closed by design (no multi-agent if config is corrupt)
+- Archive manager never touches active workflows
+- Restart recovery uses existing persisted state, no new coordination
+- Manual approval disabled by default (pending Telegram UX integration)
+
+---
+
 ## 2026-03-07 (Session 23 cont.) — Phase 7.6 Observability + Heartbeat Upgrade
 
 **Session span:** Mar 7 UTC (evening, continued)

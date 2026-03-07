@@ -346,6 +346,22 @@ def main() -> int:
             "detail": f"check skipped: {e}",
         })
 
+    # --- Phase 7.7: production hardening maintenance ---
+    try:
+        from agents.production_hardening import run_production_hardening
+        ph_result = run_production_hardening()
+        cleanup = ph_result.get("cleanup", {})
+        if isinstance(cleanup, dict):
+            archived = (len(cleanup.get("archived_workflows", []))
+                        + len(cleanup.get("archived_agents", [])))
+            cleaned = (len(cleanup.get("cleaned_leases", []))
+                       + len(cleanup.get("cleaned_tmp", [])))
+            if archived or cleaned:
+                print(f"[heartbeat] Hardening: archived={archived} "
+                      f"cleaned={cleaned}")
+    except Exception as e:
+        print(f"[heartbeat] Production hardening failed (non-fatal): {e}")
+
     # Always send heartbeat pulse to Telegram
     send_telegram_heartbeat(checks)
 
