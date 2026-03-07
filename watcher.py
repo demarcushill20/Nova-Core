@@ -618,7 +618,8 @@ def dispatch(task_path: Path):
     )
 
     # --- Deterministic worker log ---
-    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions"]
+    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions",
+           "--model", "claude-opus-4-6"]
     if append_prompt_content and skill_injection_path.exists():
         cmd += ["--append-system-prompt", append_prompt_content]
     cmd.append(prompt)

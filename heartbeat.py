@@ -322,6 +322,30 @@ def main() -> int:
 
     all_ok = all(c["ok"] for c in checks)
 
+    # --- Phase 7.6: multi-agent heartbeat ---
+    try:
+        from agents.observability import run_multiagent_heartbeat, Severity
+        ma_report = run_multiagent_heartbeat()
+        ma_ok = ma_report.overall == Severity.HEALTHY
+        checks.append({
+            "name": "multi_agent_health",
+            "ok": ma_ok,
+            "detail": (f"{ma_report.overall}: "
+                       f"{len(ma_report.findings)} finding(s), "
+                       f"{ma_report.metrics.active_workflows} active workflow(s)"),
+        })
+        if not ma_ok:
+            all_ok = False
+        print(f"[heartbeat] Multi-agent: {ma_report.overall} "
+              f"({len(ma_report.findings)} findings)")
+    except Exception as e:
+        print(f"[heartbeat] Multi-agent check failed (non-fatal): {e}")
+        checks.append({
+            "name": "multi_agent_health",
+            "ok": True,
+            "detail": f"check skipped: {e}",
+        })
+
     # Always send heartbeat pulse to Telegram
     send_telegram_heartbeat(checks)
 

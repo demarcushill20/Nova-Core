@@ -172,7 +172,8 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
         f"Execute this step and produce output. End with a ## CONTRACT block.\n"
     )
 
-    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", prompt]
+    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions",
+           "--model", "claude-opus-4-6", prompt]
 
     try:
         child_env = os.environ.copy()

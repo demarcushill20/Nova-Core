@@ -4,6 +4,39 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 23 cont.) — Phase 7.6 Observability + Heartbeat Upgrade
+
+**Session span:** Mar 7 UTC (evening, continued)
+
+### What was built
+
+Phase 7.6 — multi-agent observability layer. Single new module (`agents/observability.py`) provides:
+
+1. **Metric aggregation** — 16 operational metrics derived from STATE/ artifacts (workflows, delegations, agents, verifications, contracts, policy audit trail, leases)
+2. **Health detection** — 10 SLA-based rules detecting stuck workflows, stuck agents, stale dependency waits, orphaned leases/agents, budget exhaustion/near-exhaustion, repeated verifier rejections, unresolved child contracts
+3. **Report generation** — `HEARTBEAT_MULTIAGENT.md` (human-readable) + `STATE/heartbeat_multiagent.json` (machine-readable) with metrics table, workflow list, findings, bottlenecks
+4. **Heartbeat integration** — existing `heartbeat.py` now calls `run_multiagent_heartbeat()` with graceful degradation
+
+### Also in this session
+
+- Pinned `--model claude-opus-4-6` in watcher.py and orchestrator_adapter.py for all worker tasks
+
+### Tests
+
+38 new tests in `tests/test_observability.py`, all passing. Full suite: 780 tests, all passing.
+
+### Files created/modified
+
+| File | Action | Notes |
+|---|---|---|
+| `agents/observability.py` | Created | Core Phase 7.6 module |
+| `tests/test_observability.py` | Created | 38 tests covering all acceptance criteria |
+| `heartbeat.py` | Modified | Multi-agent heartbeat integration |
+| `watcher.py` | Modified | --model claude-opus-4-6 |
+| `tools/orchestrator_adapter.py` | Modified | --model claude-opus-4-6 |
+
+---
+
 ## 2026-03-07 (Session 23) — Phase 7.5 Memory and Context Routing
 
 **Session span:** Mar 7 UTC (evening)
