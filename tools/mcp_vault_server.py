@@ -530,6 +530,35 @@ def _assemble_note(frontmatter: dict, body: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2: Note ownership detection
+# ---------------------------------------------------------------------------
+
+# Sources that indicate Nova-Core created/manages the note
+_NOVA_CORE_SOURCES = frozenset({"nova-core-memory"})
+
+
+def _detect_note_ownership(content: str) -> str:
+    """Detect whether a note is Nova-Core-managed or human-authored.
+
+    Returns one of:
+        "nova-core"  — source field indicates Nova-Core created this note
+        "human"      — source field indicates human authorship (operator)
+        "unknown"    — no parseable frontmatter or no source field
+
+    Ownership is determined by the 'source' field in frontmatter.
+    """
+    fm = _parse_frontmatter(content)
+    if fm is None:
+        return "unknown"
+    source = fm.get("source")
+    if not source:
+        return "unknown"
+    if source in _NOVA_CORE_SOURCES:
+        return "nova-core"
+    return "human"
+
+
+# ---------------------------------------------------------------------------
 # MCP Server
 # ---------------------------------------------------------------------------
 
@@ -625,21 +654,140 @@ def vault_read(path: str) -> dict:
     return {"path": path, "size": len(content), "content": content}
 
 
+# ---------------------------------------------------------------------------
+# Search: tokenization and scoring
+# ---------------------------------------------------------------------------
+
+# Stopwords — very common English words that add noise to token matching.
+# Kept minimal to avoid over-filtering.
+_STOPWORDS = frozenset({
+    "a", "an", "the", "is", "in", "on", "of", "to", "and", "or", "for",
+    "it", "by", "at", "be", "as", "do", "if", "no", "so", "up", "we",
+})
+
+# Regex for splitting text into tokens: splits on non-alphanumeric characters
+_TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _tokenize(text: str) -> list[str]:
+    """Normalize and tokenize text into lowercase alpha-numeric tokens.
+
+    - Lowercases the input
+    - Splits on hyphens, underscores, spaces, punctuation
+    - Filters out empty strings
+    """
+    return [t for t in _TOKEN_SPLIT_RE.split(text.lower()) if t]
+
+
+def _query_tokens(query: str) -> list[str]:
+    """Tokenize a query string, filtering out stopwords.
+
+    If all tokens are stopwords, returns them all (to avoid empty queries).
+    """
+    tokens = _tokenize(query)
+    filtered = [t for t in tokens if t not in _STOPWORDS]
+    return filtered if filtered else tokens
+
+
+def _score_match(
+    query_lower: str,
+    tokens: list[str],
+    name_lower: str,
+    content_lower: str,
+) -> float:
+    """Score a note against a query. Returns 0.0 for no match.
+
+    Scoring tiers (deterministic, transparent):
+      4.0 — exact phrase match in filename
+      3.0 — all tokens found in filename
+      2.0 — exact phrase match in content
+      1.0 — all tokens found across filename + content
+      0.0 — not all tokens present → no match
+
+    Within a tier, adds a small bonus (0.0–0.5) for token density.
+    """
+    # Combined text for token presence checks
+    combined = name_lower + " " + content_lower
+
+    # Check if all tokens are present in combined text
+    all_in_combined = all(t in combined for t in tokens)
+    if not all_in_combined:
+        return 0.0
+
+    # Exact phrase in filename
+    if query_lower in name_lower:
+        return 4.0
+
+    # All tokens in filename
+    all_in_name = all(t in name_lower for t in tokens)
+    if all_in_name:
+        # Bonus for token density in name
+        density = sum(1 for t in tokens if t in name_lower) / max(len(tokens), 1)
+        return 3.0 + density * 0.5
+
+    # Exact phrase in content
+    if query_lower in content_lower:
+        return 2.0
+
+    # All tokens present across filename + content (already confirmed above)
+    # Bonus: how many tokens appear in content specifically
+    content_hits = sum(1 for t in tokens if t in content_lower)
+    density = content_hits / max(len(tokens), 1)
+    return 1.0 + density * 0.5
+
+
+def _extract_snippet(content: str, content_lower: str, tokens: list[str], query: str) -> str:
+    """Extract a context snippet around the best matching location.
+
+    Tries exact phrase first, then falls back to first token occurrence.
+    """
+    query_lower = query.strip().lower()
+
+    # Prefer exact phrase location
+    idx = content_lower.find(query_lower)
+    if idx >= 0:
+        start = max(0, idx - 50)
+        end = min(len(content), idx + len(query) + 100)
+    else:
+        # Find the first token occurrence
+        idx = -1
+        for t in tokens:
+            pos = content_lower.find(t)
+            if pos >= 0:
+                if idx < 0 or pos < idx:
+                    idx = pos
+        if idx < 0:
+            return ""
+        start = max(0, idx - 50)
+        end = min(len(content), idx + 100)
+
+    snippet = content[start:end].replace("\n", " ").strip()
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(content):
+        snippet = snippet + "..."
+    return snippet
+
+
 @server.tool(
     name="vault_search",
     description=(
         "Search for notes in the Nova-Core Obsidian vault by keyword. "
         "Searches both filenames and note contents (including frontmatter). "
-        "Returns matching note paths with a snippet of the matching context. "
+        "Multi-word queries use tokenized matching: all significant words "
+        "must appear in the note (filename or content), but need not be "
+        "adjacent. Results are ranked by match quality. "
         "Case-insensitive. Returns up to 20 results."
     ),
 )
 def vault_search(query: str, folder: str = "") -> dict:
-    """Search vault notes by keyword."""
+    """Search vault notes by keyword with tokenized multi-word matching."""
     if not query or not query.strip():
         return {"error": "query is required"}
 
-    query_lower = query.strip().lower()
+    query_stripped = query.strip()
+    query_lower = query_stripped.lower()
+    tokens = _query_tokens(query_stripped)
 
     # Determine search root
     if folder:
@@ -649,7 +797,7 @@ def vault_search(query: str, folder: str = "") -> dict:
     else:
         search_root = VAULT_ROOT
 
-    results = []
+    scored_results: list[tuple[float, dict]] = []
 
     for md_file in sorted(search_root.rglob("*.md")):
         # Skip hidden directories
@@ -665,41 +813,39 @@ def vault_search(query: str, folder: str = "") -> dict:
             continue
 
         rel_str = str(rel)
+        name_lower = md_file.stem.lower()
 
-        # Check filename match
-        name_match = query_lower in md_file.stem.lower()
-
-        # Check content match
-        content_match = False
-        snippet = ""
+        # Read content
         try:
             content = md_file.read_text(encoding="utf-8")
-            idx = content.lower().find(query_lower)
-            if idx >= 0:
-                content_match = True
-                # Extract snippet: up to 50 chars before and 100 after
-                start = max(0, idx - 50)
-                end = min(len(content), idx + len(query) + 100)
-                snippet = content[start:end].replace("\n", " ").strip()
-                if start > 0:
-                    snippet = "..." + snippet
-                if end < len(content):
-                    snippet = snippet + "..."
         except (OSError, UnicodeDecodeError):
             continue
 
-        if name_match or content_match:
-            results.append(
-                {
-                    "path": rel_str,
-                    "name_match": name_match,
-                    "content_match": content_match,
-                    "snippet": snippet,
-                }
-            )
+        content_lower = content.lower()
 
-        if len(results) >= MAX_SEARCH_RESULTS:
-            break
+        # Score the match
+        score = _score_match(query_lower, tokens, name_lower, content_lower)
+        if score <= 0.0:
+            continue
+
+        # Determine match type flags (backward compat)
+        name_match = query_lower in name_lower or all(t in name_lower for t in tokens)
+        content_match = query_lower in content_lower or all(t in content_lower for t in tokens)
+
+        snippet = _extract_snippet(content, content_lower, tokens, query_stripped)
+
+        scored_results.append((score, {
+            "path": rel_str,
+            "name_match": name_match,
+            "content_match": content_match,
+            "snippet": snippet,
+        }))
+
+    # Sort by score descending, then path ascending for stability
+    scored_results.sort(key=lambda x: (-x[0], x[1]["path"]))
+
+    # Take top results
+    results = [item for _, item in scored_results[:MAX_SEARCH_RESULTS]]
 
     return {
         "query": query,
@@ -888,6 +1034,16 @@ def vault_write(path: str, frontmatter: dict, body: str) -> dict:
         _audit_log("WRITE", path, "rejected", "missing_frontmatter")
         return {"error": "frontmatter is required and must be a non-empty dict"}
 
+    # 5b. Enforce source = nova-core-memory for durable ownership tracking
+    if frontmatter.get("source") != "nova-core-memory":
+        _audit_log("WRITE", path, "rejected", f"source_not_nova_core:{frontmatter.get('source')}")
+        return {
+            "error": (
+                "vault_write requires source='nova-core-memory' "
+                "(only Nova-Core-managed notes can be created via this tool)"
+            )
+        }
+
     valid, schema_errors = validate_frontmatter(frontmatter)
     if not valid:
         _audit_log("WRITE", path, "rejected", f"schema:{';'.join(schema_errors[:3])}")
@@ -995,6 +1151,36 @@ def vault_update(path: str, section_heading: str, section_body: str) -> dict:
         _audit_log("UPDATE", path, "rejected", "empty_body")
         return {"error": "section_body is required"}
 
+    # 4b. Ownership check — protect human-authored notes
+    try:
+        existing_content = resolved.read_text(encoding="utf-8")
+    except OSError as e:
+        _audit_log("UPDATE", path, "error", f"read_failed:{e}")
+        return {"error": f"cannot read existing file: {e}"}
+
+    ownership = _detect_note_ownership(existing_content)
+    if ownership == "human":
+        _audit_log("UPDATE", path, "rejected", "human_authored_note")
+        return {
+            "error": (
+                "cannot update human-authored note "
+                "(source is not nova-core-memory). "
+                "Only Nova-Core-managed notes accept unrestricted updates."
+            ),
+            "ownership": ownership,
+        }
+    if ownership == "unknown":
+        # No frontmatter or no source — treat as potentially human-authored
+        _audit_log("UPDATE", path, "rejected", "unknown_ownership")
+        return {
+            "error": (
+                "cannot update note with unknown ownership "
+                "(no frontmatter or no source field). "
+                "Only Nova-Core-managed notes accept unrestricted updates."
+            ),
+            "ownership": ownership,
+        }
+
     # 5. Sensitive content check on new section
     new_content = f"{section_heading}\n\n{section_body}\n"
     has_sensitive, sensitive_matches = detect_sensitive_content(new_content)
@@ -1005,14 +1191,8 @@ def vault_update(path: str, section_heading: str, section_body: str) -> dict:
             "sensitive_matches": sensitive_matches,
         }
 
-    # 6. Size check after append
-    try:
-        existing = resolved.read_text(encoding="utf-8")
-    except OSError as e:
-        _audit_log("UPDATE", path, "error", f"read_failed:{e}")
-        return {"error": f"cannot read existing file: {e}"}
-
-    updated = existing.rstrip() + "\n\n" + new_content
+    # 6. Size check after append (existing_content already read above)
+    updated = existing_content.rstrip() + "\n\n" + new_content
     updated_bytes = len(updated.encode("utf-8"))
     max_size = config.get("max_note_size_bytes", MAX_WRITE_SIZE)
     if updated_bytes > max_size:

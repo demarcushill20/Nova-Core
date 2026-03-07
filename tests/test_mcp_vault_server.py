@@ -38,10 +38,14 @@ import pytest
 
 # We test the module functions directly (not via MCP protocol)
 from tools.mcp_vault_server import (
+    _detect_note_ownership,
     _is_markdown,
     _load_vault_config,
     _parse_frontmatter,
+    _query_tokens,
     _safe_resolve,
+    _score_match,
+    _tokenize,
     _write_timestamps,
     detect_sensitive_content,
     validate_frontmatter,
@@ -127,6 +131,52 @@ def vault_dir(tmp_path):
         """)
     )
 
+    # Nova-Core-managed note in writable folder (for update tests)
+    nc_pattern = tmp_path / "20-agent-patterns" / "nc-managed-pattern.md"
+    nc_pattern.write_text(
+        textwrap.dedent("""\
+        ---
+        type: agent-pattern
+        pattern_id: "ap-nc-managed"
+        title: "Nova-Core Managed Pattern"
+        agent_role: "research"
+        confidence: "high"
+        task_classes:
+          - "research"
+        date_created: "2026-03-07"
+        source: "nova-core-memory"
+        tags:
+          - "#type/pattern"
+        ---
+
+        ## Summary
+        This note was created by Nova-Core and is managed by it.
+        """)
+    )
+
+    # Human-authored note in writable folder (for ownership rejection tests)
+    human_pattern = tmp_path / "20-agent-patterns" / "human-authored.md"
+    human_pattern.write_text(
+        textwrap.dedent("""\
+        ---
+        type: agent-pattern
+        pattern_id: "ap-human"
+        title: "Human Authored Pattern"
+        agent_role: "research"
+        confidence: "high"
+        task_classes:
+          - "research"
+        date_created: "2026-03-07"
+        source: "operator"
+        tags:
+          - "#type/pattern"
+        ---
+
+        ## Summary
+        This note was written by the human operator.
+        """)
+    )
+
     # Note without frontmatter
     plain = tmp_path / "00-inbox" / "quick-note.md"
     plain.write_text("# Quick Note\n\nJust a plain markdown file.\n")
@@ -141,6 +191,83 @@ def vault_dir(tmp_path):
 
     # Hidden folder file (should be ignored)
     (tmp_path / ".obsidian" / "config.json").write_text("{}")
+
+    # --- Phase 3.8 test notes: multi-word search scenarios ---
+
+    # Note with non-adjacent keywords for tokenized search
+    research_openclaw = tmp_path / "40-research" / "openclaw-autonomy-analysis.md"
+    research_openclaw.write_text(
+        textwrap.dedent("""\
+        ---
+        type: research-summary
+        research_id: "rs-openclaw-001"
+        title: "OpenClaw Framework Analysis"
+        topic: "autonomous agent architectures"
+        date_researched: "2026-02-15"
+        sources_count: 3
+        confidence: "high"
+        source: "nova-core-memory"
+        tags:
+          - "#type/research"
+        ---
+
+        ## Summary
+        Analysis of the OpenClaw approach to agent autonomy and
+        hierarchical task decomposition.
+        """)
+    )
+
+    # Note for "research task pattern" matching
+    wl_task_pattern = tmp_path / "30-workflow-learnings" / "task-routing-patterns.md"
+    wl_task_pattern.write_text(
+        textwrap.dedent("""\
+        ---
+        type: workflow-learning
+        learning_id: "wl-task-routing-001"
+        title: "Task Routing Patterns for Research"
+        workflow_id: "wf-dispatch"
+        task_class: "research"
+        verification_outcome: "approved"
+        confidence: "medium"
+        roles_involved:
+          - "planner"
+          - "research"
+        date: "2026-02-20"
+        source: "nova-core-memory"
+        tags:
+          - "#type/learning"
+        ---
+
+        ## Summary
+        Learned patterns for routing research tasks to agents.
+        """)
+    )
+
+    # Note for "stage rollout learning" matching
+    wl_rollout = tmp_path / "30-workflow-learnings" / "rollout-stage-learnings.md"
+    wl_rollout.write_text(
+        textwrap.dedent("""\
+        ---
+        type: workflow-learning
+        learning_id: "wl-rollout-001"
+        title: "Stage B Rollout Learnings"
+        workflow_id: "wf-rollout"
+        task_class: "system"
+        verification_outcome: "approved"
+        confidence: "high"
+        roles_involved:
+          - "planner"
+        date: "2026-03-01"
+        source: "nova-core-memory"
+        tags:
+          - "#type/learning"
+        ---
+
+        ## Summary
+        Key learnings from the Stage B rollout, including
+        staged deployment and risk mitigation.
+        """)
+    )
 
     return tmp_path
 
@@ -210,7 +337,7 @@ def _valid_pattern_fm(**overrides):
         "task_classes": ["research"],
         "date_created": "2026-03-07",
         "date_updated": "2026-03-07",
-        "source": "operator",
+        "source": "nova-core-memory",
         "tags": ["#type/pattern"],
     }
     fm.update(overrides)
@@ -229,7 +356,7 @@ def _valid_learning_fm(**overrides):
         "confidence": "high",
         "roles_involved": ["research"],
         "date": "2026-03-07",
-        "source": "operator",
+        "source": "nova-core-memory",
         "tags": ["#type/learning"],
     }
     fm.update(overrides)
@@ -460,6 +587,130 @@ class TestVaultSearch:
         result = vault_search("config")
         paths = [r["path"] for r in result["results"]]
         assert not any(".obsidian" in p for p in paths)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.8: Tokenization unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestTokenization:
+    """Unit tests for search tokenization helpers."""
+
+    def test_tokenize_basic(self):
+        assert _tokenize("OpenClaw autonomy") == ["openclaw", "autonomy"]
+
+    def test_tokenize_hyphens_underscores(self):
+        assert _tokenize("multi-agent_system") == ["multi", "agent", "system"]
+
+    def test_tokenize_mixed_case(self):
+        assert _tokenize("Research Task PATTERN") == ["research", "task", "pattern"]
+
+    def test_tokenize_empty(self):
+        assert _tokenize("") == []
+
+    def test_query_tokens_filters_stopwords(self):
+        tokens = _query_tokens("the research of patterns")
+        assert "the" not in tokens
+        assert "of" not in tokens
+        assert "research" in tokens
+        assert "patterns" in tokens
+
+    def test_query_tokens_all_stopwords_returns_all(self):
+        tokens = _query_tokens("the a an")
+        assert len(tokens) == 3  # keeps all since all are stopwords
+
+    def test_score_match_exact_phrase_in_name(self):
+        score = _score_match("openclaw", ["openclaw"], "openclaw-analysis", "some content")
+        assert score >= 4.0
+
+    def test_score_match_all_tokens_in_name(self):
+        score = _score_match("openclaw autonomy", ["openclaw", "autonomy"],
+                             "openclaw-autonomy-analysis", "some content")
+        assert 3.0 <= score < 4.0
+
+    def test_score_match_exact_phrase_in_content(self):
+        score = _score_match("openclaw autonomy", ["openclaw", "autonomy"],
+                             "analysis", "the openclaw autonomy framework")
+        assert 2.0 <= score < 3.0
+
+    def test_score_match_tokens_spread_across(self):
+        score = _score_match("openclaw autonomy", ["openclaw", "autonomy"],
+                             "openclaw-analysis", "agent autonomy framework")
+        assert 1.0 <= score < 2.0
+
+    def test_score_match_missing_token(self):
+        score = _score_match("openclaw autonomy", ["openclaw", "autonomy"],
+                             "analysis", "some other content")
+        assert score == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.8: Multi-word search integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestMultiWordSearch:
+    """Integration tests for improved multi-word vault_search."""
+
+    def test_multiword_openclaw_autonomy(self):
+        """GAP-1: 'OpenClaw autonomy' should find the research note."""
+        result = vault_search("OpenClaw autonomy")
+        assert result["results_count"] >= 1
+        paths = [r["path"] for r in result["results"]]
+        assert any("openclaw" in p.lower() for p in paths)
+
+    def test_multiword_research_task_pattern(self):
+        """GAP-1: 'research task pattern' should find task-routing-patterns."""
+        result = vault_search("research task pattern")
+        assert result["results_count"] >= 1
+        paths = [r["path"] for r in result["results"]]
+        assert any("task-routing" in p or "research-patterns" in p for p in paths)
+
+    def test_multiword_stage_rollout_learning(self):
+        """GAP-1: 'stage rollout learning' should find rollout-stage-learnings."""
+        result = vault_search("stage rollout learning")
+        assert result["results_count"] >= 1
+        paths = [r["path"] for r in result["results"]]
+        assert any("rollout" in p for p in paths)
+
+    def test_single_word_still_works(self):
+        """Backward compat: single word search must continue working."""
+        result = vault_search("Decision")
+        assert result["results_count"] >= 1
+
+    def test_exact_phrase_still_works(self):
+        """Backward compat: exact phrase matches should not regress."""
+        result = vault_search("Architecture Decision")
+        assert result["results_count"] >= 1
+        paths = [r["path"] for r in result["results"]]
+        assert any("ADR-001" in p for p in paths)
+
+    def test_results_ranked_by_quality(self):
+        """Results with name matches should rank above content-only matches."""
+        result = vault_search("research patterns")
+        if result["results_count"] >= 2:
+            # First result should be the file with "research-patterns" in the name
+            assert "research-patterns" in result["results"][0]["path"]
+
+    def test_no_false_positive_explosion(self):
+        """Multi-word search should not return notes missing key tokens."""
+        result = vault_search("xyzzy nonexistent unicorn")
+        assert result["results_count"] == 0
+
+    def test_search_with_stopwords(self):
+        """Queries with stopwords should work by filtering them out."""
+        result = vault_search("the OpenClaw of autonomy")
+        assert result["results_count"] >= 1
+        paths = [r["path"] for r in result["results"]]
+        assert any("openclaw" in p.lower() for p in paths)
+
+    def test_snippet_returned_for_token_match(self):
+        """Snippets should be returned even for non-adjacent token matches."""
+        result = vault_search("stage rollout learning")
+        assert result["results_count"] >= 1
+        matching = [r for r in result["results"] if r["snippet"]]
+        assert len(matching) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -1038,7 +1289,7 @@ class TestVaultWrite:
         assert result["status"] == "created"
 
     def test_write_to_inbox(self, write_enabled, vault_dir):
-        fm = {"type": "inbox", "title": "Quick capture", "source": "operator", "tags": ["#type/inbox"]}
+        fm = {"type": "inbox", "title": "Quick capture", "source": "nova-core-memory", "tags": ["#type/inbox"]}
         result = vault_write("00-inbox/capture.md", fm, "Some quick note.\n")
         assert "error" not in result
 
@@ -1073,7 +1324,7 @@ class TestVaultWrite:
         assert "already exists" in result["error"]
 
     def test_write_rejected_invalid_schema(self, write_enabled):
-        bad_fm = {"type": "agent-pattern", "title": "Missing fields"}
+        bad_fm = {"type": "agent-pattern", "title": "Missing fields", "source": "nova-core-memory"}
         result = vault_write("20-agent-patterns/bad.md", bad_fm, "# Body")
         assert "error" in result
         assert "schema_errors" in result
@@ -1129,6 +1380,13 @@ class TestVaultWrite:
         result = vault_write("rootfile.md", _valid_pattern_fm(), "# Body")
         assert "error" in result
 
+    def test_write_rejected_non_nova_core_source(self, write_enabled):
+        """vault_write enforces source=nova-core-memory for ownership tracking."""
+        fm = _valid_pattern_fm(source="operator")
+        result = vault_write("20-agent-patterns/human-source.md", fm, "# Body")
+        assert "error" in result
+        assert "nova-core-memory" in result["error"]
+
 
 # ===========================================================================
 # Phase 2: vault_update tests
@@ -1140,14 +1398,14 @@ class TestVaultUpdate:
 
     def test_update_append_section(self, write_enabled):
         result = vault_update(
-            "20-agent-patterns/research-patterns.md",
+            "20-agent-patterns/nc-managed-pattern.md",
             "## New Evidence",
             "This section was appended.",
         )
         assert "error" not in result
         assert result["status"] == "updated"
         # Verify content was appended
-        read_result = vault_read("20-agent-patterns/research-patterns.md")
+        read_result = vault_read("20-agent-patterns/nc-managed-pattern.md")
         assert "New Evidence" in read_result["content"]
         assert "appended" in read_result["content"]
 
@@ -1171,7 +1429,7 @@ class TestVaultUpdate:
 
     def test_update_rejected_empty_heading(self, write_enabled):
         result = vault_update(
-            "20-agent-patterns/research-patterns.md",
+            "20-agent-patterns/nc-managed-pattern.md",
             "",
             "Content.",
         )
@@ -1180,7 +1438,7 @@ class TestVaultUpdate:
 
     def test_update_rejected_no_hash_heading(self, write_enabled):
         result = vault_update(
-            "20-agent-patterns/research-patterns.md",
+            "20-agent-patterns/nc-managed-pattern.md",
             "Not A Heading",
             "Content.",
         )
@@ -1189,7 +1447,7 @@ class TestVaultUpdate:
 
     def test_update_rejected_empty_body(self, write_enabled):
         result = vault_update(
-            "20-agent-patterns/research-patterns.md",
+            "20-agent-patterns/nc-managed-pattern.md",
             "## Section",
             "",
         )
@@ -1198,7 +1456,7 @@ class TestVaultUpdate:
 
     def test_update_rejected_sensitive_content(self, write_enabled):
         result = vault_update(
-            "20-agent-patterns/research-patterns.md",
+            "20-agent-patterns/nc-managed-pattern.md",
             "## Secrets",
             "password = hunter2hunter2",
         )
@@ -1208,7 +1466,7 @@ class TestVaultUpdate:
     def test_update_rejected_would_exceed_size(self, write_enabled, vault_dir):
         _write_config(vault_dir, enabled=True, max_note_size_bytes=500)
         result = vault_update(
-            "20-agent-patterns/research-patterns.md",
+            "20-agent-patterns/nc-managed-pattern.md",
             "## Big Section",
             "x" * 1000,
         )
@@ -1222,6 +1480,72 @@ class TestVaultUpdate:
             "Content.",
         )
         assert "error" in result
+
+    def test_update_rejected_human_authored(self, write_enabled):
+        """Human-authored notes (source: operator) should be protected."""
+        result = vault_update(
+            "20-agent-patterns/human-authored.md",
+            "## Agent Addition",
+            "This should be rejected.",
+        )
+        assert "error" in result
+        assert "human-authored" in result["error"]
+        assert result.get("ownership") == "human"
+
+    def test_update_rejected_unknown_ownership(self, write_enabled):
+        """Notes without frontmatter/source should be protected."""
+        result = vault_update(
+            "00-inbox/quick-note.md",
+            "## Agent Addition",
+            "This should be rejected.",
+        )
+        assert "error" in result
+        assert "unknown ownership" in result["error"]
+        assert result.get("ownership") == "unknown"
+
+    def test_update_allowed_nova_core_managed(self, write_enabled):
+        """Nova-Core-managed notes (source: nova-core-memory) accept updates."""
+        result = vault_update(
+            "20-agent-patterns/nc-managed-pattern.md",
+            "## Agent Update",
+            "This should be allowed.",
+        )
+        assert "error" not in result
+        assert result["status"] == "updated"
+
+
+# ===========================================================================
+# Phase 2: Note ownership detection tests
+# ===========================================================================
+
+
+class TestNoteOwnership:
+    """Ownership detection for human-edit coexistence."""
+
+    def test_detect_nova_core_managed(self):
+        content = "---\nsource: nova-core-memory\ntype: inbox\n---\n\n# Note\n"
+        assert _detect_note_ownership(content) == "nova-core"
+
+    def test_detect_human_authored(self):
+        content = "---\nsource: operator\ntype: inbox\n---\n\n# Note\n"
+        assert _detect_note_ownership(content) == "human"
+
+    def test_detect_unknown_no_frontmatter(self):
+        content = "# Just a note\n\nNo frontmatter here.\n"
+        assert _detect_note_ownership(content) == "unknown"
+
+    def test_detect_unknown_no_source(self):
+        content = "---\ntype: inbox\ntitle: No Source\n---\n\n# Note\n"
+        assert _detect_note_ownership(content) == "unknown"
+
+    def test_detect_unknown_empty_source(self):
+        content = "---\nsource: \ntype: inbox\n---\n\n# Note\n"
+        assert _detect_note_ownership(content) == "unknown"
+
+    def test_detect_human_unrecognized_source(self):
+        """Any source not in _NOVA_CORE_SOURCES is treated as human."""
+        content = "---\nsource: external\ntype: inbox\n---\n\n# Note\n"
+        assert _detect_note_ownership(content) == "human"
 
 
 # ===========================================================================

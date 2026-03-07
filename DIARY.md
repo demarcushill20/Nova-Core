@@ -4,6 +4,35 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 31) — Obsidian Phase 3: Search Upgrade, Ownership Detection, Skills
+
+**Session span:** Mar 7 UTC
+
+### What was built
+
+Continued Obsidian Open Memory buildout with three areas of work:
+
+**Phase 3 — Tokenized Search & Scoring:** Replaced naive substring search with a multi-tier tokenized search system. New internal functions: `_tokenize()`, `_query_tokens()` (with stopword filtering), `_score_match()` (4-tier deterministic scoring: exact phrase in filename → all tokens in filename → exact phrase in content → all tokens across name+content), `_extract_snippet()` (context-aware snippet extraction). Multi-word queries now match non-adjacent keywords across filename and content. Single-word search remains fully backward-compatible.
+
+**Note Ownership Detection:** Added `_detect_note_ownership()` to classify notes as `nova-core`, `human`, or `unknown` based on the `source` frontmatter field. Nova-Core-managed notes (source: `nova-core-memory`) can be updated; human-authored notes (source: `operator`) are protected from overwrites. This enforces the human-coexistence contract.
+
+**Two New Claude Code Skills:**
+- `reading-obsidian-memory` — read-only retrieval of prior knowledge from the synced Obsidian vault (architecture decisions, research summaries, workflow patterns, learned context). Uses vault_search, vault_read, vault_list, vault_frontmatter, vault_info tools.
+- `retrieving-task-patterns` — targeted retrieval of prior task-class patterns, workflow learnings, and reusable examples for planning and execution consistency.
+
+### Tests
+- 178 vault MCP tests passing (30 new tests covering tokenized search, ownership detection, multi-word scenarios)
+- Zero regressions
+
+### Files changed
+- `tools/mcp_vault_server.py` — tokenized search engine, ownership detection, snippet extraction (+260 lines)
+- `tests/test_mcp_vault_server.py` — 30 new tests for search scoring, tokenization, ownership (+346 lines)
+- `.claude/skills/reading-obsidian-memory/SKILL.md` — new skill definition
+- `.claude/skills/retrieving-task-patterns/SKILL.md` — new skill definition
+- `HEARTBEAT_MULTIAGENT.md` — multi-agent heartbeat snapshot
+
+---
+
 ## 2026-03-07 (Session 30) — Obsidian Open Memory Phases O/1/1.5/2
 
 **Session span:** Mar 7 UTC
