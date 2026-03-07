@@ -8,17 +8,18 @@ use the Playwright MCP tools (mcp__playwright__*) available in interactive
 Claude sessions. This adapter covers the stateless CLI operations that
 can be safely invoked by worker agents.
 
-Requires:
-  - Node.js 18+ with npx
-  - Playwright browsers installed (npx playwright install chromium)
-  - Chromium binary at the configured path
-  - Shared libraries available via LD_LIBRARY_PATH
+Auto-detection:
+  - Chromium binary is auto-detected from ~/.cache/ms-playwright/chromium-*/
+  - Shared libraries are auto-detected from ~/.local/usr/lib/x86_64-linux-gnu/
+  - If Chromium is not installed, `ensure_chromium()` will install it
+  - Environment variables override auto-detection if set
 
-Environment:
-  PLAYWRIGHT_CHROMIUM_PATH  — override the Chromium executable path
+Environment overrides:
+  PLAYWRIGHT_CHROMIUM_PATH   — override the Chromium executable path
   PLAYWRIGHT_LD_LIBRARY_PATH — override the shared library path
 """
 
+import glob as globmod
 import os
 import re
 import subprocess
@@ -27,13 +28,8 @@ from pathlib import Path
 
 # --- Constants ---------------------------------------------------------------
 
-_DEFAULT_CHROMIUM = (
-    "/home/nova/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome"
-)
-_DEFAULT_LD_PATH = "/home/nova/.local/usr/lib/x86_64-linux-gnu"
-
-_CHROMIUM_PATH = os.environ.get("PLAYWRIGHT_CHROMIUM_PATH", _DEFAULT_CHROMIUM)
-_LD_LIBRARY_PATH = os.environ.get("PLAYWRIGHT_LD_LIBRARY_PATH", _DEFAULT_LD_PATH)
+_PLAYWRIGHT_CACHE = Path.home() / ".cache" / "ms-playwright"
+_DEFAULT_LD_PATH = str(Path.home() / ".local" / "usr" / "lib" / "x86_64-linux-gnu")
 
 _TIMEOUT = 30  # seconds per CLI invocation
 _MAX_FILENAME_LEN = 200
@@ -43,6 +39,96 @@ _URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 
 # Filename sanitization: allow alphanumeric, dash, underscore, dot
 _SAFE_FILENAME_RE = re.compile(r"^[\w\-. ]+$")
+
+
+def _find_chromium() -> str:
+    """Auto-detect the latest installed Chromium binary.
+
+    Searches ~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome
+    and returns the newest version. Falls back to env var or empty string.
+    """
+    override = os.environ.get("PLAYWRIGHT_CHROMIUM_PATH", "")
+    if override and Path(override).is_file():
+        return override
+
+    pattern = str(_PLAYWRIGHT_CACHE / "chromium-*" / "chrome-linux64" / "chrome")
+    candidates = sorted(globmod.glob(pattern), reverse=True)
+    for c in candidates:
+        if Path(c).is_file():
+            return c
+    return ""
+
+
+def _find_ld_library_path() -> str:
+    """Auto-detect the shared library path for Chromium dependencies."""
+    override = os.environ.get("PLAYWRIGHT_LD_LIBRARY_PATH", "")
+    if override and Path(override).is_dir():
+        return override
+    if Path(_DEFAULT_LD_PATH).is_dir():
+        return _DEFAULT_LD_PATH
+    return ""
+
+
+def ensure_chromium() -> dict:
+    """Install Chromium via Playwright if not present.
+
+    Returns:
+        dict with ok, chromium_path, message.
+    """
+    existing = _find_chromium()
+    if existing:
+        return {
+            "ok": True,
+            "chromium_path": existing,
+            "installed": False,
+            "message": f"Chromium already available: {existing}",
+        }
+
+    try:
+        proc = subprocess.run(
+            ["npx", "playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if proc.returncode != 0:
+            return {
+                "ok": False,
+                "chromium_path": "",
+                "installed": False,
+                "message": f"Install failed: {proc.stderr[:500]}",
+            }
+
+        # Re-detect after install
+        new_path = _find_chromium()
+        if not new_path:
+            return {
+                "ok": False,
+                "chromium_path": "",
+                "installed": False,
+                "message": "Install succeeded but Chromium binary not found",
+            }
+
+        return {
+            "ok": True,
+            "chromium_path": new_path,
+            "installed": True,
+            "message": f"Chromium installed: {new_path}",
+        }
+    except FileNotFoundError:
+        return {
+            "ok": False,
+            "chromium_path": "",
+            "installed": False,
+            "message": "npx not found — Node.js 18+ is required",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "chromium_path": "",
+            "installed": False,
+            "message": "Chromium install timed out after 120s",
+        }
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -91,10 +177,30 @@ def _validate_output_path(filename: str, output_dir: Path,
 
 
 def _run_playwright_cli(args: list[str], timeout: int = _TIMEOUT) -> dict:
-    """Execute a Playwright CLI command with proper environment."""
+    """Execute a Playwright CLI command with proper environment.
+
+    Auto-detects Chromium binary and library path. If Chromium is not
+    installed, attempts to install it automatically.
+    """
+    chromium = _find_chromium()
+    if not chromium:
+        # Attempt auto-install
+        install = ensure_chromium()
+        if not install["ok"]:
+            return {
+                "exit_code": 127,
+                "stdout": "",
+                "stderr": f"Chromium not found and auto-install failed: "
+                          f"{install['message']}",
+            }
+        chromium = install["chromium_path"]
+
+    ld_path = _find_ld_library_path()
+
     env = os.environ.copy()
-    env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] = _CHROMIUM_PATH
-    env["LD_LIBRARY_PATH"] = _LD_LIBRARY_PATH
+    env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] = chromium
+    if ld_path:
+        env["LD_LIBRARY_PATH"] = ld_path
 
     cmd = ["npx", "playwright"] + args
 
@@ -121,7 +227,7 @@ def _run_playwright_cli(args: list[str], timeout: int = _TIMEOUT) -> dict:
         return {
             "exit_code": 127,
             "stdout": "",
-            "stderr": "npx not found — Node.js is required",
+            "stderr": "npx not found — Node.js 18+ is required",
         }
 
 

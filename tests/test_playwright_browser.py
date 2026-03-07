@@ -20,6 +20,9 @@ import pytest
 from tools.adapters.playwright_browser import (
     _validate_url,
     _validate_output_path,
+    _find_chromium,
+    _find_ld_library_path,
+    ensure_chromium,
     browser_screenshot,
     browser_pdf,
 )
@@ -387,8 +390,12 @@ class TestBrowserPdf:
 
 
 class TestRunPlaywrightCli:
+    @patch("tools.adapters.playwright_browser._find_chromium",
+           return_value="/fake/chrome")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path",
+           return_value="/fake/libs")
     @patch("tools.adapters.playwright_browser.subprocess.run")
-    def test_timeout_returns_error(self, mock_run):
+    def test_timeout_returns_error(self, mock_run, _ld, _cr):
         from tools.adapters.playwright_browser import _run_playwright_cli
         import subprocess as sp
         mock_run.side_effect = sp.TimeoutExpired(cmd=["npx"], timeout=30)
@@ -397,8 +404,12 @@ class TestRunPlaywrightCli:
         assert result["exit_code"] == -1
         assert "timed out" in result["stderr"]
 
+    @patch("tools.adapters.playwright_browser._find_chromium",
+           return_value="/fake/chrome")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path",
+           return_value="/fake/libs")
     @patch("tools.adapters.playwright_browser.subprocess.run")
-    def test_npx_not_found(self, mock_run):
+    def test_npx_not_found(self, mock_run, _ld, _cr):
         from tools.adapters.playwright_browser import _run_playwright_cli
         mock_run.side_effect = FileNotFoundError()
 
@@ -406,11 +417,13 @@ class TestRunPlaywrightCli:
         assert result["exit_code"] == 127
         assert "npx not found" in result["stderr"]
 
+    @patch("tools.adapters.playwright_browser._find_chromium",
+           return_value="/detected/chrome")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path",
+           return_value="/detected/libs")
     @patch("tools.adapters.playwright_browser.subprocess.run")
-    def test_sets_chromium_env(self, mock_run):
-        from tools.adapters.playwright_browser import (
-            _run_playwright_cli, _CHROMIUM_PATH, _LD_LIBRARY_PATH
-        )
+    def test_sets_chromium_env_from_autodetect(self, mock_run, _ld, _cr):
+        from tools.adapters.playwright_browser import _run_playwright_cli
         mock_run.return_value = MagicMock(
             returncode=0, stdout="ok", stderr=""
         )
@@ -419,11 +432,15 @@ class TestRunPlaywrightCli:
 
         call_kwargs = mock_run.call_args[1]
         env = call_kwargs["env"]
-        assert env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] == _CHROMIUM_PATH
-        assert env["LD_LIBRARY_PATH"] == _LD_LIBRARY_PATH
+        assert env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] == "/detected/chrome"
+        assert env["LD_LIBRARY_PATH"] == "/detected/libs"
 
+    @patch("tools.adapters.playwright_browser._find_chromium",
+           return_value="/fake/chrome")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path",
+           return_value="/fake/libs")
     @patch("tools.adapters.playwright_browser.subprocess.run")
-    def test_truncates_output(self, mock_run):
+    def test_truncates_output(self, mock_run, _ld, _cr):
         from tools.adapters.playwright_browser import _run_playwright_cli
         mock_run.return_value = MagicMock(
             returncode=0, stdout="x" * 20_000, stderr="y" * 20_000
@@ -432,6 +449,104 @@ class TestRunPlaywrightCli:
         result = _run_playwright_cli(["screenshot", "http://x.com", "/tmp/x.png"])
         assert len(result["stdout"]) == 10_000
         assert len(result["stderr"]) == 10_000
+
+    @patch("tools.adapters.playwright_browser._find_chromium",
+           return_value="")
+    @patch("tools.adapters.playwright_browser.ensure_chromium")
+    def test_auto_install_on_missing_chromium(self, mock_install, _cr):
+        from tools.adapters.playwright_browser import _run_playwright_cli
+        mock_install.return_value = {
+            "ok": False,
+            "chromium_path": "",
+            "installed": False,
+            "message": "npx not found",
+        }
+
+        result = _run_playwright_cli(["screenshot", "http://x.com", "/tmp/x.png"])
+        assert result["exit_code"] == 127
+        assert "auto-install failed" in result["stderr"]
+        mock_install.assert_called_once()
+
+    @patch("tools.adapters.playwright_browser._find_chromium",
+           return_value="")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path",
+           return_value="/fake/libs")
+    @patch("tools.adapters.playwright_browser.ensure_chromium")
+    @patch("tools.adapters.playwright_browser.subprocess.run")
+    def test_auto_install_success_then_runs(self, mock_run, mock_install,
+                                            _ld, _cr):
+        from tools.adapters.playwright_browser import _run_playwright_cli
+        mock_install.return_value = {
+            "ok": True,
+            "chromium_path": "/new/chrome",
+            "installed": True,
+            "message": "installed",
+        }
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="done", stderr=""
+        )
+
+        result = _run_playwright_cli(["screenshot", "http://x.com", "/tmp/x.png"])
+        assert result["exit_code"] == 0
+        env = mock_run.call_args[1]["env"]
+        assert env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] == "/new/chrome"
+
+
+# ── Auto-detection ──────────────────────────────────────────────────────────
+
+
+class TestAutoDetection:
+    def test_find_chromium_detects_installed(self):
+        # On this system, chromium should be installed
+        path = _find_chromium()
+        assert path, "Chromium should be detected on this system"
+        assert Path(path).is_file()
+        assert "chrome" in Path(path).name
+
+    def test_find_chromium_env_override(self):
+        with patch.dict(os.environ,
+                        {"PLAYWRIGHT_CHROMIUM_PATH": "/tmp/fake_chrome"}):
+            # Won't return this because file doesn't exist
+            result = _find_chromium()
+            # Falls through to glob detection
+            assert result  # should still find the real one
+
+    def test_find_ld_library_path_detects(self):
+        path = _find_ld_library_path()
+        assert path, "LD library path should be detected"
+        assert Path(path).is_dir()
+
+    def test_find_ld_library_path_env_override(self):
+        with patch.dict(os.environ,
+                        {"PLAYWRIGHT_LD_LIBRARY_PATH": "/tmp"}):
+            result = _find_ld_library_path()
+            assert result == "/tmp"
+
+    def test_ensure_chromium_already_present(self):
+        result = ensure_chromium()
+        assert result["ok"] is True
+        assert result["installed"] is False  # already there
+        assert result["chromium_path"]
+
+    @patch("tools.adapters.playwright_browser._find_chromium",
+           return_value="")
+    @patch("tools.adapters.playwright_browser.subprocess.run")
+    def test_ensure_chromium_install_fails(self, mock_run, _cr):
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="network error"
+        )
+        result = ensure_chromium()
+        assert result["ok"] is False
+        assert "Install failed" in result["message"]
+
+    @patch("tools.adapters.playwright_browser._find_chromium",
+           return_value="")
+    @patch("tools.adapters.playwright_browser.subprocess.run")
+    def test_ensure_chromium_npx_missing(self, mock_run, _cr):
+        mock_run.side_effect = FileNotFoundError()
+        result = ensure_chromium()
+        assert result["ok"] is False
+        assert "npx not found" in result["message"]
 
 
 # ── Runner Dispatch Integration ─────────────────────────────────────────────
