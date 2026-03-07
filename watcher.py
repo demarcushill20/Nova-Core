@@ -559,19 +559,21 @@ def dispatch(task_path: Path):
 
     # --- Task classification & routing ---
     routing = classify_and_route(task_text)
+    stage = routing.get("stage", "")
     logger.info(
-        "ROUTING: class=%s confidence=%.2f orchestrator=%s reason=%s",
+        "ROUTING: class=%s confidence=%.2f orchestrator=%s stage=%s reason=%s",
         routing["task_class"],
         routing["confidence"],
         routing["use_orchestrator"],
+        stage or "default",
         routing.get("fallback_reason", "routed_to_orchestrator"),
     )
 
     if routing["use_orchestrator"]:
-        logger.info("ORCHESTRATOR PATH: %s (class=%s)", stem, routing["task_class"])
+        logger.info("ORCHESTRATOR PATH: %s (class=%s, stage=%s)", stem, routing["task_class"], stage or "default")
         try:
             from tools.orchestrator_adapter import execute_via_orchestrator
-            orch_result = execute_via_orchestrator(stem, task_text, inprogress_path)
+            orch_result = execute_via_orchestrator(stem, task_text, inprogress_path, routing=routing)
             # Verify artifacts using standard gate
             passed, messages = verify_artifacts(stem)
             for msg in messages:

@@ -10,6 +10,11 @@ Task classes:
   - system:       infrastructure, config, deployment, self-improvement
   - simple:       quick query, format fix, trivial ops
   - unknown:      cannot classify — falls back to direct worker
+
+Stage B rollout:
+  Only "research" class is eligible for the multi-agent orchestrator path.
+  A deterministic mutation-signal check rejects tasks that contain
+  code-change or shell-execution signals even if classified as research.
 """
 
 import json
@@ -69,6 +74,32 @@ ORCHESTRATOR_CLASSES = {"research", "code_impl", "code_review", "system"}
 # Classes that should always use direct worker
 DIRECT_CLASSES = {"simple", "unknown"}
 
+# ---------------------------------------------------------------------------
+# Stage B: mutation-signal denylist
+# ---------------------------------------------------------------------------
+# If any of these patterns match, the task contains mutation intent and
+# must NOT enter the read-only research multi-agent path — even if the
+# keyword classifier scored it as "research".
+_MUTATION_SIGNALS: list[str] = [
+    r"\bimplement\b", r"\bcreate\s+(?:a\s+)?(?:function|class|module|script|file)\b",
+    r"\bwrite\s+(?:code|file|script)\b", r"\bmodify\b", r"\bchange\b",
+    r"\bpatch\b", r"\bcommit\b", r"\bgit\s+push\b",
+    r"\brefactor\b", r"\brewrite\b", r"\bfix\s+(?:the\s+)?(?:bug|error|issue|crash)\b",
+    r"\bdeploy\b", r"\binstall\b", r"\bpip\s+install\b",
+    r"\brm\s", r"\bdelete\b", r"\bremove\b",
+    r"\bexecute\b", r"\brun\s+(?:command|script|shell)\b",
+    r"\bshell\b", r"\bbash\b",
+    r"\bsystemd\b", r"\bservice\b", r"\bcron\b",
+    r"\bsudo\b", r"\bchmod\b", r"\bchown\b",
+]
+
+_MUTATION_COMPILED: list[re.Pattern] = [
+    re.compile(p, re.IGNORECASE) for p in _MUTATION_SIGNALS
+]
+
+# Stage B: allowed classes for multi-agent orchestrator path
+STAGE_B_CLASSES = frozenset({"research"})
+
 
 def classify_task(task_text: str) -> tuple[str, float]:
     """Classify task text into a task class.
@@ -97,6 +128,70 @@ def classify_task(task_text: str) -> tuple[str, float]:
     confidence = min(1.0, best_score / max(max_possible * 0.3, 1))
 
     return best_class, round(confidence, 2)
+
+
+def has_mutation_signals(task_text: str) -> tuple[bool, list[str]]:
+    """Check if task text contains mutation/write intent signals.
+
+    Returns (has_mutations, matched_signals).
+    Used by Stage B to reject research-classified tasks that actually
+    contain code-change or shell-execution intent.
+    """
+    matched = []
+    for pattern in _MUTATION_COMPILED:
+        m = pattern.search(task_text)
+        if m:
+            matched.append(m.group())
+    return bool(matched), matched
+
+
+def is_stageB_eligible(
+    task_class: str,
+    confidence: float,
+    task_text: str,
+    feature_flags: dict | None = None,
+) -> tuple[bool, str]:
+    """Deterministic Stage B eligibility check.
+
+    Returns (eligible, reason) where reason explains the decision.
+
+    Checks performed in order:
+    1. Feature flag master switch
+    2. Stage is "B" (explicit stage gate)
+    3. Task class in Stage B allowed set (research only)
+    4. Confidence above threshold
+    5. No mutation signals in task text (read-only safety gate)
+
+    Fails closed: any check failure → not eligible.
+    """
+    flags = feature_flags or load_feature_flags()
+
+    # 1. Master switch
+    if not flags.get("enabled", False):
+        return False, "orchestrator_disabled"
+
+    # 2. Stage gate
+    stage = flags.get("stage", "")
+    if stage != "B":
+        return False, f"stage_{stage}_not_B"
+
+    # 3. Class allowlist (from config, intersected with Stage B set)
+    supported = set(flags.get("supported_classes", []))
+    allowed = supported & STAGE_B_CLASSES
+    if task_class not in allowed:
+        return False, f"class_{task_class}_not_in_stageB"
+
+    # 4. Confidence threshold
+    min_confidence = flags.get("min_confidence", 0.5)
+    if confidence < min_confidence:
+        return False, f"confidence_{confidence}_below_{min_confidence}"
+
+    # 5. Mutation signal check (deterministic safety gate)
+    has_mut, signals = has_mutation_signals(task_text)
+    if has_mut:
+        return False, f"mutation_signals_detected:{','.join(signals[:3])}"
+
+    return True, "stageB_research_eligible"
 
 
 def should_use_orchestrator(
@@ -154,7 +249,8 @@ def _default_flags() -> dict:
     return {
         "enabled": False,
         "supported_classes": [],
-        "min_confidence": 0.3,
+        "stage": "",
+        "min_confidence": 0.5,
         "fallback_to_worker": True,
         "audit_routing": True,
     }
@@ -164,9 +260,28 @@ def classify_and_route(task_text: str) -> dict:
     """Full classification + routing decision for a task.
 
     Returns a dict with classification details and routing decision.
+    Uses Stage B eligibility when stage is "B".
     """
     task_class, confidence = classify_task(task_text)
     flags = load_feature_flags()
+
+    # Stage B: use deterministic eligibility check
+    stage = flags.get("stage", "")
+    if stage == "B":
+        eligible, reason = is_stageB_eligible(
+            task_class, confidence, task_text, flags
+        )
+        return {
+            "task_class": task_class,
+            "confidence": confidence,
+            "use_orchestrator": eligible,
+            "stage": "B",
+            "allowed_roles": flags.get("allowed_roles", ["research"]),
+            "fallback_reason": None if eligible else reason,
+            "feature_flags": flags,
+        }
+
+    # Default path (non-Stage-B)
     use_orchestrator = should_use_orchestrator(task_class, confidence, flags)
 
     return {

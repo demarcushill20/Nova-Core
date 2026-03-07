@@ -4,6 +4,39 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 28) — Stage B Research-Only Rollout
+
+**Session span:** Mar 7 UTC
+
+### What was built
+
+Enabled the first selective rollout of the Phase 7 multi-agent orchestrator: Stage B allows **research-only tasks** to use the governed multi-agent path. All other task classes remain on the existing safe single-agent direct worker path.
+
+**Key design**: 5-layer deterministic safety gate — (1) feature flag master switch, (2) stage gate, (3) class allowlist, (4) confidence threshold (0.5), (5) mutation signal denylist. All gates fail closed.
+
+### Tests
+- 53 new tests in `tests/test_stageB_routing.py` across 10 test classes
+- Covers: eligible routing, ineligible rejection, disabled flags, mutation signals, confidence thresholds, plan validation, adapter enforcement, fallback, fail-closed defaults, constant definitions
+- All 155 existing Phase 7 tests still pass
+
+### Files changed
+- `STATE/config/feature_flags.json` — scoped to research-only, added stage/roles, version 3
+- `tools/task_classifier.py` — added `is_stageB_eligible()`, `has_mutation_signals()`, Stage B routing in `classify_and_route()`
+- `tools/orchestrator_adapter.py` — added `validate_stageB_plan()`, `_build_stageB_research_steps()`, Stage B enforcement
+- `watcher.py` — passes routing dict to orchestrator adapter, logs stage
+- `tests/test_stageB_routing.py` — 53 tests (new file)
+- `WORK/phase7_stageB_research_rollout_summary.md` — rollout summary
+- `WORK/phase7_stageB_operator_notes.md` — operator reference
+- `WORK/phase7_rollout_readiness_report.md` — checklist updated
+
+### Key decision
+Deterministic routing over LLM-based classification for the rollout gate. The mutation signal denylist acts as a second safety layer beyond class-based routing — even if a task is classified as "research", it cannot enter the multi-agent path if it contains words like "implement", "deploy", "shell", "delete", etc.
+
+### Next step
+Monitor first 3-5 real Stage B research task executions. After validation, proceed to Stage C (code_review with governed synthesis).
+
+---
+
 ## 2026-03-07 (Session 27) — RISK-1 ChildContract Schema Fix
 
 **Session span:** Mar 7 UTC
