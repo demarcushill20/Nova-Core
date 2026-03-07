@@ -578,6 +578,11 @@ def dispatch(task_path: Path):
             passed, messages = verify_artifacts(stem)
             for msg in messages:
                 logger.info("VERIFY: %s", msg)
+            # Orchestrator-level rejection (e.g. Stage C verifier) overrides artifact check
+            if not orch_result.get("success", True):
+                orch_error = orch_result.get("plan_summary", {}).get("error", "orchestrator_rejected")
+                logger.warning("ORCHESTRATOR REJECTED: %s — %s", stem, orch_error)
+                passed = False
             if passed:
                 done_path = inprogress_path.with_name(f"{stem}.md.done")
                 inprogress_path.rename(done_path)

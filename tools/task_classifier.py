@@ -15,6 +15,13 @@ Stage B rollout:
   Only "research" class is eligible for the multi-agent orchestrator path.
   A deterministic mutation-signal check rejects tasks that contain
   code-change or shell-execution signals even if classified as research.
+
+Stage C rollout (superset of Stage B):
+  Adds "code_impl" and "code_review" for low-risk repo inspection/refactor
+  tasks. A deterministic high-risk-signal check rejects tasks that involve
+  deployment, secrets, destructive operations, or overly broad scope.
+  Verifier approval is mandatory for all Stage C coding tasks.
+  Research tasks continue under the same rules as Stage B.
 """
 
 import json
@@ -99,6 +106,42 @@ _MUTATION_COMPILED: list[re.Pattern] = [
 
 # Stage B: allowed classes for multi-agent orchestrator path
 STAGE_B_CLASSES = frozenset({"research"})
+
+# ---------------------------------------------------------------------------
+# Stage C: high-risk signal denylist for coding tasks
+# ---------------------------------------------------------------------------
+# Stage C adds code_impl and code_review to the multi-agent path, but only
+# for low-risk tasks. Tasks matching any high-risk signal are rejected.
+STAGE_C_CLASSES = frozenset({"code_impl", "code_review"})
+
+_HIGH_RISK_SIGNALS: list[str] = [
+    # Deployment & infrastructure mutation
+    r"\bdeploy\b", r"\bproduction\b", r"\bstaging\b",
+    r"\binfrastructure\b", r"\bsystemd\b", r"\bcron\b",
+    # Secrets & credentials
+    r"\bsecret[s]?\b", r"\bcredential[s]?\b", r"\bpassword[s]?\b",
+    r"\bapi[\s_-]?key[s]?\b", r"\b\.env\s+file\b",
+    # Destructive operations
+    r"\bsudo\b", r"\brm\s+-rf\b",
+    r"\bgit\s+push\s+--force\b", r"\bgit\s+reset\s+--hard\b",
+    r"\bdrop\s+(?:table|database|collection)\b", r"\bdestructive\b",
+    # Overly broad scope
+    r"\brewrite\s+(?:everything|all|entire)\b", r"\bcross[\s-]?repo\b",
+    r"\bmigrat(?:e|ion)\b",
+    # Shell / external execution
+    r"\brun\s+(?:command|script|shell)\b",
+    r"\bexecute\s+(?:command|script|shell)\b",
+    r"\bshell\b", r"\bbash\b",
+    # Policy / agent config changes
+    r"\bpolicy\s+(?:engine|config)\b",
+    r"\bagent\s+(?:config|profile|registry)\b",
+    # Package management
+    r"\bpip\s+install\b", r"\bnpm\s+install\b", r"\bapt[\s-]get\s+install\b",
+]
+
+_HIGH_RISK_COMPILED: list[re.Pattern] = [
+    re.compile(p, re.IGNORECASE) for p in _HIGH_RISK_SIGNALS
+]
 
 
 def classify_task(task_text: str) -> tuple[str, float]:
@@ -194,6 +237,83 @@ def is_stageB_eligible(
     return True, "stageB_research_eligible"
 
 
+def has_high_risk_signals(task_text: str) -> tuple[bool, list[str]]:
+    """Check if task text contains high-risk signals for Stage C.
+
+    Returns (has_high_risk, matched_signals).
+    Used by Stage C to reject coding tasks that involve dangerous
+    operations like deployment, secret handling, or destructive commands.
+    """
+    matched = []
+    for pattern in _HIGH_RISK_COMPILED:
+        m = pattern.search(task_text)
+        if m:
+            matched.append(m.group())
+    return bool(matched), matched
+
+
+def is_stageC_eligible(
+    task_class: str,
+    confidence: float,
+    task_text: str,
+    feature_flags: dict | None = None,
+) -> tuple[bool, str]:
+    """Deterministic Stage C eligibility check.
+
+    Returns (eligible, reason) where reason explains the decision.
+
+    Stage C is a superset of Stage B:
+    - Research tasks: same rules as Stage B (mutation denylist)
+    - Coding tasks (code_impl, code_review): high-risk denylist + verifier
+
+    Checks performed in order:
+    1. Feature flag master switch
+    2. Stage is "C" (explicit stage gate)
+    3. Task class in Stage C coding set OR Stage B research set
+    4. Confidence above threshold
+    5. For coding: no high-risk signals
+    6. For research: no mutation signals (same as Stage B)
+
+    Fails closed: any check failure → not eligible.
+    """
+    flags = feature_flags or load_feature_flags()
+
+    # 1. Master switch
+    if not flags.get("enabled", False):
+        return False, "orchestrator_disabled"
+
+    # 2. Stage gate
+    stage = flags.get("stage", "")
+    if stage != "C":
+        return False, f"stage_{stage}_not_C"
+
+    # 3. Class check (intersect with config)
+    supported = set(flags.get("supported_classes", []))
+    is_coding = task_class in (supported & STAGE_C_CLASSES)
+    is_research = task_class in (supported & STAGE_B_CLASSES)
+
+    if not is_coding and not is_research:
+        return False, f"class_{task_class}_not_in_stageC"
+
+    # 4. Confidence threshold
+    min_confidence = flags.get("min_confidence", 0.5)
+    if confidence < min_confidence:
+        return False, f"confidence_{confidence}_below_{min_confidence}"
+
+    # 5/6. Risk signal check (different denylist for coding vs research)
+    if is_coding:
+        has_risk, signals = has_high_risk_signals(task_text)
+        if has_risk:
+            return False, f"high_risk_signals_detected:{','.join(signals[:3])}"
+        return True, "stageC_coding_eligible"
+    else:
+        # Research: same mutation denylist as Stage B
+        has_mut, signals = has_mutation_signals(task_text)
+        if has_mut:
+            return False, f"mutation_signals_detected:{','.join(signals[:3])}"
+        return True, "stageC_research_eligible"
+
+
 def should_use_orchestrator(
     task_class: str,
     confidence: float,
@@ -265,8 +385,27 @@ def classify_and_route(task_text: str) -> dict:
     task_class, confidence = classify_task(task_text)
     flags = load_feature_flags()
 
-    # Stage B: use deterministic eligibility check
+    # Stage-specific routing
     stage = flags.get("stage", "")
+
+    # Stage C: superset of Stage B (research + low-risk coding)
+    if stage == "C":
+        eligible, reason = is_stageC_eligible(
+            task_class, confidence, task_text, flags
+        )
+        is_coding = task_class in STAGE_C_CLASSES
+        return {
+            "task_class": task_class,
+            "confidence": confidence,
+            "use_orchestrator": eligible,
+            "stage": "C",
+            "allowed_roles": flags.get("allowed_roles", ["research", "coding"]),
+            "verifier_required": eligible and is_coding,
+            "fallback_reason": None if eligible else reason,
+            "feature_flags": flags,
+        }
+
+    # Stage B: research-only
     if stage == "B":
         eligible, reason = is_stageB_eligible(
             task_class, confidence, task_text, flags
@@ -281,7 +420,7 @@ def classify_and_route(task_text: str) -> dict:
             "feature_flags": flags,
         }
 
-    # Default path (non-Stage-B)
+    # Default path (no stage marker)
     use_orchestrator = should_use_orchestrator(task_class, confidence, flags)
 
     return {

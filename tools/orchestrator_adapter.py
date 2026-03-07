@@ -10,6 +10,12 @@ orchestrator pipeline instead of the direct Claude worker subprocess.
 Stage B enforcement:
   When routing dict has stage="B", the adapter restricts the plan
   to research-only steps and enforces the allowed_roles list.
+
+Stage C enforcement:
+  When routing dict has stage="C", the adapter builds coding or research
+  plans depending on task class. Coding plans have a mandatory
+  self-verification step. All Stage C plans are validated against the
+  Stage C allowed/blocked skill sets. Verifier rejection blocks finalization.
 """
 
 import json
@@ -46,6 +52,18 @@ _STAGE_B_BLOCKED_SKILLS = frozenset({
     "shell-ops", "git-ops", "task-execution",
 })
 
+# Stage C: skills allowed for low-risk coding path
+# Same as Stage B plus file-ops is used for bounded code edits
+_STAGE_C_ALLOWED_SKILLS = frozenset({
+    "web-research", "file-ops", "self-verification", "research-to-action",
+    "http-fetch",
+})
+
+# Stage C: skills that are blocked (dangerous execution)
+_STAGE_C_BLOCKED_SKILLS = frozenset({
+    "shell-ops", "git-ops", "task-execution",
+})
+
 
 def build_plan_from_task(
     stem: str,
@@ -62,11 +80,19 @@ def build_plan_from_task(
     task_class, confidence = classify_task(task_text)
     plan_id = f"plan_{stem}_{int(time.time())}"
 
-    # Stage B enforcement: only research steps
+    # Stage enforcement: restrict steps based on rollout stage
     stage = (routing or {}).get("stage", "")
     if stage == "B":
         steps = _build_stageB_research_steps(stem, task_text)
         strategy = "stageB_research"
+    elif stage == "C":
+        if task_class in ("code_impl", "code_review"):
+            steps = _build_stageC_coding_steps(stem, task_class, task_text)
+            strategy = "stageC_coding"
+        else:
+            # Research path under Stage C — same steps as Stage B
+            steps = _build_stageB_research_steps(stem, task_text)
+            strategy = "stageC_research"
     else:
         steps = _build_steps_for_class(stem, task_class, task_text)
         strategy = f"orchestrated_{task_class}"
@@ -110,6 +136,59 @@ def _build_stageB_research_steps(
             step_id=f"{stem}_verify",
             skill_name="self-verification",
             goal="Verify output completeness and contract",
+            inputs={},
+        ),
+    ]
+
+
+def _build_stageC_coding_steps(
+    stem: str, task_class: str, task_text: str
+) -> list[PlanStep]:
+    """Build coding plan steps for Stage C rollout.
+
+    These steps use file-ops for bounded code inspection/edits with a
+    mandatory self-verification step. No shell-ops, git-ops, or
+    task-execution steps. Verifier approval is required before finalization.
+    """
+    if task_class == "code_review":
+        return [
+            PlanStep(
+                step_id=f"{stem}_review",
+                skill_name="file-ops",
+                goal="Review code for quality, security, and correctness",
+                inputs={"task_text": task_text[:2000]},
+            ),
+            PlanStep(
+                step_id=f"{stem}_report",
+                skill_name="file-ops",
+                goal="Write review findings report",
+                inputs={"task_text": task_text[:2000]},
+            ),
+            PlanStep(
+                step_id=f"{stem}_verify",
+                skill_name="self-verification",
+                goal="Verify review completeness and contract (MANDATORY — verifier approval required)",
+                inputs={},
+            ),
+        ]
+    # code_impl (default)
+    return [
+        PlanStep(
+            step_id=f"{stem}_analyze",
+            skill_name="file-ops",
+            goal="Analyze codebase and plan bounded changes",
+            inputs={"task_text": task_text[:2000]},
+        ),
+        PlanStep(
+            step_id=f"{stem}_implement",
+            skill_name="file-ops",
+            goal="Implement bounded code changes",
+            inputs={"task_text": task_text[:2000]},
+        ),
+        PlanStep(
+            step_id=f"{stem}_verify",
+            skill_name="self-verification",
+            goal="Verify implementation correctness (MANDATORY — verifier approval required)",
             inputs={},
         ),
     ]
@@ -230,6 +309,29 @@ def validate_stageB_plan(plan: ExecutionPlan) -> tuple[bool, str]:
     return True, "all_skills_allowed"
 
 
+def validate_stageC_plan(plan: ExecutionPlan) -> tuple[bool, str]:
+    """Validate that a Stage C plan meets safety requirements.
+
+    Returns (valid, reason). Fails closed.
+
+    Requirements:
+    1. All skills must be in _STAGE_C_ALLOWED_SKILLS
+    2. No blocked skills
+    3. Must include at least one self-verification step (verifier mandatory)
+    """
+    has_verifier = False
+    for step in plan.steps:
+        if step.skill_name in _STAGE_C_BLOCKED_SKILLS:
+            return False, f"blocked_skill:{step.skill_name}:step:{step.step_id}"
+        if step.skill_name not in _STAGE_C_ALLOWED_SKILLS:
+            return False, f"unknown_skill:{step.skill_name}:step:{step.step_id}"
+        if step.skill_name == "self-verification":
+            has_verifier = True
+    if not has_verifier:
+        return False, "missing_mandatory_verifier_step"
+    return True, "all_skills_allowed_verifier_present"
+
+
 def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
     """Execute a plan step by dispatching to a Claude subprocess.
 
@@ -316,6 +418,23 @@ def execute_via_orchestrator(
             }
         logger.info("STAGE B PLAN VALIDATED: %s — research-only skills confirmed", stem)
 
+    # Stage C: validate plan before execution (must include verifier step)
+    elif stage == "C":
+        valid, reason = validate_stageC_plan(plan)
+        if not valid:
+            logger.error("STAGE C PLAN REJECTED: %s — %s", stem, reason)
+            return {
+                "success": False,
+                "output_path": None,
+                "plan_summary": {
+                    "plan_id": plan.plan_id,
+                    "task_id": stem,
+                    "status": "rejected",
+                    "error": f"Stage C plan validation failed: {reason}",
+                },
+            }
+        logger.info("STAGE C PLAN VALIDATED: %s — verifier-gated path confirmed", stem)
+
     # Create orchestrator with Claude step executor
     orchestrator = Orchestrator(
         supervisor=Supervisor(),
@@ -333,6 +452,31 @@ def execute_via_orchestrator(
             "status": "failed",
             "error": str(exc),
         }
+
+    # Stage C verifier enforcement: check verification step result
+    if stage == "C" and (routing or {}).get("verifier_required", False):
+        verify_steps = [
+            s for s in summary.get("steps", [])
+            if "verify" in s.get("step_id", "")
+        ]
+        if not verify_steps:
+            logger.warning(
+                "STAGE C VERIFIER MISSING: %s — no verification step in results",
+                stem,
+            )
+            summary["status"] = "rejected"
+            summary["verifier_rejected"] = True
+        else:
+            last_verify = verify_steps[-1]
+            if last_verify.get("status") != "done":
+                logger.warning(
+                    "STAGE C VERIFIER REJECTED: %s — verification step status=%s",
+                    stem, last_verify.get("status"),
+                )
+                summary["status"] = "rejected"
+                summary["verifier_rejected"] = True
+            else:
+                logger.info("STAGE C VERIFIER APPROVED: %s", stem)
 
     # Write output report
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")

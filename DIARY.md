@@ -4,6 +4,38 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 29) — Stage C Low-Risk Coding Rollout
+
+**Session span:** Mar 7 UTC
+
+### What was built
+
+Enabled Stage C: governed coding-agent path for **low-risk repo inspection/refactor tasks** with **mandatory verifier approval**. Stage C is a superset of Stage B — research tasks continue to work as before, and `code_impl`/`code_review` classes are newly eligible for the multi-agent path.
+
+**Key design**: 6-layer safety gate for coding tasks — (1) feature flag, (2) stage gate, (3) class allowlist, (4) confidence threshold, (5) high-risk signal denylist (27 patterns covering deployment, secrets, destructive ops, broad scope, shell, policy, packages), (6) mandatory verifier approval. All gates fail closed. Research tasks use the same 5-layer Stage B gate.
+
+### Tests
+- 72 new tests in `tests/test_stageC_routing.py` across 12 test classes
+- Covers: eligible coding routing, high-risk rejection (15 tests), research superset, ineligible classes, disabled flags, confidence, plan validation (incl. missing verifier), verifier enforcement, fallback, fail-closed, constants, Stage B backward compat
+- All 208 existing tests still pass (Stage B + integration + failure + critic/verifier + graph)
+- Grand total: 280 tests passing
+
+### Files changed
+- `tools/task_classifier.py` — added `STAGE_C_CLASSES`, `has_high_risk_signals()`, `is_stageC_eligible()`, updated `classify_and_route()` for stage "C"
+- `tools/orchestrator_adapter.py` — added `_STAGE_C_ALLOWED/BLOCKED_SKILLS`, `_build_stageC_coding_steps()`, `validate_stageC_plan()`, Stage C enforcement + verifier check
+- `watcher.py` — added orchestrator-level rejection check (verifier rejection overrides artifact verification)
+- `STATE/config/feature_flags.json` — stage "C", added code_impl/code_review, version 4
+- `tests/test_stageC_routing.py` — 72 tests (new file)
+- `WORK/phase7_stageC_coding_rollout_summary.md` — rollout summary
+- `WORK/phase7_stageC_operator_notes.md` — operator reference
+
+### Key decisions
+1. High-risk denylist is separate from mutation denylist — coding tasks inherently contain mutation-like keywords (refactor, fix, implement), so a different denylist targets truly dangerous operations.
+2. Verifier step is mandatory in all Stage C coding plans — `validate_stageC_plan()` rejects plans missing self-verification.
+3. Watcher now checks `orch_result["success"]` in addition to `verify_artifacts()` — ensures verifier rejection blocks task finalization.
+
+---
+
 ## 2026-03-07 (Session 28) — Stage B Research-Only Rollout
 
 **Session span:** Mar 7 UTC
