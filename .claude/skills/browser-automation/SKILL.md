@@ -2,6 +2,18 @@
 name: browser-automation
 description: "Playwright browser automation for multi-step web tasks — scraping dynamic pages, filling forms, navigating SPAs. Headless, login-free by default. Auto-invoked when HTTP fetch is insufficient."
 disable-model-invocation: false
+activation:
+  keywords:
+    - playwright
+    - browser
+    - screenshot
+    - scrape
+    - web page
+    - navigate
+    - headless
+    - click button
+    - fill form
+    - browser automation
 allowed-tools:
   - mcp__playwright__browser_navigate
   - mcp__playwright__browser_snapshot
@@ -24,6 +36,18 @@ allowed-tools:
 
 # Browser Automation
 
+Two modes are available depending on the context:
+
+### Mode 1: MCP tools (interactive sessions)
+For multi-step browser interactions — click, type, navigate, snapshot — use the `mcp__playwright__*` tools listed above. These run via the Playwright MCP server configured globally.
+
+### Mode 2: NovaCore CLI tools (worker agents)
+For one-shot captures, use the registered NovaCore tools:
+- `browser.screenshot` — capture a screenshot of a URL (saved to OUTPUT/)
+- `browser.pdf` — generate a PDF of a URL (saved to OUTPUT/)
+
+These are dispatched through the NovaCore runner with full audit logging.
+
 ## When to use
 - Page content is rendered by JavaScript (SPAs, React/Vue/Angular sites)
 - Multi-step interaction required (click through tabs, expand sections, paginate)
@@ -37,12 +61,7 @@ allowed-tools:
 - Page requires login credentials — stop and report the constraint
 - Simple URL retrieval — use `http-fetch`
 
-## Inputs
-- **url**: Starting URL (required)
-- **task**: What to do on the page (required) — e.g., "extract the pricing table", "screenshot the hero section"
-- **max_steps**: Maximum interaction steps before stopping. Default: 10
-
-## Workflow
+## Workflow (MCP mode)
 
 1. **Navigate** — `browser_navigate` to the starting URL.
 2. **Snapshot** — `browser_snapshot` to get the accessibility tree. Prefer this over screenshots for action planning.
@@ -71,6 +90,7 @@ allowed-tools:
 
 ### Safety
 - No credential entry. No payment form interaction. No file downloads to unknown paths.
+- URLs must use http:// or https:// — file:// and javascript: schemes are rejected.
 - Close the browser when done to free resources.
 
 ## Outputs / contract

@@ -299,6 +299,10 @@ def run_tool(
             func = lambda: _run_telegram_send_file(args, sandbox)
         elif tool_name == "contracts.validate":
             func = lambda: _run_contracts_validate(args)
+        elif tool_name == "browser.screenshot":
+            func = lambda: _run_browser_screenshot(args, sandbox)
+        elif tool_name == "browser.pdf":
+            func = lambda: _run_browser_pdf(args, sandbox)
         elif tool_name.startswith("files."):
             func = lambda: _run_files(tool_name, args, registry)
         else:
@@ -540,3 +544,27 @@ def _run_contracts_validate(args: dict) -> dict:
         raise ValueError("contracts.validate requires 'text' (str)")
     result = contracts_validate(text)
     return {"ok": True, "exit_code": 0, "stdout": "", "stderr": "", "result": result}
+
+
+def _run_browser_screenshot(args: dict, sandbox: Path) -> dict:
+    """Execute browser.screenshot via the Playwright adapter."""
+    from tools.adapters.playwright_browser import browser_screenshot
+    return browser_screenshot(
+        url=args.get("url", ""),
+        filename=args.get("filename", ""),
+        full_page=args.get("full_page", False),
+        wait_timeout=args.get("wait_timeout", 0),
+        _sandbox=sandbox,
+    )
+
+
+def _run_browser_pdf(args: dict, sandbox: Path) -> dict:
+    """Execute browser.pdf via the Playwright adapter."""
+    from tools.adapters.playwright_browser import browser_pdf
+    return browser_pdf(
+        url=args.get("url", ""),
+        filename=args.get("filename", ""),
+        paper_format=args.get("paper_format", "A4"),
+        wait_timeout=args.get("wait_timeout", 0),
+        _sandbox=sandbox,
+    )

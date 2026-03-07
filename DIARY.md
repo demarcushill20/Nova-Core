@@ -4,6 +4,63 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-07 (Session 25) — Playwright CLI Integration
+
+**Session span:** Mar 7 UTC
+
+### What was built
+
+Integrated Microsoft Playwright CLI as a NovaCore tool, adding `browser.screenshot` and `browser.pdf` capabilities for worker agents.
+
+1. **Adapter** — `tools/adapters/playwright_browser.py` wraps `npx playwright screenshot` and `npx playwright pdf` with:
+   - URL validation (http/https only, 2048 char limit, scheme enforcement)
+   - Filename sanitization (traversal prevention, safe character regex, extension enforcement)
+   - Environment config for Chromium binary and shared libraries
+   - Structured result format matching NovaCore tool conventions
+   - Timeout handling and output truncation (10KB cap)
+
+2. **Registry** — Added `browser.screenshot` and `browser.pdf` to `tools/tools_registry.json` with full args_schema, returns, and safety specifications.
+
+3. **Runner dispatch** — Added `_run_browser_screenshot()` and `_run_browser_pdf()` to `tools/runner.py` for routing through the standard tool execution pipeline.
+
+4. **Skill enhancement** — Updated `.claude/skills/browser-automation/SKILL.md` with activation keywords and dual-mode documentation (MCP tools for interactive, CLI tools for workers).
+
+### Tests
+
+41 new tests in `tests/test_playwright_browser.py`, all passing:
+- `TestValidateUrl` (10) — scheme enforcement, length limits, edge cases
+- `TestValidateOutputPath` (10) — traversal, sanitization, extensions
+- `TestBrowserScreenshot` (8) — success/failure flows, CLI args, auto-naming
+- `TestBrowserPdf` (7) — success/failure, paper formats, auto-naming
+- `TestRunPlaywrightCli` (4) — timeout, missing npx, env vars, truncation
+- `TestRunnerDispatch` (1) — registry integrity check
+
+### E2E verification
+
+Both tools verified end-to-end against httpbin.org:
+- `browser_screenshot('https://httpbin.org/get')` → 56KB PNG
+- `browser_pdf('https://httpbin.org/get')` → 14KB PDF
+
+### Files created/modified
+
+| File | Action | Notes |
+|------|--------|-------|
+| `tools/adapters/playwright_browser.py` | created | Adapter for screenshot + PDF |
+| `tests/test_playwright_browser.py` | created | 41 tests |
+| `tools/tools_registry.json` | modified | Added browser.screenshot + browser.pdf |
+| `tools/runner.py` | modified | Added dispatch for browser tools |
+| `.claude/skills/browser-automation/SKILL.md` | modified | Activation keywords, dual-mode docs |
+
+### Design decisions
+
+- Dual-mode architecture: MCP tools for interactive multi-step, CLI adapter for stateless one-shot
+- CLI adapter only covers screenshot + PDF — complex interactions (click, type, snapshot) stay with MCP
+- Chromium binary path and LD_LIBRARY_PATH match existing MCP server config
+- All outputs sandboxed to OUTPUT/ directory
+- No credential entry or payment interaction safety rules enforced
+
+---
+
 ## 2026-03-07 (Session 24) — Phase 7.7 Production Hardening
 
 **Session span:** Mar 7 UTC

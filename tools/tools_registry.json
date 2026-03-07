@@ -536,6 +536,83 @@
         "All invocations are logged to audit_log."
       ]
     },
+    "browser.screenshot": {
+      "description": "Take a screenshot of a web page using Playwright CLI. Saves the image to OUTPUT/ within the sandbox.",
+      "args_schema": {
+        "url": {
+          "type": "string",
+          "required": true,
+          "description": "URL to screenshot (must be http:// or https://)."
+        },
+        "filename": {
+          "type": "string",
+          "required": false,
+          "description": "Output filename (saved in OUTPUT/). Auto-generated if omitted."
+        },
+        "full_page": {
+          "type": "boolean",
+          "required": false,
+          "description": "Capture full scrollable page, not just viewport. Default: false."
+        },
+        "wait_timeout": {
+          "type": "integer",
+          "required": false,
+          "description": "Wait N milliseconds before capturing (max 10000). Default: 0."
+        }
+      },
+      "returns": {
+        "ok": "boolean — true if screenshot was captured successfully",
+        "path": "string — sandbox-relative path to the screenshot (e.g. OUTPUT/screenshot_20260307.png)",
+        "size_bytes": "integer — file size in bytes",
+        "url": "string — the URL that was captured",
+        "full_page": "boolean — whether full page was captured"
+      },
+      "safety": [
+        "URL must use http:// or https:// scheme. file:// and javascript: are rejected.",
+        "Output path is always within OUTPUT/ directory.",
+        "Filename is sanitized — path separators stripped to prevent traversal.",
+        "Uses headless Chromium — no GUI. No credential entry or payment interaction.",
+        "All invocations are logged to audit_log."
+      ]
+    },
+    "browser.pdf": {
+      "description": "Generate a PDF of a web page using Playwright CLI. Saves the PDF to OUTPUT/ within the sandbox.",
+      "args_schema": {
+        "url": {
+          "type": "string",
+          "required": true,
+          "description": "URL to render as PDF (must be http:// or https://)."
+        },
+        "filename": {
+          "type": "string",
+          "required": false,
+          "description": "Output filename (saved in OUTPUT/). Auto-generated if omitted."
+        },
+        "paper_format": {
+          "type": "string",
+          "required": false,
+          "description": "Paper format: A4, Letter, Legal, Tabloid, etc. Default: A4."
+        },
+        "wait_timeout": {
+          "type": "integer",
+          "required": false,
+          "description": "Wait N milliseconds before capture (max 10000). Default: 0."
+        }
+      },
+      "returns": {
+        "ok": "boolean — true if PDF was generated successfully",
+        "path": "string — sandbox-relative path to the PDF (e.g. OUTPUT/page.pdf)",
+        "size_bytes": "integer — file size in bytes",
+        "url": "string — the URL that was rendered"
+      },
+      "safety": [
+        "URL must use http:// or https:// scheme. file:// and javascript: are rejected.",
+        "Output path is always within OUTPUT/ directory.",
+        "Filename is sanitized — path separators stripped to prevent traversal.",
+        "Uses headless Chromium — no GUI. No credential entry or payment interaction.",
+        "All invocations are logged to audit_log."
+      ]
+    },
     "git.run": {
       "description": "Run an allowlisted git subcommand within the sandbox repository.",
       "args_schema": {
