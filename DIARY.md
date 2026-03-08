@@ -4,6 +4,23 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-08 (Session 33) — Obsidian Phase 4.5: `capturing-workflow-learnings` Skill
+
+**Session span:** Mar 8 UTC
+
+### What was built
+
+**Phase 4.5 — First Write-Oriented Obsidian Skill:** Created the `capturing-workflow-learnings` Claude Code skill for safely converting completed workflow outcomes into compact, reusable workflow-learning notes in the canonical synced vault. The skill uses the existing bounded write path (vault_validate → vault_write) targeting `30-workflow-learnings/`. Includes explicit activation/non-activation criteria, a 7-step capture workflow with compaction-over-transcript rules, dedup search before write, schema validation against the `workflow-learning` type (11 required frontmatter fields), and a structured output contract. Added `reference/COMPACTION_RULES.md` with anti-pattern table and size targets.
+
+This completes the read-write-retrieve skill triad: `reading-obsidian-memory` (read) + `capturing-workflow-learnings` (write) + `retrieving-task-patterns` (retrieve).
+
+### Files changed
+- `.claude/skills/capturing-workflow-learnings/SKILL.md` — main skill definition
+- `.claude/skills/capturing-workflow-learnings/reference/COMPACTION_RULES.md` — compaction rules
+- `WORK/obsidian_phase4_5_workflow_learnings_skill_summary.md` — summary artifact
+
+---
+
 ## 2026-03-08 (Session 32) — Obsidian Phases 3.9/4: Search Revalidation + Write Activation
 
 **Session span:** Mar 8 UTC
