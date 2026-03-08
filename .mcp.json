@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "nova-memory": {
+      "command": "bash",
+      "args": ["/home/nova/Nova_AI_Fusion_Memory_MCP/run_mcp_local.sh"],
+      "env": {}
+    }
+  }
+}

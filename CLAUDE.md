@@ -42,6 +42,38 @@ Confirmation required before:
 
 User preference: Full YOLO mode. Do not ask permission for any operation. Act on best judgment.
 
+## Persistent Memory (Fusion Memory MCP)
+
+Nova-Memory is the primary cross-session memory system. It persists across all Claude Code sessions via Pinecone (semantic), Neo4j (graph), and Redis (timeline).
+
+### Session Start Protocol
+1. Run `get_last_checkpoint` to resume from where the last session left off
+2. Check `open_threads` and `next_actions` from the checkpoint
+3. Use `query_memory` for any context needed about prior decisions or research
+
+### During Work
+- Store important decisions, discoveries, and patterns with `upsert_memory`
+- Use category metadata: `decision`, `research`, `pattern`, `context`, `debug`
+- Always include `project` and `session_id` in metadata
+- Use `bulk_upsert_memory` for batching multiple related items
+
+### Session End Protocol
+1. Create a checkpoint with `create_checkpoint` summarizing what was done
+2. Include `open_threads` (unfinished work) and `next_actions` (what to do next)
+3. Set `project` to scope the checkpoint for retrieval
+
+### What to Store
+- Architectural decisions and their rationale
+- Bug fixes and what caused them (debugging patterns)
+- User preferences and workflow patterns
+- Research findings and technical discoveries
+- System state changes (services, configs, deployments)
+
+### What NOT to Store
+- Secrets, API keys, passwords
+- Ephemeral task state (use TASKS/ for that)
+- Raw file contents (store summaries/insights instead)
+
 ## Runbook
 
 ```bash
