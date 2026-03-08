@@ -4,6 +4,30 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-08 (Session 32) — Obsidian Phases 3.9/4: Search Revalidation + Write Activation
+
+**Session span:** Mar 8 UTC
+
+### What was built
+
+**Phase 3.9 — Post-Search Revalidation:** Re-tested all 6 previously failing multi-word search scenarios from Phase 3.75 against the Phase 3.8 tokenized search upgrade. All 15 validation scenarios pass (6 GAP-1 multi-word fixes confirmed, 3 backward-compat, 2 reading-obsidian-memory skill, 2 retrieving-task-patterns skill, 2 safety). GAP-1 fully resolved. First-query success rate: 40% → 100%.
+
+**Phase 4 — Bounded Write Activation:** Enabled the existing write feature flag (`enabled: true` in `.nova-write-config.json`). Ran 12 live end-to-end validation checks against the canonical synced vault: 5 success cases (write, read-back, frontmatter verify, search discovery, update append) + 7 rejection cases (read-only folder, source enforcement, sensitive content, no-overwrite, human-authored protection, path traversal, schema validation). All pass. Created validation note `20-agent-patterns/phase4-validation-pattern.md`. Audit log captures all 9 operations. Pushed vault to GitHub for phone sync.
+
+### Tests
+- 178 vault MCP tests passing, zero regressions
+- 15 live search revalidation scenarios pass
+- 12 live write validation checks pass
+
+### Files changed
+- `/home/nova/nova-vault/.nova-write-config.json` — `enabled: false` → `true`
+- `/home/nova/nova-vault/20-agent-patterns/phase4-validation-pattern.md` — created + updated
+- `/home/nova/nova-vault/.nova-audit.log` — 9 validation entries
+- `WORK/obsidian_phase3_9_post_search_revalidation.md` — revalidation summary
+- `WORK/obsidian_phase4_bounded_write_activation.md` — activation summary
+
+---
+
 ## 2026-03-07 (Session 31) — Obsidian Phase 3: Search Upgrade, Ownership Detection, Skills
 
 **Session span:** Mar 7 UTC
