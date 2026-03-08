@@ -4,6 +4,62 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-08 (Session 43) — Phase 7.14/7.15: Stage 4 Evaluation Gate + Rollout Plan
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Implemented two Phase 7 atomic steps advancing the system class toward controlled rollout planning.
+
+#### Phase 7.14 — Stage 4 Evaluation Gate
+
+Created a deterministic 15-criteria evaluation gate that assesses whether Stage 3 is sufficiently stable to even consider Stage 4 planning. Thresholds are tighter than Stage 3 across the board:
+
+| Criterion | Stage 3 | Stage 4 |
+|-----------|---------|---------|
+| code_impl min runs | 2 | 5 |
+| code_impl failure rate | 50% | 30% |
+| Overall failure rate | 30% | 20% |
+| Verifier rejection rate | 50% | 30% |
+| Recovery anomalies | 3 | 1 |
+
+Decision states: `ready_for_stage4_planning`, `hold_stage4`, `block_stage4`. Key design: Stage 3 stability is a hard prerequisite — any Stage 3 soft concern cascades to block_stage4.
+
+Two additional code_impl tasks (0099, 0100) completed via Telegram during the session, bringing the total to 5 code_impl runs — crossing the Stage 4 threshold. **Live result: `ready_for_stage4_planning` (15/15 criteria PASS).**
+
+#### Phase 7.15 — Stage 4 Rollout Plan
+
+Created a bounded rollout plan defining the narrowest safe initial slice for system class:
+
+- **system_inspect only** — 8 read-only operations (status checks, log inspection, config review, health audits, resource monitoring, architecture review, dependency audits, security scans)
+- **12 mutation operations blocked** (deployment, service modification, self-modification, permission changes, user management, etc.)
+- **Skill restrictions**: shell-ops, git-ops, task-execution blocked; file-ops, self-verification, web-research allowed
+- **17 inspect-signal patterns** + **21 mutate-signal patterns** for future scope filtering
+- **6 activation prerequisites** including operator approval and manual approval hooks
+- **8 success criteria** with zero-tolerance for policy violations, budget exhaustion, and recovery anomalies
+- **7 abort conditions** for immediate rollback
+- **6-step rollback procedure**
+
+system remains blocked throughout. Plan status: draft.
+
+### Files changed
+- `agents/rollout_gate.py` — +1015 lines: Phase 7.14 evaluation gate (thresholds, criteria, decision logic, artifact generation) + Phase 7.15 rollout plan (scope definitions, signal patterns, prerequisites, success criteria, abort conditions, plan builder, markdown renderer)
+- `tests/test_stage4_evaluation_gate.py` — 54 tests for evaluation gate
+- `tests/test_stage4_rollout_plan.py` — 63 tests for rollout plan
+- `WORK/phase7_stage4_evaluation_gate.md` — live evaluation artifact
+- `STATE/stage4_evaluation.json` — machine-readable evaluation
+- `WORK/phase7_stage4_rollout_plan.md` — operator-facing rollout plan
+- `STATE/stage4_rollout_plan.json` — machine-readable plan
+- Worker-created files from tasks 0099/0100 (utils, tests)
+
+### Test results
+- Phase 7.14 tests: 54 passed
+- Phase 7.15 tests: 63 passed
+- Full regression: 2210 passed, 0 failed
+
+---
+
 ## 2026-03-08 (Session 42) — Stage 3 Live Validation: code_impl Tasks + Stability Confirmed
 
 **Session span:** Mar 8 UTC
