@@ -87,6 +87,18 @@ _STAGE_D_BLOCKED_SKILLS = frozenset({
     "shell-ops", "git-ops", "task-execution",
 })
 
+# Stage D system_report: skills allowed (superset of inspect — adds shell-ops)
+_STAGE_D_REPORT_ALLOWED_SKILLS = frozenset({
+    "web-research", "file-ops", "self-verification",
+    "http-fetch", "reading-obsidian-memory",
+    "shell-ops",  # bounded by system_shell_allowlist
+})
+
+# Stage D system_report: skills that remain blocked
+_STAGE_D_REPORT_BLOCKED_SKILLS = frozenset({
+    "git-ops", "task-execution",
+})
+
 
 def build_plan_from_task(
     stem: str,
@@ -114,8 +126,14 @@ def build_plan_from_task(
         strategy = "stageB_research"
     elif stage == "D":
         if task_class == "system":
-            steps = _build_stageD_inspect_steps(stem, task_text)
-            strategy = "stageD_system_inspect"
+            # Check system_scope to decide inspect vs report plan
+            system_scope = _get_system_scope(routing)
+            if system_scope == "report":
+                steps = _build_stageD_report_steps(stem, task_text)
+                strategy = "stageD_system_report"
+            else:
+                steps = _build_stageD_inspect_steps(stem, task_text)
+                strategy = "stageD_system_inspect"
         elif task_class in ("code_impl", "code_review"):
             steps = _build_stageC_coding_steps(stem, task_class, task_text)
             strategy = "stageD_coding"
@@ -267,6 +285,24 @@ def _build_stageC_coding_steps(
     ]
 
 
+def _get_system_scope(routing: dict | None) -> str:
+    """Get system_scope from routing dict or feature flags.
+
+    Returns 'inspect_only' by default (fail-closed).
+    """
+    if routing:
+        ff = routing.get("feature_flags", {})
+        scope = ff.get("system_scope", "inspect_only")
+        return scope
+    # Fallback: read from disk
+    try:
+        from tools.task_classifier import load_feature_flags
+        flags = load_feature_flags()
+        return flags.get("system_scope", "inspect_only")
+    except Exception:
+        return "inspect_only"
+
+
 def _build_stageD_inspect_steps(
     stem: str, task_text: str
 ) -> list[PlanStep]:
@@ -293,6 +329,48 @@ def _build_stageD_inspect_steps(
             step_id=f"{stem}_verify",
             skill_name="self-verification",
             goal="Verify inspection completeness (MANDATORY — verifier approval required)",
+            inputs={},
+        ),
+    ]
+
+
+def _build_stageD_report_steps(
+    stem: str, task_text: str
+) -> list[PlanStep]:
+    """Build system_report plan steps for Stage D.
+
+    Extends inspect with bounded shell-ops for read-only diagnostics.
+    Shell commands are validated against the system_shell_allowlist
+    at execution time.
+    """
+    return [
+        PlanStep(
+            step_id=f"{stem}_inspect",
+            skill_name="file-ops",
+            goal="Inspect system state and gather read-only information",
+            inputs={"task_text": task_text[:2000]},
+        ),
+        PlanStep(
+            step_id=f"{stem}_diagnose",
+            skill_name="shell-ops",
+            goal=(
+                "Run bounded read-only diagnostic commands (ps, df, free, "
+                "uptime, journalctl, systemctl status). "
+                "ALL commands must match the system_shell_allowlist. "
+                "Do NOT run any mutation commands."
+            ),
+            inputs={"task_text": task_text[:2000], "shell_scope": "system_report_allowlist"},
+        ),
+        PlanStep(
+            step_id=f"{stem}_report",
+            skill_name="file-ops",
+            goal="Compile diagnostic findings into a structured report",
+            inputs={"task_text": task_text[:2000]},
+        ),
+        PlanStep(
+            step_id=f"{stem}_verify",
+            skill_name="self-verification",
+            goal="Verify report completeness and confirm no mutations occurred (MANDATORY)",
             inputs={},
         ),
     ]
@@ -459,6 +537,34 @@ def validate_stageD_plan(plan: ExecutionPlan) -> tuple[bool, str]:
     return True, "all_skills_allowed_verifier_present"
 
 
+def validate_stageD_report_plan(plan: ExecutionPlan) -> tuple[bool, str]:
+    """Validate that a Stage D system_report plan meets safety requirements.
+
+    Returns (valid, reason). Fails closed.
+
+    Requirements:
+    1. All skills must be in _STAGE_D_REPORT_ALLOWED_SKILLS
+    2. No blocked skills (git-ops, task-execution)
+    3. Must include at least one self-verification step (verifier mandatory)
+    4. shell-ops steps must have shell_scope='system_report_allowlist' in inputs
+    """
+    has_verifier = False
+    for step in plan.steps:
+        if step.skill_name in _STAGE_D_REPORT_BLOCKED_SKILLS:
+            return False, f"blocked_skill:{step.skill_name}:step:{step.step_id}"
+        if step.skill_name not in _STAGE_D_REPORT_ALLOWED_SKILLS:
+            return False, f"unknown_skill:{step.skill_name}:step:{step.step_id}"
+        if step.skill_name == "self-verification":
+            has_verifier = True
+        if step.skill_name == "shell-ops":
+            scope = step.inputs.get("shell_scope", "")
+            if scope != "system_report_allowlist":
+                return False, f"shell_step_missing_allowlist_scope:step:{step.step_id}"
+    if not has_verifier:
+        return False, "missing_mandatory_verifier_step"
+    return True, "all_skills_allowed_verifier_present_shell_bounded"
+
+
 def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
     """Execute a plan step by dispatching to a Claude subprocess.
 
@@ -619,10 +725,14 @@ def execute_via_orchestrator(
             }
         logger.info("STAGE B PLAN VALIDATED: %s — research-only skills confirmed", stem)
 
-    # Stage D: validate system_inspect plan (or coding/research plan)
+    # Stage D: validate system plan (inspect or report) or coding/research
     elif stage == "D":
         if task_class == "system":
-            valid, reason = validate_stageD_plan(plan)
+            system_scope = _get_system_scope(routing)
+            if system_scope == "report":
+                valid, reason = validate_stageD_report_plan(plan)
+            else:
+                valid, reason = validate_stageD_plan(plan)
             if not valid:
                 logger.error("STAGE D PLAN REJECTED: %s — %s", stem, reason)
                 _persist_workflow_state(stem, "rejected", task_class, stage,

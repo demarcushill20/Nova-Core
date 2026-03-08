@@ -1,4 +1,4 @@
-"""Phase 7.11–7.20 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation, Stage D Monitoring, Extended Monitoring, and Broader System Scope Evaluation.
+"""Phase 7.11–7.22 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation, Stage D Monitoring, Extended Monitoring, Broader System Scope Evaluation, Rollout Plan, and System Report Activation.
 
 Deterministic, repository-native evaluation of rollout readiness and stability.
 Reads existing heartbeat, metrics, and workflow state to classify rollout
@@ -17,6 +17,8 @@ Includes:
   - Phase 7.18: Stage D monitoring and stability review
   - Phase 7.19: Extended Stage D monitoring window
   - Phase 7.20: Broader system scope evaluation gate
+  - Phase 7.21: Broader system scope rollout plan (WORK/ document)
+  - Phase 7.22: System report activation gate and controlled activation
 
 All criteria are threshold-based and auditable.
 No LLM judgments — pure metric evaluation.
@@ -221,6 +223,25 @@ BROADER_HEARTBEAT_REQUIRED = "healthy"
 
 # Required extended monitoring decision (prerequisite gate)
 BROADER_REQUIRED_EXTENDED_DECISION = "stageD_sustained_stable"
+
+
+# --- Phase 7.22: System report activation gate thresholds ---
+# Prerequisites for activating system_scope="report" (bounded shell reads).
+# Requires Phase 7.20 ready_for_broader_system_scope_planning as hard gate.
+
+# Required broader scope evaluation decision (prerequisite)
+REPORT_REQUIRED_BROADER_DECISION = "ready_for_broader_system_scope_planning"
+
+# Heartbeat must be healthy at activation time
+REPORT_HEARTBEAT_REQUIRED = "healthy"
+
+# Zero tolerance for safety signals at activation time
+REPORT_MAX_POLICY_VIOLATIONS = 0
+REPORT_MAX_BUDGET_EXHAUSTIONS = 0
+REPORT_MAX_RECOVERY_ANOMALIES = 0
+
+# Shell allowlist enforcement tests must pass (verified programmatically)
+REPORT_SHELL_ENFORCEMENT_REQUIRED = True
 
 
 # ---------------------------------------------------------------------------
@@ -5793,6 +5814,588 @@ def write_broader_system_scope_evaluation(
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(
         json.dumps(review.to_dict(), indent=2, default=str) + "\n"
+    )
+
+    return md_path, json_path
+
+
+# ============================================================================
+# Phase 7.22 — System Report Activation Gate and Controlled Activation
+# ============================================================================
+# Deterministic gate for activating system_scope="report" (bounded shell reads).
+# Prerequisites: Phase 7.20 ready_for_broader_system_scope_planning.
+# Activation: updates feature_flags.json system_scope from "inspect_only" to
+# "report", adds shell-ops to allowed skills, logs activation to activation_log.
+# Deactivation: rolls back to inspect_only.
+
+
+@dataclass
+class SystemReportActivationGate:
+    """Result of system_report activation readiness evaluation."""
+    decision: str  # "ready_to_activate_system_report" | "block_system_report_activation"
+    criteria: list[RolloutCriterion]
+    evidence_summary: dict
+    generated_at: str
+    next_action: str
+
+    def to_dict(self) -> dict:
+        return {
+            "decision": self.decision,
+            "criteria": [c.to_dict() for c in self.criteria],
+            "evidence_summary": self.evidence_summary,
+            "generated_at": self.generated_at,
+            "next_action": self.next_action,
+        }
+
+
+def evaluate_system_report_activation(
+    broader_scope_decision: str,
+    heartbeat_overall: str,
+    policy_violations: int,
+    budget_exhaustions: int,
+    unresolved_recovery_anomalies: int,
+    shell_enforcement_verified: bool,
+    stageD_rollback_count: int,
+    stage: str,
+    system_in_classes: bool,
+) -> list[RolloutCriterion]:
+    """Evaluate criteria for system_report activation.
+
+    All criteria are hard — any failure blocks activation.
+    """
+    criteria = []
+
+    # 1. Broader scope evaluation must be ready
+    criteria.append(RolloutCriterion(
+        name="broader_scope_ready",
+        passed=broader_scope_decision == REPORT_REQUIRED_BROADER_DECISION,
+        value=broader_scope_decision,
+        threshold=REPORT_REQUIRED_BROADER_DECISION,
+        detail=(
+            "Broader scope evaluation confirmed ready"
+            if broader_scope_decision == REPORT_REQUIRED_BROADER_DECISION
+            else f"Broader scope decision is '{broader_scope_decision}', need '{REPORT_REQUIRED_BROADER_DECISION}'"
+        ),
+        severity="hard",
+    ))
+
+    # 2. Heartbeat healthy
+    criteria.append(RolloutCriterion(
+        name="heartbeat_healthy",
+        passed=heartbeat_overall == REPORT_HEARTBEAT_REQUIRED,
+        value=heartbeat_overall,
+        threshold=REPORT_HEARTBEAT_REQUIRED,
+        detail=f"Current heartbeat: {heartbeat_overall}",
+        severity="hard",
+    ))
+
+    # 3. No policy violations
+    criteria.append(RolloutCriterion(
+        name="no_policy_violations",
+        passed=policy_violations <= REPORT_MAX_POLICY_VIOLATIONS,
+        value=policy_violations,
+        threshold=REPORT_MAX_POLICY_VIOLATIONS,
+        detail=(
+            "No policy violations"
+            if policy_violations == 0
+            else f"{policy_violations} policy violation(s)"
+        ),
+        severity="hard",
+    ))
+
+    # 4. No budget exhaustions
+    criteria.append(RolloutCriterion(
+        name="no_budget_exhaustions",
+        passed=budget_exhaustions <= REPORT_MAX_BUDGET_EXHAUSTIONS,
+        value=budget_exhaustions,
+        threshold=REPORT_MAX_BUDGET_EXHAUSTIONS,
+        detail=(
+            "No budget exhaustions"
+            if budget_exhaustions == 0
+            else f"{budget_exhaustions} budget exhaustion(s)"
+        ),
+        severity="hard",
+    ))
+
+    # 5. No unresolved recovery anomalies
+    criteria.append(RolloutCriterion(
+        name="no_recovery_anomalies",
+        passed=unresolved_recovery_anomalies <= REPORT_MAX_RECOVERY_ANOMALIES,
+        value=unresolved_recovery_anomalies,
+        threshold=REPORT_MAX_RECOVERY_ANOMALIES,
+        detail=(
+            "No unresolved recovery anomalies"
+            if unresolved_recovery_anomalies == 0
+            else f"{unresolved_recovery_anomalies} unresolved recovery anomaly(ies)"
+        ),
+        severity="hard",
+    ))
+
+    # 6. Shell allowlist enforcement verified
+    criteria.append(RolloutCriterion(
+        name="shell_enforcement_verified",
+        passed=shell_enforcement_verified,
+        value=shell_enforcement_verified,
+        threshold=True,
+        detail=(
+            "Shell allowlist enforcement tests verified"
+            if shell_enforcement_verified
+            else "Shell allowlist enforcement NOT verified"
+        ),
+        severity="hard",
+    ))
+
+    # 7. No Stage D rollback history
+    criteria.append(RolloutCriterion(
+        name="no_stageD_rollback_history",
+        passed=stageD_rollback_count == 0,
+        value=stageD_rollback_count,
+        threshold=0,
+        detail=(
+            "No Stage D rollback history"
+            if stageD_rollback_count == 0
+            else f"{stageD_rollback_count} Stage D rollback(s) detected"
+        ),
+        severity="hard",
+    ))
+
+    # 8. Stage is D
+    criteria.append(RolloutCriterion(
+        name="stage_is_D",
+        passed=stage.startswith("stage4_") or stage == "D",
+        value=stage,
+        threshold="stage4_*",
+        detail=f"Rollout stage confirmed: {stage}",
+        severity="hard",
+    ))
+
+    # 9. System class active
+    criteria.append(RolloutCriterion(
+        name="system_class_active",
+        passed=system_in_classes,
+        value=system_in_classes,
+        threshold=True,
+        detail=(
+            "system class active"
+            if system_in_classes
+            else "system class not in supported_classes"
+        ),
+        severity="hard",
+    ))
+
+    return criteria
+
+
+def decide_system_report_activation(
+    criteria: list[RolloutCriterion],
+) -> tuple[str, str]:
+    """Decide whether system_report activation can proceed.
+
+    Returns (decision, next_action).
+    All criteria are hard — any failure blocks.
+    """
+    failed = [c for c in criteria if not c.passed]
+    if failed:
+        names = ", ".join(c.name for c in failed)
+        return (
+            "block_system_report_activation",
+            f"System report activation blocked: {names}. Resolve before attempting activation.",
+        )
+
+    return (
+        "ready_to_activate_system_report",
+        "All activation criteria pass. system_scope may be changed from "
+        "'inspect_only' to 'report' via activate_system_report_scope(). "
+        "Shell commands bounded by allowlist. Verifier gate remains mandatory.",
+    )
+
+
+def review_system_report_activation(
+    base: Path | None = None,
+) -> SystemReportActivationGate:
+    """Full orchestrator for system_report activation readiness evaluation.
+
+    Reads live state, evaluates all criteria, returns gate result.
+    """
+    root = base or BASE
+
+    # Load broader scope evaluation decision
+    broader_path = root / "STATE" / "broader_system_scope_evaluation.json"
+    broader_decision = "unknown"
+    if broader_path.exists():
+        try:
+            data = json.loads(broader_path.read_text(encoding="utf-8"))
+            broader_decision = data.get("decision", "unknown")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Load heartbeat
+    hb = _read_json(root / "STATE" / "heartbeat_multiagent.json")
+    hb_overall = hb.get("overall", "unknown") if hb else "unknown"
+    metrics = hb.get("metrics", {}) if hb else {}
+
+    # Policy violations — read from policy_denials.jsonl
+    denials = _read_jsonl(root / "STATE" / "policy_denials.jsonl")
+    policy_violations = len(denials)
+
+    # Budget exhaustions
+    budget_exhaustions = metrics.get("budget_exhaustion_count", 0)
+
+    # Recovery anomalies (unresolved)
+    activation_log = _read_jsonl(root / "STATE" / "activation_log.jsonl")
+    stage4_activations = [
+        r for r in activation_log
+        if r.get("activated_scope") == "system_inspect"
+        and r.get("outcome") == "activated"
+    ]
+    activation = stage4_activations[-1] if stage4_activations else {}
+    activation_ts = activation.get("attempted_at", "")
+    recovery_classification = _classify_post_activation_recoveries(
+        root, activation_ts
+    )
+    unresolved = recovery_classification.get("unresolved", 0)
+
+    # Shell enforcement: verify the allowlist function works
+    shell_verified = _verify_shell_enforcement()
+
+    # Stage D rollback count
+    rollback_count = _count_stageD_rollbacks(root)
+
+    # Feature flags
+    flags_path = root / "STATE" / "config" / "feature_flags.json"
+    orch = {}
+    if flags_path.exists():
+        try:
+            data = json.loads(flags_path.read_text(encoding="utf-8"))
+            orch = data.get("phase7_orchestrator", {})
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    stage = orch.get("rollout_stage", orch.get("stage", "unknown"))
+    supported = orch.get("supported_classes", [])
+    system_in_classes = "system" in supported
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    criteria = evaluate_system_report_activation(
+        broader_scope_decision=broader_decision,
+        heartbeat_overall=hb_overall,
+        policy_violations=policy_violations,
+        budget_exhaustions=budget_exhaustions,
+        unresolved_recovery_anomalies=unresolved,
+        shell_enforcement_verified=shell_verified,
+        stageD_rollback_count=rollback_count,
+        stage=stage,
+        system_in_classes=system_in_classes,
+    )
+
+    decision, next_action = decide_system_report_activation(criteria)
+
+    evidence = {
+        "broader_scope_decision": broader_decision,
+        "heartbeat_overall": hb_overall,
+        "policy_violations": policy_violations,
+        "budget_exhaustions": budget_exhaustions,
+        "unresolved_recovery_anomalies": unresolved,
+        "shell_enforcement_verified": shell_verified,
+        "stageD_rollback_count": rollback_count,
+        "stage": stage,
+        "system_in_classes": system_in_classes,
+    }
+
+    return SystemReportActivationGate(
+        decision=decision,
+        criteria=criteria,
+        evidence_summary=evidence,
+        generated_at=now,
+        next_action=next_action,
+    )
+
+
+def _verify_shell_enforcement() -> bool:
+    """Verify that the shell allowlist enforcement function works.
+
+    Runs a small set of smoke tests to confirm the validator
+    accepts known-good commands and rejects known-bad commands.
+    Returns True only if all checks pass.
+    """
+    try:
+        from tools.task_classifier import validate_system_shell_command
+
+        # Must allow
+        for cmd in [
+            "ps aux", "df -h", "free -h", "uptime",
+            "systemctl status novacore-watcher",
+            "journalctl --no-pager -n 50",
+        ]:
+            ok, _ = validate_system_shell_command(cmd)
+            if not ok:
+                return False
+
+        # Must deny
+        for cmd in [
+            "rm -rf /", "sudo apt update",
+            "systemctl restart novacore-watcher",
+            "kill -9 1234", "pip install malware",
+        ]:
+            ok, _ = validate_system_shell_command(cmd)
+            if ok:
+                return False
+
+        return True
+    except ImportError:
+        return False
+
+
+def activate_system_report_scope(
+    base: Path | None = None,
+) -> tuple[bool, str, dict]:
+    """Activate system_scope='report' with shell-ops bounded by allowlist.
+
+    Fail-closed: only proceeds if all activation gate criteria pass.
+    Updates feature_flags.json and appends to activation_log.jsonl.
+
+    Returns (success, message, activation_record).
+    """
+    root = base or BASE
+
+    # Run activation gate
+    gate = review_system_report_activation(root)
+    if gate.decision != "ready_to_activate_system_report":
+        return False, f"Activation blocked: {gate.next_action}", gate.to_dict()
+
+    # Load current feature flags
+    flags_path = root / "STATE" / "config" / "feature_flags.json"
+    try:
+        data = json.loads(flags_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, FileNotFoundError):
+        return False, "Cannot read feature_flags.json", gate.to_dict()
+
+    orch = data.get("phase7_orchestrator", {})
+    pre_scope = orch.get("system_scope", "unknown")
+
+    if pre_scope != "inspect_only":
+        return False, f"Expected system_scope='inspect_only', got '{pre_scope}'", gate.to_dict()
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Snapshot pre-config
+    pre_config = {
+        "system_scope": pre_scope,
+        "system_allowed_skills": list(orch.get("system_allowed_skills", [])),
+        "system_blocked_skills": list(orch.get("system_blocked_skills", [])),
+    }
+
+    # Apply activation
+    orch["system_scope"] = "report"
+
+    # Move shell-ops from blocked to allowed
+    blocked = list(orch.get("system_blocked_skills", []))
+    allowed = list(orch.get("system_allowed_skills", []))
+    if "shell-ops" in blocked:
+        blocked.remove("shell-ops")
+    if "shell-ops" not in allowed:
+        allowed.append("shell-ops")
+    orch["system_blocked_skills"] = blocked
+    orch["system_allowed_skills"] = allowed
+
+    # Add activation notes
+    orch["system_report_activation_notes"] = (
+        f"Activated via Phase 7.22 controlled activation at {now}. "
+        "Scope: system_report (bounded read-only shell). "
+        "Shell commands validated against allowlist. "
+        "Denylist always checked first. "
+        "Verifier gate remains mandatory."
+    )
+
+    # Update rollout stage
+    orch["rollout_stage"] = "stage4_research_code_review_code_impl_system_report"
+    orch["stage_description"] = (
+        "Stage 4 rollout — research + code_review + code_impl + system_report. "
+        "system_report extends inspect_only with bounded read-only shell commands. "
+        "Shell allowlist enforced: ps, df, free, uptime, journalctl, systemctl status, etc. "
+        "All mutation-capable shell commands remain blocked via denylist. "
+        "Verifier gate mandatory. Maker-checker enforced."
+    )
+
+    data["phase7_orchestrator"] = orch
+    data["updated_at"] = now
+    data["version"] = data.get("version", 0) + 1
+
+    # Snapshot post-config
+    post_config = {
+        "system_scope": orch["system_scope"],
+        "system_allowed_skills": orch["system_allowed_skills"],
+        "system_blocked_skills": orch["system_blocked_skills"],
+        "rollout_stage": orch["rollout_stage"],
+    }
+
+    # Write feature flags
+    flags_path.write_text(json.dumps(data, indent=2) + "\n")
+
+    # Activation record
+    activation_record = {
+        "event": "system_report_activation",
+        "phase": "7.22",
+        "timestamp": now,
+        "pre_config": pre_config,
+        "post_config": post_config,
+        "gate_decision": gate.decision,
+        "gate_criteria_passed": sum(1 for c in gate.criteria if c.passed),
+        "gate_criteria_total": len(gate.criteria),
+    }
+
+    # Append to activation log
+    log_path = root / "STATE" / "activation_log.jsonl"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "a") as f:
+        f.write(json.dumps(activation_record) + "\n")
+
+    return True, f"system_scope activated: inspect_only → report at {now}", activation_record
+
+
+def deactivate_system_report_scope(
+    base: Path | None = None,
+    reason: str = "manual_rollback",
+) -> tuple[bool, str]:
+    """Roll back system_scope from 'report' to 'inspect_only'.
+
+    Returns (success, message).
+    """
+    root = base or BASE
+
+    flags_path = root / "STATE" / "config" / "feature_flags.json"
+    try:
+        data = json.loads(flags_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, FileNotFoundError):
+        return False, "Cannot read feature_flags.json"
+
+    orch = data.get("phase7_orchestrator", {})
+    current_scope = orch.get("system_scope", "unknown")
+
+    if current_scope != "report":
+        return False, f"Expected system_scope='report', got '{current_scope}'"
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Rollback scope
+    orch["system_scope"] = "inspect_only"
+
+    # Move shell-ops back to blocked
+    allowed = list(orch.get("system_allowed_skills", []))
+    blocked = list(orch.get("system_blocked_skills", []))
+    if "shell-ops" in allowed:
+        allowed.remove("shell-ops")
+    if "shell-ops" not in blocked:
+        blocked.append("shell-ops")
+    orch["system_allowed_skills"] = allowed
+    orch["system_blocked_skills"] = blocked
+
+    # Restore rollout stage
+    orch["rollout_stage"] = "stage4_research_code_review_code_impl_system_inspect"
+
+    data["phase7_orchestrator"] = orch
+    data["updated_at"] = now
+    data["version"] = data.get("version", 0) + 1
+
+    flags_path.write_text(json.dumps(data, indent=2) + "\n")
+
+    # Log deactivation
+    deactivation_record = {
+        "event": "system_report_deactivation",
+        "phase": "7.22",
+        "timestamp": now,
+        "reason": reason,
+        "post_scope": "inspect_only",
+    }
+
+    log_path = root / "STATE" / "activation_log.jsonl"
+    with open(log_path, "a") as f:
+        f.write(json.dumps(deactivation_record) + "\n")
+
+    return True, f"system_scope rolled back: report → inspect_only at {now} (reason: {reason})"
+
+
+def write_system_report_activation_gate(
+    gate: SystemReportActivationGate,
+    base: Path | None = None,
+) -> tuple[Path, Path]:
+    """Write system report activation gate results to WORK/ and STATE/.
+
+    Returns (md_path, json_path).
+    """
+    root = base or BASE
+
+    md_path = root / "WORK" / "phase7_system_report_activation_gate.md"
+    json_path = root / "STATE" / "system_report_activation_gate.json"
+
+    # Markdown
+    lines = [
+        "# Phase 7.22 — System Report Activation Gate",
+        f"Generated: {gate.generated_at}",
+        "",
+        f"## Decision: {'READY' if 'ready' in gate.decision else 'BLOCKED'} — {gate.decision}",
+        "",
+        f"**Next action**: {gate.next_action}",
+        "",
+        "## Activation Criteria",
+        "",
+        "| # | Criterion | Status | Value | Threshold | Detail |",
+        "|---|-----------|--------|-------|-----------|--------|",
+    ]
+
+    for i, c in enumerate(gate.criteria, 1):
+        status = "PASS" if c.passed else "FAIL"
+        lines.append(
+            f"| {i} | {c.name} | {status} | {c.value} | {c.threshold} | {c.detail} |"
+        )
+
+    lines.extend([
+        "",
+        "## Evidence Summary",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
+    ])
+    for k, v in gate.evidence_summary.items():
+        lines.append(f"| {k} | {v} |")
+
+    lines.extend([
+        "",
+        "## Scope Change (on activation)",
+        "",
+        "| Property | Before | After |",
+        "|----------|--------|-------|",
+        "| system_scope | inspect_only | report |",
+        "| shell-ops | blocked | allowed (bounded by allowlist) |",
+        "| rollout_stage | stage4_..._system_inspect | stage4_..._system_report |",
+        "",
+    ])
+
+    if "ready" in gate.decision:
+        lines.extend([
+            "## Operator Action",
+            "",
+            "- Run `activate_system_report_scope()` to proceed.",
+            "- Shell commands will be bounded by the system_shell_allowlist.",
+            "- Monitor via post-activation stability review (Phase 7.23).",
+            "",
+        ])
+    else:
+        lines.extend([
+            "## Operator Action",
+            "",
+            "- Activation blocked. Resolve failing criteria before attempting.",
+            "- Do NOT manually change system_scope.",
+            "",
+        ])
+
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text("\n".join(lines))
+
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(gate.to_dict(), indent=2, default=str) + "\n"
     )
 
     return md_path, json_path

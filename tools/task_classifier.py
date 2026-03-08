@@ -570,6 +570,7 @@ def classify_and_route(task_text: str) -> dict:
         )
         is_system = task_class == "system"
         is_coding = task_class in STAGE_C_CLASSES
+        system_scope = flags.get("system_scope", "inspect_only") if is_system else None
         return {
             "task_class": task_class,
             "confidence": confidence,
@@ -577,7 +578,7 @@ def classify_and_route(task_text: str) -> dict:
             "stage": "D",
             "allowed_roles": flags.get("allowed_roles", ["research", "coding", "system_inspect"]),
             "verifier_required": eligible and (is_coding or is_system),
-            "system_scope": "inspect_only" if is_system else None,
+            "system_scope": system_scope,
             "fallback_reason": None if eligible else reason,
             "feature_flags": flags,
         }
@@ -637,3 +638,83 @@ def _fallback_reason(task_class: str, confidence: float, flags: dict) -> str:
     if confidence < flags.get("min_confidence", 0.3):
         return f"confidence_{confidence}_below_threshold"
     return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.22: system_report shell allowlist enforcement
+# ---------------------------------------------------------------------------
+# When system_scope is "report", bounded read-only shell commands are
+# permitted. Commands must match a prefix in the allowlist and must NOT
+# match any entry in the denylist. Fail-closed: unknown commands are denied.
+
+SYSTEM_SHELL_ALLOWLIST: list[str] = [
+    # Process monitoring (read-only)
+    "ps ", "ps\n", "top -bn1", "pgrep ",
+    # Disk / memory / load (read-only)
+    "df ", "df\n", "free ", "free\n", "uptime", "du -sh",
+    # Network status (read-only)
+    "ss -tlnp", "ss -tlnp\n",
+    # Journal / log inspection (read-only)
+    "journalctl --no-pager",
+    # Service status (read-only — no start/stop/restart)
+    "systemctl status",
+    # System info (read-only)
+    "cat /proc/loadavg", "cat /proc/meminfo", "cat /proc/uptime",
+    "wc -l ", "wc -l\n", "ls -la ", "ls -la\n", "ls ",
+    "stat ", "file ", "which ", "hostname", "uname",
+    # Health check (read-only)
+    "curl -sf http://localhost",
+]
+
+SYSTEM_SHELL_DENYLIST: list[str] = [
+    # File mutation
+    "rm ", "rm\n", "mv ", "cp ", "mkdir ", "chmod ", "chown ", "chgrp ",
+    "truncate ", "shred ", "dd ",
+    # Package management
+    "apt ", "apt-get ", "pip ", "pip3 ", "npm ", "yarn ",
+    # Service mutation
+    "systemctl start", "systemctl stop", "systemctl restart",
+    "systemctl enable", "systemctl disable",
+    "reboot", "shutdown", "halt", "poweroff",
+    # Cron / scheduling mutation
+    "crontab ",
+    # Filesystem mutation
+    "mkfs ", "mount ", "umount ",
+    # Network mutation
+    "iptables ", "ip route ", "ip link ",
+    # User / permission mutation
+    "useradd ", "userdel ", "passwd ", "su ", "sudo ",
+    # Git push / destructive
+    "git push", "git reset", "git checkout",
+    # Output redirection (shell mutation)
+    ">", ">>", "tee ",
+    # Inline edit
+    "sed -i",
+    # Kill signals
+    "kill ", "pkill ", "killall ",
+]
+
+
+def validate_system_shell_command(cmd: str) -> tuple[bool, str]:
+    """Validate a shell command against the system_report allowlist.
+
+    Returns (allowed, reason).
+    Fail-closed: any command not matching the allowlist is denied.
+    Denylist is checked first — a denied command is always rejected
+    even if it matches an allowlist prefix.
+    """
+    cmd_stripped = cmd.strip()
+    if not cmd_stripped:
+        return False, "empty_command"
+
+    # Denylist check first (always wins)
+    for denied in SYSTEM_SHELL_DENYLIST:
+        if denied in cmd_stripped:
+            return False, f"denied:{denied.strip()}"
+
+    # Allowlist check — command must start with an allowed prefix
+    for allowed in SYSTEM_SHELL_ALLOWLIST:
+        if cmd_stripped.startswith(allowed.rstrip("\n")):
+            return True, f"allowed:{allowed.rstrip()}"
+
+    return False, f"not_in_allowlist:{cmd_stripped[:50]}"
