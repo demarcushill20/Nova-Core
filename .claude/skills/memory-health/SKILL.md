@@ -7,11 +7,17 @@ allowed-tools:
   - mcp__nova-memory__get_recent_events
   - mcp__nova-memory__get_last_checkpoint
   - mcp__nova-memory__query_memory
+  # Obsidian Vault — cross-system health
+  - mcp__nova-vault__vault_info
+  - mcp__nova-vault__vault_search
+  - mcp__nova-vault__vault_list
 tool_doctrine:
   diagnostics:
     workflow:
       - check_health_first
       - probe_each_backend
+      - check_vault_connectivity
+      - cross_system_consistency
       - report_component_status
       - suggest_remediation
 output_contract:
@@ -111,7 +117,62 @@ Common issues and fixes:
 | Upsert fails with encoding error | Old urllib3 | `pip3 install --upgrade urllib3` |
 | Permission denied on seq file | Wrong EVENT_SEQ_FILE path | Check .env `EVENT_SEQ_FILE` setting |
 
-### Step 5 — Verify Recovery
+### Step 5 — Check Obsidian Vault Connectivity
+
+```
+Tool: mcp__nova-vault__vault_info
+Args: {}
+```
+
+Expected healthy response includes:
+- `vault_name`, `vault_path` — vault is accessible
+- `writable_folders` — agent can write to approved folders
+- `human_managed_folders` — read-only folders identified
+
+If `vault_info` fails or times out, the Obsidian vault is unavailable.
+This degrades unified recall (vault side only), pattern promotion,
+diary generation, and ADR candidate surfacing. Fusion Memory operations
+are unaffected.
+
+### Step 6 — Cross-System Consistency Checks
+
+Run these checks to detect drift between Fusion Memory and Obsidian.
+Each check is optional — skip if the relevant system is down.
+
+**Check A — Checkpoint-to-Diary Sync**:
+Compare the latest Fusion Memory checkpoint with the latest diary entry.
+```
+1. get_last_checkpoint() -> extract session_id
+2. vault_search(session_id) in 00-inbox/ and 90-diary/
+3. If checkpoint exists but no diary entry -> "diary gap detected"
+```
+
+**Check B — Promoted Pattern Integrity**:
+Verify that items marked `promoted_to_vault=true` in Fusion Memory
+still have corresponding notes in Obsidian.
+```
+1. query_memory("promoted patterns", top_k_final=5)
+   Filter for metadata.promoted_to_vault=true
+2. For each: vault_search(vault_path from metadata)
+3. If vault note missing -> "orphaned promotion flag"
+```
+
+**Check C — Stale Promotion Detection**:
+Check if Obsidian agent-patterns with `source: nova-core-memory` still
+have valid Fusion Memory source items.
+```
+1. vault_list("20-agent-patterns/")
+2. For notes with source=nova-core-memory, check frontmatter for
+   source memory IDs
+3. query_memory by those IDs
+4. If source item missing -> "orphaned vault note"
+```
+
+**Bounds**: Run at most 2 of these 3 checks per invocation (choose the
+most relevant based on context). Max 4 additional tool calls for
+cross-system checks.
+
+### Step 7 — Verify Recovery
 
 After applying a fix, re-run health check and test a simple operation:
 
@@ -139,6 +200,10 @@ Args: {"n": 1}
 - If `check_health` itself fails (MCP server unreachable): the MCP server process crashed or isn't started. Restart Claude Code.
 - If health returns mixed status (some ok, some error): the system is partially degraded. Report which operations are available and which are blocked.
 - If all components show ok but operations still fail: the issue may be data-level (empty index, wrong namespace) rather than infrastructure.
+- If `vault_info` fails: Obsidian vault is unavailable. Fusion Memory operations are unaffected. Report degraded unified recall, pattern promotion, diary generation.
+- If diary gap detected: A checkpoint exists without a matching diary entry. Suggest running the `memory-checkpoint-to-diary` skill to backfill.
+- If orphaned promotion flags found: Fusion Memory items claim `promoted_to_vault=true` but the vault note is missing. Suggest clearing the flag via `upsert_memory` with `promoted_to_vault: false`.
+- If orphaned vault notes found: Obsidian notes reference Fusion Memory IDs that no longer exist. Flag with `#status/orphaned` for operator review. **Never auto-delete vault notes.**
 
 ## Outputs / Contract
 
@@ -151,6 +216,11 @@ component_status:
   redis: <ok | error: detail>
   redis_timeline: <active | inactive>
   reranker: <loaded | failed>
+  obsidian_vault: <ok | unavailable | error: detail>
+cross_system:
+  diary_sync: <ok | gap_detected | not_checked>
+  promotion_integrity: <ok | orphaned_flags: N | not_checked>
+  vault_note_integrity: <ok | orphaned_notes: N | not_checked>
 diagnosis: <root cause if unhealthy, "all systems nominal" if healthy>
 remediation: <fix applied or recommended, "none needed" if healthy>
 verification: <health check result after fix, or "pre-check only">
