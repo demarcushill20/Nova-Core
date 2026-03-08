@@ -29,6 +29,7 @@ from agents.rollout_gate import (
     _compute_contract_failure_rate,
     _collect_system_inspect_metrics,
     _count_blocked_mutation_attempts,
+    _classify_post_activation_recoveries,
     _verify_scope_integrity,
     EXTENDED_MIN_ELAPSED_SECONDS,
     EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
@@ -524,8 +525,8 @@ class TestRollbackRecommended:
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "rollback_system_inspect_recommended"
 
-    def test_recovery_anomalies_now_hard(self):
-        """Recovery anomalies promoted from soft to hard in extended."""
+    def test_unresolved_recovery_anomaly_triggers_rollback(self):
+        """Unresolved recovery anomalies remain hard failures in extended."""
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
@@ -534,9 +535,63 @@ class TestRollbackRecommended:
             scope_integrity=_intact_scope(),
             elapsed_seconds=5 * 3600,
             contract_failure_rate=0.0,
+            # No classification → falls back to raw count (fail-closed)
         )
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "rollback_system_inspect_recommended"
+
+    def test_unresolved_with_classification_triggers_rollback(self):
+        """Unresolved recovery + classification still triggers rollback."""
+        rc = {"total": 2, "resolved": 1, "unresolved": 1, "details": []}
+        criteria = evaluate_stageD_extended(
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            post_activation_recoveries=1,
+            blocked_mutation_attempts=0,
+            scope_integrity=_intact_scope(),
+            elapsed_seconds=5 * 3600,
+            contract_failure_rate=0.0,
+            recovery_classification=rc,
+        )
+        decision, _ = decide_stageD_extended(criteria)
+        assert decision == "rollback_system_inspect_recommended"
+
+    def test_resolved_recovery_does_not_trigger_rollback(self):
+        """Benign watcher requeue (resolved) does not trigger rollback."""
+        rc = {"total": 1, "resolved": 1, "unresolved": 0, "details": [
+            {"task": "0117_test", "ts": "T1", "outcome": "resolved",
+             "reason": "task completed successfully after requeue"},
+        ]}
+        criteria = evaluate_stageD_extended(
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            post_activation_recoveries=0,
+            blocked_mutation_attempts=0,
+            scope_integrity=_intact_scope(),
+            elapsed_seconds=5 * 3600,
+            contract_failure_rate=0.0,
+            recovery_classification=rc,
+        )
+        decision, _ = decide_stageD_extended(criteria)
+        assert decision == "stageD_sustained_stable"
+
+    def test_resolved_recovery_detail_text(self):
+        """Resolved recovery shows benign requeue info in detail."""
+        rc = {"total": 2, "resolved": 2, "unresolved": 0, "details": []}
+        criteria = evaluate_stageD_extended(
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            post_activation_recoveries=0,
+            blocked_mutation_attempts=0,
+            scope_integrity=_intact_scope(),
+            elapsed_seconds=5 * 3600,
+            contract_failure_rate=0.0,
+            recovery_classification=rc,
+        )
+        rec = next(c for c in criteria if c.name == "no_recovery_anomalies")
+        assert rec.passed
+        assert "benign" in rec.detail
+        assert "2" in rec.detail  # shows resolved count
 
     def test_hard_trumps_soft(self):
         ev = _healthy_evidence()
@@ -1026,3 +1081,238 @@ class TestNoScopeExpansion:
             tmp_path, now_override="2026-03-08T15:00:00Z"
         )
         assert result.scope_integrity["system_scope"] == "inspect_only"
+
+
+# ---------------------------------------------------------------------------
+# TestClassifyPostActivationRecoveries
+# ---------------------------------------------------------------------------
+
+def _write_recovery_log(root, entries):
+    """Write a recovery.log with the given entries.
+
+    Each entry is a dict with 'ts' and 'task' keys.
+    """
+    log = root / "LOGS" / "recovery.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for e in entries:
+        lines.append(f"--- Recovery at {e['ts']} ---")
+        lines.append(
+            f"  [task_requeued] {e['task']}.md.inprogress "
+            f"\u2014 Requeued abandoned task (no worker running)"
+        )
+        lines.append("")
+    log.write_text("\n".join(lines))
+
+
+def _write_workflow(root, task_stem, status="completed"):
+    wf_dir = root / "STATE" / "workflows"
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    (wf_dir / f"{task_stem}.json").write_text(
+        json.dumps({"task_class": "system", "status": status})
+    )
+
+
+class TestClassifyPostActivationRecoveries:
+    def test_no_recovery_log(self, tmp_path):
+        result = _classify_post_activation_recoveries(
+            tmp_path, "2026-03-08T14:00:00Z"
+        )
+        assert result == {"total": 0, "resolved": 0, "unresolved": 0, "details": []}
+
+    def test_empty_activation_ts(self, tmp_path):
+        _write_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T15:00:00Z", "task": "task_a"},
+        ])
+        result = _classify_post_activation_recoveries(tmp_path, "")
+        assert result["total"] == 0
+
+    def test_pre_activation_events_excluded(self, tmp_path):
+        _write_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T06:00:00Z", "task": "task_before"},
+        ])
+        (tmp_path / "STATE" / "workflows").mkdir(parents=True, exist_ok=True)
+        result = _classify_post_activation_recoveries(
+            tmp_path, "2026-03-08T14:00:00Z"
+        )
+        assert result["total"] == 0
+
+    def test_resolved_requeue(self, tmp_path):
+        """Requeue + later completed = resolved (benign)."""
+        _write_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T17:00:00Z", "task": "0117_System_inspect_scope"},
+        ])
+        _write_workflow(tmp_path, "0117_System_inspect_scope", "completed")
+        result = _classify_post_activation_recoveries(
+            tmp_path, "2026-03-08T14:00:00Z"
+        )
+        assert result["total"] == 1
+        assert result["resolved"] == 1
+        assert result["unresolved"] == 0
+        assert result["details"][0]["outcome"] == "resolved"
+
+    def test_unresolved_requeue(self, tmp_path):
+        """Requeue + no workflow completion = unresolved (genuine anomaly)."""
+        _write_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T17:00:00Z", "task": "0117_System_inspect_scope"},
+        ])
+        (tmp_path / "STATE" / "workflows").mkdir(parents=True, exist_ok=True)
+        # No workflow file → unresolved
+        result = _classify_post_activation_recoveries(
+            tmp_path, "2026-03-08T14:00:00Z"
+        )
+        assert result["total"] == 1
+        assert result["resolved"] == 0
+        assert result["unresolved"] == 1
+        assert result["details"][0]["outcome"] == "unresolved"
+
+    def test_failed_workflow_is_unresolved(self, tmp_path):
+        """Requeue + workflow exists but failed = unresolved."""
+        _write_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T17:00:00Z", "task": "0117_task"},
+        ])
+        _write_workflow(tmp_path, "0117_task", "failed")
+        result = _classify_post_activation_recoveries(
+            tmp_path, "2026-03-08T14:00:00Z"
+        )
+        assert result["unresolved"] == 1
+        assert result["resolved"] == 0
+
+    def test_mixed_resolved_unresolved(self, tmp_path):
+        """Mix of resolved and unresolved events."""
+        _write_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T15:00:00Z", "task": "task_ok"},
+            {"ts": "2026-03-08T16:00:00Z", "task": "task_missing"},
+            {"ts": "2026-03-08T17:00:00Z", "task": "task_also_ok"},
+        ])
+        _write_workflow(tmp_path, "task_ok", "completed")
+        _write_workflow(tmp_path, "task_also_ok", "completed")
+        (tmp_path / "STATE" / "workflows").mkdir(parents=True, exist_ok=True)
+        result = _classify_post_activation_recoveries(
+            tmp_path, "2026-03-08T14:00:00Z"
+        )
+        assert result["total"] == 3
+        assert result["resolved"] == 2
+        assert result["unresolved"] == 1
+
+    def test_pre_and_post_mixed(self, tmp_path):
+        """Pre-activation events ignored; post-activation classified."""
+        _write_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T06:00:00Z", "task": "task_pre"},
+            {"ts": "2026-03-08T08:00:00Z", "task": "task_pre2"},
+            {"ts": "2026-03-08T17:00:00Z", "task": "task_post"},
+        ])
+        _write_workflow(tmp_path, "task_post", "completed")
+        result = _classify_post_activation_recoveries(
+            tmp_path, "2026-03-08T14:00:00Z"
+        )
+        assert result["total"] == 1  # only post-activation
+        assert result["resolved"] == 1
+
+    def test_details_populated(self, tmp_path):
+        """Each event gets a detail entry with task, ts, outcome, reason."""
+        _write_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T17:00:00Z", "task": "task_x"},
+        ])
+        _write_workflow(tmp_path, "task_x", "completed")
+        result = _classify_post_activation_recoveries(
+            tmp_path, "2026-03-08T14:00:00Z"
+        )
+        detail = result["details"][0]
+        assert detail["task"] == "task_x"
+        assert "resolved" in detail["outcome"]
+        assert "reason" in detail
+
+
+# ---------------------------------------------------------------------------
+# TestRecoveryClassificationIntegration
+# ---------------------------------------------------------------------------
+
+class TestRecoveryClassificationIntegration:
+    """Integration tests: recovery log + workflow state → correct decision."""
+
+    def _add_recovery_log(self, root, entries):
+        _write_recovery_log(root, entries)
+
+    def test_benign_requeue_does_not_block_sustained_stable(self, tmp_path):
+        """Resolved watcher requeue → sustained_stable (not rollback)."""
+        _populate_extended_env(tmp_path, num_system_runs=12)
+        # Add a post-activation recovery for a task that completed
+        self._add_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T12:00:00Z", "task": "system_5"},
+        ])
+        # system_5 already exists as completed in _populate_extended_env
+        result = review_stageD_extended(
+            tmp_path, now_override="2026-03-08T15:00:00Z"
+        )
+        assert result.decision == "stageD_sustained_stable"
+        rec = next(c for c in result.criteria if c.name == "no_recovery_anomalies")
+        assert rec.passed
+        assert rec.value == 0  # 0 unresolved
+
+    def test_unresolved_requeue_triggers_rollback(self, tmp_path):
+        """Unresolved requeue (no completion) → rollback."""
+        _populate_extended_env(tmp_path, num_system_runs=12)
+        self._add_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T12:00:00Z", "task": "ghost_task_never_completed"},
+        ])
+        result = review_stageD_extended(
+            tmp_path, now_override="2026-03-08T15:00:00Z"
+        )
+        assert result.decision == "rollback_system_inspect_recommended"
+        rec = next(c for c in result.criteria if c.name == "no_recovery_anomalies")
+        assert not rec.passed
+        assert rec.value == 1  # 1 unresolved
+
+    def test_mixed_resolved_and_unresolved(self, tmp_path):
+        """1 resolved + 1 unresolved → rollback (unresolved dominates)."""
+        _populate_extended_env(tmp_path, num_system_runs=12)
+        self._add_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T11:00:00Z", "task": "system_3"},  # completed
+            {"ts": "2026-03-08T12:00:00Z", "task": "vanished_task"},  # no workflow
+        ])
+        result = review_stageD_extended(
+            tmp_path, now_override="2026-03-08T15:00:00Z"
+        )
+        assert result.decision == "rollback_system_inspect_recommended"
+
+    def test_evidence_summary_includes_classification(self, tmp_path):
+        """Evidence summary has resolved/total/details fields."""
+        _populate_extended_env(tmp_path, num_system_runs=12)
+        self._add_recovery_log(tmp_path, [
+            {"ts": "2026-03-08T12:00:00Z", "task": "system_5"},
+        ])
+        result = review_stageD_extended(
+            tmp_path, now_override="2026-03-08T15:00:00Z"
+        )
+        es = result.evidence_summary
+        assert es["post_activation_recoveries"] == 0  # unresolved
+        assert es["post_activation_recoveries_total"] == 1
+        assert es["post_activation_recoveries_resolved"] == 1
+        assert len(es["recovery_classification_details"]) == 1
+
+    def test_no_recovery_log_still_works(self, tmp_path):
+        """No recovery log → sustained_stable (no anomalies)."""
+        _populate_extended_env(tmp_path, num_system_runs=12)
+        result = review_stageD_extended(
+            tmp_path, now_override="2026-03-08T15:00:00Z"
+        )
+        assert result.decision == "stageD_sustained_stable"
+        es = result.evidence_summary
+        assert es["post_activation_recoveries"] == 0
+        assert es["post_activation_recoveries_total"] == 0
+
+    def test_no_classification_fallback_is_fail_closed(self):
+        """Without classification (direct call), raw count is used (fail-closed)."""
+        criteria = evaluate_stageD_extended(
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            post_activation_recoveries=1,
+            blocked_mutation_attempts=0,
+            scope_integrity=_intact_scope(),
+            elapsed_seconds=5 * 3600,
+            contract_failure_rate=0.0,
+            recovery_classification=None,  # no classification
+        )
+        decision, _ = decide_stageD_extended(criteria)
+        assert decision == "rollback_system_inspect_recommended"

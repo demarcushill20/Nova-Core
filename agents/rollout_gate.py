@@ -1,4 +1,4 @@
-"""Phase 7.11–7.19 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation, Stage D Monitoring, and Extended Monitoring.
+"""Phase 7.11–7.20 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation, Stage D Monitoring, Extended Monitoring, and Broader System Scope Evaluation.
 
 Deterministic, repository-native evaluation of rollout readiness and stability.
 Reads existing heartbeat, metrics, and workflow state to classify rollout
@@ -16,6 +16,7 @@ Includes:
   - Phase 7.17: Controlled Stage 4 activation (system_inspect live)
   - Phase 7.18: Stage D monitoring and stability review
   - Phase 7.19: Extended Stage D monitoring window
+  - Phase 7.20: Broader system scope evaluation gate
 
 All criteria are threshold-based and auditable.
 No LLM judgments — pure metric evaluation.
@@ -179,6 +180,47 @@ EXTENDED_MAX_CONTRACT_FAILURE_RATE = 0.10
 
 # Heartbeat requirement (unchanged — strict healthy)
 EXTENDED_HEARTBEAT_REQUIRED = "healthy"
+
+
+# --- Phase 7.20: Broader system scope evaluation gate thresholds ---
+# Tightest thresholds yet — gate before even *planning* scope expansion.
+# All must pass before broader system scope planning can be considered.
+
+# Minimum system_inspect completed workflows (more than extended's 10)
+BROADER_MIN_SYSTEM_INSPECT_RUNS = 15
+
+# Minimum elapsed time in Stage D (seconds) — 8 hours (more than extended's 4)
+BROADER_MIN_ELAPSED_SECONDS = 8 * 3600
+
+# Maximum overall failure rate (tighter than extended's 15%)
+BROADER_MAX_FAILURE_RATE = 0.10
+
+# Maximum system_inspect failure rate (tighter than extended's 10%)
+BROADER_MAX_SYSTEM_INSPECT_FAILURE_RATE = 0.05
+
+# Maximum verifier rejection rate (tighter than extended's 10%)
+BROADER_MAX_SYSTEM_VERIFIER_REJECTION_RATE = 0.05
+
+# Hard ceiling on policy violations (zero tolerance — unchanged)
+BROADER_MAX_POLICY_VIOLATIONS = 0
+
+# Hard ceiling on budget exhaustions (zero tolerance — unchanged)
+BROADER_MAX_BUDGET_EXHAUSTIONS = 0
+
+# Maximum unresolved recovery anomalies (zero tolerance — unchanged)
+BROADER_MAX_RECOVERY_ANOMALIES = 0
+
+# Maximum blocked mutation attempts (tighter than extended's 3)
+BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS = 2
+
+# Maximum contract failure rate (tighter than extended's 10%)
+BROADER_MAX_CONTRACT_FAILURE_RATE = 0.05
+
+# Heartbeat requirement (strict healthy — unchanged)
+BROADER_HEARTBEAT_REQUIRED = "healthy"
+
+# Required extended monitoring decision (prerequisite gate)
+BROADER_REQUIRED_EXTENDED_DECISION = "stageD_sustained_stable"
 
 
 # ---------------------------------------------------------------------------
@@ -1204,6 +1246,100 @@ def _count_post_activation_recoveries(
                 if ts >= activation_ts:
                     count += 1
     return count
+
+
+def _classify_post_activation_recoveries(
+    base: Path, activation_ts: str,
+) -> dict:
+    """Classify post-activation recovery events as resolved or unresolved.
+
+    A recovery event is "resolved" when the requeued task later completed
+    successfully (matching workflow in STATE/workflows/ with status
+    "completed").  Resolved events represent benign watcher-level requeues
+    where the watcher correctly detected a dead worker and the task
+    succeeded on retry.
+
+    Unresolved events — tasks that were requeued but never completed —
+    represent genuine recovery anomalies that warrant investigation.
+
+    Returns dict with keys: total, resolved, unresolved, details.
+    """
+    empty = {"total": 0, "resolved": 0, "unresolved": 0, "details": []}
+    if not activation_ts:
+        return empty
+
+    recovery_log = base / "LOGS" / "recovery.log"
+    if not recovery_log.exists():
+        return empty
+    try:
+        content = recovery_log.read_text()
+    except OSError:
+        return empty
+
+    # Parse recovery events that are post-activation
+    events: list[dict] = []
+    current_ts = ""
+    for line in content.splitlines():
+        if "--- Recovery at" in line:
+            parts = line.split("--- Recovery at ", 1)
+            if len(parts) == 2:
+                current_ts = parts[1].strip().rstrip(" ---")
+        elif "[task_requeued]" in line and current_ts:
+            if current_ts >= activation_ts:
+                task_match = line.split("[task_requeued] ", 1)
+                if len(task_match) == 2:
+                    task_part = task_match[1].split(" \u2014 ")[0].strip()
+                    # Also handle ASCII dash
+                    if " -- " in task_part:
+                        task_part = task_part.split(" -- ")[0].strip()
+                    # Strip common suffixes to get the workflow stem
+                    task_stem = task_part
+                    for suffix in (".md.inprogress", ".md.done", ".md"):
+                        if task_stem.endswith(suffix):
+                            task_stem = task_stem[: -len(suffix)]
+                            break
+                    events.append({"ts": current_ts, "task": task_stem})
+
+    if not events:
+        return empty
+
+    # Cross-reference with workflow completions
+    workflows_dir = base / "STATE" / "workflows"
+    resolved = 0
+    unresolved = 0
+    details: list[dict] = []
+    for event in events:
+        task = event["task"]
+        wf_path = workflows_dir / f"{task}.json"
+        is_resolved = False
+        if wf_path.exists():
+            try:
+                wf = json.loads(wf_path.read_text())
+                if wf.get("status") == "completed":
+                    is_resolved = True
+            except (json.JSONDecodeError, OSError):
+                pass
+        if is_resolved:
+            resolved += 1
+            details.append({
+                "task": task, "ts": event["ts"],
+                "outcome": "resolved",
+                "reason": "task completed successfully after requeue",
+            })
+        else:
+            unresolved += 1
+            details.append({
+                "task": task, "ts": event["ts"],
+                "outcome": "unresolved",
+                "reason": "task did not complete after requeue",
+            })
+
+    return {
+        "total": len(events),
+        "resolved": resolved,
+        "unresolved": unresolved,
+        "details": details,
+    }
 
 
 def evaluate_stage3_stability(
@@ -4263,11 +4399,20 @@ def evaluate_stageD_extended(
     scope_integrity: dict,
     elapsed_seconds: float,
     contract_failure_rate: float | None,
+    recovery_classification: dict | None = None,
 ) -> list[RolloutCriterion]:
     """Evaluate extended Stage D monitoring criteria.
 
     15 criteria total: 8 hard, 7 soft.
     Tighter thresholds and longer horizon than Phase 7.18.
+
+    If recovery_classification is provided (from
+    _classify_post_activation_recoveries), criterion #8 uses the
+    ``unresolved`` count rather than the raw post_activation_recoveries
+    total.  This allows benign watcher task-requeues that later completed
+    successfully to be distinguished from genuine safety-significant
+    recovery anomalies.  When recovery_classification is None, the
+    criterion falls back to the raw count (fail-closed).
     """
     criteria: list[RolloutCriterion] = []
 
@@ -4384,17 +4529,42 @@ def evaluate_stageD_extended(
         severity="hard",
     ))
 
-    # 8. No rollback events during observation window (hard — promoted from soft)
+    # 8. No unresolved recovery anomalies during observation window
+    #    (hard — promoted from soft).
+    #    When recovery_classification is available, only *unresolved*
+    #    recoveries (requeued tasks that never completed) count toward
+    #    the hard threshold.  Resolved requeues (task completed after
+    #    watcher recovery) are benign and logged for audit only.
+    #    When classification is unavailable, fall back to raw count
+    #    (fail-closed).
+    if recovery_classification is not None:
+        unresolved = recovery_classification.get("unresolved", post_activation_recoveries)
+        resolved = recovery_classification.get("resolved", 0)
+        total_rec = recovery_classification.get("total", post_activation_recoveries)
+    else:
+        unresolved = post_activation_recoveries
+        resolved = 0
+        total_rec = post_activation_recoveries
+
+    if unresolved == 0 and resolved > 0:
+        rec_detail = (
+            f"0 unresolved recovery events since activation "
+            f"({resolved} benign requeue(s) resolved by successful completion)"
+        )
+    elif unresolved == 0:
+        rec_detail = "0 recovery events since activation"
+    else:
+        rec_detail = (
+            f"{unresolved} unresolved recovery event(s) since activation — investigate"
+            + (f" ({resolved} resolved)" if resolved > 0 else "")
+        )
+
     criteria.append(RolloutCriterion(
         name="no_recovery_anomalies",
-        passed=post_activation_recoveries <= EXTENDED_MAX_RECOVERY_ANOMALIES,
-        value=post_activation_recoveries,
+        passed=unresolved <= EXTENDED_MAX_RECOVERY_ANOMALIES,
+        value=unresolved,
         threshold=EXTENDED_MAX_RECOVERY_ANOMALIES,
-        detail=(
-            f"0 recovery events since activation"
-            if post_activation_recoveries == 0
-            else f"{post_activation_recoveries} recovery event(s) since activation — investigate"
-        ),
+        detail=rec_detail,
         severity="hard",
     ))
 
@@ -4662,8 +4832,14 @@ def review_stageD_extended(
         "elapsed_seconds": round(elapsed_seconds, 1),
     }
 
-    # Count post-activation recovery anomalies
-    post_recoveries = _count_post_activation_recoveries(root, activation_ts)
+    # Classify post-activation recovery anomalies
+    # Distinguishes benign watcher requeues (task later completed) from
+    # genuine unresolved anomalies.  Only unresolved count toward the
+    # hard threshold — fail-closed when classification is unavailable.
+    recovery_classification = _classify_post_activation_recoveries(
+        root, activation_ts,
+    )
+    post_recoveries_unresolved = recovery_classification["unresolved"]
 
     # Count blocked mutation attempts since activation
     blocked_mutations = _count_blocked_mutation_attempts(root, activation_ts)
@@ -4678,11 +4854,12 @@ def review_stageD_extended(
     criteria = evaluate_stageD_extended(
         evidence,
         system_inspect_metrics,
-        post_recoveries,
+        post_recoveries_unresolved,
         blocked_mutations,
         scope_integrity,
         elapsed_seconds,
         contract_failure_rate,
+        recovery_classification=recovery_classification,
     )
     decision, next_action = decide_stageD_extended(criteria)
 
@@ -4734,7 +4911,10 @@ def review_stageD_extended(
             "orphaned_agents": evidence.get("orphaned_agents", 0),
             "stale_leases": evidence.get("stale_leases", 0),
             "recovery_events": evidence.get("recovery_events", 0),
-            "post_activation_recoveries": post_recoveries,
+            "post_activation_recoveries": post_recoveries_unresolved,
+            "post_activation_recoveries_total": recovery_classification["total"],
+            "post_activation_recoveries_resolved": recovery_classification["resolved"],
+            "recovery_classification_details": recovery_classification.get("details", []),
             "blocked_mutation_attempts": blocked_mutations,
         },
         next_action=next_action,
@@ -4952,6 +5132,663 @@ def write_stageD_extended_monitoring(
 
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text(render_stageD_extended_markdown(review))
+
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(review.to_dict(), indent=2, default=str) + "\n"
+    )
+
+    return md_path, json_path
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.20 — Broader System Scope Evaluation Gate
+# ---------------------------------------------------------------------------
+# Deterministic evaluation of whether Nova-Core's sustained-stable
+# inspect_only Stage D rollout justifies *planning* for a broader but
+# still bounded system scope.
+#
+# This is evaluation only — it never activates broader scope.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BroaderSystemScopeEvaluation:
+    """Deterministic evaluation of broader system scope readiness.
+
+    Decides whether inspect_only Stage D is sufficiently stable and
+    governed to justify planning for a broader bounded system scope.
+    Evaluation only — does not activate anything.
+    """
+    decision: str          # "ready_for_broader_system_scope_planning" | "hold_broader_system_scope" | "block_broader_system_scope"
+    rollout_stage: str
+    enabled_classes: list[str] = field(default_factory=list)
+    criteria: list[RolloutCriterion] = field(default_factory=list)
+    system_inspect_metrics: dict = field(default_factory=dict)
+    evidence_summary: dict = field(default_factory=dict)
+    extended_monitoring_decision: str = ""
+    generated_at: str = ""
+    next_action: str = ""
+    remaining_requirements: list[str] = field(default_factory=list)
+    scope_integrity: dict = field(default_factory=dict)
+    observation_window: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.generated_at:
+            self.generated_at = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+    def to_dict(self) -> dict:
+        return {
+            "decision": self.decision,
+            "rollout_stage": self.rollout_stage,
+            "enabled_classes": self.enabled_classes,
+            "criteria": [c.to_dict() for c in self.criteria],
+            "system_inspect_metrics": self.system_inspect_metrics,
+            "evidence_summary": self.evidence_summary,
+            "extended_monitoring_decision": self.extended_monitoring_decision,
+            "generated_at": self.generated_at,
+            "next_action": self.next_action,
+            "remaining_requirements": self.remaining_requirements,
+            "scope_integrity": self.scope_integrity,
+            "observation_window": self.observation_window,
+        }
+
+
+def evaluate_broader_system_scope(
+    evidence: dict,
+    system_inspect_metrics: dict,
+    extended_decision: str,
+    recovery_classification: dict | None,
+    blocked_mutation_attempts: int,
+    scope_integrity: dict,
+    elapsed_seconds: float,
+    contract_failure_rate: float | None,
+    stageD_rollback_count: int,
+) -> list[RolloutCriterion]:
+    """Evaluate broader system scope readiness criteria.
+
+    12 criteria total: 9 hard, 3 soft.
+    Tighter thresholds than Phase 7.19 extended monitoring.
+    All hard criteria must pass before planning can be considered.
+
+    This function evaluates whether the data *justifies planning* for
+    broader scope.  It never activates anything.
+    """
+    criteria: list[RolloutCriterion] = []
+
+    # --- HARD CRITERIA (9) — any failure triggers block ---
+
+    # 1. Extended monitoring must be stageD_sustained_stable (prerequisite)
+    criteria.append(RolloutCriterion(
+        name="extended_monitoring_sustained_stable",
+        passed=extended_decision == BROADER_REQUIRED_EXTENDED_DECISION,
+        value=extended_decision,
+        threshold=BROADER_REQUIRED_EXTENDED_DECISION,
+        detail=(
+            "Extended Stage D monitoring confirmed sustained-stable"
+            if extended_decision == BROADER_REQUIRED_EXTENDED_DECISION
+            else f"Extended monitoring is '{extended_decision}', "
+                 f"required '{BROADER_REQUIRED_EXTENDED_DECISION}'"
+        ),
+        severity="hard",
+    ))
+
+    # 2. Heartbeat healthy (hard — strict)
+    hb = evidence.get("heartbeat_overall", "")
+    criteria.append(RolloutCriterion(
+        name="heartbeat_healthy",
+        passed=hb == BROADER_HEARTBEAT_REQUIRED,
+        value=hb or "(no data)",
+        threshold=BROADER_HEARTBEAT_REQUIRED,
+        detail=(
+            f"Current heartbeat: {hb or '(no data)'}"
+            if hb == BROADER_HEARTBEAT_REQUIRED
+            else f"Heartbeat is '{hb or '(no data)'}', "
+                 f"required '{BROADER_HEARTBEAT_REQUIRED}'"
+        ),
+        severity="hard",
+    ))
+
+    # 3. No policy violations (hard — zero tolerance)
+    violations = evidence.get("policy_violations", 0)
+    criteria.append(RolloutCriterion(
+        name="no_policy_violations",
+        passed=violations <= BROADER_MAX_POLICY_VIOLATIONS,
+        value=violations,
+        threshold=BROADER_MAX_POLICY_VIOLATIONS,
+        detail=(
+            "No policy violations"
+            if violations == 0
+            else f"{violations} policy violation(s) — broader scope blocked"
+        ),
+        severity="hard",
+    ))
+
+    # 4. No budget exhaustions (hard — zero tolerance)
+    budget = evidence.get("budget_exhaustions", 0)
+    criteria.append(RolloutCriterion(
+        name="no_budget_exhaustions",
+        passed=budget <= BROADER_MAX_BUDGET_EXHAUSTIONS,
+        value=budget,
+        threshold=BROADER_MAX_BUDGET_EXHAUSTIONS,
+        detail=(
+            "No budget exhaustions"
+            if budget == 0
+            else f"{budget} budget exhaustion(s) — broader scope blocked"
+        ),
+        severity="hard",
+    ))
+
+    # 5. Scope integrity (hard — system_inspect must still be inspect_only)
+    criteria.append(RolloutCriterion(
+        name="scope_integrity",
+        passed=scope_integrity.get("intact", False),
+        value=scope_integrity.get("reason", "unknown"),
+        threshold="intact",
+        detail=(
+            "Scope integrity verified: system_inspect remains read-only"
+            if scope_integrity.get("intact")
+            else f"Scope integrity violated: "
+                 f"{scope_integrity.get('reason', 'unknown')}"
+        ),
+        severity="hard",
+    ))
+
+    # 6. Stage is D (hard)
+    stage = evidence.get("rollout_stage", "unknown")
+    is_stage_d = "stage4" in stage or "system_inspect" in stage
+    criteria.append(RolloutCriterion(
+        name="stage_is_D",
+        passed=is_stage_d,
+        value=stage,
+        threshold="stage4_*",
+        detail=(
+            f"Rollout stage confirmed: {stage}"
+            if is_stage_d
+            else f"Unexpected rollout stage: {stage}"
+        ),
+        severity="hard",
+    ))
+
+    # 7. System class active (hard)
+    classes = evidence.get("supported_classes", [])
+    criteria.append(RolloutCriterion(
+        name="system_class_active",
+        passed="system" in classes,
+        value=classes,
+        threshold="system in supported_classes",
+        detail=(
+            f"system class active in: {classes}"
+            if "system" in classes
+            else f"system class not found in: {classes}"
+        ),
+        severity="hard",
+    ))
+
+    # 8. No unresolved recovery anomalies (hard)
+    if recovery_classification is not None:
+        unresolved = recovery_classification.get("unresolved", 0)
+        resolved = recovery_classification.get("resolved", 0)
+    else:
+        unresolved = 0
+        resolved = 0
+    criteria.append(RolloutCriterion(
+        name="no_recovery_anomalies",
+        passed=unresolved <= BROADER_MAX_RECOVERY_ANOMALIES,
+        value=unresolved,
+        threshold=BROADER_MAX_RECOVERY_ANOMALIES,
+        detail=(
+            "0 unresolved recovery events"
+            + (f" ({resolved} benign resolved)" if resolved > 0 else "")
+            if unresolved == 0
+            else f"{unresolved} unresolved recovery event(s) — "
+                 f"broader scope blocked"
+        ),
+        severity="hard",
+    ))
+
+    # 9. No Stage D rollback history (hard — never rolled back)
+    criteria.append(RolloutCriterion(
+        name="no_stageD_rollback_history",
+        passed=stageD_rollback_count == 0,
+        value=stageD_rollback_count,
+        threshold=0,
+        detail=(
+            "No Stage D rollback history"
+            if stageD_rollback_count == 0
+            else f"{stageD_rollback_count} prior Stage D rollback(s) — "
+                 f"broader scope blocked until root cause confirmed resolved"
+        ),
+        severity="hard",
+    ))
+
+    # --- SOFT CRITERIA (3) — any failure triggers hold ---
+
+    # 10. Minimum system_inspect runs (soft — higher bar)
+    sys_total = system_inspect_metrics.get("total_runs", 0)
+    criteria.append(RolloutCriterion(
+        name="minimum_system_inspect_runs",
+        passed=sys_total >= BROADER_MIN_SYSTEM_INSPECT_RUNS,
+        value=sys_total,
+        threshold=BROADER_MIN_SYSTEM_INSPECT_RUNS,
+        detail=(
+            f"{sys_total} system_inspect runs "
+            f"(need >= {BROADER_MIN_SYSTEM_INSPECT_RUNS})"
+        ),
+        severity="soft",
+    ))
+
+    # 11. Minimum elapsed time in Stage D (soft — longer window)
+    elapsed_hours = elapsed_seconds / 3600.0
+    min_hours = BROADER_MIN_ELAPSED_SECONDS / 3600.0
+    criteria.append(RolloutCriterion(
+        name="minimum_elapsed_time",
+        passed=elapsed_seconds >= BROADER_MIN_ELAPSED_SECONDS,
+        value=round(elapsed_hours, 2),
+        threshold=min_hours,
+        detail=(
+            f"Elapsed {elapsed_hours:.1f}h in Stage D "
+            f"(need >= {min_hours:.0f}h)"
+        ),
+        severity="soft",
+    ))
+
+    # 12. Blocked mutation attempts within tighter bounds (soft)
+    criteria.append(RolloutCriterion(
+        name="blocked_mutation_attempts",
+        passed=blocked_mutation_attempts <= BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS,
+        value=blocked_mutation_attempts,
+        threshold=BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS,
+        detail=(
+            f"{blocked_mutation_attempts} blocked mutation attempt(s) "
+            f"(max {BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS})"
+        ),
+        severity="soft",
+    ))
+
+    return criteria
+
+
+def decide_broader_system_scope(
+    criteria: list[RolloutCriterion],
+) -> tuple[str, str]:
+    """Determine broader system scope readiness from criteria.
+
+    Returns (decision, next_action) where decision is one of:
+      - "ready_for_broader_system_scope_planning"
+      - "hold_broader_system_scope"
+      - "block_broader_system_scope"
+    """
+    hard_failures = [c for c in criteria
+                     if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria
+                     if c.severity == "soft" and not c.passed]
+
+    # Any hard failure -> block
+    if hard_failures:
+        reasons = ", ".join(c.name for c in hard_failures)
+        return (
+            "block_broader_system_scope",
+            f"Broader system scope blocked: {reasons}. "
+            f"Resolve hard failures before broader scope can be considered. "
+            f"system remains inspect_only.",
+        )
+
+    # Any soft failure -> hold
+    if soft_failures:
+        reasons = ", ".join(c.name for c in soft_failures)
+        return (
+            "hold_broader_system_scope",
+            f"Broader system scope held: {reasons}. "
+            f"Continue operating Stage D to accumulate evidence. "
+            f"system remains inspect_only.",
+        )
+
+    # All clear -> ready for planning (not activation)
+    return (
+        "ready_for_broader_system_scope_planning",
+        "All broader-scope evaluation criteria pass. "
+        "inspect_only Stage D has proven safe under tightened thresholds. "
+        "A bounded broader-system rollout plan may be prepared in the "
+        "next phase. system remains inspect_only until that plan is "
+        "reviewed, approved, and separately activated.",
+    )
+
+
+def _count_stageD_rollbacks(base: Path) -> int:
+    """Count activation log entries that indicate a Stage D rollback.
+
+    A rollback is any activation record where pre_config has stage='D'
+    and post_config has stage != 'D' (reverted to an earlier stage).
+    """
+    log = _read_jsonl(base / "STATE" / "activation_log.jsonl")
+    count = 0
+    for record in log:
+        pre = record.get("pre_config", {})
+        post = record.get("post_config", {})
+        if pre.get("stage") == "D" and post.get("stage", "D") != "D":
+            count += 1
+    return count
+
+
+def review_broader_system_scope(
+    base: Path | None = None,
+    now_override: str = "",
+) -> BroaderSystemScopeEvaluation:
+    """Run the broader system scope evaluation gate.
+
+    Collects evidence from the sustained-stable Stage D observation window
+    and evaluates tighter thresholds to determine whether *planning* for
+    a broader system scope is justified.
+
+    This function is evaluation-only — it never activates broader scope.
+
+    Decisions:
+      - ready_for_broader_system_scope_planning: all criteria pass
+      - hold_broader_system_scope: insufficient evidence (soft)
+      - block_broader_system_scope: hard failures detected
+    """
+    root = base or BASE
+    state = root / "STATE"
+
+    # Collect general evidence
+    evidence = collect_evidence(root)
+
+    # Collect system_inspect-specific metrics
+    workflows = _list_json_files(state / "workflows")
+    system_inspect_metrics = _collect_system_inspect_metrics(workflows)
+
+    # Get extended monitoring decision
+    ext_json = _read_json(state / "stageD_extended_monitoring.json")
+    extended_decision = (
+        ext_json.get("decision", "") if ext_json else ""
+    )
+
+    # Get Stage D activation record for elapsed time
+    activation_log = _read_jsonl(state / "activation_log.jsonl")
+    stage4_activations = [
+        r for r in activation_log
+        if r.get("activated_scope") == "system_inspect"
+        and r.get("outcome") == "activated"
+    ]
+    activation = stage4_activations[-1] if stage4_activations else {}
+    activation_ts = activation.get("attempted_at", "")
+
+    # Current time
+    now_iso = now_override or datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    # Compute elapsed time since Stage D activation
+    elapsed_seconds = _compute_elapsed_seconds(activation_ts, now_iso)
+    elapsed_hours = elapsed_seconds / 3600.0
+
+    observation_window = {
+        "activation_at": activation_ts or "N/A",
+        "review_at": now_iso,
+        "scope": "system_inspect (read-only)",
+        "elapsed_hours": round(elapsed_hours, 2),
+        "elapsed_seconds": round(elapsed_seconds, 1),
+    }
+
+    # Classify post-activation recovery anomalies
+    recovery_classification = _classify_post_activation_recoveries(
+        root, activation_ts,
+    )
+
+    # Count blocked mutation attempts
+    blocked_mutations = _count_blocked_mutation_attempts(root, activation_ts)
+
+    # Verify scope integrity
+    scope_integrity = _verify_scope_integrity(root)
+
+    # Compute contract failure rate
+    contract_failure_rate = _compute_contract_failure_rate(workflows)
+
+    # Count Stage D rollback history
+    stageD_rollbacks = _count_stageD_rollbacks(root)
+
+    # Evaluate criteria
+    criteria = evaluate_broader_system_scope(
+        evidence,
+        system_inspect_metrics,
+        extended_decision,
+        recovery_classification,
+        blocked_mutations,
+        scope_integrity,
+        elapsed_seconds,
+        contract_failure_rate,
+        stageD_rollbacks,
+    )
+    decision, next_action = decide_broader_system_scope(criteria)
+
+    # Remaining requirements
+    remaining = []
+    for c in criteria:
+        if not c.passed:
+            remaining.append(f"{c.name}: {c.detail}")
+
+    return BroaderSystemScopeEvaluation(
+        decision=decision,
+        rollout_stage=evidence.get("rollout_stage", "unknown"),
+        enabled_classes=evidence.get("supported_classes", []),
+        criteria=criteria,
+        system_inspect_metrics=system_inspect_metrics,
+        evidence_summary={
+            "total_workflows": evidence.get("total_workflows", 0),
+            "completed_workflows": evidence.get("completed_workflows", 0),
+            "failed_workflows": evidence.get("failed_workflows", 0),
+            "halted_workflows": evidence.get("halted_workflows", 0),
+            "heartbeat_overall": evidence.get("heartbeat_overall", ""),
+            "policy_violations": evidence.get("policy_violations", 0),
+            "budget_exhaustions": evidence.get("budget_exhaustions", 0),
+            "verifier_rejection_rate": evidence.get("verifier_rejection_rate"),
+            "contract_failure_rate": contract_failure_rate,
+            "orphaned_agents": evidence.get("orphaned_agents", 0),
+            "stale_leases": evidence.get("stale_leases", 0),
+            "recovery_events": evidence.get("recovery_events", 0),
+            "post_activation_recoveries_unresolved": recovery_classification["unresolved"],
+            "post_activation_recoveries_resolved": recovery_classification["resolved"],
+            "blocked_mutation_attempts": blocked_mutations,
+            "stageD_rollback_count": stageD_rollbacks,
+        },
+        extended_monitoring_decision=extended_decision,
+        next_action=next_action,
+        remaining_requirements=remaining,
+        scope_integrity=scope_integrity,
+        observation_window=observation_window,
+    )
+
+
+def render_broader_system_scope_markdown(
+    review: BroaderSystemScopeEvaluation,
+) -> str:
+    """Render broader system scope evaluation as operator-facing markdown."""
+    icon = {
+        "ready_for_broader_system_scope_planning": "READY FOR PLANNING",
+        "hold_broader_system_scope": "HOLD",
+        "block_broader_system_scope": "BLOCKED",
+    }.get(review.decision, "?")
+
+    lines = [
+        "# Phase 7.20 — Broader System Scope Evaluation Gate",
+        f"Generated: {review.generated_at}",
+        "",
+        f"## Decision: {icon} — {review.decision}",
+        "",
+        f"**Rollout stage**: {review.rollout_stage}",
+        f"**Enabled classes**: {', '.join(review.enabled_classes)}",
+        f"**Current system scope**: inspect_only (read-only)",
+        f"**Extended monitoring**: {review.extended_monitoring_decision}",
+        "",
+        f"**Next action**: {review.next_action}",
+        "",
+    ]
+
+    # Observation window
+    ow = review.observation_window
+    lines += [
+        "## Observation Window",
+        "",
+        f"- **Stage D activation at**: {ow.get('activation_at', 'N/A')}",
+        f"- **Review at**: {ow.get('review_at', 'N/A')}",
+        f"- **Elapsed in Stage D**: {ow.get('elapsed_hours', 0)}h "
+        f"({ow.get('elapsed_seconds', 0)}s)",
+        f"- **Scope under review**: {ow.get('scope', 'N/A')}",
+        "",
+    ]
+
+    # Scope integrity
+    si = review.scope_integrity
+    lines += [
+        "## Scope Integrity",
+        "",
+        f"- **Status**: {'INTACT' if si.get('intact') else 'VIOLATED'}",
+        f"- **system_scope**: {si.get('system_scope', 'N/A')}",
+        f"- **system in classes**: {si.get('system_in_classes', 'N/A')}",
+        "",
+    ]
+
+    # system_inspect metrics
+    sim = review.system_inspect_metrics
+    lines += [
+        "## system_inspect Metrics",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
+        f"| Total runs | {sim.get('total_runs', 0)} |",
+        f"| Completed | {sim.get('completed', 0)} |",
+        f"| Failed | {sim.get('failed', 0)} |",
+        f"| Verifier rejected | {sim.get('verifier_rejected', 0)} |",
+        f"| Failure rate | {sim.get('failure_rate', 0):.1%} |",
+        "",
+    ]
+
+    # Criteria table
+    lines += [
+        "## Evaluation Criteria",
+        "",
+        "| # | Criterion | Status | Value | Threshold | Severity | Detail |",
+        "|---|-----------|--------|-------|-----------|----------|--------|",
+    ]
+    for i, c in enumerate(review.criteria, 1):
+        status = "PASS" if c.passed else "FAIL"
+        val = c.value if c.value is not None else "N/A"
+        lines.append(
+            f"| {i} | {c.name} | {status} | {val} | "
+            f"{c.threshold} | {c.severity} | {c.detail} |"
+        )
+    lines.append("")
+
+    # Evidence summary
+    es = review.evidence_summary
+    lines += [
+        "## Evidence Summary",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
+    ]
+    for k, v in es.items():
+        display = "N/A" if v is None else v
+        lines.append(f"| {k} | {display} |")
+    lines.append("")
+
+    # Remaining requirements
+    if review.remaining_requirements:
+        lines += [
+            "## Remaining Requirements",
+            "",
+        ]
+        for req in review.remaining_requirements:
+            lines.append(f"- {req}")
+        lines.append("")
+
+    # Threshold comparison
+    lines += [
+        "## Threshold Progression (Extended -> Broader Scope)",
+        "",
+        "| Threshold | Extended (7.19) | Broader (7.20) |",
+        "|-----------|-----------------|----------------|",
+        f"| Min system_inspect runs | {EXTENDED_MIN_SYSTEM_INSPECT_RUNS}"
+        f" | {BROADER_MIN_SYSTEM_INSPECT_RUNS} |",
+        f"| Min elapsed time | "
+        f"{EXTENDED_MIN_ELAPSED_SECONDS // 3600}h"
+        f" | {BROADER_MIN_ELAPSED_SECONDS // 3600}h |",
+        f"| Max failure rate | "
+        f"{EXTENDED_MAX_FAILURE_RATE:.0%}"
+        f" | {BROADER_MAX_FAILURE_RATE:.0%} |",
+        f"| Max system_inspect failure rate | "
+        f"{EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%}"
+        f" | {BROADER_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%} |",
+        f"| Max verifier rejection rate | "
+        f"{EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%}"
+        f" | {BROADER_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%} |",
+        f"| Max blocked mutations | "
+        f"{EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS}"
+        f" | {BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS} |",
+        f"| Max contract failure rate | "
+        f"{EXTENDED_MAX_CONTRACT_FAILURE_RATE:.0%}"
+        f" | {BROADER_MAX_CONTRACT_FAILURE_RATE:.0%} |",
+        "| Stage D rollback history | N/A | must be 0 |",
+        "| Extended monitoring prerequisite | N/A"
+        " | stageD_sustained_stable |",
+        "",
+    ]
+
+    # Operator action
+    if review.decision == "ready_for_broader_system_scope_planning":
+        lines += [
+            "## Operator Action",
+            "",
+            "- Broader system scope planning is justified.",
+            "- system remains inspect_only until a rollout plan is "
+            "prepared, reviewed, and separately activated.",
+            "- Next step: Phase 7.21 — Broader System Scope "
+            "Rollout Plan.",
+            "- No scope expansion is performed by this evaluation.",
+            "",
+        ]
+    elif review.decision == "hold_broader_system_scope":
+        lines += [
+            "## Operator Action",
+            "",
+            "- Broader system scope is held pending more evidence.",
+            "- system remains inspect_only.",
+            "- Continue operating Stage D and re-run this evaluation "
+            "after thresholds are met.",
+            "",
+        ]
+    else:
+        lines += [
+            "## Operator Action",
+            "",
+            "- Broader system scope is BLOCKED.",
+            "- Resolve hard failures before re-evaluation.",
+            "- system remains inspect_only.",
+            "- Do NOT proceed to broader scope planning.",
+            "",
+        ]
+
+    return "\n".join(lines)
+
+
+def write_broader_system_scope_evaluation(
+    review: BroaderSystemScopeEvaluation,
+    base: Path | None = None,
+) -> tuple[Path, Path]:
+    """Write broader system scope evaluation to WORK/ and STATE/.
+
+    Returns (md_path, json_path).
+    """
+    root = base or BASE
+
+    md_path = root / "WORK" / "phase7_broader_system_scope_evaluation.md"
+    json_path = root / "STATE" / "broader_system_scope_evaluation.json"
+
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(render_broader_system_scope_markdown(review))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(
