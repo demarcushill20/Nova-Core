@@ -1,12 +1,15 @@
-"""Phase 7.9 — Feature-Flagged Rollout Tests.
+"""Phase 7.9/7.10 — Feature-Flagged Rollout Tests.
 
-Deterministic tests for Stage 1 research-only rollout behavior:
+Deterministic tests for Stage 1 (research-only) and Stage 2
+(research + code_review) rollout behavior:
 - Research class enabled → multi-agent path
-- Non-research classes → single-agent fallback
+- code_review enabled (Stage 2) → multi-agent path
+- Non-selected classes → single-agent fallback
 - Flag off → safe fallback
 - UNHEALTHY heartbeat → auto-degrade
 - Rollback behavior (flag change)
 - Health gating edge cases
+- Stage 2 expansion and boundary tests
 """
 
 import json
@@ -61,6 +64,23 @@ def _stage1_flags(**overrides):
         "allowed_roles": ["research"],
         "min_confidence": 0.5,
         "verifier_required": False,
+        "fallback_to_worker": True,
+        "audit_routing": True,
+    }
+    flags.update(overrides)
+    return flags
+
+
+def _stage2_flags(**overrides):
+    """Standard Stage 2 research + code_review rollout flags."""
+    flags = {
+        "enabled": True,
+        "supported_classes": ["research", "code_review"],
+        "stage": "C",
+        "rollout_stage": "stage2_research_and_code_review",
+        "allowed_roles": ["research", "coding"],
+        "min_confidence": 0.5,
+        "verifier_required": True,
         "fallback_to_worker": True,
         "audit_routing": True,
     }
@@ -485,6 +505,297 @@ class TestRollout_FullPreFlight:
         _write_flags(tmp_path, _stage1_flags())
         _write_heartbeat(tmp_path, "healthy")
 
+        gd = GracefulDegradation(base=tmp_path)
+        r1 = gd.check_orchestrator_available("code_impl")
+        assert r1.action == "degrade"
+        assert "task_class_not_supported" in r1.reason
+
+
+# ===================================================================
+# Part 10 — Stage 2: code_review Enabled
+# ===================================================================
+
+class TestRollout_Stage2_CodeReviewEnabled:
+    """Verify code_review routes to multi-agent path under Stage 2 flags."""
+
+    def test_code_review_proceeds(self, tmp_path):
+        """code_review with Stage 2 flags → proceed."""
+        _write_flags(tmp_path, _stage2_flags())
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("code_review")
+        assert result.action == "proceed"
+        assert "orchestrator_available" in result.reason
+
+    def test_code_review_with_healthy_heartbeat(self, tmp_path):
+        """code_review + HEALTHY heartbeat → proceed."""
+        _write_flags(tmp_path, _stage2_flags())
+        _write_heartbeat(tmp_path, "healthy")
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("code_review")
+        assert result.action == "proceed"
+
+    def test_code_review_with_warning_heartbeat(self, tmp_path):
+        """code_review + WARNING heartbeat → proceed (only UNHEALTHY blocks)."""
+        _write_flags(tmp_path, _stage2_flags())
+        _write_heartbeat(tmp_path, "warning")
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("code_review")
+        assert result.action == "proceed"
+
+    def test_code_review_with_no_heartbeat(self, tmp_path):
+        """code_review + no heartbeat → proceed (first-run tolerance)."""
+        _write_flags(tmp_path, _stage2_flags())
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("code_review")
+        assert result.action == "proceed"
+
+    def test_research_still_proceeds_under_stage2(self, tmp_path):
+        """Research continues to route correctly under Stage 2 flags."""
+        _write_flags(tmp_path, _stage2_flags())
+        _write_heartbeat(tmp_path, "healthy")
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("research")
+        assert result.action == "proceed"
+
+
+# ===================================================================
+# Part 11 — Stage 2: Excluded Classes Still Blocked
+# ===================================================================
+
+class TestRollout_Stage2_ExcludedClasses:
+    """Verify non-selected classes remain on fallback under Stage 2."""
+
+    def test_code_impl_still_degrades(self, tmp_path):
+        """code_impl excluded from Stage 2 → degrade."""
+        _write_flags(tmp_path, _stage2_flags())
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("code_impl")
+        assert result.action == "degrade"
+        assert "task_class_not_supported" in result.reason
+        assert result.fallback == "single_agent_worker"
+
+    def test_system_still_degrades(self, tmp_path):
+        """system class still excluded → degrade."""
+        _write_flags(tmp_path, _stage2_flags())
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("system")
+        assert result.action == "degrade"
+
+    def test_simple_still_degrades(self, tmp_path):
+        """simple class still excluded → degrade."""
+        _write_flags(tmp_path, _stage2_flags())
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("simple")
+        assert result.action == "degrade"
+
+    def test_unknown_still_degrades(self, tmp_path):
+        """unknown class still excluded → degrade."""
+        _write_flags(tmp_path, _stage2_flags())
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("unknown")
+        assert result.action == "degrade"
+
+
+# ===================================================================
+# Part 12 — Stage 2: UNHEALTHY Heartbeat Blocks code_review
+# ===================================================================
+
+class TestRollout_Stage2_UnhealthyBlocks:
+    """Verify UNHEALTHY heartbeat blocks code_review under Stage 2."""
+
+    def test_unhealthy_blocks_code_review(self, tmp_path):
+        """UNHEALTHY heartbeat → code_review degrades."""
+        _write_flags(tmp_path, _stage2_flags())
+        _write_heartbeat(tmp_path, "unhealthy")
+        gd = GracefulDegradation(base=tmp_path)
+        result = gd.check_orchestrator_available("code_review")
+        assert result.action == "degrade"
+        assert "heartbeat_unhealthy" in result.reason
+        assert result.fallback == "single_agent_worker"
+
+    def test_unhealthy_blocks_both_classes(self, tmp_path):
+        """UNHEALTHY blocks both research and code_review."""
+        _write_flags(tmp_path, _stage2_flags())
+        _write_heartbeat(tmp_path, "unhealthy")
+        gd = GracefulDegradation(base=tmp_path)
+
+        for cls in ["research", "code_review"]:
+            result = gd.check_orchestrator_available(cls)
+            assert result.action == "degrade", f"{cls} should degrade"
+            assert "heartbeat_unhealthy" in result.reason
+
+    def test_unhealthy_blocks_all_classes_stage2(self, tmp_path):
+        """UNHEALTHY blocks everything — selected and non-selected."""
+        _write_flags(tmp_path, _stage2_flags())
+        _write_heartbeat(tmp_path, "unhealthy")
+        gd = GracefulDegradation(base=tmp_path)
+
+        for cls in ["research", "code_review", "code_impl", "system"]:
+            result = gd.check_orchestrator_available(cls)
+            assert result.action == "degrade", f"{cls} should degrade"
+
+
+# ===================================================================
+# Part 13 — Stage 2: Rollback Behavior
+# ===================================================================
+
+class TestRollout_Stage2_Rollback:
+    """Verify rollback controls work for Stage 2."""
+
+    def test_rollback_disables_both_classes(self, tmp_path):
+        """Disable flag → both research and code_review degrade."""
+        _write_flags(tmp_path, _stage2_flags())
+        gd = GracefulDegradation(base=tmp_path)
+        assert gd.check_orchestrator_available("research").action == "proceed"
+        assert gd.check_orchestrator_available("code_review").action == "proceed"
+
+        # Rollback
+        _write_flags(tmp_path, _stage2_flags(enabled=False))
+        gd2 = GracefulDegradation(base=tmp_path)
+        assert gd2.check_orchestrator_available("research").action == "degrade"
+        assert gd2.check_orchestrator_available("code_review").action == "degrade"
+
+    def test_rollback_remove_code_review_only(self, tmp_path):
+        """Remove code_review from supported → research still works."""
+        _write_flags(tmp_path, _stage2_flags())
+        gd = GracefulDegradation(base=tmp_path)
+        assert gd.check_orchestrator_available("code_review").action == "proceed"
+
+        # Partial rollback: remove code_review only
+        _write_flags(tmp_path, _stage2_flags(supported_classes=["research"]))
+        gd2 = GracefulDegradation(base=tmp_path)
+        assert gd2.check_orchestrator_available("research").action == "proceed"
+        assert gd2.check_orchestrator_available("code_review").action == "degrade"
+
+    def test_rollback_to_empty_classes(self, tmp_path):
+        """Remove all classes → everything degrades."""
+        _write_flags(tmp_path, _stage2_flags())
+        gd = GracefulDegradation(base=tmp_path)
+        assert gd.check_orchestrator_available("research").action == "proceed"
+
+        _write_flags(tmp_path, _stage2_flags(supported_classes=[]))
+        gd2 = GracefulDegradation(base=tmp_path)
+        assert gd2.check_orchestrator_available("research").action == "degrade"
+        assert gd2.check_orchestrator_available("code_review").action == "degrade"
+
+    def test_health_rollback_and_recovery(self, tmp_path):
+        """HEALTHY → UNHEALTHY → code_review blocked → HEALTHY → code_review resumes."""
+        _write_flags(tmp_path, _stage2_flags())
+        _write_heartbeat(tmp_path, "healthy")
+        gd = GracefulDegradation(base=tmp_path)
+        assert gd.check_orchestrator_available("code_review").action == "proceed"
+
+        _write_heartbeat(tmp_path, "unhealthy")
+        gd2 = GracefulDegradation(base=tmp_path)
+        assert gd2.check_orchestrator_available("code_review").action == "degrade"
+
+        _write_heartbeat(tmp_path, "healthy")
+        gd3 = GracefulDegradation(base=tmp_path)
+        assert gd3.check_orchestrator_available("code_review").action == "proceed"
+
+
+# ===================================================================
+# Part 14 — Stage 2: Config and Classifier Integration
+# ===================================================================
+
+class TestRollout_Stage2_Config:
+    """Verify Stage 2 config fields and classifier integration."""
+
+    def test_rollout_stage_field(self, tmp_path):
+        """rollout_stage reads as stage2_research_and_code_review."""
+        _write_flags(tmp_path, _stage2_flags())
+        ff = FeatureFlags(tmp_path)
+        config = ff.orchestrator_config()
+        assert config["rollout_stage"] == "stage2_research_and_code_review"
+
+    def test_both_classes_supported(self, tmp_path):
+        """Both research and code_review pass is_task_class_supported."""
+        _write_flags(tmp_path, _stage2_flags())
+        ff = FeatureFlags(tmp_path)
+        assert ff.is_task_class_supported("research") is True
+        assert ff.is_task_class_supported("code_review") is True
+        assert ff.is_task_class_supported("code_impl") is False
+        assert ff.is_task_class_supported("system") is False
+
+    def test_classify_code_review_task(self, tmp_path):
+        """code_review-classified task routes correctly."""
+        from tools.task_classifier import classify_task
+        task_class, confidence = classify_task(
+            "Review code quality of the authentication module"
+        )
+        assert task_class == "code_review"
+        assert confidence > 0.0
+
+    def test_code_review_eligible_with_stage2_flags(self, tmp_path):
+        """code_review task + Stage 2 flags → eligible via is_stageC_eligible."""
+        from tools.task_classifier import is_stageC_eligible
+        eligible, reason = is_stageC_eligible(
+            "code_review", 0.8,
+            "Audit the error handling in the API layer",
+            _stage2_flags(),
+        )
+        assert eligible is True
+        assert "coding_eligible" in reason
+
+    def test_code_review_with_high_risk_blocked(self, tmp_path):
+        """code_review with high-risk signals → rejected by classifier."""
+        from tools.task_classifier import is_stageC_eligible
+        eligible, reason = is_stageC_eligible(
+            "code_review", 0.8,
+            "Review code and deploy to production with sudo access",
+            _stage2_flags(),
+        )
+        assert eligible is False
+        assert "high_risk" in reason
+
+    def test_code_impl_ineligible_with_stage2_flags(self, tmp_path):
+        """code_impl + Stage 2 flags → ineligible (not in supported_classes)."""
+        from tools.task_classifier import is_stageC_eligible
+        eligible, reason = is_stageC_eligible(
+            "code_impl", 0.8,
+            "Implement a caching layer for the API",
+            _stage2_flags(),
+        )
+        assert eligible is False
+        assert "not_in_stageC" in reason
+
+
+# ===================================================================
+# Part 15 — Stage 2: Full Pre-Flight
+# ===================================================================
+
+class TestRollout_Stage2_FullPreFlight:
+    """Combined pre-flight for Stage 2 dispatch."""
+
+    def test_preflight_code_review_healthy(self, tmp_path):
+        """Stage 2 + code_review + HEALTHY → proceed through all gates."""
+        _write_flags(tmp_path, _stage2_flags(), {
+            "archive_cleanup": True,
+            "rate_limiting": True,
+            "manual_approval": False,
+        })
+        _write_heartbeat(tmp_path, "healthy")
+
+        gd = GracefulDegradation(base=tmp_path)
+        r1 = gd.check_orchestrator_available("code_review")
+        assert r1.action == "proceed"
+        r2 = gd.check_workflow_launch_feasibility()
+        assert r2.action == "proceed"
+        r3 = gd.check_spawn_feasibility()
+        assert r3.action == "proceed"
+
+    def test_preflight_both_classes_healthy(self, tmp_path):
+        """Stage 2 + both classes + HEALTHY → both proceed."""
+        _write_flags(tmp_path, _stage2_flags())
+        _write_heartbeat(tmp_path, "healthy")
+        gd = GracefulDegradation(base=tmp_path)
+        assert gd.check_orchestrator_available("research").action == "proceed"
+        assert gd.check_orchestrator_available("code_review").action == "proceed"
+
+    def test_preflight_code_impl_still_blocked(self, tmp_path):
+        """Stage 2 + code_impl + HEALTHY → blocked at class gate."""
+        _write_flags(tmp_path, _stage2_flags())
+        _write_heartbeat(tmp_path, "healthy")
         gd = GracefulDegradation(base=tmp_path)
         r1 = gd.check_orchestrator_available("code_impl")
         assert r1.action == "degrade"
