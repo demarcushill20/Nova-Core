@@ -70,6 +70,15 @@ TASK_CLASSES: dict[str, list[str]] = {
         r"\bphase\s+\d+\b", r"\barchitect\b",
         r"\bpipeline\b", r"\bci[/\s]*cd\b",
         r"\bpromote\b", r"\brollout\b", r"\bfeature[\s-]*flag\b",
+        # Stage D system_inspect signals — read-only inspection of system state
+        r"\bsystem[\s_-]*inspect\b",
+        r"\bheartbeat\b",
+        r"\bhealth[\s_-]*report\b",
+        r"\bscope[\s_-]*enforcement\b",
+        r"\brollout[\s_-]*audit\b",
+        r"\bactivation[\s_-]*log\b",
+        r"\bstability[\s_-]*review\b",
+        r"\bstage[\s_-]*[dD]\b",
     ],
     "simple": [
         r"\bformat\b", r"\brename\b", r"\btypo\b",
@@ -181,18 +190,59 @@ _SYSTEM_MUTATE_COMPILED: list[re.Pattern] = [
 ]
 
 
+_NEGATION_PREFIX = re.compile(
+    r"\b(?:do\s+not|don'?t|no|never|without|not|avoid)\s+$",
+    re.IGNORECASE,
+)
+
+# Mutate signals that commonly appear in negated contexts ("Do not modify").
+# These are checked for preceding negation; if negated, the match is discarded.
+_NEGATION_SENSITIVE_SIGNALS = frozenset({
+    "modify", "deploy", "configure", "install", "create", "delete",
+    "remove", "start", "stop", "restart", "enable", "disable", "push",
+})
+
+# Mutate signals that commonly appear in read-only audit context.
+# Only treated as mutate when they appear as action verbs, not as nouns
+# describing audit targets (e.g., "rollout auditability").
+_AUDIT_CONTEXT_SIGNALS = frozenset({"rollout", "promote", "cron"})
+
+_AUDIT_CONTEXT_SUFFIX = re.compile(
+    r"\s+(?:audit\w*|review\w*|inspect\w*|status|history|log|record)",
+    re.IGNORECASE,
+)
+
+
 def has_system_mutate_signals(task_text: str) -> tuple[bool, list[str]]:
     """Check if a system task contains mutation intent signals.
 
     Returns (has_mutations, matched_signals).
     Used by Stage D to reject system tasks that involve mutation
     operations — only read-only inspect tasks are eligible.
+
+    Handles negated contexts: "Do not modify" is not a mutation signal.
+    Handles audit contexts: "rollout auditability" is not a mutation signal.
     """
     matched = []
     for pattern in _SYSTEM_MUTATE_COMPILED:
         m = pattern.search(task_text)
-        if m:
-            matched.append(m.group())
+        if not m:
+            continue
+        word = m.group().strip().lower()
+
+        # Check for negation prefix (e.g., "Do not modify")
+        if word in _NEGATION_SENSITIVE_SIGNALS:
+            prefix = task_text[:m.start()]
+            if _NEGATION_PREFIX.search(prefix):
+                continue
+
+        # Check for audit-context suffix (e.g., "rollout auditability")
+        if word in _AUDIT_CONTEXT_SIGNALS:
+            suffix = task_text[m.end():]
+            if _AUDIT_CONTEXT_SUFFIX.match(suffix):
+                continue
+
+        matched.append(m.group())
     return bool(matched), matched
 
 

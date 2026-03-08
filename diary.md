@@ -4,6 +4,63 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-08 (Session 45) — Phase 7.18: Stage D Stability Review + Classifier Fixes
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Implemented Phase 7.18 — the Stage D monitoring and stability review. Then dispatched live system_inspect tasks to validate the full pipeline, uncovering and fixing two classifier bugs along the way.
+
+#### Phase 7.18 — Stage D Stability Review
+
+Built a deterministic stability review evaluating whether the live `system_inspect` scope is operating safely. Uses 13 criteria (7 hard, 6 soft) to classify Stage D health:
+
+**Hard criteria (7)** — any failure triggers rollback recommendation:
+heartbeat strict healthy, zero policy violations, zero budget exhaustions, overall failure rate <= 20%, scope integrity (5 sub-checks), stage is D, system class active.
+
+**Soft criteria (6)** — any failure triggers hold:
+system_inspect minimum runs (>= 3), system_inspect failure rate <= 20%, verifier rejection rate <= 20%, zero recovery anomalies, blocked mutation attempts <= 5, no workflow anomalies.
+
+**Scope integrity verification** checks 5 dimensions: system_scope == "inspect_only", stage == "D", system in supported_classes, allowed_ops subset of STAGE4_ALLOWED_OPERATIONS, STAGE4_BLOCKED_OPERATIONS subset of persisted blocked_ops.
+
+Three decision states: `stable_continue_stageD`, `hold_stageD`, `rollback_system_inspect_recommended`.
+
+77 tests in `tests/test_stageD_stability_review.py`.
+
+#### Classifier Fixes (discovered during live testing)
+
+**Fix 1 — System class patterns:** system_inspect tasks were misclassified as `code_review` because `\binspect\b` matched in code_review patterns. Added 7 system_inspect signal patterns to the `system` class in task_classifier.py.
+
+**Fix 2 — Negation-aware mutation detection:** `has_system_mutate_signals()` produced false positives on "Do not modify" (matching `\bmodify\b` in negated context) and "rollout auditability" (matching `\brollout\b` in audit context). Added negation-prefix detection and audit-context-suffix filtering.
+
+#### Live Validation
+
+After fixes and watcher restart, tasks 0113-0115 routed correctly through `stageD_system_inspect` pipeline (3/3 steps each, all grade B). Re-ran stability review:
+
+```
+Decision: stable_continue_stageD
+Hard criteria: 7/7 PASS
+Soft criteria: 6/6 PASS
+system_inspect runs: 3 (0% failure rate)
+Scope integrity: intact (inspect_only)
+Observation window: ~2h since activation
+```
+
+### Numbers
+
+- Tests added: 77
+- Total tests: 2342 (all passing)
+- Files modified: 3 (rollout_gate.py +735 lines, task_classifier.py +54 lines, HEARTBEAT_MULTIAGENT.md)
+- Files created: 4 (1 test file, 1 summary artifact, 1 stability review md, 1 stability review json)
+- Live system_inspect runs: 3/3 successful (tasks 0113-0115)
+
+### Milestone
+
+**Stage D validated stable.** The first three system_inspect tasks completed successfully through the full orchestrator pipeline (classify → route → build plan → execute → verify). All 13 stability criteria pass. The system can now reliably inspect its own infrastructure — heartbeat, scope enforcement, workflow records, activation logs — in read-only mode with full audit trail.
+
+---
+
 ## 2026-03-08 (Session 44) — Phase 7.16/7.17: Stage 4 Activation Gate + Live Activation
 
 **Session span:** Mar 8 UTC
