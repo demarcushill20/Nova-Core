@@ -4,7 +4,7 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
-## 2026-03-08 (Session 33) — Obsidian Phases 4.5/5/5.5/6: Write Skills + Context Injection + Promotion + Pattern Skill
+## 2026-03-08 (Session 33) — Obsidian Phases 4.5–7.5: Full Read-Write-Retrieve-Feedback Pipeline
 
 **Session span:** Mar 8 UTC
 
@@ -18,25 +18,37 @@ Reverse-chronological. Each entry covers one working session.
 
 **Phase 6 — `writing-agent-patterns` Skill:** Created the second write-oriented Obsidian skill for promoting stable, repeatable Nova-Core methods into structured agent-pattern notes. Higher confidence bar than workflow-learnings: requires 2+ independent task confirmations. 7-step promotion workflow: assess maturity → search duplicates → extract pattern → compose → validate → write → verify. Target folder `20-agent-patterns/`, schema `agent-pattern` (9 required frontmatter fields). Includes pattern promotion rubric reference doc with maturity criteria, confidence levels, and anti-patterns. Completes the four-skill read-write cycle across both memory note types.
 
+**Phase 6.5 — Controlled Agent-Pattern Promotion Integration:** Added bounded post-learning-promotion path in `execute_via_orchestrator()` that detects converging workflow learnings and promotes them to agent-pattern notes. New module `planner/pattern_promoter.py` handles keyword-based convergence detection (2+ independent learnings, 40% keyword overlap), dedup against existing patterns, and writes via vault_validate → vault_write. Only triggers after successful workflow-learning promotion. Tagged `#source/auto-promoted`, confidence always starts at medium.
+
+**Phase 7 — Pattern-Backed Planner Retrieval:** Added targeted agent-pattern retrieval for planner/orchestrator flows. New module `planner/pattern_retriever.py` searches `20-agent-patterns/` specifically, reads full pattern notes, extracts structured guidance sections (Summary, When to Apply, Pattern Steps, Guidance, Failure Modes), and formats compact advisory context (max 1.5KB, 2 patterns). Injected into `build_plan_from_task()` complementing Phase 5's general context. Step executor prompt includes pattern guidance. Advisory-only, fail-open.
+
+**Phase 7.5 — Planner Feedback Tracing:** Added bounded runtime feedback tracing for pattern-backed planning. New module `planner/pattern_feedback.py` records whether retrieved patterns influenced planning and whether post-execution evidence suggests they were useful. Trace initialized after plan build (inspects step inputs), finalized after execution (combines with outcome). Usefulness taxonomy: useful/neutral/unused/unknown/not_applicable. Conservative evidence rules — prefers "unknown" over weak inference. Traces logged to `LOGS/pattern_feedback.jsonl` (runtime audit only, never Obsidian). Fail-open at every stage.
+
 ### Tests
 - 48 vault context injection tests
-- 38 workflow promoter tests (eligibility, compaction, mock vault success/failure, safety boundaries, orchestrator integration)
-- 116 existing related tests pass, zero regressions
+- 38 workflow promoter tests
+- 39 pattern promoter tests
+- 46 pattern retriever tests
+- 35 pattern feedback tests
+- 16 plan builder tests
+- 222 total tests pass, zero regressions
 
 ### Files changed
 - `.claude/skills/capturing-workflow-learnings/SKILL.md` — new skill
 - `.claude/skills/capturing-workflow-learnings/reference/COMPACTION_RULES.md` — compaction rules
-- `planner/vault_context.py` — context injection module
-- `planner/workflow_promoter.py` — promotion eligibility + compaction + execution
-- `tests/test_vault_context.py` — 48 tests
-- `tests/test_workflow_promoter.py` — 38 tests
-- `tools/orchestrator_adapter.py` — context injection + promotion integration
-- `WORK/obsidian_phase4_5_workflow_learnings_skill_summary.md` — Phase 4.5 summary
-- `WORK/obsidian_phase5_context_injection_summary.md` — Phase 5 summary
-- `WORK/obsidian_phase5_5_workflow_promotion_summary.md` — Phase 5.5 summary
 - `.claude/skills/writing-agent-patterns/SKILL.md` — new skill
 - `.claude/skills/writing-agent-patterns/reference/PATTERN_PROMOTION_RUBRIC.md` — promotion rubric
-- `WORK/obsidian_phase6_agent_patterns_skill_summary.md` — Phase 6 summary
+- `planner/vault_context.py` — Phase 5 context injection
+- `planner/workflow_promoter.py` — Phase 5.5 promotion
+- `planner/pattern_promoter.py` — Phase 6.5 pattern promotion
+- `planner/pattern_retriever.py` — Phase 7 pattern retrieval
+- `planner/pattern_feedback.py` — Phase 7.5 feedback tracing
+- `tests/test_vault_context.py` — 48 tests
+- `tests/test_workflow_promoter.py` — 38 tests
+- `tests/test_pattern_promoter.py` — 39 tests
+- `tests/test_pattern_retriever.py` — 46 tests
+- `tests/test_pattern_feedback.py` — 35 tests
+- `tools/orchestrator_adapter.py` — all phase integrations
 
 ---
 

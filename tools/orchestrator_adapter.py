@@ -30,7 +30,10 @@ from planner.orchestrator import Orchestrator
 from planner.schemas import ExecutionPlan, PlanStep
 from planner.supervisor import Supervisor
 from planner.vault_context import inject_vault_context
+from planner.pattern_retriever import retrieve_pattern_guidance
 from planner.workflow_promoter import attempt_promotion
+from planner.pattern_promoter import attempt_pattern_promotion
+from planner.pattern_feedback import init_pattern_trace, finalize_pattern_trace, log_pattern_trace
 from tools.task_classifier import classify_task
 
 logger = logging.getLogger(__name__)
@@ -103,6 +106,10 @@ def build_plan_from_task(
         steps = _build_steps_for_class(stem, task_class, task_text)
         strategy = f"orchestrated_{task_class}"
 
+    # Phase 7: retrieve targeted agent-pattern guidance for eligible tasks
+    pattern_ctx = retrieve_pattern_guidance(task_class, task_text)
+    pattern_guidance = pattern_ctx.get("pattern_guidance_context", "")
+
     # Phase 5: inject advisory context into first step's inputs
     if advisory_context and steps:
         steps[0].inputs["vault_advisory_context"] = advisory_context
@@ -116,6 +123,23 @@ def build_plan_from_task(
         logger.debug(
             "VAULT CONTEXT SKIPPED: %s — reason=%s",
             stem, vault_ctx.get("vault_eligibility_reason", "?"),
+        )
+
+    # Phase 7: inject pattern guidance into first step's inputs
+    if pattern_guidance and steps:
+        steps[0].inputs["pattern_guidance"] = pattern_guidance
+        steps[0].inputs["pattern_paths"] = [
+            p["path"] for p in pattern_ctx.get("selected_patterns", [])
+        ]
+        logger.info(
+            "PATTERN GUIDANCE INJECTED: %s — %d patterns, reason=%s",
+            stem, len(pattern_ctx.get("selected_patterns", [])),
+            pattern_ctx.get("retrieval_reason", "?"),
+        )
+    elif not pattern_ctx.get("pattern_retrieval_activated", False):
+        logger.debug(
+            "PATTERN GUIDANCE SKIPPED: %s — reason=%s",
+            stem, pattern_ctx.get("retrieval_reason", "?"),
         )
 
     return ExecutionPlan(
@@ -362,12 +386,16 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
     vault_ctx = step.inputs.get("vault_advisory_context", "")
     vault_section = f"\n{vault_ctx}\n" if vault_ctx else ""
 
+    pattern_ctx = step.inputs.get("pattern_guidance", "")
+    pattern_section = f"\n{pattern_ctx}\n" if pattern_ctx else ""
+
     prompt = (
         f"You are executing step '{step.step_id}' of an orchestrated plan.\n"
         f"Goal: {step.goal}\n"
         f"Skill: {step.skill_name}\n\n"
         f"Task context:\n{step.inputs.get('task_text', '(no context)')}\n\n"
         f"{vault_section}"
+        f"{pattern_section}"
         f"Execute this step and produce output. End with a ## CONTRACT block.\n"
     )
 
@@ -426,6 +454,9 @@ def execute_via_orchestrator(
         "Plan built: %s (%d steps, strategy=%s)",
         plan.plan_id, len(plan.steps), plan.strategy,
     )
+
+    # Phase 7.5: initialize pattern feedback trace
+    pattern_trace = init_pattern_trace(stem, task_class, plan)
 
     # Stage B: validate plan before execution
     if stage == "B":
@@ -536,11 +567,55 @@ def execute_via_orchestrator(
                 stem, promotion_result.get("reason", "?"),
             )
 
+    # Phase 6.5: controlled agent-pattern promotion from converging learnings
+    pattern_result = None
+    if (
+        promotion_result
+        and promotion_result.get("promoted")
+        and promotion_result.get("note_path")
+        and promotion_result.get("learning_id")
+    ):
+        try:
+            pattern_result = attempt_pattern_promotion(
+                task_class=task_class,
+                task_text=task_text,
+                learning_id=promotion_result["learning_id"],
+                learning_path=promotion_result["note_path"],
+            )
+            if pattern_result.get("promoted"):
+                logger.info(
+                    "PATTERN PROMOTED: %s → %s (%d evidence)",
+                    stem,
+                    pattern_result.get("note_path"),
+                    pattern_result.get("evidence_count", 0),
+                )
+            else:
+                logger.debug(
+                    "PATTERN DEFERRED: %s — %s",
+                    stem, pattern_result.get("reason", "?"),
+                )
+        except Exception as exc:
+            logger.warning("PATTERN PROMOTION ERROR: %s — %s", stem, exc)
+            pattern_result = {
+                "promoted": False,
+                "reason": f"error:{exc}",
+                "errors": [str(exc)],
+            }
+
+    # Phase 7.5: finalize pattern feedback trace and log
+    try:
+        finalize_pattern_trace(pattern_trace, summary)
+        log_pattern_trace(pattern_trace)
+    except Exception as exc:
+        logger.warning("PATTERN FEEDBACK TRACING ERROR: %s — %s", stem, exc)
+
     return {
         "success": summary.get("status") == "done",
         "output_path": str(output_path),
         "plan_summary": summary,
         "promotion": promotion_result,
+        "pattern_promotion": pattern_result,
+        "pattern_feedback": pattern_trace,
     }
 
 
