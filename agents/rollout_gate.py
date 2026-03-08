@@ -1,4 +1,4 @@
-"""Phase 7.11–7.22 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation, Stage D Monitoring, Extended Monitoring, Broader System Scope Evaluation, Rollout Plan, and System Report Activation.
+"""Phase 7.11–7.23 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation, Stage D Monitoring, Extended Monitoring, Broader System Scope Evaluation, Rollout Plan, System Report Activation, and System Report Stability Monitoring.
 
 Deterministic, repository-native evaluation of rollout readiness and stability.
 Reads existing heartbeat, metrics, and workflow state to classify rollout
@@ -19,6 +19,7 @@ Includes:
   - Phase 7.20: Broader system scope evaluation gate
   - Phase 7.21: Broader system scope rollout plan (WORK/ document)
   - Phase 7.22: System report activation gate and controlled activation
+  - Phase 7.23: Post-activation system_report stability monitoring
 
 All criteria are threshold-based and auditable.
 No LLM judgments — pure metric evaluation.
@@ -242,6 +243,41 @@ REPORT_MAX_RECOVERY_ANOMALIES = 0
 
 # Shell allowlist enforcement tests must pass (verified programmatically)
 REPORT_SHELL_ENFORCEMENT_REQUIRED = True
+
+
+# --- Phase 7.23: Post-activation system_report stability monitoring thresholds ---
+# Monitor the newly activated system_report scope under real production load.
+# system_report adds bounded shell-ops; these thresholds track shell safety.
+
+# Minimum system_report workflows completed since activation
+REPORT_STABILITY_MIN_RUNS = 5
+
+# Minimum elapsed time since system_report activation (seconds) — 2 hours
+REPORT_STABILITY_MIN_ELAPSED_SECONDS = 2 * 3600
+
+# Maximum failure rate for system_report workflows
+REPORT_STABILITY_MAX_FAILURE_RATE = 0.10
+
+# Maximum verifier rejection rate
+REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE = 0.10
+
+# Hard ceiling: zero policy violations post-activation
+REPORT_STABILITY_MAX_POLICY_VIOLATIONS = 0
+
+# Hard ceiling: zero budget exhaustions
+REPORT_STABILITY_MAX_BUDGET_EXHAUSTIONS = 0
+
+# Hard ceiling: zero unresolved recovery anomalies
+REPORT_STABILITY_MAX_RECOVERY_ANOMALIES = 0
+
+# Hard ceiling: zero shell allowlist violations
+REPORT_STABILITY_MAX_SHELL_VIOLATIONS = 0
+
+# Maximum contract failure rate
+REPORT_STABILITY_MAX_CONTRACT_FAILURE_RATE = 0.10
+
+# Heartbeat must be healthy
+REPORT_STABILITY_HEARTBEAT_REQUIRED = "healthy"
 
 
 # ---------------------------------------------------------------------------
@@ -6396,6 +6432,624 @@ def write_system_report_activation_gate(
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(
         json.dumps(gate.to_dict(), indent=2, default=str) + "\n"
+    )
+
+    return md_path, json_path
+
+
+# ============================================================================
+# Phase 7.23 — Post-Activation System Report Stability Monitoring
+# ============================================================================
+# Monitors the newly activated system_report scope under real production load.
+# Tracks shell-ops safety, workflow completion, and standard governance signals.
+# Decisions: stable_continue_system_report / hold_system_report /
+#            rollback_system_report_recommended
+
+
+@dataclass
+class SystemReportStabilityReview:
+    """Result of post-activation system_report stability monitoring."""
+    decision: str
+    rollout_stage: str
+    system_scope: str
+    criteria: list[RolloutCriterion]
+    system_report_metrics: dict
+    evidence_summary: dict
+    generated_at: str
+    next_action: str
+    observation_window: dict
+    scope_integrity: dict
+    monitoring_progress: dict
+
+    def to_dict(self) -> dict:
+        return {
+            "decision": self.decision,
+            "rollout_stage": self.rollout_stage,
+            "system_scope": self.system_scope,
+            "criteria": [c.to_dict() for c in self.criteria],
+            "system_report_metrics": self.system_report_metrics,
+            "evidence_summary": self.evidence_summary,
+            "generated_at": self.generated_at,
+            "next_action": self.next_action,
+            "observation_window": self.observation_window,
+            "scope_integrity": self.scope_integrity,
+            "monitoring_progress": self.monitoring_progress,
+        }
+
+
+def _collect_post_activation_system_workflows(
+    workflows: list[dict],
+    activation_ts: str,
+) -> list[dict]:
+    """Filter system workflows created after system_report activation."""
+    if not activation_ts:
+        return []
+    try:
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        act_dt = datetime.strptime(activation_ts, fmt).replace(
+            tzinfo=timezone.utc
+        )
+        act_epoch = act_dt.timestamp()
+    except (ValueError, TypeError):
+        return []
+
+    return [
+        w for w in workflows
+        if w.get("task_class") == "system"
+        and w.get("created_at", 0) >= act_epoch
+    ]
+
+
+def _collect_system_report_metrics(
+    post_activation_workflows: list[dict],
+) -> dict:
+    """Extract system_report-specific metrics from post-activation workflows."""
+    total = len(post_activation_workflows)
+    completed = sum(
+        1 for w in post_activation_workflows if w.get("status") == "completed"
+    )
+    failed = sum(
+        1 for w in post_activation_workflows
+        if w.get("status") in ("failed", "halted")
+    )
+    rejected = sum(
+        1 for w in post_activation_workflows
+        if w.get("halt_reason") == "verifier_rejected"
+    )
+
+    failure_rate = failed / total if total > 0 else 0.0
+    rejection_rate = rejected / total if total > 0 else 0.0
+
+    return {
+        "total_runs": total,
+        "completed": completed,
+        "failed": failed,
+        "verifier_rejected": rejected,
+        "failure_rate": round(failure_rate, 4),
+        "rejection_rate": round(rejection_rate, 4),
+    }
+
+
+def _count_shell_audit_violations(root: Path) -> int:
+    """Count shell allowlist violations from the shell audit log.
+
+    Returns the number of violations found in LOGS/system_shell_audit.log.
+    Returns 0 if no audit log exists (no violations recorded).
+    """
+    audit_path = root / "LOGS" / "system_shell_audit.log"
+    if not audit_path.exists():
+        return 0
+    try:
+        text = audit_path.read_text(encoding="utf-8")
+        violations = sum(
+            1 for line in text.splitlines()
+            if "[VIOLATION]" in line or "[DENIED]" in line
+        )
+        return violations
+    except OSError:
+        return 0
+
+
+def _verify_system_report_scope_integrity(
+    orch: dict,
+) -> dict:
+    """Verify that system_report scope is properly configured.
+
+    Checks:
+    - system_scope is "report"
+    - shell-ops is in allowed_skills
+    - git-ops and task-execution remain blocked
+    - system is in supported_classes
+    """
+    scope = orch.get("system_scope", "unknown")
+    allowed = orch.get("system_allowed_skills", [])
+    blocked = orch.get("system_blocked_skills", [])
+    classes = orch.get("supported_classes", [])
+
+    issues = []
+    if scope != "report":
+        issues.append(f"system_scope is '{scope}', expected 'report'")
+    if "shell-ops" not in allowed:
+        issues.append("shell-ops not in system_allowed_skills")
+    if "git-ops" not in blocked:
+        issues.append("git-ops not in system_blocked_skills")
+    if "task-execution" not in blocked:
+        issues.append("task-execution not in system_blocked_skills")
+    if "system" not in classes:
+        issues.append("system not in supported_classes")
+
+    intact = len(issues) == 0
+    return {
+        "intact": intact,
+        "reason": "scope intact" if intact else "; ".join(issues),
+        "system_scope": scope,
+        "shell_ops_allowed": "shell-ops" in allowed,
+        "git_ops_blocked": "git-ops" in blocked,
+        "system_in_classes": "system" in classes,
+    }
+
+
+def evaluate_system_report_stability(
+    system_report_metrics: dict,
+    elapsed_seconds: float,
+    heartbeat_overall: str,
+    policy_violations: int,
+    budget_exhaustions: int,
+    unresolved_recovery_anomalies: int,
+    shell_audit_violations: int,
+    scope_integrity: dict,
+    contract_failure_rate: float | None = None,
+) -> list[RolloutCriterion]:
+    """Evaluate post-activation stability criteria for system_report.
+
+    Returns list of criteria with hard/soft severity classification.
+    Hard failures -> rollback_system_report_recommended.
+    Soft failures -> hold_system_report.
+    """
+    criteria = []
+    total_runs = system_report_metrics.get("total_runs", 0)
+    failure_rate = system_report_metrics.get("failure_rate", 0.0)
+    rejection_rate = system_report_metrics.get("rejection_rate", 0.0)
+
+    # --- Hard criteria (any failure -> rollback) ---
+
+    # 1. Heartbeat healthy
+    criteria.append(RolloutCriterion(
+        name="heartbeat_healthy",
+        passed=heartbeat_overall == REPORT_STABILITY_HEARTBEAT_REQUIRED,
+        value=heartbeat_overall,
+        threshold=REPORT_STABILITY_HEARTBEAT_REQUIRED,
+        detail=f"Current heartbeat: {heartbeat_overall}",
+        severity="hard",
+    ))
+
+    # 2. No policy violations
+    criteria.append(RolloutCriterion(
+        name="no_policy_violations",
+        passed=policy_violations <= REPORT_STABILITY_MAX_POLICY_VIOLATIONS,
+        value=policy_violations,
+        threshold=REPORT_STABILITY_MAX_POLICY_VIOLATIONS,
+        detail=(
+            "No policy violations since system_report activation"
+            if policy_violations == 0
+            else f"{policy_violations} policy violation(s) detected"
+        ),
+        severity="hard",
+    ))
+
+    # 3. No budget exhaustions
+    criteria.append(RolloutCriterion(
+        name="no_budget_exhaustions",
+        passed=budget_exhaustions <= REPORT_STABILITY_MAX_BUDGET_EXHAUSTIONS,
+        value=budget_exhaustions,
+        threshold=REPORT_STABILITY_MAX_BUDGET_EXHAUSTIONS,
+        detail=(
+            "No budget exhaustions"
+            if budget_exhaustions == 0
+            else f"{budget_exhaustions} budget exhaustion(s)"
+        ),
+        severity="hard",
+    ))
+
+    # 4. No unresolved recovery anomalies
+    criteria.append(RolloutCriterion(
+        name="no_recovery_anomalies",
+        passed=unresolved_recovery_anomalies <= REPORT_STABILITY_MAX_RECOVERY_ANOMALIES,
+        value=unresolved_recovery_anomalies,
+        threshold=REPORT_STABILITY_MAX_RECOVERY_ANOMALIES,
+        detail=(
+            "No unresolved recovery anomalies"
+            if unresolved_recovery_anomalies == 0
+            else f"{unresolved_recovery_anomalies} unresolved recovery anomaly(ies)"
+        ),
+        severity="hard",
+    ))
+
+    # 5. Zero shell allowlist violations (critical for system_report safety)
+    criteria.append(RolloutCriterion(
+        name="no_shell_violations",
+        passed=shell_audit_violations <= REPORT_STABILITY_MAX_SHELL_VIOLATIONS,
+        value=shell_audit_violations,
+        threshold=REPORT_STABILITY_MAX_SHELL_VIOLATIONS,
+        detail=(
+            "No shell allowlist violations"
+            if shell_audit_violations == 0
+            else f"{shell_audit_violations} shell allowlist violation(s) — CRITICAL"
+        ),
+        severity="hard",
+    ))
+
+    # 6. Scope integrity
+    criteria.append(RolloutCriterion(
+        name="scope_integrity",
+        passed=scope_integrity.get("intact", False),
+        value=scope_integrity.get("reason", "unknown"),
+        threshold="intact",
+        detail=(
+            "Scope integrity verified: system_report properly configured"
+            if scope_integrity.get("intact")
+            else f"Scope integrity issue: {scope_integrity.get('reason', 'unknown')}"
+        ),
+        severity="hard",
+    ))
+
+    # 7. Failure rate within threshold (hard if any runs exist)
+    if total_runs > 0:
+        criteria.append(RolloutCriterion(
+            name="failure_rate_acceptable",
+            passed=failure_rate <= REPORT_STABILITY_MAX_FAILURE_RATE,
+            value=round(failure_rate, 4),
+            threshold=REPORT_STABILITY_MAX_FAILURE_RATE,
+            detail=f"Failure rate {failure_rate:.1%} (max {REPORT_STABILITY_MAX_FAILURE_RATE:.0%})",
+            severity="hard",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="failure_rate_acceptable",
+            passed=True,
+            value=0.0,
+            threshold=REPORT_STABILITY_MAX_FAILURE_RATE,
+            detail="No runs yet — failure rate check deferred",
+            severity="hard",
+        ))
+
+    # --- Soft criteria (failure -> hold) ---
+
+    # 8. Minimum completed runs
+    criteria.append(RolloutCriterion(
+        name="minimum_system_report_runs",
+        passed=total_runs >= REPORT_STABILITY_MIN_RUNS,
+        value=total_runs,
+        threshold=REPORT_STABILITY_MIN_RUNS,
+        detail=f"{total_runs} system_report run(s) (need >= {REPORT_STABILITY_MIN_RUNS})",
+        severity="soft",
+    ))
+
+    # 9. Minimum elapsed time
+    elapsed_hours = round(elapsed_seconds / 3600, 1)
+    required_hours = REPORT_STABILITY_MIN_ELAPSED_SECONDS / 3600
+    criteria.append(RolloutCriterion(
+        name="minimum_elapsed_time",
+        passed=elapsed_seconds >= REPORT_STABILITY_MIN_ELAPSED_SECONDS,
+        value=elapsed_hours,
+        threshold=required_hours,
+        detail=f"Elapsed {elapsed_hours}h since system_report activation (need >= {required_hours}h)",
+        severity="soft",
+    ))
+
+    # 10. Verifier rejection rate
+    if total_runs > 0:
+        criteria.append(RolloutCriterion(
+            name="verifier_rejection_rate",
+            passed=rejection_rate <= REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
+            value=round(rejection_rate, 4),
+            threshold=REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
+            detail=f"Verifier rejection rate {rejection_rate:.1%} (max {REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE:.0%})",
+            severity="soft",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="verifier_rejection_rate",
+            passed=True,
+            value=0.0,
+            threshold=REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
+            detail="No runs yet — verifier rejection check deferred",
+            severity="soft",
+        ))
+
+    return criteria
+
+
+def decide_system_report_stability(
+    criteria: list[RolloutCriterion],
+) -> tuple[str, str]:
+    """Decide system_report stability status.
+
+    Returns (decision, next_action).
+    Decision states:
+      - stable_continue_system_report: all criteria pass
+      - hold_system_report: only soft criteria fail (need more evidence)
+      - rollback_system_report_recommended: any hard criterion fails
+    """
+    hard_failed = [c for c in criteria if not c.passed and c.severity == "hard"]
+    soft_failed = [c for c in criteria if not c.passed and c.severity == "soft"]
+
+    if hard_failed:
+        names = ", ".join(c.name for c in hard_failed)
+        return (
+            "rollback_system_report_recommended",
+            f"system_report rollback recommended: {names}. "
+            "Run deactivate_system_report_scope() to roll back to inspect_only.",
+        )
+
+    if soft_failed:
+        names = ", ".join(c.name for c in soft_failed)
+        return (
+            "hold_system_report",
+            f"system_report held: {names}. Continue operating to accumulate evidence. "
+            "system_scope remains 'report'.",
+        )
+
+    return (
+        "stable_continue_system_report",
+        "system_report is stable under production load. All criteria pass. "
+        "system_scope remains 'report'. Tier 2 (system_diagnose) may be "
+        "evaluated in a future phase.",
+    )
+
+
+def review_system_report_stability(
+    base: Path | None = None,
+    now_override: str = "",
+) -> SystemReportStabilityReview:
+    """Full orchestrator for system_report post-activation stability review.
+
+    Reads live state, evaluates all criteria, returns review result.
+    """
+    root = base or BASE
+    state = root / "STATE"
+
+    # Find system_report activation timestamp
+    activation_log = _read_jsonl(state / "activation_log.jsonl")
+    report_activations = [
+        r for r in activation_log
+        if r.get("event") == "system_report_activation"
+    ]
+    activation = report_activations[-1] if report_activations else {}
+    activation_ts = activation.get("timestamp", "")
+
+    # Current time
+    now_iso = now_override or datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    # Elapsed time
+    elapsed_seconds = _compute_elapsed_seconds(activation_ts, now_iso)
+
+    # Collect post-activation system workflows
+    workflows = _list_json_files(state / "workflows")
+    post_act_workflows = _collect_post_activation_system_workflows(
+        workflows, activation_ts
+    )
+    report_metrics = _collect_system_report_metrics(post_act_workflows)
+
+    # Heartbeat
+    hb = _read_json(state / "heartbeat_multiagent.json")
+    hb_overall = hb.get("overall", "unknown") if hb else "unknown"
+    hb_metrics = hb.get("metrics", {}) if hb else {}
+
+    # Policy violations
+    denials = _read_jsonl(state / "policy_denials.jsonl")
+    policy_violations = len(denials)
+
+    # Budget exhaustions
+    budget_exhaustions = hb_metrics.get("budget_exhaustion_count", 0)
+
+    # Recovery anomalies
+    recovery_classification = _classify_post_activation_recoveries(
+        root, activation_ts
+    )
+    unresolved = recovery_classification.get("unresolved", 0)
+
+    # Shell audit violations
+    shell_violations = _count_shell_audit_violations(root)
+
+    # Feature flags / scope integrity
+    flags_data = _read_json(state / "config" / "feature_flags.json")
+    orch = flags_data.get("phase7_orchestrator", {}) if flags_data else {}
+    scope_integrity = _verify_system_report_scope_integrity(orch)
+    system_scope = orch.get("system_scope", "unknown")
+    rollout_stage = orch.get("rollout_stage", "unknown")
+
+    # Contract failure rate
+    contract_success = hb_metrics.get("contract_success_count", 0)
+    contract_failure = hb_metrics.get("contract_failure_count", 0)
+    contract_total = contract_success + contract_failure
+    contract_failure_rate = (
+        contract_failure / contract_total if contract_total > 0 else None
+    )
+
+    # Evaluate criteria
+    criteria = evaluate_system_report_stability(
+        system_report_metrics=report_metrics,
+        elapsed_seconds=elapsed_seconds,
+        heartbeat_overall=hb_overall,
+        policy_violations=policy_violations,
+        budget_exhaustions=budget_exhaustions,
+        unresolved_recovery_anomalies=unresolved,
+        shell_audit_violations=shell_violations,
+        scope_integrity=scope_integrity,
+        contract_failure_rate=contract_failure_rate,
+    )
+
+    decision, next_action = decide_system_report_stability(criteria)
+
+    # Monitoring progress
+    runs_target = REPORT_STABILITY_MIN_RUNS
+    elapsed_target = REPORT_STABILITY_MIN_ELAPSED_SECONDS / 3600
+    elapsed_hours = round(elapsed_seconds / 3600, 1)
+    monitoring_progress = {
+        "runs_completed": report_metrics["total_runs"],
+        "runs_target": runs_target,
+        "runs_pct": min(100, round(100 * report_metrics["total_runs"] / runs_target)) if runs_target else 100,
+        "elapsed_hours": elapsed_hours,
+        "elapsed_target_hours": elapsed_target,
+        "elapsed_pct": min(100, round(100 * elapsed_seconds / REPORT_STABILITY_MIN_ELAPSED_SECONDS)) if REPORT_STABILITY_MIN_ELAPSED_SECONDS else 100,
+    }
+
+    evidence = {
+        "total_system_report_workflows": report_metrics["total_runs"],
+        "completed_system_report_workflows": report_metrics["completed"],
+        "failed_system_report_workflows": report_metrics["failed"],
+        "verifier_rejected": report_metrics["verifier_rejected"],
+        "heartbeat_overall": hb_overall,
+        "policy_violations": policy_violations,
+        "budget_exhaustions": budget_exhaustions,
+        "unresolved_recovery_anomalies": unresolved,
+        "shell_audit_violations": shell_violations,
+        "contract_failure_rate": contract_failure_rate,
+        "scope_integrity": scope_integrity.get("intact", False),
+    }
+
+    observation_window = {
+        "activation_at": activation_ts,
+        "review_at": now_iso,
+        "scope": "system_report (bounded shell-ops)",
+        "elapsed_hours": elapsed_hours,
+        "elapsed_seconds": elapsed_seconds,
+    }
+
+    return SystemReportStabilityReview(
+        decision=decision,
+        rollout_stage=rollout_stage,
+        system_scope=system_scope,
+        criteria=criteria,
+        system_report_metrics=report_metrics,
+        evidence_summary=evidence,
+        generated_at=now_iso,
+        next_action=next_action,
+        observation_window=observation_window,
+        scope_integrity=scope_integrity,
+        monitoring_progress=monitoring_progress,
+    )
+
+
+def render_system_report_stability_markdown(
+    review: SystemReportStabilityReview,
+) -> str:
+    """Render system_report stability review as operator-readable markdown."""
+    decision_labels = {
+        "stable_continue_system_report": "STABLE",
+        "hold_system_report": "HOLD",
+        "rollback_system_report_recommended": "ROLLBACK RECOMMENDED",
+    }
+    label = decision_labels.get(review.decision, review.decision.upper())
+
+    lines = [
+        "# Phase 7.23 — System Report Post-Activation Stability Review",
+        f"Generated: {review.generated_at}",
+        "",
+        f"## Decision: {label} — {review.decision}",
+        "",
+        f"**Rollout stage**: {review.rollout_stage}",
+        f"**System scope**: {review.system_scope}",
+        f"**Next action**: {review.next_action}",
+        "",
+        "## Observation Window",
+        "",
+        f"- **system_report activated at**: {review.observation_window.get('activation_at', 'N/A')}",
+        f"- **Review at**: {review.observation_window.get('review_at', 'N/A')}",
+        f"- **Elapsed**: {review.observation_window.get('elapsed_hours', 0)}h ({review.observation_window.get('elapsed_seconds', 0)}s)",
+        "",
+        "## Monitoring Progress",
+        "",
+        f"- **Runs**: {review.monitoring_progress.get('runs_completed', 0)}/{review.monitoring_progress.get('runs_target', 0)} ({review.monitoring_progress.get('runs_pct', 0)}%)",
+        f"- **Elapsed**: {review.monitoring_progress.get('elapsed_hours', 0)}h/{review.monitoring_progress.get('elapsed_target_hours', 0)}h ({review.monitoring_progress.get('elapsed_pct', 0)}%)",
+        "",
+        "## Scope Integrity",
+        "",
+        f"- **Status**: {'INTACT' if review.scope_integrity.get('intact') else 'ISSUE'}",
+        f"- **system_scope**: {review.scope_integrity.get('system_scope', 'N/A')}",
+        f"- **shell-ops allowed**: {review.scope_integrity.get('shell_ops_allowed', 'N/A')}",
+        f"- **git-ops blocked**: {review.scope_integrity.get('git_ops_blocked', 'N/A')}",
+        "",
+        "## system_report Metrics",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
+        f"| Total runs | {review.system_report_metrics.get('total_runs', 0)} |",
+        f"| Completed | {review.system_report_metrics.get('completed', 0)} |",
+        f"| Failed | {review.system_report_metrics.get('failed', 0)} |",
+        f"| Verifier rejected | {review.system_report_metrics.get('verifier_rejected', 0)} |",
+        f"| Failure rate | {review.system_report_metrics.get('failure_rate', 0):.1%} |",
+        "",
+        "## Stability Criteria",
+        "",
+        "| # | Criterion | Status | Value | Threshold | Severity | Detail |",
+        "|---|-----------|--------|-------|-----------|----------|--------|",
+    ]
+
+    for i, c in enumerate(review.criteria, 1):
+        status = "PASS" if c.passed else "FAIL"
+        lines.append(
+            f"| {i} | {c.name} | {status} | {c.value} | {c.threshold} | {c.severity} | {c.detail} |"
+        )
+
+    lines.extend([
+        "",
+        "## Evidence Summary",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
+    ])
+    for k, v in review.evidence_summary.items():
+        display = "N/A" if v is None else v
+        lines.append(f"| {k} | {display} |")
+
+    lines.extend(["", "## Operator Action", ""])
+
+    if review.decision == "stable_continue_system_report":
+        lines.extend([
+            "- system_report is stable. No action required.",
+            "- system_scope remains 'report'.",
+            "- Tier 2 (system_diagnose) may be evaluated in a future phase.",
+        ])
+    elif review.decision == "hold_system_report":
+        lines.extend([
+            "- system_report is held pending more evidence.",
+            "- system_scope remains 'report'.",
+            "- Re-run this review after more system_report tasks complete.",
+        ])
+    else:
+        lines.extend([
+            "- **ROLLBACK RECOMMENDED**.",
+            "- Run `deactivate_system_report_scope()` to roll back to inspect_only.",
+            "- Investigate the failing criteria before re-attempting activation.",
+        ])
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_system_report_stability_review(
+    review: SystemReportStabilityReview,
+    base: Path | None = None,
+) -> tuple[Path, Path]:
+    """Write system_report stability review to WORK/ and STATE/.
+
+    Returns (md_path, json_path).
+    """
+    root = base or BASE
+
+    md_path = root / "WORK" / "phase7_system_report_stability_review.md"
+    json_path = root / "STATE" / "system_report_stability_review.json"
+
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(render_system_report_stability_markdown(review))
+
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(review.to_dict(), indent=2, default=str) + "\n"
     )
 
     return md_path, json_path
