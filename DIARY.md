@@ -4,6 +4,43 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-08 (Session 35) — Phase 10 Operator Setup: Obsidian Headless Live Deployment
+
+**Session span:** Mar 8 UTC
+
+### What was built
+
+Executed the operator setup for Phase 10 — deployed Obsidian Headless Auto-Sync on the VPS and verified end-to-end.
+
+**Node.js upgrade:** System had Node.js v20.20.0 (no sudo for apt upgrade). Installed nvm, then Node.js v22.22.1 via `nvm install 22`. Required because `obsidian-headless` npm package specifies `engines: { node: ">=22.0.0" }`.
+
+**Obsidian Headless installed:** `npm install -g obsidian-headless` → `ob` CLI v0.0.6 at `/home/nova/.nvm/versions/node/v22.22.1/bin/ob`.
+
+**Systemd service created:** `~/.config/systemd/user/obsidian-headless-sync.service` with full nvm-managed node/ob paths. `loginctl enable-linger nova` enabled for persistent user services.
+
+**Operator authenticated:** `ob login` (manual — email + password + 2FA). Vault linked: `ob sync-setup --vault "Nova-Core Open Memory" --device-name "nova-vps"`. Daemon started: `systemctl --user enable --now obsidian-headless-sync`.
+
+**Sync config enabled:** `/home/nova/nova-vault/.nova-sync-config.json` set to `enabled: true` with correct nvm-managed `ob_binary` path.
+
+**End-to-end verification:** Triggered a real bounded `vault_write` (`30-workflow-learnings/phase-10-sync-verification.md`, 813 bytes, schema-compliant). `check_sync_after_write` returned `daemon_active`, attempted=true, error=null. Daemon log confirmed: `Upload complete` + `Fully synced` in <1 second. Operator confirmed note appeared on phone.
+
+### Evidence
+- Daemon: `active (running)`, PID 478272, vault "Nova-Core Open Memory"
+- Daemon log: `New file → Uploading → Upload complete → Fully synced` at 03:39:19 UTC
+- Sync audit: all 6 structured fields present, `obsidian_sync_result: "daemon_active"`
+- Phone: operator confirmed note visible
+
+### Tests
+- 24/24 vault sync tests pass, zero regressions
+
+### Files changed
+- `/home/nova/.nvm/` — nvm + Node.js 22.22.1 (user home, not repo)
+- `/home/nova/.config/systemd/user/obsidian-headless-sync.service` — systemd service
+- `/home/nova/nova-vault/.nova-sync-config.json` — sync config (enabled)
+- `MEMORY/obsidian-headless-sync-setup.md` — updated with actual nvm paths and current state
+
+---
+
 ## 2026-03-08 (Session 34) — Obsidian Phases 7.6–10: Safety Audit, Navigation, Role Binding, Auto-Sync
 
 **Session span:** Mar 8 UTC

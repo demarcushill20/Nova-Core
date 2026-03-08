@@ -2,34 +2,38 @@
 
 ## Prerequisites
 
-- Node.js 22+ installed on the VPS
 - Active Obsidian Sync subscription ($4/month)
 - Vault exists at `/home/nova/nova-vault/`
 
-## Step 1: Install Obsidian Headless
+## Current State (Session 35)
+
+Already completed by automated setup:
+- Node.js 22.22.1 installed via nvm at `/home/nova/.nvm/versions/node/v22.22.1/`
+- obsidian-headless 0.0.6 installed globally (`ob` CLI)
+- ob binary: `/home/nova/.nvm/versions/node/v22.22.1/bin/ob`
+- systemd service file: `~/.config/systemd/user/obsidian-headless-sync.service`
+- loginctl linger enabled
+- `.nova-sync-config.json` created (disabled, awaiting auth)
+
+## Remaining Operator Steps
+
+### Step 1: Authenticate (MANUAL — requires credentials + 2FA)
 
 ```bash
-npm install -g obsidian-headless
-```
+export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
 
-Verify: `ob --version`
-
-## Step 2: Authenticate
-
-```bash
 ob login
 # Enter your Obsidian account email, password, and 2FA code
 ```
 
-## Step 3: Link the Vault
+### Step 2: Link the Vault
 
 ```bash
 ob sync-list-remote          # find your vault name
-cd /home/nova/nova-vault
-ob sync-setup --vault "Nova-Core Open Memory" --device-name "nova-vps"
+ob sync-setup --vault "YOUR_VAULT_NAME" --device-name "nova-vps" --path /home/nova/nova-vault
 ```
 
-## Step 4: Test One-Shot Sync
+### Step 3: Test One-Shot Sync
 
 ```bash
 ob sync --path /home/nova/nova-vault
@@ -37,50 +41,26 @@ ob sync --path /home/nova/nova-vault
 
 Verify notes appear on your phone within seconds.
 
-## Step 5: Enable Continuous Daemon
-
-Create systemd service:
+### Step 4: Start the Daemon
 
 ```bash
-mkdir -p ~/.config/systemd/user
-
-cat > ~/.config/systemd/user/obsidian-headless-sync.service << 'EOF'
-[Unit]
-Description=Obsidian Headless Sync Daemon
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/ob sync --path /home/nova/nova-vault --continuous
-Restart=on-failure
-RestartSec=30s
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=default.target
-EOF
-
-loginctl enable-linger nova
 systemctl --user daemon-reload
 systemctl --user enable --now obsidian-headless-sync
+systemctl --user status obsidian-headless-sync
 ```
 
-Check status: `systemctl --user status obsidian-headless-sync`
-
-## Step 6: Enable Nova-Core Sync Integration
-
-Create the sync config in the vault:
+### Step 5: Enable Nova-Core Sync
 
 ```bash
-cat > /home/nova/nova-vault/.nova-sync-config.json << 'EOF'
-{
-  "enabled": true,
-  "mode": "continuous",
-  "ob_binary": "ob",
-  "vault_path": "/home/nova/nova-vault",
-  "sync_timeout_seconds": 30,
-  "check_daemon": true
-}
-EOF
+# Edit the existing config to enable sync:
+python3 -c "
+import json
+p = '/home/nova/nova-vault/.nova-sync-config.json'
+c = json.loads(open(p).read())
+c['enabled'] = True
+open(p, 'w').write(json.dumps(c, indent=2) + '\n')
+print('Sync enabled:', c)
+"
 ```
 
 ## Verifying It Works
