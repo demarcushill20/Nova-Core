@@ -30,6 +30,7 @@ from planner.orchestrator import Orchestrator
 from planner.schemas import ExecutionPlan, PlanStep
 from planner.supervisor import Supervisor
 from planner.vault_context import inject_vault_context
+from planner.workflow_promoter import attempt_promotion
 from tools.task_classifier import classify_task
 
 logger = logging.getLogger(__name__)
@@ -416,6 +417,7 @@ def execute_via_orchestrator(
         dict with keys: success, output_path, plan_summary
     """
     stage = (routing or {}).get("stage", "")
+    task_class, _ = classify_task(task_text)
     logger.info("ORCHESTRATOR DISPATCH: %s (stage=%s)", stem, stage or "default")
 
     # Build plan
@@ -513,10 +515,32 @@ def execute_via_orchestrator(
     # Write routing audit log
     _log_routing_decision(stem, plan, summary, stage)
 
+    # Phase 5.5: controlled post-execution workflow-learning promotion
+    promotion_result = None
+    if summary.get("status") == "done" and stage in ("B", "C"):
+        promotion_result = attempt_promotion(
+            stem=stem,
+            task_class=task_class,
+            task_text=task_text,
+            plan_summary=summary,
+            strategy=plan.strategy,
+        )
+        if promotion_result.get("promoted"):
+            logger.info(
+                "WORKFLOW PROMOTED: %s → %s",
+                stem, promotion_result.get("note_path"),
+            )
+        else:
+            logger.debug(
+                "PROMOTION SKIPPED: %s — %s",
+                stem, promotion_result.get("reason", "?"),
+            )
+
     return {
         "success": summary.get("status") == "done",
         "output_path": str(output_path),
         "plan_summary": summary,
+        "promotion": promotion_result,
     }
 
 

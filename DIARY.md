@@ -4,7 +4,7 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
-## 2026-03-08 (Session 33) — Obsidian Phases 4.5/5: Write Skill + Context Injection
+## 2026-03-08 (Session 33) — Obsidian Phases 4.5/5/5.5: Write Skill + Context Injection + Promotion
 
 **Session span:** Mar 8 UTC
 
@@ -14,18 +14,24 @@ Reverse-chronological. Each entry covers one working session.
 
 **Phase 5 — Read-Only Agent Context Injection:** Integrated bounded, advisory vault context retrieval into the orchestrator/planner path. New module `planner/vault_context.py` provides eligibility checking, keyword extraction, vault retrieval, and context formatting. Injected into `build_plan_from_task()` → first step's inputs → step executor prompt. Eligible task classes: research, code_impl, code_review. Runtime-state queries always skip. Advisory-only — runtime truth in STATE/TASKS/LOGS/ remains authoritative. Fail-open: vault unavailability does not block execution. Max 3 notes, 2KB formatted context, deterministic (no LLM calls).
 
+**Phase 5.5 — Controlled Post-Execution Workflow-Learning Promotion:** Added bounded promotion path in `execute_via_orchestrator()` that converts successful governed workflow outcomes into Obsidian workflow-learning notes. New module `planner/workflow_promoter.py` handles eligibility (task class + grade A/B + done + 2+ steps + learning signals), compaction (frontmatter + body), and writes via existing vault_validate → vault_write. Only governed stage B/C tasks trigger promotion. Tagged `#source/auto-promoted`. Fail-open: promotion failure does not block execution.
+
 ### Tests
-- 48 new vault context injection tests (eligibility, keywords, formatting, retrieval, source-truth boundary, orchestrator integration)
-- 68 existing planner/orchestrator tests pass, zero regressions
+- 48 vault context injection tests
+- 38 workflow promoter tests (eligibility, compaction, mock vault success/failure, safety boundaries, orchestrator integration)
+- 116 existing related tests pass, zero regressions
 
 ### Files changed
 - `.claude/skills/capturing-workflow-learnings/SKILL.md` — new skill
 - `.claude/skills/capturing-workflow-learnings/reference/COMPACTION_RULES.md` — compaction rules
-- `planner/vault_context.py` — new context injection module
+- `planner/vault_context.py` — context injection module
+- `planner/workflow_promoter.py` — promotion eligibility + compaction + execution
 - `tests/test_vault_context.py` — 48 tests
-- `tools/orchestrator_adapter.py` — 3 narrow integration changes
+- `tests/test_workflow_promoter.py` — 38 tests
+- `tools/orchestrator_adapter.py` — context injection + promotion integration
 - `WORK/obsidian_phase4_5_workflow_learnings_skill_summary.md` — Phase 4.5 summary
 - `WORK/obsidian_phase5_context_injection_summary.md` — Phase 5 summary
+- `WORK/obsidian_phase5_5_workflow_promotion_summary.md` — Phase 5.5 summary
 
 ---
 
