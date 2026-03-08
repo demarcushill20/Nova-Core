@@ -1,6 +1,6 @@
-"""Phase 7.11/7.12a — Rollout Evaluation Gate and Stage 3 Activation.
+"""Phase 7.11/7.12a/7.13 — Rollout Evaluation Gate, Stage 3 Activation, and Stability Review.
 
-Deterministic, repository-native evaluation of Stage 2 rollout readiness.
+Deterministic, repository-native evaluation of rollout readiness and stability.
 Reads existing heartbeat, metrics, and workflow state to classify rollout
 status as ready_to_expand, hold, or rollback_recommended.
 
@@ -9,6 +9,7 @@ Includes:
   - Readiness check with progress toward thresholds
   - Evaluation-gated Stage 3 activation with audit trail
   - Fail-closed activation procedure
+  - Phase 7.13: Post-activation Stage 3 stability review
 
 All criteria are threshold-based and auditable.
 No LLM judgments — pure metric evaluation.
@@ -18,6 +19,7 @@ State sources:
   STATE/workflows/*.json            — workflow history
   STATE/config/feature_flags.json   — current rollout config
   STATE/policy_denials.jsonl        — policy denial records
+  STATE/activation_log.jsonl        — activation audit trail
   LOGS/recovery.log                 — recovery event history
 
 Stdlib only — no pip installs required.
@@ -54,6 +56,23 @@ MAX_POLICY_VIOLATIONS = 0
 
 # Hard ceiling on budget exhaustions (any = rollback)
 MAX_BUDGET_EXHAUSTIONS = 0
+
+# --- Phase 7.13: Stage 3 stability review thresholds ---
+
+# Minimum code_impl workflows before a stability opinion can be given
+STAGE3_MIN_CODE_IMPL_RUNS = 2
+
+# Maximum code_impl failure rate (tighter than overall because mutation-capable)
+STAGE3_MAX_CODE_IMPL_FAILURE_RATE = 0.50
+
+# Maximum overall failure rate under Stage 3 operation
+STAGE3_MAX_FAILURE_RATE = 0.30
+
+# Maximum verifier rejection rate (critical for mutation-capable class)
+STAGE3_MAX_VERIFIER_REJECTION_RATE = 0.50
+
+# Maximum recovery anomalies (requeued/orphaned) since activation
+STAGE3_MAX_RECOVERY_ANOMALIES = 3
 
 
 # ---------------------------------------------------------------------------
@@ -950,3 +969,548 @@ def _append_activation_log(log_path: Path, record: ActivationRecord) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a") as f:
         f.write(json.dumps(record.to_dict(), default=str) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.13 — Post-Stage-3 Stability Review
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StabilityReview:
+    """Deterministic stability review for live Stage 3 rollout."""
+    decision: str          # "stable_continue" | "hold_stage3" | "rollback_code_impl_recommended"
+    rollout_stage: str
+    enabled_classes: list[str]
+    criteria: list[RolloutCriterion] = field(default_factory=list)
+    code_impl_metrics: dict = field(default_factory=dict)
+    evidence_summary: dict = field(default_factory=dict)
+    generated_at: str = ""
+    next_action: str = ""
+    activation_record: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.generated_at:
+            self.generated_at = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+    def to_dict(self) -> dict:
+        return {
+            "decision": self.decision,
+            "rollout_stage": self.rollout_stage,
+            "enabled_classes": self.enabled_classes,
+            "criteria": [c.to_dict() for c in self.criteria],
+            "code_impl_metrics": self.code_impl_metrics,
+            "evidence_summary": self.evidence_summary,
+            "generated_at": self.generated_at,
+            "next_action": self.next_action,
+            "activation_record": self.activation_record,
+        }
+
+
+def _collect_code_impl_metrics(
+    workflows: list[dict],
+) -> dict:
+    """Extract code_impl-specific metrics from workflow records."""
+    impl_workflows = [
+        w for w in workflows if w.get("task_class") == "code_impl"
+    ]
+    impl_completed = [w for w in impl_workflows if w.get("status") == "completed"]
+    impl_failed = [
+        w for w in impl_workflows
+        if w.get("status") in ("failed", "halted")
+    ]
+    impl_rejected = [
+        w for w in impl_workflows
+        if w.get("halt_reason") == "verifier_rejected"
+    ]
+
+    total = len(impl_completed) + len(impl_failed)
+    failure_rate = (
+        round(len(impl_failed) / total, 3) if total > 0 else None
+    )
+
+    return {
+        "total_runs": len(impl_workflows),
+        "completed": len(impl_completed),
+        "failed": len(impl_failed),
+        "verifier_rejected": len(impl_rejected),
+        "failure_rate": failure_rate,
+    }
+
+
+def _get_latest_activation(base: Path) -> dict:
+    """Read the most recent activation record from the audit log."""
+    log_path = base / "STATE" / "activation_log.jsonl"
+    records = _read_jsonl(log_path)
+    # Return the last activated entry, or the last entry
+    activated = [r for r in records if r.get("outcome") == "activated"]
+    if activated:
+        return activated[-1]
+    return records[-1] if records else {}
+
+
+def _count_post_activation_recoveries(
+    base: Path, activation_ts: str,
+) -> int:
+    """Count recovery events that occurred after the activation timestamp."""
+    recovery_log = base / "LOGS" / "recovery.log"
+    if not recovery_log.exists():
+        return 0
+    try:
+        content = recovery_log.read_text()
+    except OSError:
+        return 0
+
+    count = 0
+    for line in content.splitlines():
+        if "--- Recovery at" in line:
+            # Extract ISO timestamp from "--- Recovery at 2026-03-08T..."
+            parts = line.split("--- Recovery at ", 1)
+            if len(parts) == 2:
+                ts = parts[1].strip().rstrip(" ---")
+                if ts >= activation_ts:
+                    count += 1
+    return count
+
+
+def evaluate_stage3_stability(
+    evidence: dict,
+    code_impl_metrics: dict,
+    post_activation_recoveries: int,
+) -> list[RolloutCriterion]:
+    """Evaluate Stage 3 stability criteria.
+
+    These criteria are specific to post-activation stability with extra
+    attention to code_impl (the first mutation-capable class).
+    """
+    criteria: list[RolloutCriterion] = []
+
+    # 1. Heartbeat healthy (inherited, hard)
+    hb = evidence.get("heartbeat_overall", "")
+    criteria.append(RolloutCriterion(
+        name="heartbeat_healthy",
+        passed=hb != "unhealthy",
+        value=hb or "(no data)",
+        threshold="not unhealthy",
+        detail=(
+            f"Current heartbeat: {hb or '(no data)'}"
+            if hb != "unhealthy"
+            else "Heartbeat is UNHEALTHY — Stage 3 unsafe"
+        ),
+        severity="hard",
+    ))
+
+    # 2. Overall failure rate (hard — tighter threshold for live mutation)
+    failure_rate = evidence.get("failure_rate")
+    if failure_rate is not None:
+        criteria.append(RolloutCriterion(
+            name="overall_failure_rate",
+            passed=failure_rate <= STAGE3_MAX_FAILURE_RATE,
+            value=failure_rate,
+            threshold=STAGE3_MAX_FAILURE_RATE,
+            detail=f"Overall failure rate {failure_rate:.1%} (max {STAGE3_MAX_FAILURE_RATE:.0%})",
+            severity="hard",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="overall_failure_rate",
+            passed=True,
+            value=None,
+            threshold=STAGE3_MAX_FAILURE_RATE,
+            detail="No terminal workflows yet",
+            severity="soft",
+        ))
+
+    # 3. No policy violations (hard — zero tolerance)
+    violations = evidence.get("policy_violations", 0)
+    criteria.append(RolloutCriterion(
+        name="no_policy_violations",
+        passed=violations <= MAX_POLICY_VIOLATIONS,
+        value=violations,
+        threshold=MAX_POLICY_VIOLATIONS,
+        detail=(
+            "No policy violations"
+            if violations == 0
+            else f"{violations} policy violation(s) — review immediately"
+        ),
+        severity="hard",
+    ))
+
+    # 4. No budget exhaustions (hard — zero tolerance)
+    budget = evidence.get("budget_exhaustions", 0)
+    criteria.append(RolloutCriterion(
+        name="no_budget_exhaustions",
+        passed=budget <= MAX_BUDGET_EXHAUSTIONS,
+        value=budget,
+        threshold=MAX_BUDGET_EXHAUSTIONS,
+        detail=(
+            "No budget exhaustions"
+            if budget == 0
+            else f"{budget} budget exhaustion(s)"
+        ),
+        severity="hard",
+    ))
+
+    # 5. code_impl minimum observation (soft — insufficient evidence = hold)
+    impl_total = code_impl_metrics.get("total_runs", 0)
+    criteria.append(RolloutCriterion(
+        name="code_impl_minimum_runs",
+        passed=impl_total >= STAGE3_MIN_CODE_IMPL_RUNS,
+        value=impl_total,
+        threshold=STAGE3_MIN_CODE_IMPL_RUNS,
+        detail=(
+            f"{impl_total} code_impl runs (need >= {STAGE3_MIN_CODE_IMPL_RUNS})"
+        ),
+        severity="soft",
+    ))
+
+    # 6. code_impl failure rate (soft — mutation-capable class needs monitoring)
+    impl_fr = code_impl_metrics.get("failure_rate")
+    if impl_fr is not None:
+        criteria.append(RolloutCriterion(
+            name="code_impl_failure_rate",
+            passed=impl_fr <= STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
+            value=impl_fr,
+            threshold=STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
+            detail=(
+                f"code_impl failure rate {impl_fr:.1%} "
+                f"(max {STAGE3_MAX_CODE_IMPL_FAILURE_RATE:.0%})"
+            ),
+            severity="soft",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="code_impl_failure_rate",
+            passed=True,
+            value=None,
+            threshold=STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
+            detail="No code_impl terminal workflows yet",
+            severity="soft",
+        ))
+
+    # 7. Verifier rejection rate (soft — critical for mutation-capable class)
+    vr_rate = evidence.get("verifier_rejection_rate")
+    if vr_rate is not None:
+        criteria.append(RolloutCriterion(
+            name="verifier_rejection_rate",
+            passed=vr_rate <= STAGE3_MAX_VERIFIER_REJECTION_RATE,
+            value=vr_rate,
+            threshold=STAGE3_MAX_VERIFIER_REJECTION_RATE,
+            detail=(
+                f"Verifier rejection rate {vr_rate:.1%} "
+                f"(max {STAGE3_MAX_VERIFIER_REJECTION_RATE:.0%})"
+            ),
+            severity="soft",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="verifier_rejection_rate",
+            passed=True,
+            value=None,
+            threshold=STAGE3_MAX_VERIFIER_REJECTION_RATE,
+            detail="No verifier reports yet — N/A",
+            severity="soft",
+        ))
+
+    # 8. Contract failure rate (soft)
+    cf_rate = evidence.get("contract_failure_rate")
+    if cf_rate is not None:
+        criteria.append(RolloutCriterion(
+            name="contract_failure_rate",
+            passed=cf_rate <= MAX_CONTRACT_FAILURE_RATE,
+            value=cf_rate,
+            threshold=MAX_CONTRACT_FAILURE_RATE,
+            detail=f"Contract failure rate {cf_rate:.1%} (max {MAX_CONTRACT_FAILURE_RATE:.0%})",
+            severity="soft",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="contract_failure_rate",
+            passed=True,
+            value=None,
+            threshold=MAX_CONTRACT_FAILURE_RATE,
+            detail="No contract metrics yet — N/A",
+            severity="soft",
+        ))
+
+    # 9. Recovery anomalies (soft — requeues/orphans since activation)
+    criteria.append(RolloutCriterion(
+        name="recovery_anomalies",
+        passed=post_activation_recoveries <= STAGE3_MAX_RECOVERY_ANOMALIES,
+        value=post_activation_recoveries,
+        threshold=STAGE3_MAX_RECOVERY_ANOMALIES,
+        detail=(
+            f"{post_activation_recoveries} recovery events since activation "
+            f"(max {STAGE3_MAX_RECOVERY_ANOMALIES})"
+        ),
+        severity="soft",
+    ))
+
+    # 10. No orphaned agents (soft)
+    orphaned = evidence.get("orphaned_agents", 0)
+    criteria.append(RolloutCriterion(
+        name="no_orphaned_agents",
+        passed=orphaned == 0,
+        value=orphaned,
+        threshold=0,
+        detail=(
+            "No orphaned agents"
+            if orphaned == 0
+            else f"{orphaned} orphaned agent(s)"
+        ),
+        severity="soft",
+    ))
+
+    # 11. No stale leases (soft)
+    stale = evidence.get("stale_leases", 0)
+    criteria.append(RolloutCriterion(
+        name="no_stale_leases",
+        passed=stale == 0,
+        value=stale,
+        threshold=0,
+        detail=(
+            "No stale leases"
+            if stale == 0
+            else f"{stale} stale lease(s)"
+        ),
+        severity="soft",
+    ))
+
+    return criteria
+
+
+def decide_stage3_stability(
+    criteria: list[RolloutCriterion],
+) -> tuple[str, str]:
+    """Determine Stage 3 stability from evaluated criteria.
+
+    Returns (decision, next_action) where decision is one of:
+      - "stable_continue"
+      - "hold_stage3"
+      - "rollback_code_impl_recommended"
+    """
+    hard_failures = [c for c in criteria
+                     if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria
+                     if c.severity == "soft" and not c.passed]
+
+    # Any hard failure → rollback code_impl
+    if hard_failures:
+        reasons = ", ".join(c.name for c in hard_failures)
+        return (
+            "rollback_code_impl_recommended",
+            f"Hard failures detected: {reasons}. "
+            f"Remove code_impl from supported_classes and restart watcher. "
+            f"Investigate before re-enabling.",
+        )
+
+    # Insufficient code_impl evidence → hold
+    impl_runs = next(
+        (c for c in criteria if c.name == "code_impl_minimum_runs"), None
+    )
+    if impl_runs and not impl_runs.passed:
+        return (
+            "hold_stage3",
+            f"Insufficient code_impl evidence: {impl_runs.value} runs "
+            f"(need >= {impl_runs.threshold}). "
+            f"Continue operating Stage 3 and re-evaluate after more code_impl tasks.",
+        )
+
+    # Any soft failure → hold
+    if soft_failures:
+        reasons = ", ".join(c.name for c in soft_failures)
+        return (
+            "hold_stage3",
+            f"Soft concerns: {reasons}. "
+            f"Continue monitoring Stage 3. Do not expand to Stage 4.",
+        )
+
+    # All clear → stable
+    return (
+        "stable_continue",
+        "Stage 3 is stable. code_impl operating within thresholds. "
+        "Safe to continue current rollout. "
+        "Stage 4 (system class) expansion can be evaluated when ready.",
+    )
+
+
+def review_stage3_stability(
+    base: Path | None = None,
+) -> StabilityReview:
+    """Run the Stage 3 post-activation stability review.
+
+    Collects evidence, evaluates Stage 3-specific criteria with extra
+    attention to code_impl, and returns a deterministic decision.
+
+    Decisions:
+      - stable_continue: Stage 3 operating safely
+      - hold_stage3: insufficient evidence or soft concerns
+      - rollback_code_impl_recommended: hard failures detected
+    """
+    root = base or BASE
+    state = root / "STATE"
+
+    # Collect general evidence (reuse existing collector)
+    evidence = collect_evidence(root)
+
+    # Collect code_impl-specific metrics
+    workflows = _list_json_files(state / "workflows")
+    code_impl_metrics = _collect_code_impl_metrics(workflows)
+
+    # Get activation record for observation window
+    activation = _get_latest_activation(root)
+    activation_ts = activation.get("attempted_at", "")
+
+    # Count post-activation recovery anomalies
+    post_recoveries = _count_post_activation_recoveries(root, activation_ts)
+
+    # Evaluate Stage 3 stability criteria
+    criteria = evaluate_stage3_stability(
+        evidence, code_impl_metrics, post_recoveries,
+    )
+    decision, next_action = decide_stage3_stability(criteria)
+
+    return StabilityReview(
+        decision=decision,
+        rollout_stage=evidence.get("rollout_stage", "unknown"),
+        enabled_classes=evidence.get("supported_classes", []),
+        criteria=criteria,
+        code_impl_metrics=code_impl_metrics,
+        evidence_summary={
+            "total_workflows": evidence.get("total_workflows", 0),
+            "completed_workflows": evidence.get("completed_workflows", 0),
+            "failed_workflows": evidence.get("failed_workflows", 0),
+            "halted_workflows": evidence.get("halted_workflows", 0),
+            "heartbeat_overall": evidence.get("heartbeat_overall", ""),
+            "policy_violations": evidence.get("policy_violations", 0),
+            "budget_exhaustions": evidence.get("budget_exhaustions", 0),
+            "verifier_rejection_rate": evidence.get("verifier_rejection_rate"),
+            "contract_failure_rate": evidence.get("contract_failure_rate"),
+            "orphaned_agents": evidence.get("orphaned_agents", 0),
+            "stale_leases": evidence.get("stale_leases", 0),
+            "recovery_events": evidence.get("recovery_events", 0),
+            "post_activation_recoveries": post_recoveries,
+        },
+        next_action=next_action,
+        activation_record=activation,
+    )
+
+
+def render_stability_review_markdown(review: StabilityReview) -> str:
+    """Render Stage 3 stability review as a markdown report."""
+    icon = {
+        "stable_continue": "STABLE",
+        "hold_stage3": "HOLD",
+        "rollback_code_impl_recommended": "ROLLBACK",
+    }.get(review.decision, "?")
+
+    lines = [
+        "# Phase 7.13 — Stage 3 Stability Review",
+        f"Generated: {review.generated_at}",
+        "",
+        f"## Decision: {icon} — {review.decision}",
+        "",
+        f"**Rollout stage**: {review.rollout_stage}",
+        f"**Enabled classes**: {', '.join(review.enabled_classes)}",
+        "",
+        f"**Next action**: {review.next_action}",
+        "",
+    ]
+
+    # Activation context
+    if review.activation_record:
+        act = review.activation_record
+        lines.append("## Activation Context")
+        lines.append("")
+        lines.append(f"- **Activated at**: {act.get('attempted_at', 'N/A')}")
+        lines.append(f"- **Outcome**: {act.get('outcome', 'N/A')}")
+        lines.append(f"- **Decision at activation**: {act.get('decision', 'N/A')}")
+        lines.append("")
+
+    # code_impl metrics
+    m = review.code_impl_metrics
+    lines.append("## code_impl Metrics")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    lines.append(f"| Total runs | {m.get('total_runs', 0)} |")
+    lines.append(f"| Completed | {m.get('completed', 0)} |")
+    lines.append(f"| Failed | {m.get('failed', 0)} |")
+    lines.append(f"| Verifier rejected | {m.get('verifier_rejected', 0)} |")
+    fr = m.get("failure_rate")
+    fr_str = f"{fr:.1%}" if fr is not None else "N/A"
+    lines.append(f"| Failure rate | {fr_str} |")
+    lines.append("")
+
+    # Criteria table
+    lines.append("## Stability Criteria")
+    lines.append("")
+    lines.append("| # | Criterion | Status | Value | Threshold | Severity | Detail |")
+    lines.append("|---|-----------|--------|-------|-----------|----------|--------|")
+    for i, c in enumerate(review.criteria, 1):
+        status = "PASS" if c.passed else "FAIL"
+        val = c.value if c.value is not None else "N/A"
+        lines.append(
+            f"| {i} | {c.name} | {status} | {val} | {c.threshold} "
+            f"| {c.severity} | {c.detail} |"
+        )
+    lines.append("")
+
+    # Evidence summary
+    ev = review.evidence_summary
+    lines.append("## Evidence Summary")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    for k, v in ev.items():
+        display = (
+            f"{v:.1%}" if isinstance(v, float)
+            else str(v) if v is not None
+            else "N/A"
+        )
+        lines.append(f"| {k} | {display} |")
+    lines.append("")
+
+    # Rollback instructions
+    lines.append("## Rollback Instructions")
+    lines.append("")
+    lines.append("### Remove code_impl (revert to Stage 2)")
+    lines.append("```bash")
+    lines.append('python3 -c "')
+    lines.append("import json; p='STATE/config/feature_flags.json'")
+    lines.append("d=json.loads(open(p).read())")
+    lines.append("d['phase7_orchestrator']['supported_classes']=['research','code_review']")
+    lines.append("d['phase7_orchestrator']['rollout_stage']='stage2_research_and_code_review'")
+    lines.append("open(p,'w').write(json.dumps(d,indent=2))")
+    lines.append("print('Reverted to Stage 2')")
+    lines.append('"')
+    lines.append("sudo systemctl restart novacore-watcher")
+    lines.append("```")
+    lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def write_stability_review(
+    review: StabilityReview,
+    base: Path | None = None,
+) -> tuple[Path, Path]:
+    """Write stability review to WORK/ and STATE/.
+
+    Returns (md_path, json_path).
+    """
+    root = base or BASE
+
+    md_path = root / "WORK" / "phase7_stage3_stability_review.md"
+    json_path = root / "STATE" / "stage3_stability_review.json"
+
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(render_stability_review_markdown(review))
+
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(review.to_dict(), indent=2, default=str) + "\n"
+    )
+
+    return md_path, json_path

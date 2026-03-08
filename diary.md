@@ -4,6 +4,58 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-08 (Session 41) — Phase 7.12d Stage 3 Live Activation + Phase 7.13 Stability Review
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Two sequential Phase 7 steps completed in one session:
+
+#### Phase 7.12d — Stage 3 Live Activation
+
+Executed the repository-native `activate_stage3()` procedure after confirming 9/9 readiness criteria pass. No code changes — pure operational activation.
+
+- Pre-activation readiness: `permitted=True`, `decision=ready_to_expand`, 9/9 PASS
+- Activation outcome: `activated` at `2026-03-08T08:11:44Z`
+- Config version: 6 → 7
+- Enabled classes: research, code_review, **code_impl** (new)
+- system remains blocked until Stage D
+- Verifier gate mandatory for code_impl
+- Audit record written to `STATE/activation_log.jsonl`
+- Two additional bugs fixed during live validation:
+  - Worker CONTRACT prompt: specified 4 required fields (summary, files_changed, verification, confidence) — workers previously didn't know the format
+  - Verifier status mismatch: enforcement checked `"done"` but step results use `"success"` — now accepts both
+  - Stale pre-fix workflow records cleaned from `STATE/workflows/`
+
+#### Phase 7.13 — Post-Stage-3 Stability Review
+
+Added deterministic Stage 3 stability review to `agents/rollout_gate.py` that evaluates whether code_impl is operating safely under live conditions.
+
+- 11 stability criteria (4 hard, 7 soft)
+- 3 decision states: `stable_continue`, `hold_stage3`, `rollback_code_impl_recommended`
+- code_impl-specific metrics: total runs, completed, failed, verifier rejected, failure rate
+- Post-activation recovery anomaly counting (relative to activation timestamp)
+- Operator-facing markdown + JSON artifacts
+- Live review result: `hold_stage3` (0 code_impl runs, need >= 2)
+
+### Test results
+
+```
+tests/test_stage3_stability_review.py:   41 passed (new)
+Full regression:                       1951 passed, 0 failed
+```
+
+### Files changed
+
+- `agents/rollout_gate.py` — Stage 3 stability review (StabilityReview dataclass, 5 functions, rendering)
+- `tools/orchestrator_adapter.py` — CONTRACT prompt fix, verifier status fix
+- `tests/test_stage3_stability_review.py` — 41 new tests (created)
+- `STATE/config/feature_flags.json` — Stage 3 activated (by activation procedure)
+- `STATE/activation_log.jsonl` — activation audit record
+
+---
+
 ## 2026-03-08 (Session 40) — Phase 7.12b/c Live Orchestrator Pipeline Fixes + Stage 3 Readiness
 
 **Session span:** Mar 8 UTC
