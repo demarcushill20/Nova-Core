@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-08T05:37:23Z
+Generated: 2026-03-08T08:05:42Z
 
 ## Overall: HEALTHY
 
@@ -8,7 +8,7 @@ Generated: 2026-03-08T05:37:23Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 0 |
+| Completed workflows | 3 |
 | Failed workflows | 0 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
@@ -21,7 +21,7 @@ Generated: 2026-03-08T05:37:23Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 15 |
+| Contract successes | 33 |
 | Contract failures | 0 |
 | Contract failure rate | 0.0% |
 | Budget exhaustions | 0 |
@@ -32,6 +32,14 @@ Generated: 2026-03-08T05:37:23Z
 | Most rejected tool | shell.run |
 | Most overloaded role | N/A |
 | Max dependency wait | N/As |
+
+## Workflows
+
+| ID | Task | Status | Halt Reason |
+|----|------|--------|-------------|
+| 0094_Research_how_Nova-Core_workflow_records_in_STATE_workflows__support_rollout_evid | ? | completed | - |
+| test_integration | ? | completed | - |
+| test_no_promo | ? | completed | - |
 
 ## Top Bottlenecks
 

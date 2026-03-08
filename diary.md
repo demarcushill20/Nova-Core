@@ -1,0 +1,2005 @@
+# NovaCore Development Diary
+
+Reverse-chronological. Each entry covers one working session.
+
+---
+
+## 2026-03-08 (Session 40) — Phase 7.12b/c Live Orchestrator Pipeline Fixes + Stage 3 Readiness
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Closed the remaining gaps preventing live Telegram tasks from completing through the orchestrator and accumulating rollout evidence. Fixed 5 distinct issues across 4 files, achieving Stage 3 readiness (all 9/9 rollout gate criteria pass).
+
+#### Phase 7.12b — Workflow state persistence
+
+Added `_persist_workflow_state()` to `tools/orchestrator_adapter.py` — every orchestrator execution now writes a JSON record to `STATE/workflows/{stem}.json` using atomic tmp+rename. Covers all terminal paths: plan rejection, success, failure, verifier rejection, and runtime exceptions. Status mapping: done→completed, failed/partial/rejected→failed. 26 new tests.
+
+#### Phase 7.12c — Classifier calibration
+
+Calibrated `tools/task_classifier.py` so natural-language Stage 2 tasks (research + code_review) reliably route to the orchestrator:
+- Confidence formula: `score / max(N*0.3, 1)` → `score / 2.0` (1 match = 0.5, 2 matches = 1.0)
+- Added patterns: explain, describe (research); review filepath, inspect, check-for-bugs (code_review)
+- Narrowed patterns: `implement\w*` → `implement(s|ing|ed)?`; `architect\w*` → `architect` (prevent nouns triggering wrong class)
+- 60 new tests
+
+#### Telegram bot title/body fix
+
+`telegram_bot.py` `handle_run_task()` now writes `title + body` into the task file instead of body alone. The parser puts the task description (with classifier keywords) into the filename; without this fix the classifier only saw trailing instructions.
+
+#### Long title handling
+
+`telegram/parse.py` `_parse_run()` no longer rejects titles > 200 chars. Instead, it auto-truncates the title for the filename and puts the full text into the body. Users can now paste long unstructured messages without hitting length errors.
+
+#### Worker CONTRACT prompt fix
+
+`_claude_step_executor()` prompt now explicitly specifies the 4 required CONTRACT fields (summary, files_changed, verification, confidence) with format examples. Previously workers were told "End with a ## CONTRACT block" without knowing what fields were needed — causing 100% contract validation failures.
+
+#### Verifier status mismatch fix
+
+Verifier enforcement checked `status != "done"` but step results use `"success"`. Fixed to accept both `"done"` and `"success"`.
+
+### Live Telegram validation
+
+Sent 6 tasks through Telegram (0090-0095). Early tasks exposed the bugs fixed above. After all fixes deployed:
+- 0093: 3/3 steps succeeded, 3/3 contracts valid, Grade B (rejected due to verifier status mismatch — now fixed)
+- 0094: 3/3 steps succeeded, 3/3 contracts valid, Grade B, Status: done → workflow "completed"
+- 0095: Full code review output with detailed findings, fell back to worker for output
+
+### Stage 3 readiness achieved
+
+```
+permitted: True
+decision: ready_to_expand
+completed_workflows: 3 (≥ 3)
+failure_rate: 0.0% (≤ 30%)
+all 9/9 criteria: PASS
+```
+
+### Test results
+
+```
+tests/test_workflow_persistence.py:             26 passed
+tests/test_stage2_classifier_calibration.py:    60 passed
+tests/test_stageB_routing.py:                   52 passed
+tests/test_stageC_routing.py:                   73 passed
+tests/test_phase7_rollout.py:                   95 passed
+tests/test_rollout_gate.py:                     67 passed
+Full regression:                              1910 passed, 0 failed
+```
+
+### Files changed
+
+- `tools/orchestrator_adapter.py` — workflow persistence, CONTRACT prompt, verifier status fix
+- `tools/task_classifier.py` — confidence formula, pattern additions/narrowing
+- `telegram_bot.py` — title included in task body
+- `telegram/parse.py` — long title auto-truncation
+- `agents/rollout_gate.py` — Stage 3 activation procedure, evidence collection
+- `tests/test_workflow_persistence.py` — 26 new tests (created)
+- `tests/test_stage2_classifier_calibration.py` — 60 new tests (created)
+- `tests/test_phase7_rollout.py` — extended with Stage 3 activation tests
+- `tests/test_rollout_gate.py` — extended with evidence collection tests
+
+---
+
+## 2026-03-08 (Session 39) — Phase 7.11 Rollout Evaluation Gate
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Built a deterministic rollout evaluation gate (`agents/rollout_gate.py`) that classifies Stage 2 rollout stability into `ready_to_expand`, `hold`, or `rollback_recommended` using 9 explicit threshold-based criteria.
+
+#### Evaluation criteria (9 total)
+
+- **Hard failures** (→ rollback): UNHEALTHY heartbeat, failure rate > 30%, policy violations > 0, budget exhaustions > 0
+- **Soft concerns** (→ hold): insufficient runs (< 3), verifier rejection rate > 50%, contract failure rate > 30%, orphaned agents, stale leases
+- **All clear** (→ ready_to_expand): all criteria pass with sufficient evidence
+
+#### Evidence sources
+
+Reads existing repository-native state: `STATE/heartbeat_multiagent.json`, `STATE/workflows/*.json`, `STATE/verifications/*.json`, `STATE/metrics.json`, `STATE/policy_denials.jsonl`, `LOGS/recovery.log`, `STATE/config/feature_flags.json`.
+
+#### Outputs
+
+- Markdown report: `WORK/phase7_rollout_stage2_evaluation.md`
+- JSON report: `STATE/rollout_evaluation.json`
+- Both include per-criterion pass/fail, evidence summary, and next action
+
+### Test results
+
+```
+tests/test_rollout_gate.py:     41 passed (8 test classes)
+Full repository regression:   1763 passed, 0 failed
+```
+
+### Next step
+
+**Phase 7.12 — Stage 3 Rollout: Add `code_impl`** after evaluation gate returns `ready_to_expand`.
+
+---
+
+## 2026-03-08 (Session 38) — Phase 7.10 Stage 2 Rollout: Add code_review
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Expanded the Phase 7 multi-agent rollout from Stage 1 (research only) to Stage 2 (research + code_review). Pure configuration expansion — no runtime code changes needed.
+
+#### Why code_review
+
+- Read-heavy: examines code and produces audit findings, does not modify repository
+- High-risk denylist protected by Stage C classifier (rejects deploy/secrets/shell signals)
+- Verifier-gated: classifier sets `verifier_required=True`, orchestrator enforces verifier step
+- Same infrastructure: identical health-gated, rate-limited, fail-closed framework as research
+
+#### Changes
+
+- `STATE/config/feature_flags.json`: `supported_classes` → `["research", "code_review"]`, `rollout_stage` → `stage2_research_and_code_review`, `allowed_roles` → `["research", "coding"]`, `verifier_required` → `true`, version 6
+- 25 new tests in `tests/test_phase7_rollout.py` across 6 Stage 2 test classes
+- No runtime code modifications — routing is class-agnostic
+
+#### Test results
+
+```
+tests/test_phase7_rollout.py:          60 passed (35 Stage 1 + 25 Stage 2)
+Full repository regression:          1722 passed, 0 failed
+```
+
+### Next step
+
+**Phase 7.11 — Stage 3 Rollout: Add `code_impl`** after 5+ clean code_review runs.
+
+---
+
+## 2026-03-08 (Session 37) — Phase 7.9 Feature-Flagged Rollout by Task Class
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Implemented Phase 7.9 — the first controlled live rollout of the Phase 7 multi-agent runtime for exactly one low-risk task class (`research`) behind explicit feature flags, with health-aware auto-degrade, immediate rollback, and deterministic test coverage.
+
+#### Task class selection: `research`
+
+- **Why research**: read-only, mutation-denylist protected, no verifier needed, lowest risk of all orchestrator-eligible classes
+- **Why NOT others**: `code_impl` and `code_review` modify/inspect repo (deferred to Stage 2); `system` is infrastructure (deferred to Stage D); `simple` always uses direct worker
+
+#### Rollout health gating (new)
+
+- Added `GracefulDegradation.check_rollout_health()` in `agents/production_hardening.py`
+- Reads `STATE/heartbeat_multiagent.json` — if `overall == "unhealthy"` → auto-degrades to single-agent worker
+- Missing/corrupt heartbeat → proceeds (first-run tolerance)
+- WARNING status → proceeds (only UNHEALTHY blocks)
+- Wired into `check_orchestrator_available()` as third gate after flag check + class check
+
+#### Watcher dispatch pre-flight gate (new)
+
+- Added `GracefulDegradation` pre-flight check in `watcher.py` dispatch path
+- Runs between `classify_and_route()` and `execute_via_orchestrator()`
+- If pre-flight returns degrade/halt → overrides routing to worker path
+- Logs as `ROLLOUT GATE: {stem} → {action} (reason={reason})`
+
+#### Feature flags narrowed
+
+- `supported_classes`: `["research", "code_impl", "code_review"]` → `["research"]`
+- Added `rollout_stage: "stage1_research_only"` for tracking
+- `allowed_roles`: narrowed to `["research"]` only
+- `verifier_required`: `true` → `false` (research doesn't modify code)
+- Version bumped to 5
+
+#### Rollback paths (3 methods, no restart needed)
+
+1. Kill switch: `enabled: false` → all tasks route to worker
+2. Class removal: `supported_classes: []` → all tasks route to worker
+3. Auto-degrade: UNHEALTHY heartbeat → research tasks auto-fallback to worker
+
+Flags are read per-dispatch (not cached), so changes take effect immediately.
+
+#### Focused rollout tests — 35 tests, 9 test classes
+
+| Test Class | Coverage | Tests |
+|------------|----------|-------|
+| TestRollout_ResearchEnabled | Research → proceed (healthy, warning, no-heartbeat) | 4 |
+| TestRollout_NonResearchFallback | code_impl, code_review, system, simple, unknown → degrade | 5 |
+| TestRollout_FlagOff | enabled=false, empty classes, missing/corrupt file | 4 |
+| TestRollout_UnhealthyHeartbeat | UNHEALTHY → degrade, blocks all, corrupt → proceed | 3 |
+| TestRollout_Rollback | Disable flag, remove class, health degrade, health restore | 4 |
+| TestRollout_HealthGatingEdgeCases | Independent check, all states, empty/missing overall | 6 |
+| TestRollout_StageConfig | rollout_stage readable, absent OK | 2 |
+| TestRollout_ClassifierIntegration | Classifier + Stage 1 flags routing | 4 |
+| TestRollout_FullPreFlight | Full pre-flight chain (all gates) | 3 |
+
+### Test results
+
+```
+tests/test_phase7_rollout.py:         35 passed
+Phase 7 regression (6 files):        322 passed, 0 failed
+Full repository regression:         1697 passed, 0 failed
+```
+
+### Artifacts produced
+
+| Artifact | Purpose |
+|----------|---------|
+| `agents/production_hardening.py` | Added health gating method + wired into orchestrator check |
+| `watcher.py` | Added rollout pre-flight gate in dispatch path |
+| `STATE/config/feature_flags.json` | Narrowed to research-only Stage 1 |
+| `tests/test_phase7_rollout.py` | 35 focused rollout tests |
+| `WORK/phase7_rollout_stage1.md` | Operator-facing rollout artifact |
+| `WORK/phase7_step_feature_flagged_rollout_summary.md` | Implementation summary |
+
+### Next step
+
+**Phase 7.10 — Stage 2 Rollout: Add `code_review`** after 5+ successful research task runs with clean heartbeat.
+
+---
+
+## 2026-03-08 (Session 36) — Phases 7.6–7.8 Gap Fill + Integration Suite
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Verified and completed Phases 7.6, 7.7, and built the full Phase 7.8 integration + failure simulation suite.
+
+#### Phase 7.6 — Observability Gap Fill (3 metrics added)
+
+- Added `most_rejected_tool`, `most_overloaded_role`, `max_dependency_wait_s` to `MultiAgentMetrics`
+- Per-tool rejection counting from `tool_audit.jsonl`
+- Per-role load counting from active delegations
+- Max wait time from waiting agents
+- Added to markdown report and bottleneck surfacing
+- 7 new tests → 45/45 observability tests pass
+
+#### Phase 7.5 — Memory Engine Verification
+
+- Confirmed `agents/memory_engine.py` fully implemented (511 lines)
+- 36/36 tests pass — standalone module, intentionally not wired into main flow (superseded by Obsidian vault)
+
+#### Phase 7.7 — Production Hardening Gap Fill (6 gaps closed)
+
+- `is_task_class_supported()` on FeatureFlags — enforces supported_classes list
+- `GracefulDegradation` class (7 methods) + `DegradationResult` dataclass — safe fallback logic for orchestrator/spawn/workflow/verifier/artifact failures
+- `archive_completed_delegations()` on ArchiveManager — wired into `run_cleanup()`
+- Recovery lock (O_CREAT|O_EXCL) with stale-lock PID reclaim on `RestartRecovery.reconcile()`
+- `check_retry_burst()` on RateLimiter (5 retries per 10 min)
+- `run_production_hardening()` now runs rate limit status + recovery alongside cleanup
+- 28 new tests → 89/89 hardening tests pass
+
+#### Phase 7.8 — Full Integration + Failure Simulation Suite (NEW)
+
+Built `tests/test_phase7_e2e_suite.py` — 63 deterministic tests across 28 test classes:
+
+**End-to-end integration (14 tests):**
+- Research-only lifecycle, coder→verifier governed path, critic→replan→retry, memory capture→retrieval
+- Multi-agent disabled → graceful degradation → single-agent fallback
+- Rate-limited workflow launch/spawn, multi-role DAG (research→code→verify)
+- Full governed workflow with ALL hardening controls active
+
+**Failure simulation (35 tests):**
+- Child timeout, spawn failure, dependency cycles (2-node, 3-node, failed dep)
+- Policy denial → PolicyViolation → workflow halt + audit
+- Verifier rejection (single block, double halt, unavailable halt)
+- Budget exhaustion (zero halt, near warning, metrics, heartbeat)
+- Retry burst, missing artifact, restart recovery (5 sub-tests)
+- Orphaned state, archive after terminal, unsupported task class
+
+**Observability validation (14 tests):**
+- Stuck workflow/SLA warning, unresolved contract, budget pressure
+- Policy violations + most rejected tool, mixed-state report, heartbeat files
+- Verifier rejection rate, hardening integration, failure→recovery→observability cycle
+
+**Coverage matrix:** `WORK/phase7_integration_failure_matrix.md` — 65 scenarios mapped
+
+### Test results
+
+```
+tests/test_phase7_e2e_suite.py:       63/63 passed
+Full regression (all tests):        1662/1662 passed, 0 failed
+```
+
+### Files changed
+
+- `agents/observability.py` — 3 new metrics + report integration
+- `agents/production_hardening.py` — task-class scoping, GracefulDegradation, delegation archival, recovery lock, retry burst, full integration entry point
+- `tests/test_observability.py` — 7 new tests
+- `tests/test_production_hardening.py` — 28 new tests
+- `tests/test_phase7_e2e_suite.py` — NEW (63 tests)
+- `WORK/phase7_integration_failure_matrix.md` — NEW
+- `WORK/phase7_step_integration_failure_simulation_summary.md` — NEW
+- `WORK/phase7_step_observability_heartbeat_summary.md` — updated
+- `WORK/phase7_step_production_hardening_summary.md` — rewritten
+
+### Next step
+
+**Phase 7.9 — Feature-Flagged Rollout by Task Class**: Enable orchestrator for `research` task class behind feature flags. Monitor heartbeat for UNHEALTHY findings. Expand to additional classes after confirmed stability.
+
+---
+
+## 2026-03-06 (Session 20) — Phase 6 Bounded Self-Improvement Loop
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Built the complete Phase 6 bounded self-improvement loop — an automated health-inspection and improvement-planning subsystem that runs after every plan execution. All logic is deterministic (no LLM). One cycle only, no recursion.
+
+#### ImprovementPlanner (`planner/improvement_planner.py`) — NEW
+- `build_health_findings()`: extracts health findings from plan evaluations across 5 categories:
+  - `low_grade_execution` (grade D/F → high/critical severity)
+  - `repeated_contract_failure` (invalid contracts → medium/high)
+  - `repeated_retry_pattern` (retry penalties → medium)
+  - `slow_execution` (zero duration score on successful steps → low)
+  - `verification_weakness` (verification score < 0.10 on successful steps → medium)
+- Cross-plan pattern detection: 2+ recent D/F grades → critical systemic finding
+- `build_improvement_plan()`: derives bounded plan from findings — capped at 3 steps, 5 files, restricted skill allowlist; critical findings require human review
+- `should_execute()`: deterministic gating (blocks on human review, skipped/non-queued, zero steps)
+- `persist_improvement_run()`: saves full improvement run to `STATE/improvement_runs/` as JSON
+
+#### Schemas (`planner/schemas.py`)
+- Added `VALID_SEVERITIES = ("low", "medium", "high", "critical")` constant
+- `HealthFinding` dataclass with `__post_init__` severity validation
+- `ImprovementPlan` dataclass (bounded fields: max_steps, max_files_changed, allowed_skills, requires_human_review)
+- `ImprovementResult` dataclass (executed, final_status, evaluation linkage, followup flag)
+
+#### Orchestrator integration (`planner/orchestrator.py`)
+- `_run_improvement_cycle()`: runs after plan evaluation — builds findings, creates bounded plan, gates through supervisor review, persists result
+- Non-recursive: exactly one cycle per plan execution
+- Returns improvement data dict in the plan result payload
+
+#### Supervisor review (`planner/supervisor.py`)
+- `review_improvement_plan()`: structured review returning `SupervisorDecision`
+  - `requires_human_review` → escalate
+  - `max_steps > 3` or `max_files_changed > 5` → escalate (exceeds bounds)
+  - No findings → fail
+  - Otherwise → continue
+- `approve_improvement()`: boolean gate with same deterministic rules
+
+#### Repo health check skill (`SKILLS/repo_health_check/SKILL.md`) — NEW
+- Full skill definition with 8-step deterministic workflow, verification checks, failure handling, and severity mapping documentation
+
+#### Tests
+- `tests/test_improvement_planner.py`: 34 tests — build_health_findings (15 tests across all categories, cross-plan patterns, uniqueness), build_improvement_plan (8 tests: bounds, goals, human review, severity escalation), should_execute (6 tests: all gate conditions), persist (3 tests), schema validation (6 tests: severity enforcement)
+- `tests/test_orchestrator.py`: +5 improvement cycle integration tests (persist, gate, supervisor escalate, execute, evaluation linkage)
+- `tests/test_supervisor.py`: +6 review_improvement_plan tests (continue, escalate, fail, bounds, return type)
+
+#### Files changed
+- New: `planner/improvement_planner.py`, `tests/test_improvement_planner.py`, `SKILLS/repo_health_check/SKILL.md`
+- Modified: `planner/schemas.py`, `planner/orchestrator.py`, `planner/supervisor.py`, `tests/test_orchestrator.py`, `tests/test_supervisor.py`
+
+**Total tests passing: 565**
+
+---
+
+## 2026-03-06 (Session 19) — Phase 5.3D Live Contract Compliance Audit
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Added a live contract compliance audit scanner that mechanically evaluates all OUTPUT/ files against the contract validator. Deterministic, no LLM — pure regex + field checking.
+
+#### Contract audit scanner (`planner/contract_audit.py`)
+- Scans OUTPUT/*.md, extracts contract blocks via `tools/contracts.py` validator
+- Classifies outputs: `legacy_pre_contract` (task <25), `no_contract_detected`, `post_contract_valid`, `post_contract_invalid`
+- Conservative legacy classification — if uncertain, assumes post-contract
+- Produces `ContractAuditRecord` per file, `ContractAuditSummary` aggregate
+
+#### Schemas (`planner/schemas.py`)
+- Added `ContractAuditRecord` and `ContractAuditSummary` dataclasses
+
+#### Validator strengthening (`tools/contracts.py`)
+- Promoted `files_changed` from optional action-detail to required field
+- Updated all test fixtures to match strengthened rules
+
+#### Persisted audit artifacts (`STATE/audits/`)
+- Initial audit saved: 46 outputs, 3 valid (6.52%), 23 legacy, 16 invalid (missing `files_changed`/`confidence`)
+
+#### Worker contract enforcement (`watcher.py`)
+- Dispatch template now includes mandatory CONTRACT instruction
+- Output rejected without valid contract; retry task auto-created on first failure
+
+#### Tests
+- `tests/test_contract_audit.py`: 27 tests (scan, classify, summarize, persist, integration)
+- `tests/test_worker_contract_emission.py`: 25 tests (dispatch prompt, compliance, cross-validator, evaluator/supervisor compat)
+- Fixed 5 existing tests in `test_contracts.py` and `test_contract_gate.py` to match strengthened `files_changed` requirement
+
+#### Files changed
+- New: `planner/contract_audit.py`, `tests/test_contract_audit.py`, `tests/test_worker_contract_emission.py`
+- Modified: `planner/schemas.py`, `tools/contracts.py`, `watcher.py`, `tests/test_contracts.py`, `tests/test_contract_gate.py`
+- Artifact: `STATE/audits/phase-5.3d-initial.json`
+
+**Total tests passing: 512**
+
+---
+
+## 2026-03-06 (Session 18) — Phase 5.3 Deterministic Execution Evaluation
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Added a deterministic execution evaluation and outcome grading layer to the planner subsystem. Fully mechanical scoring — no LLM, no embeddings, no external services.
+
+#### Req 1–2: ExecutionEvaluation, PlanEvaluation schemas + Evaluator module
+
+- Added `ExecutionEvaluation` and `PlanEvaluation` dataclasses to `planner/schemas.py`
+- Created `planner/evaluator.py` with `Evaluator` class
+- **Step scoring formula**: `execution_base (0.40) + contract_bonus (0.25) + verification_score (0.20) + duration_score (0.15) - retry_penalty (0.05/retry, cap 0.15)`
+- **Grade boundaries**: A (≥0.90), B (≥0.75), C (≥0.60), D (≥0.40), F (<0.40)
+- **Duration thresholds**: <1s → 0.15, <5s → 0.10, <30s → 0.05, ≥30s → 0.00
+- **tests_passed inference**: True if contract_valid, False if failed/error/skipped, None otherwise
+- Machine-readable `reasons` list for auditability
+
+#### Req 3: Orchestrator integration
+
+- After execution loop: `Evaluator.evaluate_plan()` runs on all step results
+- `evaluation_data` dict included in both `run_plan()` return and persisted plan state JSON
+- Added `_eval_to_dict()` serialization helper, `evaluation` param to `save_plan_state()`
+
+#### Req 4: Supervisor followup from evaluation
+
+- Added `Supervisor.recommend_followup_from_evaluation(plan_eval)` method
+- Rules: A+clean → None, D/F → high-priority dict, B/C with issues → medium-priority dict
+- Dict shape: `{title, description, priority, source, related_plan_id}`
+
+#### Req 5: Skill history evaluation stats
+
+- Added `SkillHistoryStore.get_evaluation_stats()` — derives `success_rate`, `avg_duration_ms`, `avg_retries_per_run` from existing JSON fields
+- No change to persisted JSON shape
+
+#### Req 6: SKILL.md alignment
+
+- Updated `SKILLS/system_supervisor/SKILL.md` with evaluation workflow step, scoring formula, grade mapping, and follow-up recommendation logic
+
+#### Req 7: Tests
+
+- Created `tests/test_evaluator.py` — 40 tests: perfect step, retry penalty, invalid contract, all grade boundaries, score bounds, reasons, tests_passed inference, duration/verification scoring, grade mapping, plan evaluation aggregate/mixed/empty, followup thresholds
+- Added 9 evaluation persistence tests to `tests/test_orchestrator.py`
+- Added 8 `recommend_followup_from_evaluation` tests to `tests/test_supervisor.py`
+
+### Test results
+
+- **459 tests passed**, 0 failures
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `planner/schemas.py` | +33 lines — ExecutionEvaluation, PlanEvaluation dataclasses |
+| `planner/evaluator.py` | NEW — 170 lines — deterministic scoring engine |
+| `planner/orchestrator.py` | +46 lines — evaluation integration + persistence |
+| `planner/supervisor.py` | +53 lines — recommend_followup_from_evaluation |
+| `planner/skill_history.py` | +17 lines — get_evaluation_stats query method |
+| `SKILLS/system_supervisor/SKILL.md` | +17 lines — evaluation workflow docs |
+| `tests/test_evaluator.py` | NEW — 480 lines — 40 evaluator tests |
+| `tests/test_orchestrator.py` | +94 lines — 9 evaluation persistence tests |
+| `tests/test_supervisor.py` | +115 lines — 8 followup recommendation tests |
+
+### Blockers
+
+None.
+
+---
+
+## 2026-03-06 (Session 17) — Phase 5.2B Planner/Orchestrator Hardening
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Targeted hardening pass on the Phase 5.2 planner/orchestrator subsystem. No architectural changes — purely runtime correctness and production readiness improvements.
+
+#### Requirement 1: Real execution timing
+
+- `time.monotonic()` now wraps each step execution in `run_plan()`, including retries
+- Real `duration_ms` (integer) passed to `SkillHistoryStore.record_run()` instead of hardcoded `0`
+- Duration covers the full supervision cycle per step (all retry attempts)
+
+#### Requirement 2: Honest no-executor behavior
+
+- Default stub changed from `status="success", contract_valid=True` to `status="skipped", contract_valid=False, validation_errors=["No step executor configured"]`
+- `_execute_with_supervision` detects `status="skipped"` and escalates immediately (no retry loop)
+- No false success reporting when no real execution occurred
+
+#### Requirement 3: Contract-validation compatibility
+
+- Verified `_run_with_executor` validates output through `contracts_validate()` for all 4 required fields (summary, files_changed, verification, confidence)
+- Invalid contracts populate `StepResult.validation_errors` with specific error messages
+- Supervisor correctly consumes `contract_valid=False` results → retry → escalate
+
+#### Requirement 4: Plan-state persistence completeness
+
+- Added `step_durations: dict[str, int]` to persisted plan state snapshot
+- Added `step_durations` to `run_plan()` return value
+- Persisted state now contains: plan metadata, ordered steps, step results (with retry_count), supervisor decisions (with followup_task), step durations, timestamp
+
+#### Requirement 5: System supervisor SKILL.md alignment
+
+- Changed `output_contract` from `[summary, checks_performed, result, confidence]` to `[summary, files_changed, verification, confidence]`
+- Updated StepResult field references from old API (`success`, `output`, `error`) to current (`status`, `contract_valid`, `validation_errors`, `retry_count`)
+- Updated Output Contract example to use `files_changed: none` and `verification:`
+
+#### Requirement 6: Tests
+
+Added 13 new tests proving each hardening change:
+
+| Test | Proves |
+|------|--------|
+| `test_no_executor_returns_skipped` | Honest skipped status |
+| `test_no_executor_does_not_falsely_succeed` | Never reports success without execution |
+| `test_no_executor_plan_escalates` | Immediate escalation, no retry |
+| `test_no_executor_step_status_set` | Step status = "skipped" |
+| `test_no_executor_does_not_retry` | retry_count stays 0 |
+| `test_real_duration_ms_recorded` | Non-placeholder integer duration |
+| `test_real_duration_ms_with_retries` | Duration includes retry time (≥15ms for 2×10ms) |
+| `test_step_durations_in_plan_result` | step_durations in return dict |
+| `test_step_durations_in_persisted_state` | step_durations in JSON file |
+| `test_plan_state_includes_full_history` | Complete reconstruction data |
+| `test_plan_state_with_retry_has_decision_history` | Retry + decision history persisted |
+| `test_invalid_contract_populates_validation_errors` | Errors observable in StepResult |
+| `test_supervisor_consumes_contract_invalid_correctly` | Supervisor escalates correctly |
+
+### Files changed
+
+| File | Lines | Change |
+|------|-------|--------|
+| planner/orchestrator.py | 263 | Timing, honest stub, step_durations |
+| SKILLS/system_supervisor/SKILL.md | 159 | Contract field alignment |
+| tests/test_orchestrator.py | 689 | Fixture update + 13 new tests |
+| tools/runner.py | 520 | Fix contracts_validate import path |
+
+### Test results
+
+```
+404 passed in 0.85s
+```
+
+### Architecture preserved
+
+No dataclass changes. No method signature changes (except `save_plan_state` gaining optional `step_durations` param). Same class names, field names, and data shapes as Phase 5.2.
+
+---
+
+## 2026-03-06 (Session 16) — Phase 5.2 Planner/Orchestrator Upgrade
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Full implementation of the Phase 5.2 planner/orchestrator subsystem with exact spec conformance. The system introduces 4-component deterministic skill scoring, persistent skill usage history, execution plan building with multi-skill chain rules, a supervisor decision engine, and a sequential orchestrator with retry logic and contract validation.
+
+#### planner/schemas.py — Exact Data Shapes
+
+Six spec-conformant dataclasses:
+
+- **TaskIntent**: `task_id`, `goal`, `source`, `priority="normal"`, `constraints=[]`, `context={}`
+- **SkillScore**: 4-component breakdown — `semantic_match`, `activation_rules`, `recency`, `success_rate`, `total_score`, `reasons[]`
+- **PlanStep**: `step_id`, `skill_name`, `goal`, `inputs={}`, `status="queued"`
+- **ExecutionPlan**: `plan_id`, `task_id`, `strategy`, `steps[]`, `success_criteria[]`, `status="queued"`
+- **StepResult**: `step_id`, `status`, `output_path`, `contract_valid`, `validation_errors[]`, `retry_count`
+- **SupervisorDecision**: `action` (continue|retry|escalate|fail), `reason`, `retry_allowed`
+
+#### planner/skill_history.py — SkillHistoryStore
+
+- Persistent store at `STATE/skill_usage_history.json` with exact JSON shape: `runs`, `successes`, `failures`, `avg_duration_ms`, `last_used_ts` (ISO-8601), `total_retries`
+- Methods: `load()`, `save(data)`, `record_run(skill_name, success, duration_ms, retries)`, `get_stats()`, `get_recency_score()` (exponential decay, 24h half-life), `get_success_rate()`
+- Tolerates empty/corrupt JSON files, creates parent directories on write
+
+#### planner/skill_scorer.py — 4-Component Deterministic Scoring
+
+- Formula: `score = semantic_match(0-0.4) + activation_rules(0-0.2) + recency(0-0.2) + success_rate(0-0.2)`
+- `score_skill(intent, skill_meta, history_store)` — scores one skill, returns SkillScore with all components
+- `rank_skills(intent, skills_catalog, history_store)` — scores all skills, filters zero-signal, sorts descending
+- `DEFAULT_SKILLS_CATALOG`: 8 skills (log_triage, code_improve, service_ops, system_supervisor, task_execution, file_ops, shell_ops, web_research)
+- No embeddings — deterministic word overlap and keyword substring matching only
+
+#### planner/plan_builder.py — Intent Parsing + Plan Generation
+
+- `build_intent(task_id, raw_text, source)` — creates TaskIntent with `goal=raw_text`
+- `build_plan(intent, ranked_skills)` — applies chain rules then falls back to top-ranked single skill
+- Chain rules: diagnose→(log_triage→code_improve→system_supervisor), fix→(code_improve→system_supervisor), service→(service_ops→system_supervisor)
+
+#### planner/supervisor.py — Decision Engine
+
+- `evaluate_step(step, result)` → SupervisorDecision with `retry_allowed` field
+- Rules: contract_valid=True→continue, invalid+retries<2→retry, retries exhausted→escalate, anomaly markers→escalate (no retry)
+- Anomaly markers: permission denied, sandbox, blocked, timeout
+- `generate_followup_task(result)` — separate method returning improvement task dict on failure
+- `should_retry(result)`, `build_retry_reason(result)` — helper methods
+
+#### planner/orchestrator.py — Sequential Plan Execution
+
+- Constructor: `Orchestrator(supervisor, history_store, step_executor)`
+- `run_plan(plan)` — executes steps sequentially with supervisor evaluation after each
+- `_execute_with_supervision(step)` — retry loop (up to 2 retries), tracks retry_count on StepResult
+- `_run_with_executor(step)` — pluggable step executor with contract validation via `contracts_validate()`
+- `save_plan_state()` — atomic JSON persistence to `STATE/plans/<plan_id>.json`
+- History recording via `history_store.record_run()` after each step
+
+#### tools/adapters/contracts_validate.py — Contract Validation
+
+- Validates `## CONTRACT` blocks with required fields: summary, files_changed, verification, confidence
+- Returns structured result: `ok`, `valid`, `found_contract`, `fields`, `missing_fields`, `errors`
+
+#### Test suites — 137 Phase 5.2 tests (391 total)
+
+- **test_skill_history.py** (23 tests): File creation, record success/failure, success rates, recency scores, persistence, corrupt file tolerance, exact JSON shape
+- **test_skill_scorer.py** (20 tests): Semantic match ranking, activation keyword boost, success rate weighting, recency weighting, stable sort, component caps (0.4, 0.2, 0.2, 0.2), total equals sum
+- **test_plan_builder.py** (17 tests): Single-skill plans, multi-skill chain rules, fallback to top-ranked, empty plan, plan IDs, success criteria, build_intent fields, step inputs
+- **test_supervisor.py** (26 tests): Continue on valid contract, retry under limit, escalate on retries exhausted, anomaly escalation (permission denied, sandbox, timeout, blocked), followup task generation, should_retry, build_retry_reason, decision shape
+- **test_orchestrator.py** (31 tests): Sequential execution, plan state persistence, step result shape, decision shape, retry path, supervisor continue/escalate paths, history recording, contract validation via executor, retry counts, multi-step with mixed retries
+- **test_contracts_validate.py** (20 tests): Valid/missing/partial contracts, malformed headers, extra text, duplicate blocks, empty values, runner dispatch, JSON shape
+
+### Architecture
+
+```
+Telegram/Input → PlanBuilder.build_intent()
+              → SkillScorer.rank_skills(intent, catalog, history_store)
+              → PlanBuilder.build_plan(intent, ranked_skills)
+              → Orchestrator.run_plan(plan)
+                → run_step() → contracts_validate() → Supervisor.evaluate_step()
+                → SkillHistoryStore.record_run()
+                → save_plan_state()
+```
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `planner/__init__.py` | **CREATED** | Package init |
+| `planner/schemas.py` | **CREATED** | 6 spec-conformant dataclasses |
+| `planner/skill_history.py` | **CREATED** | SkillHistoryStore with exact JSON shape |
+| `planner/skill_scorer.py` | **CREATED** | 4-component deterministic scoring |
+| `planner/plan_builder.py` | **CREATED** | Intent parsing + chain rules |
+| `planner/supervisor.py` | **CREATED** | Supervisor decision engine |
+| `planner/orchestrator.py` | **CREATED** | Sequential plan executor with retries |
+| `tools/adapters/contracts_validate.py` | **CREATED** | Contract validation adapter |
+| `tests/test_skill_history.py` | **CREATED** | 23 tests |
+| `tests/test_skill_scorer.py` | **CREATED** | 20 tests |
+| `tests/test_plan_builder.py` | **CREATED** | 17 tests |
+| `tests/test_supervisor.py` | **CREATED** | 26 tests |
+| `tests/test_orchestrator.py` | **CREATED** | 31 tests |
+| `tests/test_contracts_validate.py` | **CREATED** | 20 tests |
+
+### Test results
+
+```
+391 passed, 0 failed (0.83s)
+```
+
+---
+
+## 2026-03-06 (Session 15) — repo.diff & repo.search Semantic Tools
+
+**Session span:** Mar 6 UTC
+
+### What was done
+
+Added two new read-only semantic tools to the NovaCore tool layer: `repo.diff` for structured git diffs and `repo.search` for substring search across repository files. Both tools follow the established sandbox-enforcement pattern and include comprehensive test suites.
+
+#### repo.diff — Structured Git Diff
+
+New adapter in `tools/adapters/repo_diff.py`:
+
+- Returns structured diff for a single file: uncommitted working-tree changes or against a specified git ref (e.g. `HEAD`, branch name, tag).
+- **Sandbox enforcement**: path must resolve within repo root; `../` traversal and absolute paths outside sandbox are rejected.
+- **Flag injection protection**: paths and `against` refs starting with `-` are rejected. The `against` parameter is validated against a safe character set (`[A-Za-z0-9._/~^-]`).
+- Returns structured output: `ok`, `path` (normalized repo-relative), `changed`, `diff` (unified diff text), `summary` (`lines_added`, `lines_removed`).
+- Uses `subprocess.run` with 15s timeout; gracefully handles timeout and missing git.
+
+#### repo.search — Substring Search Across Files
+
+New adapter in `tools/adapters/repo_search.py`:
+
+- Case-sensitive substring search across all text files in the repository (or a subdirectory).
+- Returns structured matches: `[{path, line, snippet}]` with repo-relative paths.
+- **Sandbox enforcement**: search path must resolve within repo root.
+- **Safety filters**: skips binary files (null-byte heuristic), files over 1 MB, hidden directories (`.git`, etc.), and files that fail UTF-8 decode.
+- `max_results` clamped to 1–100 (default 50) to prevent unbounded output.
+- Pure Python implementation with `os.walk` — no external dependencies.
+
+#### Runner integration
+
+- `runner.py` gained `_run_repo_diff()` and `_run_repo_search()` dispatch functions with lazy imports.
+- `tools_registry.json` updated with full schemas, args, return types, and safety documentation for both tools.
+
+#### Test suites
+
+- **`tests/test_repo_diff.py`** (17 tests): Unchanged file, changed file, empty/None path, traversal rejection, non-file rejection, flag injection in path and against, diff against HEAD, diff against unchanged, unsafe ref rejection, empty against rejection, runner dispatch integration, JSON output shape, summary count accuracy.
+- **`tests/test_repo_search.py`** (16 tests): Basic search, restricted path search, multiple matches, max_results clamping (low/high), limits output, binary file skip, oversized file skip, traversal rejection (direct and mid-path), non-directory path, empty query, decode failure skip, hidden directory skip, runner dispatch integration, JSON output shape.
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `tools/adapters/repo_diff.py` | **CREATED** | Structured git diff adapter with sandbox enforcement |
+| `tools/adapters/repo_search.py` | **CREATED** | Substring search adapter with sandbox enforcement |
+| `tools/runner.py` | **MODIFIED** | Added dispatch for `repo.diff` and `repo.search` |
+| `tools/tools_registry.json` | **MODIFIED** | Full schemas for both new tools |
+| `tests/test_repo_diff.py` | **CREATED** | 17 tests covering diff functionality and safety |
+| `tests/test_repo_search.py` | **CREATED** | 16 tests covering search functionality and safety |
+
+### Test results
+
+33 new tests, all passing. Full suite covers sandbox enforcement, flag injection, traversal rejection, binary/oversized file handling, runner dispatch, and JSON output contracts.
+
+---
+
+## 2026-03-06 (Session 14) — Semantic File Ops & Heartbeat Telegram Pulse
+
+**Session span:** ~ongoing (Mar 6 UTC)
+
+### What was done
+
+Extended the NovaCore semantic tool layer with file-write and file-patch operations, refactored heartbeat alerting to include always-on Telegram pulses, and hardened the test suite.
+
+#### repo.files.write & repo.files.patch — New Semantic Tools
+
+Added two new sandboxed file-operation tools to the semantic layer:
+
+- **`repo.files.write`** — Atomic file writing with post-write verification. Writes via `tempfile` + `os.replace` to prevent partial writes. Auto-creates parent directories. Returns structured output with `ok`, `bytes_written`, `created`, `overwritten`, `verified` fields.
+- **`repo.files.patch`** — Structured patch operations (`replace` with count control, `append`) on existing files. Same atomic-write + verification guarantees. Supports `create_if_missing` flag. Returns `operations_applied` count.
+
+Both tools enforce the same sandbox rules as `repo.files.read`: path must resolve within the repo root, `../` traversal is blocked, absolute paths outside sandbox are rejected. The `_sandbox` parameter is internal-only (prefixed with underscore) and never exposed through runner args.
+
+#### Heartbeat Telegram pulse
+
+Refactored heartbeat alerting from alert-on-failure to always-send:
+
+- Extracted `_send_telegram()` helper from `send_telegram_alert()` to eliminate duplication
+- Added `send_telegram_heartbeat()` — sends a compact status line on every cron run: `💚 Heartbeat HH:MM UTC — HEALTHY (N/N checks passed)` or `🔴 ... UNHEALTHY (N failed)` with per-check details
+- Removed the unhealthy-only `send_telegram_alert()` call from `main()` — now every heartbeat run sends a pulse, giving positive confirmation the system is alive
+
+#### Runner integration
+
+- `runner.py` gained `_run_repo_files_write()` and `_run_repo_files_patch()` dispatch functions
+- `tools_registry.json` updated with full schemas for both new tools
+
+#### Test coverage expansion
+
+- **`test_repo_files.py`**: Expanded from ~27 lines to ~562 lines. Comprehensive coverage for write (atomic write, overwrite, make_dirs, sandbox escape, empty content, binary, verified flag) and patch (replace, append, count control, missing file, create_if_missing, multi-op, sandbox escape, empty ops). All using temp-dir sandboxing.
+- **`test_heartbeat.py`**: Added tests for `send_telegram_heartbeat()` — healthy pulse, unhealthy pulse with details, missing env var skip.
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `tools/adapters/repo_files.py` | **MODIFIED** | Added `repo_write()`, `repo_patch()`, `_resolve_and_check()` helper |
+| `tools/runner.py` | **MODIFIED** | Added dispatch for `repo.files.write` and `repo.files.patch` |
+| `tools/tools_registry.json` | **MODIFIED** | Schemas for both new tools |
+| `heartbeat.py` | **MODIFIED** | Extracted `_send_telegram()`, added `send_telegram_heartbeat()`, always-send pulse |
+| `tests/test_repo_files.py` | **MODIFIED** | Comprehensive write + patch test coverage (~562 lines) |
+| `tests/test_heartbeat.py` | **MODIFIED** | Tests for heartbeat Telegram pulse |
+
+### Test results
+
+240 total, all passing. Coverage includes sandbox enforcement, atomic writes, patch operations, and heartbeat Telegram output.
+
+---
+
+## 2026-03-05 (Session 13) — Security Audit & Guardrails
+
+**Session span:** ~18:10–18:45 UTC
+
+### What was done
+
+Full security audit of working tree and all 36 commits in git history, followed by guardrail implementation to prevent recurrence.
+
+#### Secret scan results
+
+**No real secrets found.** Scanned for Telegram bot tokens, GitHub PATs, AWS keys, Slack tokens, OpenAI/Anthropic keys, and generic TOKEN= assignments across both the working tree and full git history. Only matches were intentional test fixtures in `tools/dev_safety_smoke.py` (redaction system tests). The Telegram bot token lives in `/etc/novacore/telegram.env` (never committed).
+
+#### Runtime artifact inventory
+
+115 files found in git history across TASKS/ (35), OUTPUT/ (33), WORK/ (33), STATE/ (12), HEARTBEAT.md (2). No secrets in any of them — just task titles, worker outputs, and runtime state. These were already untracked in Session 12; history rewrite plan prepared but not executed (low urgency since no credentials exposed).
+
+#### Guardrails implemented
+
+- `scripts/check-guardrails.sh` — blocks runtime artifacts and secret patterns from being committed; never prints secret values, only file paths + line numbers + pattern types
+- `scripts/install-hooks.sh` — installs local pre-commit hook
+- `.github/workflows/guardrails.yml` — CI on push/PR to main (guardrails + test suite)
+- `docs/security.md` — token rotation checklist, history rewrite procedure with rollback plan
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `scripts/check-guardrails.sh` | **NEW** | Runtime artifact + secret pattern blocker |
+| `scripts/install-hooks.sh` | **NEW** | Pre-commit hook installer |
+| `.github/workflows/guardrails.yml` | **NEW** | CI guardrails + tests |
+| `docs/security.md` | **NEW** | Security docs, rotation checklist, rewrite procedure |
+
+### Test results
+
+194 total, all passing. Guardrails verified: catches force-added runtime artifacts and simulated secret patterns, blocks commit with exit code 1.
+
+---
+
+## 2026-03-05 (Session 12) — Repository Hygiene & Telegram Reliability
+
+**Session span:** ~17:45–18:10 UTC
+
+### What was fixed
+
+Four targeted fixes applied — no new features, minimal diffs, all existing behavior preserved.
+
+#### 1. Runtime artifacts untracked from git
+
+`TASKS/`, `OUTPUT/`, `WORK/`, `STATE/*`, and `HEARTBEAT.md` were all committed to git, polluting history with transient runtime state. Updated `.gitignore` to exclude them while preserving `.gitkeep` placeholders and `STATE/tools_registry.json` (config, not runtime). Removed 100+ runtime files from the git index; all remain on disk.
+
+#### 2. Telegram message reliability
+
+Removed `drop_pending_updates=True` from `telegram_bot.py`. This flag discarded all queued Telegram updates on every startup — any `/run` command sent during a restart was permanently lost. The existing `fcntl` process lock already guarantees single-instance. Updated systemd unit to `RestartSec=10` (was 3) and added `TimeoutStopSec=20` to let Telegram's server-side long-poll expire before the new process starts.
+
+#### 3. README accuracy
+
+Corrected several stale docs:
+- Notifier glob: `tg_*.md` → `*.md`
+- Non-command messages: "silently ignored" → documents chat intent classification
+- Added `/chat` and `/report` commands to command table
+- Updated task lifecycle diagram to show intent flow
+- Fixed verification section (removed contradictory `drop_pending_updates` check)
+- Added heartbeat timer to services table
+
+#### 4. Repository structure documented
+
+README now separates "Source (version-controlled)" from "Runtime (gitignored)" with clear directory tables.
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `.gitignore` | Modified | Exclude TASKS/, OUTPUT/, WORK/, STATE/*, HEARTBEAT.md; keep .gitkeep |
+| `telegram_bot.py` | Modified | Removed `drop_pending_updates=True` (1 line) |
+| `systemd/novacore-telegram.service` | **NEW** | Repo copy with RestartSec=10, TimeoutStopSec=20 |
+| `README.md` | Modified | Fixed inaccuracies, documented repo structure separation |
+| `TASKS/.gitkeep` | **NEW** | Directory placeholder |
+| `OUTPUT/.gitkeep` | **NEW** | Directory placeholder |
+| `WORK/.gitkeep` | **NEW** | Directory placeholder |
+| `STATE/.gitkeep` | **NEW** | Directory placeholder |
+
+### Test results
+
+194 total, all passing. No behavioral changes.
+
+---
+
+## 2026-03-05 (Session 11) — Heartbeat Health Monitoring System
+
+**Session span:** ~16:35–17:45 UTC
+
+### What was built
+
+#### heartbeat.py — proactive health monitoring
+
+Standalone stdlib-only script (~240 lines) that runs 9 health checks and reports status. Designed as a systemd oneshot triggered every 30 minutes.
+
+**Health checks:**
+1. `service:novacore-watcher` — systemd is-active + PID/uptime
+2. `service:novacore-telegram` — same
+3. `service:novacore-telegram-notifier` — same
+4. `disk` — `os.statvfs`, warns at >85% usage
+5. `claude_binary` — `/usr/bin/claude` exists and is executable
+6. `task_queue` — pending count (warns >10), orphaned `.inprogress` files (>15min)
+7. `last_output` — most recent OUTPUT/ file age (informational)
+8. `stale_workers` — dead PIDs in `STATE/running/*.pid`
+9. `metrics` — `STATE/metrics.json` failure rate (warns >50%)
+
+**Outputs:**
+- Writes `HEARTBEAT.md` with timestamped checklist
+- Appends to `LOGS/heartbeat.log`
+- Sends Telegram alert on failure (via `TELEGRAM_BOT_TOKEN` + `ALLOWED_CHAT_ID`)
+- Injects self-repair tasks into `TASKS/` for service failures (rate-limited)
+
+**Metrics parsing fix:** `contract_failure`/`contract_success` in `metrics.json` are dicts with `_total` keys, not plain ints. Added `isinstance(cf, dict)` dispatch.
+
+#### systemd timer deployment
+
+- `systemd/novacore-heartbeat.service` — Type=oneshot, EnvironmentFile=/etc/novacore/telegram.env
+- `systemd/novacore-heartbeat.timer` — OnBootSec=2min, OnUnitActiveSec=30min
+- Deployed to `/etc/systemd/system/`, enabled, verified firing
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `heartbeat.py` | **NEW** | 9 health checks, HEARTBEAT.md writer, Telegram alerter, self-repair injector |
+| `tests/test_heartbeat.py` | **NEW** | 30 tests covering all checks, edge cases, integration |
+| `systemd/novacore-heartbeat.service` | **NEW** | Oneshot service unit |
+| `systemd/novacore-heartbeat.timer` | **NEW** | 30-minute timer unit |
+| `HEARTBEAT.md` | **NEW** | Auto-generated health status (gitignored runtime artifact) |
+
+### Test results
+
+194 total (164 existing + 30 new), all passing.
+
+### First live run
+
+Timer fired immediately on enable. All services healthy, disk at 17.3%, only flag was metrics at 62.5% failure rate (5/8 historical contract failures) — will normalize as task volume grows.
+
+---
+
+## 2026-03-05 (Session 10) — Production Incident Recovery + Chat Mode
+
+**Session span:** ~15:37–16:35 UTC
+
+### Production incident: Telegram bot silent
+
+**Root cause 1 — Conflict loop:** After a network disruption on Mar 3, the bot entered a `telegram.error.Conflict` loop (overlapping `getUpdates` requests). Fixed by SIGTERM + systemd respawn.
+
+**Root cause 2 — Notifier only processed `tg_*` files:** The notifier filtered on `tg_*.md` output files (legacy naming). New numbered tasks (`0009_Wow_ok`) were never notified. Fixed by broadening the glob from `tg_*.md` to `*.md`.
+
+**Hardening applied:**
+- `drop_pending_updates=True` on `run_polling()` to avoid stale update conflicts on restart
+- Error handler that calls `os._exit(1)` on Conflict errors → clean systemd restart
+- Added structured logging (`_log = logging.getLogger("telegram_bot")`) with MSG/ACTION/PARSE_ERR/SKIP lines to stdout
+
+### Feature: plain text as task
+
+Previously only `/commands` were processed; plain text was silently ignored. Now any plain text message is routed through `_parse_run()` as a task — users can type conversationally.
+
+### Feature: chat mode (intent-based output formatting)
+
+**Problem:** Telegram replies were over-structured — CONTRACT blocks, Files Referenced, Security Notes, tool audit tables, `notifier_pid` telemetry, metadata lines. Normal questions deserve clean answers.
+
+**Solution:** Intent classification + report stripping, applied at the notifier layer (single source of truth).
+
+**Intent classification** (`classify_intent()` in `telegram/parse.py`):
+- Plain text → `chat` (default)
+- `/run`, `/status`, other commands → `task`
+- `/chat <text>` → forced `chat`
+- `/report <text>` → forced `task`
+- Text containing "report", "contract", "verbose", "audit", "debug", "show files", "detailed" → `task`
+
+**Report stripping** (`strip_report_sections()` in `telegram/format.py`):
+- Truncates from first `## CONTRACT` / `## Files Referenced` / `## Security Notes` through EOF
+- Removes metadata lines (`**Task:**`, `**Completed:**`, `**Source:**`)
+- Removes title line (`# Task NNNN: ...`)
+- Removes `notifier_pid=` / `host=` footer
+- Removes CONTRACT field lines (`task_id:`, `status:`, `verification:`)
+- Preserves all answer content including tables and code blocks
+
+**Pipeline:** Bot stores intent in `STATE/intents/{stem}.intent` → notifier reads it → chat intent uses `strip_report_sections()`, task intent uses existing `build_message()`.
+
+### Import shim fix
+
+Initial implementation put `classify_intent()` in `telegram/format.py`, but `from telegram.format import ...` resolved to the python-telegram-bot library (not our local dir) due to the sys.path shim. Moved `classify_intent()` into `telegram/parse.py` which is already registered in `sys.modules` via the import shim in `telegram_bot.py`.
+
+### Files changed
+
+| File | Action | Purpose |
+|---|---|---|
+| `telegram/format.py` | **NEW** | `strip_report_sections()` — report section stripper |
+| `telegram/parse.py` | Modified | Added `classify_intent()`, `/chat`, `/report` commands, plain-text-as-task routing |
+| `telegram_bot.py` | Modified | Intent storage (`STATE/intents/`), logging, Conflict handler, `drop_pending_updates`, help text |
+| `telegram_notifier.py` | Modified | Intent-aware formatting, broadened `*.md` glob, chat-mode message builder |
+| `tests/test_chat_format.py` | **NEW** | 39 tests for classify_intent + strip_report_sections |
+
+### Test results
+
+164 total (125 existing + 39 new), all passing.
+
+### Verified end-to-end
+
+Task 0011 "Should we give Nova-Core a heartbeat first or persistent memory?" — classified as `chat`, worker produced 5232-char structured report, notifier stripped to 4737-char clean answer, delivered to Telegram without CONTRACT/metadata/footer.
+
+---
+
+## 2026-03-03 (Session 9) — Phase 3 Completion + Phase 4 Execution Audit & logs.tail
+
+**Session span:** ~15:50–16:30 UTC
+
+### What was built
+
+#### Phase 3 / Step 4 — Observability Metrics
+
+Added lightweight metrics tracking to `STATE/metrics.json` for contract validation and retry outcomes.
+
+- `_update_metrics(event, tool_name)` helper in `watcher.py` — increments counters, never throws, never blocks
+- 5 tracked events: `contract_success`, `contract_failure`, `retry_issued`, `retry_success`, `retry_failed`
+- Per-stem breakdown with `_total` rollup
+- Corruption-safe: invalid JSON or non-dict resets silently
+- Wired into `verify_artifacts()` (success/failure + retry outcomes) and `_maybe_create_retry()` (retry_issued)
+- `STATE/metrics.json` added to `.gitignore` (runtime state)
+- 15 tests in `tests/test_metrics.py`
+
+#### Phase 4 / Step 1 — Execution Audit Envelope
+
+Added `_execute_with_audit()` wrapper to `tools/runner.py` that wraps every tool execution in a structured envelope.
+
+- Validates tool exists in `tools_registry.json` before execution
+- Times execution, returns `{tool, ok, duration_ms, result}` envelope
+- Unregistered tools raise `ValueError` immediately — function never called
+- `run_tool()` refactored: registry gate at top, all dispatches go through wrapper
+- Error cases (blocked commands, unregistered tools) still return well-formed envelopes
+- 10 tests in `tests/test_runner_audit.py`
+
+#### Phase 4 / Step 2 — Semantic Tool: logs.tail
+
+Added read-only log tailing for systemd services via journalctl.
+
+- New adapter: `tools/adapters/logs_tool.py` — `logs_tail(service, lines)` function
+- Runs `journalctl -u <service> -n <lines> --no-pager -o short-iso`
+- Lines clamped to 1–500, output capped at 100KB
+- Service name sanitized (alphanumeric, dash, underscore, dot, @)
+- Returns structured dict: `{service, lines, entries[], truncated}`
+- Registered in `tools/tools_registry.json` as `logs.tail`
+- Wired into runner dispatch via `_run_logs_tail()`
+- 13 tests in `tests/test_logs_tail.py`
+
+### Test suite
+
+| File | Tests |
+|------|-------|
+| test_contract_gate.py | 13/13 |
+| test_contract_retry.py | 17/17 |
+| test_contracts.py | 14/14 |
+| test_git_repo.py | 28/28 |
+| test_logs_tail.py | 13/13 |
+| test_metrics.py | 15/15 |
+| test_runner_audit.py | 10/10 |
+| test_system_service.py | 15/15 |
+| **Total** | **125/125** |
+
+### Files changed
+
+- `watcher.py` — metrics helper + wiring (+43 lines)
+- `.gitignore` — added `STATE/metrics.json`
+- `tools/runner.py` — audit envelope wrapper, registry gate, logs.tail dispatch (+86 lines)
+- `tools/tools_registry.json` — added `logs.tail` entry
+- `tools/adapters/logs_tool.py` — new adapter
+- `tests/test_metrics.py` — new (15 tests)
+- `tests/test_runner_audit.py` — new (10 tests)
+- `tests/test_logs_tail.py` — new (13 tests)
+
+### Commits
+
+- `c85efc2` — Phase 3 Step 4: observability metrics
+- `d71f688` — Phase 4 Step 1: execution audit envelope
+- (pending) — Phase 4 Step 2: logs.tail semantic tool
+
+---
+
+## 2026-03-03 (Session 8) — MCP Server Setup + MCP Skills (Web/Fetch/Browser/Research)
+
+**Session span:** ~14:00–15:00 UTC
+
+### What was built
+
+#### MCP Server Integration (4 servers)
+
+Added 4 Model Context Protocol servers to Claude Code, providing web search, HTTP fetch, and browser automation capabilities.
+
+**Discovery & fixes:**
+- All 4 were initially configured with wrong package names (`@anthropic-ai/mcp-server-*` — doesn't exist on npm)
+- Learned that MCP servers must be registered via `claude mcp add` into `~/.claude.json`, NOT manually in `~/.claude/settings.json`
+- Each server required iterative debugging across multiple Claude Code restarts
+
+| Server | Wrong package | Correct package | Notes |
+|---|---|---|---|
+| brave-search | `@anthropic-ai/mcp-server-brave-search` | `@brave/brave-search-mcp-server` | API key moved from env var to `--brave-api-key` CLI flag |
+| tavily | (correct from start) | `tavily-mcp@latest` | Worked on first try |
+| fetch | `@anthropic-ai/mcp-server-fetch` (npm) | `mcp-server-fetch` (Python via `uv tool run`) | Official server is Python-only, not npm |
+| playwright | `@anthropic-ai/mcp-server-playwright` | `@playwright/mcp` | Required `--headless --no-sandbox --executable-path` flags |
+
+#### Playwright System Dependencies (no-sudo workaround)
+
+Chromium binary requires GTK/ATK system libraries not present on the headless VPS. Without sudo access:
+
+1. Downloaded 24 `.deb` packages via `apt-get download` (no sudo needed)
+2. Extracted shared libraries to `~/.local/usr/lib/x86_64-linux-gnu/` via `dpkg-deb -x`
+3. Configured `LD_LIBRARY_PATH` env var in the MCP server config
+4. Final config: `--headless --no-sandbox --executable-path /home/nova/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome`
+
+Missing libs resolved: `libatk-1.0`, `libatk-bridge-2.0`, `libcups2`, `libxkbcommon0`, `libatspi2.0`, `libxcomposite1`, `libxdamage1`, `libxrandr2`, `libcairo2`, `libpango-1.0`, `libasound2`, + transitive deps.
+
+#### MCP Skills (4 new skills under `.claude/skills/`)
+
+Built Anthropic-style Claude Code Skills teaching correct MCP tool usage:
+
+| Skill | Path | Purpose | Mode | Tools |
+|---|---|---|---|---|
+| `web-research` | `.claude/skills/web-research/` | Multi-engine search with citations & query log | Auto-invoked | 4 (brave_web_search, brave_news_search, tavily_search, tavily_research) |
+| `http-fetch` | `.claude/skills/http-fetch/` | Deterministic URL retrieval with parsing patterns | Auto-invoked | 2 (fetch, tavily_extract) |
+| `browser-automation` | `.claude/skills/browser-automation/` | Playwright automation with failure handling | Auto-invoked | 17 playwright tools |
+| `research-to-action` | `.claude/skills/research-to-action/` | Workflow chaining search→fetch→browse | Operator (`/research-to-action`) | 14 (union of key tools) |
+
+**Skill conventions (Anthropic-style):**
+- YAML frontmatter: `name`, `description`, `disable-model-invocation`, `allowed-tools`
+- Each SKILL.md contains: When to use, Inputs, Workflow, Tool usage rules, Outputs/contract, 2 Examples
+- Reference files linked one level deep (no nesting)
+
+**Supporting reference files:**
+- `web-research/reference/SOURCES_RUBRIC.md` — 4-tier source quality rubric + conflict resolution rules
+- `http-fetch/reference/PARSING_PATTERNS.md` — HTML/JSON/text parsing patterns + failure handling table
+
+**Key design: research-to-action decision tree:**
+```
+SEARCH (always start here)
+  → found answer in snippet? → SYNTHESIZE
+  → found URL? → FETCH
+  → nothing? → retry once → REPORT GAP
+
+FETCH
+  → got content? → SYNTHESIZE
+  → empty/JS-rendered? → BROWSE (only if depth=full)
+  → failed? → try tavily_extract → REPORT CONSTRAINT
+
+BROWSE (last resort)
+  → got content? → close browser → SYNTHESIZE
+  → login/captcha? → STOP → REPORT CONSTRAINT
+```
+
+### Tool inventory (MCP tools discovered)
+
+| Server | Tool count | Key tools |
+|---|---|---|
+| brave-search | 6 | `brave_web_search`, `brave_news_search`, `brave_local_search`, `brave_video_search`, `brave_image_search`, `brave_summarizer` |
+| tavily | 5 | `tavily_search`, `tavily_extract`, `tavily_crawl`, `tavily_map`, `tavily_research` |
+| fetch | 1 | `fetch` |
+| playwright | 22 | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_evaluate`, + 17 more |
+
+All tool names use MCP qualified format: `mcp__<server>__<tool_name>`
+
+### Files created
+
+| File | Action |
+|---|---|
+| `.claude/skills/web-research/SKILL.md` | Created — web research skill |
+| `.claude/skills/web-research/reference/SOURCES_RUBRIC.md` | Created — source quality rubric |
+| `.claude/skills/http-fetch/SKILL.md` | Created — HTTP fetch skill |
+| `.claude/skills/http-fetch/reference/PARSING_PATTERNS.md` | Created — parsing patterns |
+| `.claude/skills/browser-automation/SKILL.md` | Created — browser automation skill |
+| `.claude/skills/research-to-action/SKILL.md` | Created — workflow chaining skill |
+
+**Also modified (infrastructure):**
+| File | Action |
+|---|---|
+| `~/.claude.json` | MCP servers registered (brave-search, tavily, fetch, playwright) |
+| `~/.claude/settings.json` | Cleaned up stale `mcpServers` key |
+| `~/.local/usr/lib/x86_64-linux-gnu/` | 47 shared libraries extracted for Playwright |
+
+### Packages installed
+
+| Package | Method | Purpose |
+|---|---|---|
+| `uv` (0.10.7) | `pip3 install uv` | Python tool runner for mcp-server-fetch |
+| Chromium 145.0.7632.6 | `npx playwright install chromium` | Browser for Playwright MCP |
+| 24 .deb packages | `apt-get download` + `dpkg-deb -x` | System libs for Chromium |
+
+### Design decisions
+
+- **`claude mcp add` over manual JSON editing**: Claude Code reads MCP config from `~/.claude.json`, not `~/.claude/settings.json`. The `claude mcp add -s user` CLI is the canonical way to register servers.
+- **Local lib extraction over sudo**: Extracted .deb packages to `~/.local/` and used `LD_LIBRARY_PATH` rather than requiring root access. Makes the setup portable and non-destructive.
+- **Separate skills over one mega-skill**: Each MCP capability (search, fetch, browse) gets its own skill with minimal tool lists. The `research-to-action` workflow skill chains them but is operator-invoked only (`disable-model-invocation: true`).
+- **Anthropic frontmatter style for new skills**: Used `allowed-tools` + `disable-model-invocation` format (Anthropic convention) rather than the existing `activation.keywords` + `tool_doctrine` format used by Phase 1 skills. Both formats coexist — Phase 1 skills teach behavior, MCP skills teach tool selection.
+
+---
+
+## 2026-03-03 (Session 7) — Phase 2 Completion + Phase 3 Contract Enforcement
+
+**Session span:** ~14:00–16:00 UTC
+
+### What was built
+
+#### Phase 2 / Step 5 — `repo.git.commit` (state-changing, safety-enforced)
+
+Extended `tools/adapters/git_repo.py`:
+- `git_commit(message, paths=None)` → structured dict with `action`, `message`, `commit_hash`, `files`, `success`, `verification`
+- **Forbidden flag rejection**: regex blocks `--amend`, `--no-verify`, `--force`, `--allow-empty`, `-a` in commit messages
+- **Flag injection prevention**: paths starting with `-` are rejected; `--` separator used before path args
+- **5-step workflow**: status check → stage paths → verify staging (`git diff --cached --name-only`) → commit → verify via `git log -1 --oneline`
+- Runner dispatch wired via lazy import in `_run_repo_git_commit()`
+
+**Phase 2 complete.** All 5 semantic tool adapters built and tested:
+
+| Tool | Type | Adapter |
+|---|---|---|
+| `system.service.status` | Read-only | `system_service.py` |
+| `system.service.restart` | State-changing (gated) | `system_service.py` |
+| `repo.git.status` | Read-only | `git_repo.py` |
+| `repo.git.diff` | Read-only | `git_repo.py` |
+| `repo.git.commit` | State-changing (safety-enforced) | `git_repo.py` |
+
+#### Phase 3 / Step 1 — `contracts.validate` tool
+
+Created `tools/contracts.py`:
+- `validate_contract(text)` → `{valid, errors, warnings, contract}`
+- Locates the **last** `## CONTRACT` header in text, parses `key: value` pairs below it
+- Required fields: `summary`, `verification`, `confidence`
+- Requires at least one action-detail field: `files_changed`, `commands_executed`, `git_commands_executed`, `task_id`, `status`, `checks_performed`
+- Confidence validation: accepts `0.0–1.0` float or `low`/`medium`/`high`
+- Code fences inside CONTRACT blocks are skipped (content inside ``` ignored)
+- Deterministic — no LLM calls, pure string parsing
+
+Registered as `contracts.validate` in `tools/tools_registry.json`. Runner dispatch via `_run_contracts_validate()`.
+
+#### Phase 3 / Step 2 — Contract enforcement gate on task completion
+
+Modified `watcher.py` `verify_artifacts()`:
+- After finding the OUTPUT file, calls `_check_contract(output_file)` which runs `validate_contract(text)`
+- **Valid contract** → proceeds to `.done` as before
+- **Invalid contract** → `passed = False` → task becomes `.failed`
+- Failure appends a `## CONTRACT VALIDATION FAILED` section to the output file with:
+  - List of validation errors
+  - List of warnings (if any)
+  - Suggestion to fix output with required fields
+
+Flow: OUTPUT found → contract validated → `.done` **or** contract invalid → failure section appended → `.failed`
+
+### Test results
+
+| Test suite | Tests | Status |
+|---|---|---|
+| `tests/test_git_repo.py` | 28 | All passing |
+| `tests/test_system_service.py` | 15 | All passing |
+| `tests/test_contracts.py` | 14 | All passing |
+| `tests/test_contract_gate.py` | 13 | All passing |
+| **Total** | **70** | **All passing** |
+
+### Files created or modified
+
+| File | Action |
+|---|---|
+| `tools/adapters/git_repo.py` | Extended — `git_commit()` added |
+| `tools/contracts.py` | Created — contract validator |
+| `tools/runner.py` | Modified — dispatch for `repo.git.commit` + `contracts.validate` |
+| `tools/tools_registry.json` | Modified — 2 new tool entries |
+| `watcher.py` | Modified — `_check_contract()` + contract gate in `verify_artifacts()` |
+| `tests/test_git_repo.py` | Extended — 7 commit tests |
+| `tests/test_contracts.py` | Created — 14 validator tests |
+| `tests/test_contract_gate.py` | Created — 13 gate tests |
+
+### Git history (session 7)
+
+| Commit | Message |
+|---|---|
+| `cce37f2` | feat: Phase 2 add repo.git.commit adapter |
+| `4b72994` | feat: Phase 3 add contracts.validate tool |
+| `e64523d` | feat: Phase 3 add contract enforcement gate on task completion |
+
+### Design decisions
+
+- **Gate at `verify_artifacts()`, not at file write time**: The contract gate runs after Claude finishes and the OUTPUT file exists. This means Claude's raw output is preserved (the failure section is appended, not replacing). The gate is the single chokepoint before `.done` transition.
+- **Last CONTRACT block wins**: If an output has multiple `## CONTRACT` sections (e.g., from retries), only the last one is validated. This supports iterative correction within a single output.
+- **Failure report appended to output file**: Rather than creating a separate error file, the validation failure is appended to the existing OUTPUT file. This keeps the full context (original output + why it failed) in one place.
+
+---
+
+## 2026-03-02 (Session 6) — Phase 2 Tool Abstraction Layer (Semantic Adapters)
+
+**Session span:** ~15:00–17:00 UTC
+
+### What was built
+
+#### Phase 2 — Tool Abstraction Layer (Steps 1–4)
+
+Replaced raw shell/git stdout parsing with structured JSON tool adapters. Agents now interact with semantic APIs instead of parsing terminal output.
+
+#### Architecture decisions
+
+- **Code-owned registry**: moved authoritative tool definitions from `STATE/tools_registry.json` (runtime state) to `tools/tools_registry.json` (code-owned, versioned). `tools/registry.py` updated to default to `tools/tools_registry.json`.
+- **Lazy imports**: runner dispatches to adapters via lazy `from tools.adapters.X import Y` inside handler functions, avoiding circular imports (adapters import `run_subprocess` from runner).
+- **Adapter pattern**: each adapter module lives under `tools/adapters/`, calls `run_subprocess()` from runner, parses output, returns structured dict.
+
+#### Step 1 — `system.service.status` (read-only)
+
+Created `tools/adapters/system_service.py`:
+- `parse_status_output(stdout)` — extracts Loaded, Active, Main PID from systemctl output
+- `service_status(name)` → structured dict with `service`, `loaded`, `active_state`, `sub_state`, `main_pid`, `raw_excerpt`
+- Service name sanitized via regex (alphanumeric, dash, underscore, dot, @)
+- Exit code 3 (inactive) treated as non-error
+
+#### Step 2 — `system.service.restart` (state-changing, gated)
+
+Extended `tools/adapters/system_service.py`:
+- `service_restart(name)` → structured dict with `service`, `action`, `success`, `active_state`, `sub_state`, `main_pid`, `verification`
+- **Confirmation gate**: requires `NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE` env var. Without it, returns `blocked: true` with reason — command never executes.
+- **Post-restart verification**: immediately calls `service_status()` after restart to confirm the service came back `active (running)`.
+- Restart failures return `blocked: false` with stderr reason.
+
+#### Step 3 — `repo.git.status` (read-only)
+
+Created `tools/adapters/git_repo.py`:
+- `parse_porcelain(output)` — parses `git status --porcelain=v1 -b` output
+- `git_status()` → structured dict with `branch`, `remote`, `ahead`, `behind`, `staged`, `modified`, `untracked`, `clean`
+- Staged/modified files include status code (`A`, `M`, `D`, etc.) and path
+- `MM` files correctly appear in both staged and modified lists
+
+#### Step 4 — `repo.git.diff` (read-only)
+
+Extended `tools/adapters/git_repo.py`:
+- `parse_diff(output)` — parses `git diff --unified=3` output into per-file records
+- `git_diff(path=None)` → structured dict with `files`, `total_files`, `total_additions`, `total_deletions`, `empty`
+- Each file entry contains `path`, `additions`, `deletions`, `excerpt` (first ~20 lines)
+- Counts exclude `+++`/`---` header lines (only real content changes)
+- Optional `path` argument scopes diff to a single file (uses `--` separator to prevent flag injection)
+- Paths starting with `-` are rejected as potential flag injection
+
+### Test results
+
+| Test suite | Tests | Status |
+|---|---|---|
+| `tests/test_system_service.py` | 15 | All passing |
+| `tests/test_git_repo.py` | 21 | All passing |
+| **Total** | **36** | **All passing** |
+
+All tests use mocked subprocess output — no systemd or git repo required.
+
+### Files created or modified
+
+| File | Action |
+|---|---|
+| `tools/adapters/__init__.py` | Created (package) |
+| `tools/adapters/system_service.py` | Created (status + restart adapters) |
+| `tools/adapters/git_repo.py` | Created (git status + diff adapters) |
+| `tools/tools_registry.json` | Created (code-owned, 4 new tools registered) |
+| `tools/registry.py` | Modified — default path → `tools/tools_registry.json` |
+| `tools/runner.py` | Modified — dispatch for 3 new tool names |
+| `tests/__init__.py` | Created (package) |
+| `tests/test_system_service.py` | Created (15 tests) |
+| `tests/test_git_repo.py` | Created (21 tests) |
+
+### Git history (session 6)
+
+| Commit | Message |
+|---|---|
+| `c21426b` | feat: Phase 2 add system.service.status adapter |
+| `75d4f87` | feat: Phase 2 add system.service.restart adapter |
+| `9463bf3` | feat: Phase 2 add repo.git.status adapter |
+| (pending) | feat: Phase 2 add repo.git.diff adapter |
+
+### Semantic tool namespace (current state)
+
+| Tool | Type | Adapter |
+|---|---|---|
+| `system.service.status` | Read-only | `system_service.py` |
+| `system.service.restart` | State-changing (gated) | `system_service.py` |
+| `repo.git.status` | Read-only | `git_repo.py` |
+| `repo.git.diff` | Read-only | `git_repo.py` |
+
+---
+
+## 2026-03-02 (Session 5) — Phase 1 Skill Standardization (All 5 Skills)
+
+**Session span:** ~10:20–15:00 UTC
+
+### What was built
+
+#### Phase 1 — Skill Standardization (Foundation Layer)
+
+Brought all 5 skills into a standardized format following Anthropic-aligned skill doctrine. Each skill now has:
+
+- **Proper YAML frontmatter** with `name`, `description`, `activation.when`, `tool_doctrine`, and `output_contract`
+- **6 mandatory sections** in exact order: `When To Use`, `Workflow`, `Tool Usage Rules`, `Verification`, `Failure Handling`, `Output Contract`
+- **Progressive disclosure docs**: `reference.md` (deep detail, edge cases) and `examples.md` (concrete workflows with machine-checkable contracts)
+
+#### Skills standardized (in order)
+
+| Skill | Commit | Files | Key reference.md topics |
+|---|---|---|---|
+| `file-ops` | `a3205c0` | 3 (292 ins) | Edge cases (missing file, large file, binary, conflicts), style rules (minimal diffs, atomic edits, no silent overwrite) |
+| `shell-ops` | `2a51570` | 3 (322 ins) | Deny pattern philosophy, confirmation override (`NOVACORE_CONFIRM`), safe command patterns, exit code interpretation |
+| `git-ops` | `09ae19e` | 3 (321 ins) | Git as audit trail, forbidden operations table, safe operation sequence, commit message discipline, divergence handling |
+| `task-execution` | `1c4734e` | 3 (346 ins) | Lifecycle states/transitions, atomic rename philosophy, crash recovery, output naming conventions, idempotency, never-deletion |
+| `self-verification` | `95061b9` | 3 (339 ins) | Verification philosophy (never assume success), read-after-write principle, exit code discipline, confidence scoring, false-positive patterns |
+
+#### Output Contract standard
+
+Every skill now ends with a machine-checkable contract. Each skill defines its own required fields:
+
+| Skill | Contract fields |
+|---|---|
+| `file-ops` | `summary`, `files_changed`, `verification` |
+| `shell-ops` | `summary`, `commands_executed`, `verification` |
+| `git-ops` | `summary`, `git_commands_executed`, `verification` |
+| `task-execution` | `summary`, `task_id`, `status`, `verification` |
+| `self-verification` | `summary`, `checks_performed`, `result`, `confidence` |
+
+#### Tool doctrine standard
+
+Each skill declares its behavioral workflow rules in frontmatter:
+
+| Skill | Doctrine key | Workflow rules |
+|---|---|---|
+| `file-ops` | `tool_doctrine.files.workflow` | `read_before_write`, `diff_first`, `verify_after_write` |
+| `shell-ops` | `tool_doctrine.runtime.workflow` | `sandbox_only`, `never_bypass_runner`, `respect_deny_patterns`, `require_confirmation_for_sensitive` |
+| `git-ops` | `tool_doctrine.repo.workflow` | `prefer_status_diff_first`, `no_force_push`, `no_rebase`, `no_reset_hard`, `no_clean_fd` |
+| `task-execution` | `tool_doctrine.runtime.workflow` | `read_task_before_execute`, `atomic_state_transition`, `write_output_before_done`, `never_delete_task_files` |
+| `self-verification` | `tool_doctrine.runtime.workflow` | `check_expected_state`, `confirm_no_errors`, `validate_contract_fields`, `prefer_read_after_write` |
+
+### Verification discipline
+
+Each step followed a spot-check protocol before commit:
+- YAML frontmatter parsed with `python3 -c "import yaml; ..."` to confirm validity
+- `grep -n "## CONTRACT"` on examples.md to confirm all examples have contract blocks
+- `git status --short` to confirm only the target skill directory was modified
+- `git diff --stat` to confirm no runtime code changed
+
+### Files created or modified
+
+| File | Action |
+|---|---|
+| `.claude/skills/file-ops/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/file-ops/reference.md` | Created |
+| `.claude/skills/file-ops/examples.md` | Created |
+| `.claude/skills/shell-ops/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/shell-ops/reference.md` | Created |
+| `.claude/skills/shell-ops/examples.md` | Created |
+| `.claude/skills/git-ops/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/git-ops/reference.md` | Created |
+| `.claude/skills/git-ops/examples.md` | Created |
+| `.claude/skills/task-execution/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/task-execution/reference.md` | Created |
+| `.claude/skills/task-execution/examples.md` | Created |
+| `.claude/skills/self-verification/SKILL.md` | Rewritten (Phase 1 format) |
+| `.claude/skills/self-verification/reference.md` | Created |
+| `.claude/skills/self-verification/examples.md` | Created |
+
+**Total:** 15 files (5 rewritten, 10 created), ~1,620 lines added.
+
+### Git history (session 5)
+
+| Commit | Message |
+|---|---|
+| `a3205c0` | feat: Phase 1 standardize file-ops skill |
+| `2a51570` | feat: Phase 1 standardize shell-ops skill |
+| `09ae19e` | feat: Phase 1 standardize git-ops skill |
+| `1c4734e` | feat: Phase 1 standardize task-execution skill |
+| `95061b9` | feat: Phase 1 standardize self-verification skill |
+
+### Design decisions
+
+- **No runtime code changes:** Phase 1 is purely cognitive — skills guide agent behavior, runner enforces safety. The two layers evolve independently.
+- **Progressive disclosure (SKILL.md → reference.md → examples.md):** Keeps the injected prompt concise while providing deep detail when needed. Mirrors Anthropic's internal skill playbook structure.
+- **Machine-checkable contracts over freeform output:** Enables future Phase 3 contract validation (automated verification that agent outputs meet spec).
+
+---
+
+## 2026-03-02 (Session 4) — Runner Safety Hardening & Shell Skill Smoke Test
+
+**Session span:** ~09:10–09:45 UTC
+
+### What was built
+
+#### Step 2.5-alt — Runner Safety Hardening (`tools/runner.py`)
+
+Replaced naive substring denylist with regex-based, word-boundary-aware safety enforcement. Even with `--dangerously-skip-permissions` on the Claude CLI, destructive operations are blocked at the tool-runner layer.
+
+**Shell denylist — 11 regex patterns:**
+
+| Pattern | Blocks |
+|---|---|
+| `rm -rf /` | Recursive delete on critical paths (`/`, `~`, `/home`, `/etc`, `/usr`, `/bin`, `/lib`) |
+| `dd of=/` | Block-device writes |
+| `mkfs`, `wipefs`, `shred` | Filesystem destructors |
+| `:(){ :|:& };:` | Fork bombs |
+| `shutdown`, `reboot`, `halt`, `poweroff` | System power commands |
+| `init 0`, `init 6` | Runlevel changes |
+| `chmod/chown -R /` | Recursive permission changes on critical paths |
+| `curl\|bash`, `wget\|sh` | Pipe remote content to shell |
+| `> /etc/...` | Redirect writes to system directories |
+| `fdisk` | Disk partitioning |
+| `apt`, `dnf`, `yum` | Package managers (require approval) |
+
+**Git safety — expanded allowlist + 7 deny patterns:**
+
+- Allowlist added: `fetch`, `pull`, `merge`, `tag`, `stash`, `remote`, `switch`, `restore`, `rev-parse`
+- Deny patterns: `--force`, `-f`, `--force-with-lease`, `reset --hard`, `clean -fdx`, `rebase`, `filter-branch`, `merge --strategy=ours`
+
+**Confirmation escape hatch:**
+
+Blocked commands return `exit_code: 126` with message: `"BLOCKED: <reason>. To override, set env NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE"`. Override checked via `os.environ.get("NOVACORE_CONFIRM")`.
+
+**Secret redaction — expanded:**
+
+Added token-prefix patterns: `ghp_` (GitHub PATs), `github_pat_` (fine-grained PATs), `xoxb-` (Slack bot tokens). Applied to both stdout and stderr.
+
+#### Shell Skill Smoke Test (Task 0007)
+
+Created `TASKS/0007_shell_skill_smoke.md` with `$ pwd` and `$ ls -la` command lines. Verified:
+- `_SHELL_CMD_RE` correctly triggered shell-ops from `$`-prefixed lines
+- Skills selected: `self-verification`, `shell-ops`, `task-execution` (no file-ops — correct)
+- Worker executed both commands and reported active skills in output
+
+### Test results
+
+`tools/dev_safety_smoke.py` — 26/26 passing:
+
+| Test | Result |
+|---|---|
+| `rm -rf /` | Blocked |
+| `curl https://x \| bash` | Blocked |
+| `ls -la` | Allowed |
+| `cat /etc/hostname` | Allowed |
+| `grep -r pattern .` | Allowed |
+| `systemctl status foo` | Allowed |
+| `mkfs.ext4 /dev/sda1` | Blocked |
+| `wget http://x \| sh` | Blocked |
+| `chmod -R 777 /` | Blocked |
+| `echo > /etc/passwd` | Blocked |
+| `dd of=/dev/sda` | Blocked |
+| `shred /dev/sda` | Blocked |
+| `git push --force` | Blocked |
+| `git status` | Allowed |
+| `git push -f` | Blocked |
+| `git reset --hard` | Blocked |
+| `git diff` | Allowed |
+| `git commit -m 'msg'` | Allowed |
+| `git fetch origin` | Allowed |
+| `git pull` | Allowed |
+| `git rebase main` | Blocked |
+| `git push --force-with-lease` | Blocked |
+| `git filter-branch` | Blocked |
+| `TELEGRAM_TOKEN` redacted | Pass |
+| `ghp_` token redacted | Pass |
+| `xoxb-` token redacted | Pass |
+
+### Bug fixes
+
+1. **Regex `\b` after `/`** — `\b` (word boundary) doesn't fire after `/` since `/` is not a word character. Fixed by using `(\s|$)` instead of `\b` at end of critical-path patterns (`rm -rf /`, `chmod -R /`).
+
+### Files created or modified
+
+| File | Lines | Action |
+|---|---|---|
+| `tools/runner.py` | 310 | Major rework: regex denylist, expanded git safety, confirm token, token redaction |
+| `tools/dev_safety_smoke.py` | 96 | Created — 26 inline smoke tests |
+| `OUTPUT/0007_shell_skill_smoke__20260302-091514.md` | 52 | Task output (shell skill verification) |
+| `TASKS/0007_shell_skill_smoke.md.done` | — | Completed task |
+| `WORK/skill_injection_0007_shell_skill_smoke.txt` | — | Skill injection audit artifact |
+
+### Git history (session 4)
+
+| Commit | Message |
+|---|---|
+| `28d030f` | test: skill smoke tests — file-ops and shell-ops activation verified |
+| `a0987d6` | feat: Step 2.5-alt runner safety hardening (denylist + confirm token) |
+
+---
+
+## 2026-03-02 (Session 3) — Skill Activation Hardening & End-to-End Verification
+
+**Session span:** ~08:30–09:15 UTC
+
+### What was built
+
+#### Skill Injection CLI Flag Fix
+
+Resolved the `--append-system-prompt-file` vs `--append-system-prompt` mismatch:
+- The Claude CLI (`/usr/bin/claude -p --help`) only supports `--append-system-prompt <prompt>` (inline string), not a file-based variant.
+- An intermediate attempt added feature-detection (`claude_supports_append_prompt_file()`) but this was unnecessary complexity.
+- Final state: inline `--append-system-prompt` with content passed directly. Skill injection files still written to `WORK/` for auditability.
+
+#### Shell-ops False Positive Elimination (Two Rounds)
+
+**Round 1 — Substring → word-boundary:** Moved shell-ops keywords from naive substring matching (`"ls" in text`) to `\b` word-boundary regex. Fixed "lines" matching "ls" and "include" matching "run".
+
+**Round 2 — Word-boundary → intent-based:** Discovered `\bshell\b` still matched "no shell commands" in plain English. Split shell-ops matching into three layers:
+
+| Layer | Pattern | Example |
+|---|---|---|
+| `_SHELL_CMD_RE` | `^\s*\$\s+\S` (multiline) | `$ ls -la` |
+| `_SHELL_CMDS_RE` | `\b(ls\|sudo\|systemctl\|...)\b` | `sudo apt install htop` |
+| `_SHELL_INTENT_RE` | action verb + intent word pairing | `run this command in terminal` |
+
+Key insight: intent words like "shell", "terminal", "command" only trigger when paired with action verbs ("run", "execute", "use", "open", "launch", "start"). This prevents false positives from sentences like "no shell commands" while still matching "run this command in terminal".
+
+#### End-to-End Verification
+
+- Killed stale watcher process (PID 147234 — old code from before skill patches)
+- Tasks 0006 + 0007 confirmed skill injection pipeline works
+- Task 0006_skill_smoke confirmed worker reports active skills in output
+
+### Bug fixes
+
+1. **Stale watcher process** — Two watcher.py processes running simultaneously (old PID 147234 pre-dating skill patches, new PID 179373 from restart). Old process dispatched task 0006 without skill injection. Killed stale process; subsequent tasks used correct code.
+
+2. **shell-ops false positive (round 1)** — Substring match `"ls" in text_lower` matched "lines", "false", etc. Fixed with `\b` word-boundary regex.
+
+3. **shell-ops false positive (round 2)** — `\bshell\b` matched "no shell commands" in plain English. Fixed by requiring intent words to co-occur with action verbs via `_SHELL_INTENT_RE`.
+
+### Test matrix (final state)
+
+| Input | shell-ops? | Correct? |
+|---|---|---|
+| "This line mentions lines and include but no shell commands." | No | Yes |
+| `$ ls -la` | Yes | Yes |
+| `sudo apt install htop` | Yes | Yes |
+| `run this command in terminal` | Yes | Yes |
+| `use systemctl to restart the service` | Yes | Yes |
+| `show the first 15 lines` | No | Yes |
+| `List the directory` | No | Yes |
+
+### Git history (session 3)
+
+| Commit | Message |
+|---|---|
+| `ac8f0d6` | test: verify skill activation engine end-to-end |
+| `8408e63` | fix: prevent accidental shell-ops activation (word-boundary matching) |
+| `e9f926f` | fix: eliminate shell-ops false positives (token-based intent matching) |
+
+---
+
+## 2026-03-02 (Session 2) — Skill Activation Engine, Git Init, First Push
+
+**Session span:** ~07:00–08:00 UTC
+
+### What was built
+
+#### Git Repository Init & First Push
+
+- Initialized git repo in `~/nova-core`
+- Created `.gitignore` (excludes `.venv/`, `__pycache__/`, `LOGS/`, lock files, audit logs, env files)
+- Configured git identity (Demarcus Hill)
+- Generated SSH deploy key (ed25519), added to GitHub as read/write deploy key
+- Initial commit: 91 files, 5,051 lines → pushed to `github.com:demarcushill20/Nova-Core.git`
+
+#### Step 2.4 — Skill Activation Engine
+
+Created `tools/skills.py` (160 lines) — discovers, selects, and renders SKILL.md files for injection into Claude worker prompts.
+
+| Function | Purpose |
+|---|---|
+| `load_skills()` | Scans `.claude/skills/*/SKILL.md`, parses YAML frontmatter (name, description, tags, version, activation.keywords) |
+| `select_skills(task_text)` | Selects relevant skills based on task content — always includes `task-execution` + `self-verification`, then keyword-matches `git-ops`, `shell-ops`, `file-ops` via built-in rules + frontmatter `activation.keywords` + shell-command regex heuristic |
+| `render_append_prompt(skills)` | Concatenates skill bodies under `## ACTIVE SKILLS` header in deterministic name order; 60KB hard cap with truncation note |
+
+**Skill selection rules:**
+
+| Skill | Triggered by |
+|---|---|
+| `task-execution` | Always on |
+| `self-verification` | Always on |
+| `git-ops` | "git", "commit", "branch", "merge", "push", "pull", "stage", "checkout" |
+| `shell-ops` | "bash", "shell", "sudo", "pip", "python", "script", "command", "process", or lines matching `^\s*(\$\|sudo)\s+` |
+| `file-ops` | "file", "read", "write", "edit", "diff", "patch", "path", or file extensions (.py .md .json .yaml .yml .txt .csv .toml .cfg .ini .sh) |
+
+**Watcher integration** — patched `watcher.py` (4 changes):
+1. Imports `tools.skills`
+2. Before building Claude command: reads task file (50KB cap), calls `select_skills()`, writes `WORK/skill_injection_<stem>.txt`, adds `--append-system-prompt <content>` to the `cmd` list
+3. Worker log header now includes `=== SKILLS: ... ===` line
+4. Command log reflects skill count
+
+**SKILL.md frontmatter updates** — all 5 skills gained `activation.keywords` lists for content-based matching beyond the built-in rules.
+
+**Dev tool** — `tools/dev_check_skills.py` (52 lines): CLI self-test that prints selected skills for any task file or stdin text. Supports `--render` flag for full prompt output.
+
+### Verified behavior
+
+| Test input | Skills selected |
+|---|---|
+| Task mentioning files/paths | task-execution, self-verification, file-ops |
+| "commit and push to git" | task-execution, self-verification, git-ops |
+| `$ sudo apt install...` | task-execution, self-verification, file-ops, shell-ops |
+| "health check" (no keywords) | task-execution, self-verification (always-on only) |
+| "create a .py file and commit it via git" | task-execution, self-verification, file-ops, git-ops |
+
+### Files created or modified
+
+| File | Lines | Action |
+|---|---|---|
+| `.gitignore` | 14 | Created |
+| `tools/skills.py` | 160 | Created |
+| `tools/dev_check_skills.py` | 52 | Created |
+| `watcher.py` | 401 | Modified (+33 lines) — skill injection integration |
+| `.claude/skills/task-execution/SKILL.md` | 48 | Modified — added activation.keywords |
+| `.claude/skills/self-verification/SKILL.md` | 53 | Modified — added activation.keywords |
+| `.claude/skills/file-ops/SKILL.md` | 53 | Modified — added activation.keywords |
+| `.claude/skills/shell-ops/SKILL.md` | 51 | Modified — added activation.keywords |
+| `.claude/skills/git-ops/SKILL.md` | 49 | Modified — added activation.keywords |
+
+### Git history
+
+| Commit | Message |
+|---|---|
+| `5fc18b3` | Initial commit: NovaCore agent runtime (91 files, 5,051 lines) |
+| `8a6c9e1` | feat: add Skill Activation Engine (Step 2.4) (8 files, +350 lines) |
+
+### Design decisions
+
+- **`--append-system-prompt` (inline string) over file-based injection:** Claude CLI only supports `--append-system-prompt <string>`, not a file variant. Linux `ARG_MAX` is 2MB on this VPS; 60KB skill payloads are safe.
+- **No PyYAML dependency:** Frontmatter parser is hand-rolled (handles simple key-value and nested list syntax) to avoid adding a pip dependency for 5 small files.
+- **Skill injection files written to `WORK/`:** Persisted as `WORK/skill_injection_<stem>.txt` for debugging/auditability, not cleaned up automatically.
+
+---
+
+## 2026-03-02 — Infrastructure Build-Out: Skills, Tools, Telegram Protocol, Bot Hardening
+
+**Session span:** ~00:00–05:00 UTC (across two Claude Code context windows)
+
+### What was built
+
+#### Step 2.1 — Claude Skills Skeleton (00:13 UTC)
+
+Created `.claude/skills/` with five SKILL.md files using Anthropic-style YAML frontmatter:
+
+| Skill | Purpose |
+|---|---|
+| `task-execution` | Task lifecycle `.md` → `.inprogress` → `.done`/`.failed`; delegates to other skills |
+| `file-ops` | Sandbox-scoped CRUD; no deletions outside `LOGS/backups/`; diff-first edits |
+| `shell-ops` | Safe shell execution; denylist for destructive commands |
+| `git-ops` | Allowlisted git subcommands; blocks force-push and hard-reset |
+| `self-verification` | Health checks: required dirs, orphaned tasks, output matching, log freshness |
+
+**Compliance patches applied:** Removed general delete capability from file-ops. Added tiered directory checking (required/optional/always) to self-verification. Added explicit skill invocation delegation to task-execution.
+
+#### Step 2.2 — Tools Registry (00:25 UTC)
+
+Created `STATE/tools_registry.json` — canonical registry for 6 tools:
+`files.read`, `files.write`, `files.list`, `files.diff`, `shell.run`, `git.run`
+
+Each tool has `args_schema`, `returns`, and `safety` constraints. Registry defines `sandbox_root: ~/nova-core` and `audit_log: STATE/tool_audit.jsonl`.
+
+#### Step 2.3a — Registry Module (00:29 UTC)
+
+Created `tools/registry.py` (98 lines):
+- `load_registry()` — loads and validates JSON
+- `get_tool()` — lookup by name
+- `resolve_sandbox_root()` / `resolve_audit_log()` — path resolution
+- `validate_registry()` — structural validation
+
+#### Step 2.3b — Tool Runner: shell.run + git.run (00:40 UTC)
+
+Created `tools/runner.py` (266 lines):
+- `run_tool()` — central dispatch with audit logging
+- `enforce_shell_safety()` — denylist matching
+- `enforce_git_safety()` — allowlist + forbidden args
+- `redact_secrets()` — regex replacement for 6 known secret key patterns
+- `run_subprocess()` — capture, truncate (100 KB), redact
+- Consistent return envelope: `{ok, exit_code, stdout, stderr}`
+
+#### Step 2.3c — File Operations (00:37 UTC)
+
+Created `tools/files.py` (251 lines):
+- `read_text()`, `write_text()`, `list_glob()`, `unified_diff()`
+- `dispatch_files_tool()` — routes `files.*` tool names
+- Binary detection via NUL-byte check in first 8 KB
+- Glob results capped at 1000 entries
+- All paths enforced within sandbox_root
+
+#### Step 2.3d — Runner Integration for files.* (00:40 UTC)
+
+Patched `tools/runner.py` to route `files.*` tools through `dispatch_files_tool()`. Added `result` field to return envelope for structured output. Audit log includes compact `result_summary` (path, lines/bytes/count — never file contents).
+
+#### Step 3.1 — Telegram Command Protocol (01:23 UTC)
+
+Created `PROTOCOL/telegram_commands.md` (v1.1) — full specification for 8 commands. Defines canonical action JSON objects, parsing rules, response formats, error handling, and constants table.
+
+**Finalization patches:** Fixed task ID normalization consistency, added UTC timestamp labelling, defined cancel marker file pattern (`TASKS/.<stem>.cancel_requested`), specified mode persistence in `STATE/chat_modes.json`, added paging constants (3000 chars/page, max 20 pages).
+
+#### Step 3.2 — Telegram Command Parser (01:32 UTC)
+
+Created `telegram/parse.py` (197 lines):
+- Pure parsing, no I/O, no side effects
+- `parse_message(text, chat_id, ts)` → `{ok, action}` / `{ok: false, error}` / `None`
+- Per-command parsers for all 8 commands
+- Constants: `_MAX_MSG_LEN=4096`, `_MAX_TITLE_LEN=200`, `_TAIL_DEFAULT=50`, `_TAIL_MAX=200`
+
+#### Step 3.3 — Bot Integration: Parser + Dispatcher (01:40–02:00 UTC)
+
+Integrated `telegram/parse.py` into `telegram_bot.py`:
+- Replaced individual CommandHandlers with single `on_message` dispatcher
+- Implemented `handle_help()`, `handle_status()`, `handle_run_task()`
+- Built import shim to resolve `telegram/` directory shadowing `python-telegram-bot` package
+
+**Import shim approach:** Temporarily hide project root from `sys.path`, import library, restore path, register local module via `importlib.util`, then use canonical `from telegram.parse import parse_message`.
+
+#### Step 3.4 — Remaining Command Handlers (02:30–03:30 UTC)
+
+Implemented all remaining Telegram command actions in `telegram_bot.py`:
+
+| Handler | Signature |
+|---|---|
+| `handle_get_last(chat_id)` | Finds highest-numbered task, mode-aware body display |
+| `handle_get_output(chat_id, filename, page)` | Prefix/exact match in OUTPUT/, 3000-char paging |
+| `handle_tail_log(chat_id, task_id, lines)` | Prefix match worker_/task_ logs, last N lines, 3000-char cap |
+| `handle_cancel_task(chat_id, task_id_or_last)` | Queued → `.skip`; inprogress → marker file + log note |
+| `handle_set_mode(chat_id, mode)` | Persists to `STATE/chat_modes.json` |
+| `handle_get_mode(chat_id)` | Reads from `STATE/chat_modes.json`, defaults "normal" |
+
+All 8 handler tests passed (mode persistence, get_last, output paging, log tailing, queued cancel with .skip rename, inprogress cancel with marker file, error handling).
+
+### Bug fixes applied
+
+1. **Handler signature normalization** — All handlers changed from `(action: dict)` to explicit args (e.g., `handle_set_mode(chat_id, mode)` instead of `handle_set_mode(action)`). Fixed `TypeError: handle_set_mode() takes 1 positional argument but 2 were given`.
+
+2. **Tail log validation** — `handle_tail_log()` now rejects `lines <= 0` and `lines > 200` with protocol-compliant error message. Previously `lines=0` silently returned all lines (`list[-0:]` = full list) and `lines=500` was uncapped.
+
+3. **Import shim restructure** — Fixed `from telegram.parse import parse_message` not being grep-matchable. Restructured shim to register module in `sys.modules` first, then use the explicit import statement.
+
+### Conflict diagnosis and hardening
+
+**Forensic investigation of `telegram.error.Conflict`:**
+
+- Analyzed journalctl: 272 distinct PIDs since service creation, including a crash-restart loop of 218 rapid restarts (missing token), 52 more (placeholder token "REPLACE_ME"), then stable operation.
+- Two Conflict episodes: single hit at 20:51 UTC, burst of 10 at 04:02–04:04 UTC with exponential backoff (5s → 30s).
+- Root cause: `RestartSec=3` shorter than getUpdates long-poll timeout (10s), causing overlapping pollers during `systemctl restart`.
+- Confirmed: no webhook set, no external pollers, notifier uses only `sendMessage` via httpx (never `getUpdates`), `__name__` guard prevents importlib test loads from triggering `main()`.
+
+**Mitigations implemented:**
+
+1. **fcntl process lock** — `STATE/telegram_bot.lock` with non-blocking exclusive flock. Second instance logs and exits 0. Lock auto-releases on process death (kernel guarantee). FD stashed to prevent GC.
+
+2. **`drop_pending_updates=True` added then removed** — Initially added to `run_polling()`, then identified as a message-loss risk during the analysis phase: it tells Telegram to discard all queued updates on startup, silently dropping any commands sent during downtime. Reverted to `run_polling(close_loop=False)` only.
+
+3. **Systemd unit hardening** (prepared, pending sudo apply):
+   - `RestartSec=10` (was 3) — exceeds getUpdates long-poll timeout
+   - `TimeoutStopSec=20` (was default 90) — caps graceful shutdown window
+   - KillSignal left as default SIGTERM (library handles both SIGINT and SIGTERM identically)
+
+**Systemd changes status:** Unit file written but not yet applied — requires `sudo` which needs an interactive terminal. Commands staged for manual execution.
+
+### Documentation
+
+Created `README.md` (244 lines) with four main sections:
+- Telegram Integration (services, protocol v1.1, import shim, conflict mitigation, verification commands)
+- Skills / Tooling Integration (5 skills, 6 tools, runner envelope, safety enforcement)
+- Quick Start / Ops (service management, key paths, task lifecycle flow)
+
+### Files created or modified today
+
+| File | Lines | Action |
+|---|---|---|
+| `.claude/skills/task-execution/SKILL.md` | 42 | Created + patched |
+| `.claude/skills/file-ops/SKILL.md` | 43 | Created + patched |
+| `.claude/skills/shell-ops/SKILL.md` | 41 | Created |
+| `.claude/skills/git-ops/SKILL.md` | 39 | Created |
+| `.claude/skills/self-verification/SKILL.md` | 44 | Created + patched |
+| `STATE/tools_registry.json` | ~150 | Created |
+| `tools/__init__.py` | 0 | Created |
+| `tools/registry.py` | 98 | Created |
+| `tools/runner.py` | 266 | Created + patched (files.* support) |
+| `tools/files.py` | 251 | Created |
+| `PROTOCOL/telegram_commands.md` | ~300 | Created + finalized |
+| `telegram/__init__.py` | 0 | Created |
+| `telegram/parse.py` | 197 | Created |
+| `telegram_bot.py` | 663 | Major rework: import shim, unified dispatcher, all 9 handlers, lock, signature normalization, tail validation, drop_pending removal |
+| `README.md` | 244 | Created |
+| `DIARY.md` | this file | Created |
+
+**Total new code:** ~2,394 lines across 7 Python modules.
+
+### What's pending
+
+- [ ] Apply systemd unit changes (requires interactive `sudo`):
+  ```
+  sudo tee /etc/systemd/system/novacore-telegram.service < unit-content
+  sudo systemctl daemon-reload
+  sudo systemctl restart novacore-telegram.service
+  ```
+- [ ] Verify lock behavior live after systemd restart
+- [ ] End-to-end Telegram test: send `/run` during restart window, confirm message not lost
+- [ ] Task 0004 (real autonomy) still queued in `TASKS/`
+
+---
+
+## 2026-03-01 — Project Bootstrap, Watcher, Telegram Bot & Notifier
+
+**Session span:** ~06:55–23:21 UTC (across ~28 Claude Code sessions)
+
+### Phase 1: Project Bootstrap (06:55–08:31 UTC)
+
+#### Initial setup
+
+- Created project structure: `TASKS/`, `OUTPUT/`, `LOGS/`, `MEMORY/`, `WORK/`
+- Created `CLAUDE.md` with operating rules, autonomy policy, execution model
+- Created `TASKS/0001_bootstrap.md` — initial bootstrap task (completed)
+
+#### watcher.py — Task Execution Dispatcher
+
+Created `watcher.py` (368 lines) through iterative development across multiple sessions:
+
+1. **v1 — Basic poller:** Polls `TASKS/` every 60 seconds, detects pending `.md` files, logs to `LOGS/watcher.log`. Graceful shutdown on SIGINT/SIGTERM.
+2. **v2 — Execution dispatcher:** Added Claude subprocess execution via `claude --print` with `--allowedTools` flags. Task lifecycle: `.md` → `.inprogress` → `.done`/`.failed`.
+3. **v3 — Artifact verification:** Post-execution checks verify OUTPUT file was created within 10 minutes. Specific artifact checks per task (e.g., task 0004 checks `WORK/real_autonomy_confirmed.txt`). Worker logs written to `LOGS/worker_<stem>.log`.
+4. **v4 — Observable headless execution:** Added `cwd` setting, self-check prompt for the Claude worker, improved logging (command used, prompt header, verification results).
+
+**Tasks completed via watcher:**
+- 0001 bootstrap (manual)
+- 0002 agent bootstrap (created watcher.py itself)
+- 0004 real autonomy test (created `WORK/real_autonomy_confirmed.txt`)
+- 0005 service test (confirmed systemd dispatch working)
+
+#### Systemd Services Created
+
+Three systemd unit files installed in `/etc/systemd/system/`:
+
+| Service | Created | Purpose |
+|---|---|---|
+| `novacore-watcher.service` | ~08:30 UTC | Runs `watcher.py` as persistent daemon |
+| `novacore-telegram.service` | ~18:35 UTC | Runs `telegram_bot.py` for Telegram → TASKS |
+| `novacore-telegram-notifier.service` | ~19:00 UTC | Runs `telegram_notifier.py` for OUTPUT → Telegram |
+
+All use `Restart=always`, `EnvironmentFile=/etc/novacore/telegram.env`, `User=nova`.
+
+### Phase 2: Telegram Bot (18:35–21:30 UTC)
+
+#### telegram_bot.py — Initial Creation
+
+Created `telegram_bot.py` using `python-telegram-bot` library:
+
+- Polls Telegram via `getUpdates` for incoming messages
+- Authorized chat ID gating via `ALLOWED_CHAT_ID` env var
+- Non-command messages create task files in `TASKS/` with `tg_` prefix and timestamp
+- Task file format: markdown with `## Instruction` section containing message body
+- Response sent back to user confirming task was queued
+
+#### Step 1A — Command Protocol (first pass)
+
+Added command handling to `telegram_bot.py`:
+- `/run <title>` — queue a task with explicit title
+- `/status` — list recent tasks
+- `/cancel <id>` — cancel a task
+- `/help` — show available commands
+- Non-command messages still routed to task creation (original behavior)
+
+#### Telegram Integration Testing (18:43–21:30 UTC)
+
+End-to-end tests via live Telegram messages:
+
+| Test | Time | Result |
+|---|---|---|
+| First Telegram task (`tg_ok.txt`) | 18:43 | Task created, worker executed, output generated |
+| Auth gate test (`auth_ok.txt`) | 18:53 | ALLOWED_CHAT_ID correctly enforced |
+| Notifier push test (`notifier_ok.txt`) | 19:01 | OUTPUT → Telegram notification delivered |
+| Verbose mode test | 19:19 | Mode-aware notification formatting confirmed |
+| Hello/echo test | 19:59 | Non-command message correctly created task |
+| Ping/parsing test | 20:10 | Parser and notifier metadata extraction validated |
+| Log test | 20:15 | Worker log creation and content verified |
+| Format test | 20:20 | Output report formatting confirmed |
+| Cancel test | 20:47 | Task cancellation flow verified |
+| Sleep/timeout test | 20:52 | 90-second sleep task with worker timeout behavior |
+| Cancel-last test | 21:21 | `/cancel last` resolved to most recent task |
+
+### Phase 3: Telegram Notifier (19:00–23:21 UTC)
+
+#### telegram_notifier.py — Creation and Iteration
+
+Created `telegram_notifier.py` (551 lines) — watches `OUTPUT/` for `tg_*.md` files and sends Telegram notifications:
+
+1. **v1 — Basic notifier:** Watchdog-based filesystem observer on `OUTPUT/`. Sends completion message via Telegram Bot API (`sendMessage` via httpx). Dedup via `STATE/tg_sent_outputs.txt` flat file.
+2. **v2 — Smart summary extraction:** 6-tier fallback for extracting summaries from output reports (`## Summary` → `## Actions Taken` → `## Instruction` → header paragraph → any `##` section → first content line).
+3. **v3 — Metrics and mode support:** Added latency calculation from filename timestamps, output size, worker log resolution (3-tier: exact base match → task_id match → glob fallback). Mode-aware formatting (compact/normal/verbose).
+4. **v4 — Durable dedup (marker files):** Replaced flat-file dedup with atomic `O_CREAT|O_EXCL` marker files in `STATE/notified/`. One-time migration from legacy format. 7-day marker cleanup. Catch-up-on-start for unsent outputs. PID/hostname footer for debugging.
+
+#### Key fixes during notifier development
+
+- **Task ID extraction:** Added multi-pattern parsing (`**Task ID:**`, `**Task:**`, header regex)
+- **Timestamp normalization:** ISO 8601 → human-readable UTC, filename-inferred timestamps as fallback
+- **Worker log resolution:** 3-tier search (exact base, task_id, glob wildcard) to handle naming variations
+- **Duplicate notification prevention:** Moved from flat-file append to atomic marker files to handle race conditions between filesystem events and catch-up scans
+- **Chunked sending:** Messages over 3500 chars split at newline boundaries
+
+### Systemd restarts during development
+
+Multiple `systemctl restart novacore-telegram.service` calls during the session (20:58, 21:10, 21:19, 22:44 stop, 22:46 start) as code was iterated. These restarts with `RestartSec=3` are the root cause of the Conflict errors diagnosed on Mar 2.
+
+### Environment setup
+
+- Python venv at `/home/nova/nova-core/.venv/`
+- Key packages: `python-telegram-bot`, `httpx`, `watchdog`
+- Env file: `/etc/novacore/telegram.env` (root:root 0600) containing `TELEGRAM_BOT_TOKEN` and `ALLOWED_CHAT_ID`
+- VPS: Vultr, Linux 5.15.0-171-generic
+
+### Files created on Mar 1
+
+| File | Lines | Notes |
+|---|---|---|
+| `CLAUDE.md` | ~40 | Project instructions, autonomy policy |
+| `watcher.py` | 368 | Task execution dispatcher (4 iterations) |
+| `telegram_bot.py` | ~350 | Initial bot with command handling (pre-Mar 2 rework) |
+| `telegram_notifier.py` | 551 | OUTPUT → Telegram notifier (4 iterations) |
+| Various `TASKS/` files | — | 0001–0005 + tg_* task files |
+| Various `OUTPUT/` files | — | 14 output reports from executed tasks |
+| `STATE/chat_modes.json` | — | Mode persistence |
+| `STATE/notifier_mode.txt` | — | Notifier mode setting |
+| `MEMORY.md` | ~20 | Auto-memory with project state |
+
+---
+
+*Diary format: one entry per working session. Add new entries above this line.*

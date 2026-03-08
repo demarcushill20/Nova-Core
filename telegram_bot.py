@@ -329,7 +329,11 @@ def handle_run_task(chat_id: str, title: str, body: str = "",
     filename = f"{number}_{sanitized}.md"
     path = TASKS / filename
 
-    path.write_text(body, encoding="utf-8")
+    # Include title as first line so the watcher classifier sees the full
+    # task description (title goes into filename but gets sanitized; body
+    # alone may lack classifier-relevant keywords).
+    full_body = f"{title}\n\n{body}".strip() if body else title
+    path.write_text(full_body, encoding="utf-8")
 
     stem = f"{number}_{sanitized}"
     _store_intent(stem, intent)

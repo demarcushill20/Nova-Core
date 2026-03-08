@@ -39,7 +39,7 @@ from tools.task_classifier import classify_task
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path("/home/nova/nova-core")
+BASE_DIR = Path(os.environ.get("NOVACORE_ROOT", "/home/nova/nova-core"))
 OUTPUT_DIR = BASE_DIR / "OUTPUT"
 WORK_DIR = BASE_DIR / "WORK"
 LOGS_DIR = BASE_DIR / "LOGS"
@@ -397,7 +397,14 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
         f"Task context:\n{step.inputs.get('task_text', '(no context)')}\n\n"
         f"{vault_section}"
         f"{pattern_section}"
-        f"Execute this step and produce output. End with a ## CONTRACT block.\n"
+        f"Execute this step and produce output.\n\n"
+        f"IMPORTANT: You MUST end your output with a ## CONTRACT block "
+        f"containing these exact fields:\n"
+        f"## CONTRACT\n"
+        f"summary: <one-line description of what you did>\n"
+        f"files_changed: <comma-separated list of files modified, or 'none'>\n"
+        f"verification: <how you verified correctness>\n"
+        f"confidence: <high|medium|low>\n"
     )
 
     cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions",
@@ -426,6 +433,59 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
         return "", False, f"Step timed out after {TASK_TIMEOUT}s"
     except Exception as exc:
         return "", False, str(exc)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.12b — Live workflow state persistence for rollout evidence
+# ---------------------------------------------------------------------------
+
+# Map orchestrator summary status → workflow record status
+_ORCHESTRATOR_STATUS_MAP = {
+    "done": "completed",
+    "failed": "failed",
+    "partial": "failed",
+    "rejected": "failed",
+}
+
+
+def _persist_workflow_state(
+    stem: str,
+    status: str,
+    task_class: str = "",
+    stage: str = "",
+    halt_reason: str | None = None,
+) -> Path | None:
+    """Persist a workflow state record for rollout evidence and operational auditing.
+
+    Writes to STATE/workflows/{stem}.json using atomic tmp+rename.
+    The persisted record is compatible with rollout_gate.collect_evidence().
+    """
+    wf_dir = STATE_DIR / "workflows"
+    wf_dir.mkdir(parents=True, exist_ok=True)
+
+    now = time.time()
+    record = {
+        "workflow_id": stem,
+        "status": status,
+        "task_class": task_class,
+        "stage": stage,
+        "execution_path": "orchestrator",
+        "created_at": now,
+        "completed_at": now,
+    }
+    if halt_reason:
+        record["halt_reason"] = halt_reason
+
+    wf_path = wf_dir / f"{stem}.json"
+    tmp_path = wf_path.with_suffix(".json.tmp")
+    try:
+        tmp_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        tmp_path.replace(wf_path)
+        logger.info("WORKFLOW STATE: %s → %s (%s)", stem, status, wf_path.name)
+        return wf_path
+    except OSError as exc:
+        logger.error("WORKFLOW STATE WRITE FAILED: %s — %s", stem, exc)
+        return None
 
 
 def execute_via_orchestrator(
@@ -464,6 +524,8 @@ def execute_via_orchestrator(
         valid, reason = validate_stageB_plan(plan)
         if not valid:
             logger.error("STAGE B PLAN REJECTED: %s — %s", stem, reason)
+            _persist_workflow_state(stem, "rejected", task_class, stage,
+                                   halt_reason=f"plan_validation: {reason}")
             return {
                 "success": False,
                 "output_path": None,
@@ -481,6 +543,8 @@ def execute_via_orchestrator(
         valid, reason = validate_stageC_plan(plan)
         if not valid:
             logger.error("STAGE C PLAN REJECTED: %s — %s", stem, reason)
+            _persist_workflow_state(stem, "rejected", task_class, stage,
+                                   halt_reason=f"plan_validation: {reason}")
             return {
                 "success": False,
                 "output_path": None,
@@ -526,7 +590,7 @@ def execute_via_orchestrator(
             summary["verifier_rejected"] = True
         else:
             last_verify = verify_steps[-1]
-            if last_verify.get("status") != "done":
+            if last_verify.get("status") not in ("done", "success"):
                 logger.warning(
                     "STAGE C VERIFIER REJECTED: %s — verification step status=%s",
                     stem, last_verify.get("status"),
@@ -535,6 +599,16 @@ def execute_via_orchestrator(
                 summary["verifier_rejected"] = True
             else:
                 logger.info("STAGE C VERIFIER APPROVED: %s", stem)
+
+    # Phase 7.12b: persist workflow state for rollout evidence
+    orch_status = summary.get("status", "failed")
+    wf_status = _ORCHESTRATOR_STATUS_MAP.get(orch_status, "failed")
+    wf_halt = None
+    if summary.get("verifier_rejected"):
+        wf_halt = "verifier_rejected"
+    elif orch_status == "failed" and summary.get("error"):
+        wf_halt = summary["error"][:200]
+    _persist_workflow_state(stem, wf_status, task_class, stage, halt_reason=wf_halt)
 
     # Write output report
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")

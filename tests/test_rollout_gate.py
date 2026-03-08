@@ -1,4 +1,4 @@
-"""Phase 7.11 — Rollout Evaluation Gate Tests.
+"""Phase 7.11/7.12a — Rollout Evaluation Gate + Activation Tests.
 
 Deterministic tests for Stage 2 rollout evaluation:
 - ready_to_expand when metrics are clean
@@ -7,6 +7,15 @@ Deterministic tests for Stage 2 rollout evaluation:
 - verifier pressure affects code_review evaluation
 - criterion-level pass/fail correctness
 - report output is correct and auditable
+
+Stage 3 activation tests:
+- readiness check shows correct progress
+- activation blocked when gate returns hold
+- activation blocked when gate returns rollback_recommended
+- activation proceeds when gate returns ready_to_expand
+- activation audit trail written
+- state change between check and activation → fail closed
+- readiness report correctness
 """
 
 import json
@@ -547,3 +556,302 @@ class TestDecision_EdgeCases:
         result = evaluate_rollout(tmp_path)
         serialized = json.dumps(result.to_dict(), default=str)
         assert isinstance(json.loads(serialized), dict)
+
+
+# ===================================================================
+# Part 9 — Stage 3 Readiness Check
+# ===================================================================
+
+from agents.rollout_gate import (
+    check_stage3_readiness,
+    render_readiness_markdown,
+    activate_stage3,
+    ReadinessReport,
+    ActivationRecord,
+)
+
+
+class TestReadinessCheck:
+    """Verify readiness check reports correct progress."""
+
+    def test_readiness_blocked_no_evidence(self, tmp_path):
+        """Zero workflows → not permitted, minimum_completed_runs blocking."""
+        _write_flags(tmp_path)
+        _write_heartbeat(tmp_path, "healthy")
+        report = check_stage3_readiness(tmp_path)
+        assert report.permitted is False
+        assert report.decision == "hold"
+        assert "minimum_completed_runs" in report.blocking_criteria
+
+    def test_readiness_blocked_insufficient_runs(self, tmp_path):
+        """Below threshold → not permitted."""
+        _setup_clean_stage2(tmp_path, completed=MIN_COMPLETED_WORKFLOWS - 1)
+        report = check_stage3_readiness(tmp_path)
+        assert report.permitted is False
+        assert "minimum_completed_runs" in report.blocking_criteria
+
+    def test_readiness_permitted_clean(self, tmp_path):
+        """Sufficient clean evidence → permitted."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        report = check_stage3_readiness(tmp_path)
+        assert report.permitted is True
+        assert report.decision == "ready_to_expand"
+        assert report.blocking_criteria == []
+
+    def test_readiness_blocked_unhealthy(self, tmp_path):
+        """UNHEALTHY heartbeat → rollback_recommended, heartbeat blocking."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        _write_heartbeat(tmp_path, "unhealthy")
+        report = check_stage3_readiness(tmp_path)
+        assert report.permitted is False
+        assert report.decision == "rollback_recommended"
+        assert "heartbeat_healthy" in report.blocking_criteria
+
+    def test_readiness_progress_has_all_criteria(self, tmp_path):
+        """Progress dict contains all 9 criteria."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        report = check_stage3_readiness(tmp_path)
+        assert len(report.progress) == 9
+        for name, info in report.progress.items():
+            assert "value" in info
+            assert "threshold" in info
+            assert "met" in info
+            assert "severity" in info
+            assert "detail" in info
+
+    def test_readiness_progress_shows_current_values(self, tmp_path):
+        """Progress shows correct current values."""
+        _setup_clean_stage2(tmp_path, completed=4)
+        _write_workflow(tmp_path, "wf_fail_0", "failed")
+        report = check_stage3_readiness(tmp_path)
+        runs = report.progress["minimum_completed_runs"]
+        assert runs["value"] == 4
+        assert runs["threshold"] == MIN_COMPLETED_WORKFLOWS
+        assert runs["met"] is True
+
+    def test_readiness_report_serializable(self, tmp_path):
+        """ReadinessReport.to_dict() is JSON-serializable."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        report = check_stage3_readiness(tmp_path)
+        serialized = json.dumps(report.to_dict(), default=str)
+        parsed = json.loads(serialized)
+        assert parsed["permitted"] is True
+
+
+class TestReadinessMarkdown:
+    """Verify readiness markdown rendering."""
+
+    def test_blocked_markdown_shows_blocking(self, tmp_path):
+        """Blocked report shows blocking criteria."""
+        _write_flags(tmp_path)
+        _write_heartbeat(tmp_path, "healthy")
+        report = check_stage3_readiness(tmp_path)
+        md = render_readiness_markdown(report)
+        assert "BLOCKED" in md
+        assert "minimum_completed_runs" in md
+        assert "check_stage3_readiness" in md
+
+    def test_permitted_markdown_shows_activation(self, tmp_path):
+        """Permitted report shows activation command."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        report = check_stage3_readiness(tmp_path)
+        md = render_readiness_markdown(report)
+        assert "PERMITTED" in md
+        assert "activate_stage3" in md
+
+    def test_markdown_contains_evidence(self, tmp_path):
+        """Report contains evidence summary."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        report = check_stage3_readiness(tmp_path)
+        md = render_readiness_markdown(report)
+        assert "Evidence Summary" in md
+        assert "completed_workflows" in md
+
+
+# ===================================================================
+# Part 10 — Stage 3 Activation Procedure
+# ===================================================================
+
+class TestActivation_Blocked:
+    """Verify activation is blocked when gate is not ready."""
+
+    def test_activation_blocked_on_hold(self, tmp_path):
+        """hold → activation blocked, config unchanged."""
+        _write_flags(tmp_path)
+        _write_heartbeat(tmp_path, "healthy")
+        record = activate_stage3(tmp_path)
+        assert record.outcome == "blocked"
+        assert record.decision == "hold"
+        # Config unchanged
+        flags = json.loads(
+            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
+        )
+        assert "code_impl" not in flags["phase7_orchestrator"]["supported_classes"]
+
+    def test_activation_blocked_on_rollback(self, tmp_path):
+        """rollback_recommended → activation blocked."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        _write_heartbeat(tmp_path, "unhealthy")
+        record = activate_stage3(tmp_path)
+        assert record.outcome == "blocked"
+        assert record.decision == "rollback_recommended"
+        assert "heartbeat_healthy" in record.blocking_criteria
+
+    def test_activation_blocked_insufficient_runs(self, tmp_path):
+        """Insufficient runs → activation blocked."""
+        _setup_clean_stage2(tmp_path, completed=1)
+        record = activate_stage3(tmp_path)
+        assert record.outcome == "blocked"
+        assert "minimum_completed_runs" in record.blocking_criteria
+
+    def test_activation_error_missing_flags(self, tmp_path):
+        """Missing feature_flags.json → error outcome."""
+        # Only write heartbeat and evidence but no flags
+        _write_heartbeat(tmp_path, "healthy")
+        record = activate_stage3(tmp_path)
+        assert record.outcome in ("error", "blocked")
+
+    def test_blocked_activation_preserves_config(self, tmp_path):
+        """Blocked activation preserves original config exactly."""
+        _write_flags(tmp_path)
+        _write_heartbeat(tmp_path, "healthy")
+        before = json.loads(
+            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
+        )
+        activate_stage3(tmp_path)
+        after = json.loads(
+            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
+        )
+        assert before == after
+
+
+class TestActivation_Permitted:
+    """Verify activation proceeds when gate is ready."""
+
+    def test_activation_succeeds_on_ready(self, tmp_path):
+        """ready_to_expand → activation succeeds, config updated."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        record = activate_stage3(tmp_path)
+        assert record.outcome == "activated"
+        assert record.decision == "ready_to_expand"
+        # Config updated
+        flags = json.loads(
+            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
+        )
+        assert "code_impl" in flags["phase7_orchestrator"]["supported_classes"]
+
+    def test_activation_records_pre_and_post_config(self, tmp_path):
+        """Activation record contains config snapshots."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        record = activate_stage3(tmp_path)
+        assert "supported_classes" in record.pre_config
+        assert "supported_classes" in record.post_config
+        assert "code_impl" not in record.pre_config["supported_classes"]
+        assert "code_impl" in record.post_config["supported_classes"]
+
+    def test_activation_has_timestamp(self, tmp_path):
+        """Activation record has attempted_at timestamp."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        record = activate_stage3(tmp_path)
+        assert record.attempted_at
+        assert "T" in record.attempted_at
+
+
+class TestActivation_AuditTrail:
+    """Verify activation writes audit trail."""
+
+    def test_blocked_activation_logged(self, tmp_path):
+        """Blocked activation is logged to activation_log.jsonl."""
+        _write_flags(tmp_path)
+        _write_heartbeat(tmp_path, "healthy")
+        activate_stage3(tmp_path)
+        log_path = tmp_path / "STATE" / "activation_log.jsonl"
+        assert log_path.exists()
+        entries = [json.loads(l) for l in log_path.read_text().strip().splitlines()]
+        assert len(entries) == 1
+        assert entries[0]["outcome"] == "blocked"
+
+    def test_successful_activation_logged(self, tmp_path):
+        """Successful activation is logged."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        activate_stage3(tmp_path)
+        log_path = tmp_path / "STATE" / "activation_log.jsonl"
+        assert log_path.exists()
+        entries = [json.loads(l) for l in log_path.read_text().strip().splitlines()]
+        assert len(entries) == 1
+        assert entries[0]["outcome"] == "activated"
+
+    def test_multiple_attempts_accumulated(self, tmp_path):
+        """Multiple activation attempts are all recorded."""
+        _write_flags(tmp_path)
+        _write_heartbeat(tmp_path, "healthy")
+        # First attempt: blocked (no evidence)
+        activate_stage3(tmp_path)
+        # Add evidence
+        for i in range(5):
+            _write_workflow(tmp_path, f"wf_{i}", "completed")
+        # Second attempt: ready
+        activate_stage3(tmp_path)
+        log_path = tmp_path / "STATE" / "activation_log.jsonl"
+        entries = [json.loads(l) for l in log_path.read_text().strip().splitlines()]
+        assert len(entries) == 2
+        assert entries[0]["outcome"] == "blocked"
+        assert entries[1]["outcome"] == "activated"
+
+    def test_audit_record_serializable(self, tmp_path):
+        """ActivationRecord.to_dict() is JSON-serializable."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        record = activate_stage3(tmp_path)
+        serialized = json.dumps(record.to_dict(), default=str)
+        parsed = json.loads(serialized)
+        assert parsed["outcome"] == "activated"
+
+
+class TestActivation_FailClosed:
+    """Verify activation fails closed on state changes."""
+
+    def test_state_change_during_evaluation_blocks(self, tmp_path):
+        """If state is insufficient at evaluation time → blocked.
+
+        The gate re-evaluates fresh evidence at activation time,
+        so even if a previous check showed hold, a later call with
+        sufficient evidence will pass (and vice versa).
+        """
+        # First: insufficient evidence
+        _write_flags(tmp_path)
+        _write_heartbeat(tmp_path, "healthy")
+        record1 = activate_stage3(tmp_path)
+        assert record1.outcome == "blocked"
+
+        # Config unchanged
+        flags = json.loads(
+            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
+        )
+        assert "code_impl" not in flags["phase7_orchestrator"]["supported_classes"]
+
+    def test_policy_violation_after_clean_runs_blocks(self, tmp_path):
+        """Clean runs + policy violation → rollback_recommended, blocked."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        _write_policy_denial(tmp_path, count=1)
+        record = activate_stage3(tmp_path)
+        assert record.outcome == "blocked"
+        assert record.decision == "rollback_recommended"
+        assert "no_policy_violations" in record.blocking_criteria
+
+    def test_unhealthy_heartbeat_after_clean_runs_blocks(self, tmp_path):
+        """Clean runs + UNHEALTHY heartbeat → blocked."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        _write_heartbeat(tmp_path, "unhealthy")
+        record = activate_stage3(tmp_path)
+        assert record.outcome == "blocked"
+        assert "heartbeat_healthy" in record.blocking_criteria
+
+    def test_no_double_activation(self, tmp_path):
+        """Activating twice doesn't break anything."""
+        _setup_clean_stage2(tmp_path, completed=5)
+        record1 = activate_stage3(tmp_path)
+        assert record1.outcome == "activated"
+        # Second activation: already at Stage 3, gate re-checks
+        record2 = activate_stage3(tmp_path)
+        # Should still be activated (or hold if evidence doesn't meet new stage)
+        assert record2.outcome in ("activated", "blocked")

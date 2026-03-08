@@ -1,8 +1,14 @@
-"""Phase 7.11 — Rollout Evaluation Gate.
+"""Phase 7.11/7.12a — Rollout Evaluation Gate and Stage 3 Activation.
 
 Deterministic, repository-native evaluation of Stage 2 rollout readiness.
 Reads existing heartbeat, metrics, and workflow state to classify rollout
 status as ready_to_expand, hold, or rollback_recommended.
+
+Includes:
+  - Evidence collection and criterion evaluation
+  - Readiness check with progress toward thresholds
+  - Evaluation-gated Stage 3 activation with audit trail
+  - Fail-closed activation procedure
 
 All criteria are threshold-based and auditable.
 No LLM judgments — pure metric evaluation.
@@ -600,3 +606,347 @@ def write_evaluation_report(
     json_path.write_text(render_evaluation_json(evaluation))
 
     return md_path, json_path
+
+
+# ---------------------------------------------------------------------------
+# Stage 3 expansion — evaluation-gated code_impl enablement
+# ---------------------------------------------------------------------------
+
+# Stage 3 target configuration
+STAGE3_CLASSES = ["research", "code_review", "code_impl"]
+STAGE3_ROLLOUT_STAGE = "stage3_research_code_review_code_impl"
+STAGE3_ALLOWED_ROLES = ["research", "coding"]
+
+
+@dataclass
+class ExpansionResult:
+    """Outcome of an evaluation-gated Stage 3 expansion attempt."""
+    expanded: bool
+    decision: str          # "ready_to_expand" | "hold" | "rollback_recommended"
+    reason: str
+    evaluation: RolloutEvaluation | None = None
+    config_path: Path | None = None
+
+    def to_dict(self) -> dict:
+        d = {
+            "expanded": self.expanded,
+            "decision": self.decision,
+            "reason": self.reason,
+        }
+        if self.config_path:
+            d["config_path"] = str(self.config_path)
+        if self.evaluation:
+            d["evaluation"] = self.evaluation.to_dict()
+        return d
+
+
+def expand_to_stage3(base: Path | None = None) -> ExpansionResult:
+    """Attempt evaluation-gated expansion to Stage 3 (add code_impl).
+
+    Runs the rollout evaluation gate. Only updates feature_flags.json
+    if the decision is ready_to_expand. Otherwise preserves current
+    config and returns the blocking reason.
+
+    Returns ExpansionResult with details of the attempt.
+    """
+    root = base or BASE
+    flags_path = root / "STATE" / "config" / "feature_flags.json"
+
+    # Run evaluation gate
+    evaluation = evaluate_rollout(root)
+
+    if evaluation.decision != "ready_to_expand":
+        return ExpansionResult(
+            expanded=False,
+            decision=evaluation.decision,
+            reason=evaluation.next_action,
+            evaluation=evaluation,
+        )
+
+    # Gate approved — update feature flags
+    try:
+        flags_data = json.loads(flags_path.read_text())
+    except (json.JSONDecodeError, OSError, FileNotFoundError):
+        return ExpansionResult(
+            expanded=False,
+            decision=evaluation.decision,
+            reason="cannot_read_feature_flags",
+            evaluation=evaluation,
+        )
+
+    orch = flags_data.get("phase7_orchestrator", {})
+    orch["supported_classes"] = list(STAGE3_CLASSES)
+    orch["rollout_stage"] = STAGE3_ROLLOUT_STAGE
+    orch["allowed_roles"] = list(STAGE3_ALLOWED_ROLES)
+    orch["verifier_required"] = True  # mandatory for mutation-capable class
+    orch["stage_description"] = (
+        "Stage 3 rollout — research + code_review + code_impl. "
+        "code_impl is the first mutation-capable class. "
+        "Verifier gate mandatory. Maker-checker enforced. "
+        "system blocked until Stage D."
+    )
+    flags_data["phase7_orchestrator"] = orch
+    flags_data["version"] = flags_data.get("version", 0) + 1
+    flags_data["updated_at"] = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    # Atomic write
+    flags_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = flags_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(flags_data, indent=2))
+    tmp.rename(flags_path)
+
+    return ExpansionResult(
+        expanded=True,
+        decision="ready_to_expand",
+        reason="Stage 3 expansion applied — code_impl added to supported_classes",
+        evaluation=evaluation,
+        config_path=flags_path,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage 3 readiness check — operator-facing progress report
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ReadinessReport:
+    """Operator-facing report of Stage 3 readiness progress."""
+    permitted: bool
+    decision: str
+    blocking_criteria: list[str]
+    progress: dict          # criterion_name -> {value, threshold, met, detail}
+    evidence_summary: dict
+    rollout_stage: str
+    generated_at: str = ""
+
+    def __post_init__(self):
+        if not self.generated_at:
+            self.generated_at = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+    def to_dict(self) -> dict:
+        return {
+            "permitted": self.permitted,
+            "decision": self.decision,
+            "blocking_criteria": self.blocking_criteria,
+            "progress": self.progress,
+            "evidence_summary": self.evidence_summary,
+            "rollout_stage": self.rollout_stage,
+            "generated_at": self.generated_at,
+        }
+
+
+def check_stage3_readiness(base: Path | None = None) -> ReadinessReport:
+    """Check current progress toward Stage 3 readiness.
+
+    Evaluates all rollout criteria and reports:
+    - Whether activation is currently permitted or blocked
+    - Which criteria are blocking
+    - Current value vs threshold for each criterion
+    - Evidence summary
+
+    This is a read-only check — it does not modify any state.
+    """
+    root = base or BASE
+    evaluation = evaluate_rollout(root)
+
+    progress: dict = {}
+    blocking: list[str] = []
+
+    for c in evaluation.criteria:
+        progress[c.name] = {
+            "value": c.value,
+            "threshold": c.threshold,
+            "met": c.passed,
+            "severity": c.severity,
+            "detail": c.detail,
+        }
+        if not c.passed:
+            blocking.append(c.name)
+
+    return ReadinessReport(
+        permitted=evaluation.decision == "ready_to_expand",
+        decision=evaluation.decision,
+        blocking_criteria=blocking,
+        progress=progress,
+        evidence_summary=evaluation.evidence_summary,
+        rollout_stage=evaluation.rollout_stage,
+    )
+
+
+def render_readiness_markdown(report: ReadinessReport) -> str:
+    """Render readiness report as operator-facing markdown."""
+    status = "PERMITTED" if report.permitted else "BLOCKED"
+    lines = [
+        "# Stage 3 Activation Readiness",
+        f"Generated: {report.generated_at}",
+        "",
+        f"## Status: {status}",
+        f"**Decision**: {report.decision}",
+        f"**Rollout stage**: {report.rollout_stage}",
+        "",
+    ]
+
+    if report.blocking_criteria:
+        lines.append("### Blocking Criteria")
+        for name in report.blocking_criteria:
+            p = report.progress[name]
+            lines.append(f"- **{name}** ({p['severity']}): {p['detail']}")
+        lines.append("")
+
+    lines.append("### All Criteria Progress")
+    lines.append("")
+    lines.append("| Criterion | Status | Value | Threshold | Severity |")
+    lines.append("|-----------|--------|-------|-----------|----------|")
+
+    for name, p in report.progress.items():
+        icon = "PASS" if p["met"] else "FAIL"
+        val = p["value"] if p["value"] is not None else "N/A"
+        lines.append(
+            f"| {name} | {icon} | {val} | {p['threshold']} | {p['severity']} |"
+        )
+
+    lines.append("")
+    lines.append("### Evidence Summary")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    for k, v in report.evidence_summary.items():
+        display = (f"{v:.1%}" if isinstance(v, float)
+                   else str(v) if v is not None else "N/A")
+        lines.append(f"| {k} | {display} |")
+    lines.append("")
+
+    if report.permitted:
+        lines.append("### Activation")
+        lines.append("")
+        lines.append("Stage 3 activation is permitted. Run:")
+        lines.append("```python")
+        lines.append("from agents.rollout_gate import activate_stage3")
+        lines.append("result = activate_stage3()")
+        lines.append("```")
+    else:
+        lines.append("### Next Steps")
+        lines.append("")
+        lines.append("Accumulate more clean Stage 2 evidence, then re-check.")
+        lines.append("```python")
+        lines.append("from agents.rollout_gate import check_stage3_readiness")
+        lines.append("report = check_stage3_readiness()")
+        lines.append("```")
+
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Stage 3 activation procedure — auditable, fail-closed
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ActivationRecord:
+    """Audit record of a Stage 3 activation attempt."""
+    attempted_at: str
+    outcome: str           # "activated" | "blocked" | "error"
+    decision: str          # gate decision at time of activation
+    reason: str
+    pre_config: dict       # config snapshot before attempt
+    post_config: dict      # config snapshot after attempt (same if blocked)
+    blocking_criteria: list[str]
+
+    def to_dict(self) -> dict:
+        return {
+            "attempted_at": self.attempted_at,
+            "outcome": self.outcome,
+            "decision": self.decision,
+            "reason": self.reason,
+            "pre_config": self.pre_config,
+            "post_config": self.post_config,
+            "blocking_criteria": self.blocking_criteria,
+        }
+
+
+def activate_stage3(base: Path | None = None) -> ActivationRecord:
+    """Safe, auditable Stage 3 activation procedure.
+
+    1. Snapshots current config
+    2. Re-runs rollout evaluation gate (fresh evidence)
+    3. Only activates if gate returns ready_to_expand
+    4. Writes activation audit record to STATE/activation_log.jsonl
+    5. Returns ActivationRecord with full details
+
+    Fail-closed: any gate failure, config error, or non-ready decision
+    blocks activation and preserves current state.
+    """
+    root = base or BASE
+    flags_path = root / "STATE" / "config" / "feature_flags.json"
+    log_path = root / "STATE" / "activation_log.jsonl"
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # 1. Snapshot pre-activation config
+    pre_config: dict = {}
+    try:
+        pre_config = json.loads(flags_path.read_text())
+    except (json.JSONDecodeError, OSError, FileNotFoundError):
+        record = ActivationRecord(
+            attempted_at=now_iso,
+            outcome="error",
+            decision="unknown",
+            reason="cannot_read_feature_flags",
+            pre_config={},
+            post_config={},
+            blocking_criteria=[],
+        )
+        _append_activation_log(log_path, record)
+        return record
+
+    # 2. Run expansion (includes fresh gate evaluation)
+    expansion = expand_to_stage3(root)
+
+    # 3. Build activation record
+    blocking = []
+    if expansion.evaluation:
+        blocking = [
+            c.name for c in expansion.evaluation.criteria if not c.passed
+        ]
+
+    if expansion.expanded:
+        # Read post-activation config
+        try:
+            post_config = json.loads(flags_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            post_config = pre_config
+
+        record = ActivationRecord(
+            attempted_at=now_iso,
+            outcome="activated",
+            decision=expansion.decision,
+            reason=expansion.reason,
+            pre_config=pre_config.get("phase7_orchestrator", {}),
+            post_config=post_config.get("phase7_orchestrator", {}),
+            blocking_criteria=[],
+        )
+    else:
+        record = ActivationRecord(
+            attempted_at=now_iso,
+            outcome="blocked",
+            decision=expansion.decision,
+            reason=expansion.reason,
+            pre_config=pre_config.get("phase7_orchestrator", {}),
+            post_config=pre_config.get("phase7_orchestrator", {}),
+            blocking_criteria=blocking,
+        )
+
+    # 4. Write audit log
+    _append_activation_log(log_path, record)
+
+    return record
+
+
+def _append_activation_log(log_path: Path, record: ActivationRecord) -> None:
+    """Append activation record to STATE/activation_log.jsonl."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a") as f:
+        f.write(json.dumps(record.to_dict(), default=str) + "\n")

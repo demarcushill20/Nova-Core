@@ -36,9 +36,11 @@ TASK_CLASSES: dict[str, list[str]] = {
         r"\bsummariz\w+\b", r"\breview\s+(?:paper|article|doc)",
         r"\bfind\s+(?:out|information)\b", r"\bliterature\b",
         r"\bweb\s*search\b", r"\blook\s*up\b",
+        r"\bexplain\b",   # "explain how X works"
+        r"\bdescribe\b",  # "describe the architecture"
     ],
     "code_impl": [
-        r"\bimplement\w*\b", r"\bcreate\s+(?:a\s+)?(?:function|class|module|script|file)\b",
+        r"\bimplement(?:s|ing|ed)?\b", r"\bcreate\s+(?:a\s+)?(?:function|class|module|script|file)\b",
         r"\bbuild\b", r"\badd\s+(?:a\s+)?(?:feature|endpoint|handler|method)\b",
         r"\bfix\s+(?:the\s+)?(?:bug|error|issue|crash)\b",
         r"\brefactor\b", r"\brewrite\b", r"\boptimize\b",
@@ -47,16 +49,19 @@ TASK_CLASSES: dict[str, list[str]] = {
     ],
     "code_review": [
         r"\breview\s+(?:code|pr|pull|changes|diff)\b",
+        r"\breview\s+\S*[/\\.]\S+",  # review a file path: "review agents/rollout_gate.py"
         r"\baudit\b", r"\bcode\s+quality\b",
         r"\blint\b", r"\bstatic\s+analysis\b",
         r"\bsecurity\s+(?:review|scan|check)\b",
         r"\bmaker[\s-]*checker\b",
+        r"\binspect\b",  # "inspect the watcher for issues"
+        r"\bcheck\s+(?:for\s+)?(?:bugs?|issues?|problems?|errors?|edge[\s-]*cases?|quality|safety)\b",
     ],
     "system": [
         r"\bdeploy\b", r"\bconfigure\b", r"\binfrastructure\b",
         r"\bsystemd\b", r"\bservice\b", r"\bcron\b",
         r"\bself[\s-]*improv\w+\b", r"\bbootstrap\b",
-        r"\bphase\s+\d+\b", r"\barchitect\w*\b",
+        r"\bphase\s+\d+\b", r"\barchitect\b",
         r"\bpipeline\b", r"\bci[/\s]*cd\b",
         r"\bpromote\b", r"\brollout\b", r"\bfeature[\s-]*flag\b",
     ],
@@ -88,7 +93,7 @@ DIRECT_CLASSES = {"simple", "unknown"}
 # must NOT enter the read-only research multi-agent path — even if the
 # keyword classifier scored it as "research".
 _MUTATION_SIGNALS: list[str] = [
-    r"\bimplement\b", r"\bcreate\s+(?:a\s+)?(?:function|class|module|script|file)\b",
+    r"\bimplement(?:s|ing|ed)?\b", r"\bcreate\s+(?:a\s+)?(?:function|class|module|script|file)\b",
     r"\bwrite\s+(?:code|file|script)\b", r"\bmodify\b", r"\bchange\b",
     r"\bpatch\b", r"\bcommit\b", r"\bgit\s+push\b",
     r"\brefactor\b", r"\brewrite\b", r"\bfix\s+(?:the\s+)?(?:bug|error|issue|crash)\b",
@@ -166,9 +171,11 @@ def classify_task(task_text: str) -> tuple[str, float]:
     best_class = max(scores, key=scores.get)
     best_score = scores[best_class]
 
-    # Confidence: normalize by pattern count for that class
-    max_possible = len(_COMPILED[best_class])
-    confidence = min(1.0, best_score / max(max_possible * 0.3, 1))
+    # Confidence: 1 match = 0.5, 2 matches = 1.0
+    # Fixed denominator ensures single clear keyword matches clear the
+    # min_confidence threshold (0.5). Class filtering and denylists
+    # remain the primary safety gates for routing decisions.
+    confidence = min(1.0, best_score / 2.0)
 
     return best_class, round(confidence, 2)
 

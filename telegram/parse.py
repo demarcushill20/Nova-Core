@@ -71,12 +71,18 @@ def normalize_command(text: str) -> tuple[str, str]:
 
 def _parse_run(rest: str, chat_id: str, ts: float) -> dict:
     lines = rest.split("\n", 1)
-    title = lines[0].strip() if lines else ""
-    if not title:
+    first_line = lines[0].strip() if lines else ""
+    if not first_line:
         return _err("Error: /run requires a title. Usage: /run <title>")
-    if len(title) > _MAX_TITLE_LEN:
-        return _err(f"Error: title too long (max {_MAX_TITLE_LEN} chars)")
     body = lines[1] if len(lines) > 1 else ""
+    # If the first line exceeds the title limit, truncate it for the
+    # filename and push the full original text into the body so the
+    # classifier and worker still see everything.
+    if len(first_line) > _MAX_TITLE_LEN:
+        title = first_line[:_MAX_TITLE_LEN]
+        body = first_line + ("\n" + body if body else "")
+    else:
+        title = first_line
     action = _base("run_task", chat_id, ts)
     action["title"] = title
     action["body"] = body
