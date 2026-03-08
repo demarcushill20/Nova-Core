@@ -220,6 +220,7 @@ class GracefulDegradation:
         """Check if orchestrator is available for this task class.
 
         Returns degrade action with fallback to single-agent when disabled.
+        Includes rollout health gating — degrades on UNHEALTHY heartbeat.
         """
         ff = FeatureFlags(self.base)
 
@@ -237,7 +238,47 @@ class GracefulDegradation:
                 fallback="single_agent_worker",
             )
 
+        # Rollout health gate — degrade if last heartbeat was UNHEALTHY
+        health = self.check_rollout_health()
+        if health.action != "proceed":
+            return health
+
         return DegradationResult(action="proceed", reason="orchestrator_available")
+
+    def check_rollout_health(self) -> DegradationResult:
+        """Check if rollout health allows multi-agent routing.
+
+        Reads STATE/heartbeat_multiagent.json for the overall health status.
+        If UNHEALTHY → degrade to single-agent path.
+        If file is missing or unreadable → proceed (first-run tolerance).
+        """
+        hb_path = self.base / "STATE" / "heartbeat_multiagent.json"
+        if not hb_path.exists():
+            return DegradationResult(
+                action="proceed",
+                reason="no_heartbeat_data",
+            )
+
+        try:
+            data = json.loads(hb_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return DegradationResult(
+                action="proceed",
+                reason="heartbeat_unreadable",
+            )
+
+        overall = data.get("overall", "")
+        if overall == "unhealthy":
+            return DegradationResult(
+                action="degrade",
+                reason="heartbeat_unhealthy",
+                fallback="single_agent_worker",
+            )
+
+        return DegradationResult(
+            action="proceed",
+            reason=f"heartbeat_{overall or 'unknown'}",
+        )
 
     def check_spawn_feasibility(self) -> DegradationResult:
         """Check if spawning a child agent is feasible (rate limit check).

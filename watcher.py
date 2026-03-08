@@ -570,6 +570,20 @@ def dispatch(task_path: Path):
     )
 
     if routing["use_orchestrator"]:
+        # Rollout pre-flight: health + rate-limit gating
+        from agents.production_hardening import GracefulDegradation
+        gd = GracefulDegradation()
+        preflight = gd.check_orchestrator_available(routing["task_class"])
+        if preflight.action != "proceed":
+            logger.info(
+                "ROLLOUT GATE: %s → %s (reason=%s, fallback=%s)",
+                stem, preflight.action, preflight.reason,
+                preflight.fallback or "worker",
+            )
+            routing["use_orchestrator"] = False
+            routing["fallback_reason"] = f"rollout_gate:{preflight.reason}"
+
+    if routing["use_orchestrator"]:
         logger.info("ORCHESTRATOR PATH: %s (class=%s, stage=%s)", stem, routing["task_class"], stage or "default")
         try:
             from tools.orchestrator_adapter import execute_via_orchestrator
