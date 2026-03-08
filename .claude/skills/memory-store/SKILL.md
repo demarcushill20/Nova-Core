@@ -6,6 +6,8 @@ allowed-tools:
   - mcp__nova-memory__upsert_memory
   - mcp__nova-memory__bulk_upsert_memory
   - mcp__nova-memory__check_health
+  # Obsidian enrichment (optional, best-effort)
+  - mcp__nova-vault__vault_search
 tool_doctrine:
   memory_writes:
     workflow:
@@ -13,6 +15,7 @@ tool_doctrine:
       - structured_metadata_always
       - one_concept_per_item
       - never_store_secrets
+      - enrich_from_vault_best_effort
 output_contract:
   required:
     - summary
@@ -91,6 +94,40 @@ Args: {
 
 System auto-injects: `event_seq`, `event_time`. Do not set these manually.
 
+### Step 3.5 — Enrich from Obsidian (Best-Effort)
+
+Before storing, optionally search the Obsidian vault for related knowledge
+to cross-reference. This enriches the metadata with vault links, improving
+future retrieval and traceability.
+
+**When to enrich**: Items with `memory_type` of `decision`, `pattern`, or
+`research`. Skip enrichment for `scratch` and `context` types.
+
+**How**:
+1. Extract 2-3 key terms from the content
+2. Call `vault_search(key_terms)` — single call, max 5 results
+3. If matches found in relevant folders, add to metadata:
+   ```json
+   {
+     "vault_refs": ["10-adrs/adr-005-embedding-model.md"],
+     "related_patterns": ["ap-mcp-stdio-logging-order"]
+   }
+   ```
+4. Inherit tags from matching vault notes:
+   - Inherit `#phase/*` tags from matching ADRs
+   - Inherit `#agent/*` tags from matching agent-patterns
+   - **Never** inherit `#status/*` tags (Obsidian-specific lifecycle)
+
+**Rules**:
+- **Best-effort only**: If vault_search fails or returns nothing, proceed
+  without enrichment. Never block a Fusion Memory write on Obsidian.
+- **Max 1 vault_search per store invocation**. Do not search per-item in
+  bulk operations — search once with the most distinctive terms.
+- **Never add vault_refs for weak matches**. Only link when the vault note
+  is clearly about the same concept (same project, same topic).
+- **Bulk stores skip enrichment** unless all items share the same topic
+  and a single search covers them all.
+
 ### Step 4 — Bulk Store When Appropriate
 
 For 3+ related items, use `bulk_upsert_memory` to batch allocate consecutive event_seq numbers:
@@ -141,6 +178,8 @@ memory_types: [decision, research, ...]
 project: <project scope>
 items_attempted: <N>
 items_succeeded: <N>
+enrichment: <enriched | skipped | vault_unavailable>
+vault_refs_added: <N or 0>
 verification: <confirmed via upsert response status>
 confidence: <high | medium | low>
 ```
