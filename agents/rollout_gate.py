@@ -1,4 +1,4 @@
-"""Phase 7.11–7.18 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation, and Stage D Monitoring.
+"""Phase 7.11–7.19 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation, Stage D Monitoring, and Extended Monitoring.
 
 Deterministic, repository-native evaluation of rollout readiness and stability.
 Reads existing heartbeat, metrics, and workflow state to classify rollout
@@ -15,6 +15,7 @@ Includes:
   - Phase 7.16: Stage 4 activation gate (system_inspect readiness)
   - Phase 7.17: Controlled Stage 4 activation (system_inspect live)
   - Phase 7.18: Stage D monitoring and stability review
+  - Phase 7.19: Extended Stage D monitoring window
 
 All criteria are threshold-based and auditable.
 No LLM judgments — pure metric evaluation.
@@ -140,6 +141,44 @@ STAGED_MAX_UNRESOLVED_CONTRACTS = 3
 
 # Heartbeat requirement (must be exactly "healthy", not just "not unhealthy")
 STAGED_HEARTBEAT_REQUIRED = "healthy"
+
+
+# --- Phase 7.19: Extended Stage D monitoring window thresholds ---
+# Tighter thresholds and longer observation horizon than Phase 7.18.
+# Validates sustained Stage D safety before any future scope expansion.
+
+# Minimum elapsed time since Stage D activation (seconds) — 4 hours
+EXTENDED_MIN_ELAPSED_SECONDS = 4 * 3600
+
+# Minimum system_inspect completed workflows for sustained opinion
+EXTENDED_MIN_SYSTEM_INSPECT_RUNS = 10
+
+# Maximum system_inspect failure rate (tighter than initial)
+EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE = 0.10
+
+# Maximum overall failure rate under extended window
+EXTENDED_MAX_FAILURE_RATE = 0.15
+
+# Maximum verifier rejection rate for system_inspect tasks
+EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE = 0.10
+
+# Hard ceiling on policy violations (zero tolerance — unchanged)
+EXTENDED_MAX_POLICY_VIOLATIONS = 0
+
+# Hard ceiling on budget exhaustions (zero tolerance — unchanged)
+EXTENDED_MAX_BUDGET_EXHAUSTIONS = 0
+
+# Maximum recovery anomalies (zero tolerance — unchanged)
+EXTENDED_MAX_RECOVERY_ANOMALIES = 0
+
+# Maximum blocked mutation attempts (tighter — by now classifier should be clean)
+EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS = 3
+
+# Maximum contract failure rate for system_inspect (new)
+EXTENDED_MAX_CONTRACT_FAILURE_RATE = 0.10
+
+# Heartbeat requirement (unchanged — strict healthy)
+EXTENDED_HEARTBEAT_REQUIRED = "healthy"
 
 
 # ---------------------------------------------------------------------------
@@ -4114,6 +4153,805 @@ def write_stageD_stability_review(
 
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text(render_stageD_stability_markdown(review))
+
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(review.to_dict(), indent=2, default=str) + "\n"
+    )
+
+    return md_path, json_path
+
+
+# ============================================================================
+# Phase 7.19 — Extended Stage D Monitoring Window
+# ============================================================================
+
+
+@dataclass
+class StageDExtendedMonitoring:
+    """Deterministic extended monitoring review for sustained Stage D safety.
+
+    Evaluates whether system_inspect has remained stably safe over a longer
+    observation window with tighter thresholds than the initial Phase 7.18
+    stability review.
+    """
+    decision: str          # "stageD_sustained_stable" | "stageD_continue_monitoring" | "rollback_system_inspect_recommended"
+    rollout_stage: str
+    enabled_classes: list[str] = field(default_factory=list)
+    criteria: list[RolloutCriterion] = field(default_factory=list)
+    system_inspect_metrics: dict = field(default_factory=dict)
+    evidence_summary: dict = field(default_factory=dict)
+    generated_at: str = ""
+    next_action: str = ""
+    activation_record: dict = field(default_factory=dict)
+    observation_window: dict = field(default_factory=dict)
+    scope_integrity: dict = field(default_factory=dict)
+    monitoring_progress: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.generated_at:
+            self.generated_at = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+    def to_dict(self) -> dict:
+        return {
+            "decision": self.decision,
+            "rollout_stage": self.rollout_stage,
+            "enabled_classes": self.enabled_classes,
+            "criteria": [c.to_dict() for c in self.criteria],
+            "system_inspect_metrics": self.system_inspect_metrics,
+            "evidence_summary": self.evidence_summary,
+            "generated_at": self.generated_at,
+            "next_action": self.next_action,
+            "activation_record": self.activation_record,
+            "observation_window": self.observation_window,
+            "scope_integrity": self.scope_integrity,
+            "monitoring_progress": self.monitoring_progress,
+        }
+
+
+def _compute_elapsed_seconds(activation_ts: str, now_ts: str) -> float:
+    """Compute seconds elapsed between two ISO timestamps.
+
+    Returns 0.0 if either timestamp is empty or unparseable.
+    """
+    if not activation_ts or not now_ts:
+        return 0.0
+    try:
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        t_start = datetime.strptime(activation_ts, fmt).replace(
+            tzinfo=timezone.utc
+        )
+        t_end = datetime.strptime(now_ts, fmt).replace(tzinfo=timezone.utc)
+        delta = (t_end - t_start).total_seconds()
+        return max(0.0, delta)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _compute_contract_failure_rate(workflows: list[dict]) -> float | None:
+    """Compute contract failure rate for system_inspect workflows.
+
+    Returns None if no system workflows have contract data.
+    """
+    sys_workflows = [
+        w for w in workflows if w.get("task_class") == "system"
+    ]
+    if not sys_workflows:
+        return None
+    total_with_contract = 0
+    contract_failures = 0
+    for w in sys_workflows:
+        steps = w.get("steps", [])
+        for s in steps:
+            contract = s.get("contract_status", s.get("contract"))
+            if contract is not None:
+                total_with_contract += 1
+                if contract not in ("valid", True):
+                    contract_failures += 1
+    if total_with_contract == 0:
+        return None
+    return round(contract_failures / total_with_contract, 3)
+
+
+def evaluate_stageD_extended(
+    evidence: dict,
+    system_inspect_metrics: dict,
+    post_activation_recoveries: int,
+    blocked_mutation_attempts: int,
+    scope_integrity: dict,
+    elapsed_seconds: float,
+    contract_failure_rate: float | None,
+) -> list[RolloutCriterion]:
+    """Evaluate extended Stage D monitoring criteria.
+
+    15 criteria total: 8 hard, 7 soft.
+    Tighter thresholds and longer horizon than Phase 7.18.
+    """
+    criteria: list[RolloutCriterion] = []
+
+    # --- HARD CRITERIA (8) — any failure triggers rollback ---
+
+    # 1. Heartbeat healthy (hard — strict)
+    hb = evidence.get("heartbeat_overall", "")
+    criteria.append(RolloutCriterion(
+        name="heartbeat_healthy",
+        passed=hb == EXTENDED_HEARTBEAT_REQUIRED,
+        value=hb or "(no data)",
+        threshold=EXTENDED_HEARTBEAT_REQUIRED,
+        detail=(
+            f"Current heartbeat: {hb or '(no data)'}"
+            if hb == EXTENDED_HEARTBEAT_REQUIRED
+            else f"Heartbeat is '{hb or '(no data)'}', required '{EXTENDED_HEARTBEAT_REQUIRED}'"
+        ),
+        severity="hard",
+    ))
+
+    # 2. No policy violations (hard — zero tolerance)
+    violations = evidence.get("policy_violations", 0)
+    criteria.append(RolloutCriterion(
+        name="no_policy_violations",
+        passed=violations <= EXTENDED_MAX_POLICY_VIOLATIONS,
+        value=violations,
+        threshold=EXTENDED_MAX_POLICY_VIOLATIONS,
+        detail=(
+            "No policy violations"
+            if violations == 0
+            else f"{violations} policy violation(s) — review immediately"
+        ),
+        severity="hard",
+    ))
+
+    # 3. No budget exhaustions (hard — zero tolerance)
+    budget = evidence.get("budget_exhaustions", 0)
+    criteria.append(RolloutCriterion(
+        name="no_budget_exhaustions",
+        passed=budget <= EXTENDED_MAX_BUDGET_EXHAUSTIONS,
+        value=budget,
+        threshold=EXTENDED_MAX_BUDGET_EXHAUSTIONS,
+        detail=(
+            "No budget exhaustions"
+            if budget == 0
+            else f"{budget} budget exhaustion(s)"
+        ),
+        severity="hard",
+    ))
+
+    # 4. Overall failure rate (hard — tighter than initial)
+    failure_rate = evidence.get("failure_rate")
+    if failure_rate is not None:
+        criteria.append(RolloutCriterion(
+            name="overall_failure_rate",
+            passed=failure_rate <= EXTENDED_MAX_FAILURE_RATE,
+            value=failure_rate,
+            threshold=EXTENDED_MAX_FAILURE_RATE,
+            detail=f"Overall failure rate {failure_rate:.1%} (max {EXTENDED_MAX_FAILURE_RATE:.0%})",
+            severity="hard",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="overall_failure_rate",
+            passed=True,
+            value=None,
+            threshold=EXTENDED_MAX_FAILURE_RATE,
+            detail="No terminal workflows yet",
+            severity="soft",
+        ))
+
+    # 5. Scope integrity (hard — system_inspect must remain read-only)
+    criteria.append(RolloutCriterion(
+        name="scope_integrity",
+        passed=scope_integrity.get("intact", False),
+        value=scope_integrity.get("reason", "unknown"),
+        threshold="intact",
+        detail=(
+            "Scope integrity verified: system_inspect remains read-only"
+            if scope_integrity.get("intact")
+            else f"Scope integrity violated: {scope_integrity.get('reason', 'unknown')}"
+        ),
+        severity="hard",
+    ))
+
+    # 6. Stage is D (hard)
+    stage = evidence.get("rollout_stage", "unknown")
+    is_stage_d = "stage4" in stage or "system_inspect" in stage
+    criteria.append(RolloutCriterion(
+        name="stage_is_D",
+        passed=is_stage_d,
+        value=stage,
+        threshold="stage4_*",
+        detail=(
+            f"Rollout stage confirmed: {stage}"
+            if is_stage_d
+            else f"Unexpected rollout stage: {stage}"
+        ),
+        severity="hard",
+    ))
+
+    # 7. system class in supported_classes (hard)
+    classes = evidence.get("supported_classes", [])
+    criteria.append(RolloutCriterion(
+        name="system_class_active",
+        passed="system" in classes,
+        value=classes,
+        threshold="system in supported_classes",
+        detail=(
+            f"system class active in: {classes}"
+            if "system" in classes
+            else f"system class not found in: {classes}"
+        ),
+        severity="hard",
+    ))
+
+    # 8. No rollback events during observation window (hard — promoted from soft)
+    criteria.append(RolloutCriterion(
+        name="no_recovery_anomalies",
+        passed=post_activation_recoveries <= EXTENDED_MAX_RECOVERY_ANOMALIES,
+        value=post_activation_recoveries,
+        threshold=EXTENDED_MAX_RECOVERY_ANOMALIES,
+        detail=(
+            f"0 recovery events since activation"
+            if post_activation_recoveries == 0
+            else f"{post_activation_recoveries} recovery event(s) since activation — investigate"
+        ),
+        severity="hard",
+    ))
+
+    # --- SOFT CRITERIA (7) — any failure triggers continue_monitoring ---
+
+    # 9. Minimum elapsed time since activation (soft — insufficient time = continue)
+    elapsed_hours = elapsed_seconds / 3600.0
+    min_hours = EXTENDED_MIN_ELAPSED_SECONDS / 3600.0
+    criteria.append(RolloutCriterion(
+        name="minimum_elapsed_time",
+        passed=elapsed_seconds >= EXTENDED_MIN_ELAPSED_SECONDS,
+        value=round(elapsed_hours, 2),
+        threshold=min_hours,
+        detail=(
+            f"Elapsed {elapsed_hours:.1f}h since activation "
+            f"(need >= {min_hours:.0f}h)"
+        ),
+        severity="soft",
+    ))
+
+    # 10. Minimum system_inspect runs (soft — higher bar than initial)
+    sys_total = system_inspect_metrics.get("total_runs", 0)
+    criteria.append(RolloutCriterion(
+        name="extended_minimum_runs",
+        passed=sys_total >= EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
+        value=sys_total,
+        threshold=EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
+        detail=(
+            f"{sys_total} system_inspect runs "
+            f"(need >= {EXTENDED_MIN_SYSTEM_INSPECT_RUNS})"
+        ),
+        severity="soft",
+    ))
+
+    # 11. system_inspect failure rate (soft — tighter)
+    sys_fr = system_inspect_metrics.get("failure_rate")
+    if sys_fr is not None:
+        criteria.append(RolloutCriterion(
+            name="system_inspect_failure_rate",
+            passed=sys_fr <= EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+            value=sys_fr,
+            threshold=EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+            detail=(
+                f"system_inspect failure rate {sys_fr:.1%} "
+                f"(max {EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%})"
+            ),
+            severity="soft",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="system_inspect_failure_rate",
+            passed=True,
+            value=None,
+            threshold=EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+            detail="No system_inspect terminal workflows yet",
+            severity="soft",
+        ))
+
+    # 12. Verifier rejection rate (soft — tighter)
+    sys_rejected = system_inspect_metrics.get("verifier_rejected", 0)
+    sys_completed = system_inspect_metrics.get("completed", 0)
+    sys_total_for_vr = sys_rejected + sys_completed
+    if sys_total_for_vr > 0:
+        vr_rate = round(sys_rejected / sys_total_for_vr, 3)
+        criteria.append(RolloutCriterion(
+            name="system_verifier_rejection_rate",
+            passed=vr_rate <= EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+            value=vr_rate,
+            threshold=EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+            detail=(
+                f"system_inspect verifier rejection rate {vr_rate:.1%} "
+                f"(max {EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%})"
+            ),
+            severity="soft",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="system_verifier_rejection_rate",
+            passed=True,
+            value=None,
+            threshold=EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+            detail="No system verifier reports yet — N/A",
+            severity="soft",
+        ))
+
+    # 13. Blocked mutation attempts within tighter bounds (soft)
+    criteria.append(RolloutCriterion(
+        name="blocked_mutation_attempts",
+        passed=blocked_mutation_attempts <= EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS,
+        value=blocked_mutation_attempts,
+        threshold=EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS,
+        detail=(
+            f"{blocked_mutation_attempts} blocked mutation attempt(s) "
+            f"(max {EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS})"
+        ),
+        severity="soft",
+    ))
+
+    # 14. Contract failure rate for system_inspect (soft)
+    if contract_failure_rate is not None:
+        criteria.append(RolloutCriterion(
+            name="contract_failure_rate",
+            passed=contract_failure_rate <= EXTENDED_MAX_CONTRACT_FAILURE_RATE,
+            value=contract_failure_rate,
+            threshold=EXTENDED_MAX_CONTRACT_FAILURE_RATE,
+            detail=(
+                f"system_inspect contract failure rate {contract_failure_rate:.1%} "
+                f"(max {EXTENDED_MAX_CONTRACT_FAILURE_RATE:.0%})"
+            ),
+            severity="soft",
+        ))
+    else:
+        criteria.append(RolloutCriterion(
+            name="contract_failure_rate",
+            passed=True,
+            value=None,
+            threshold=EXTENDED_MAX_CONTRACT_FAILURE_RATE,
+            detail="No system_inspect contract data yet — N/A",
+            severity="soft",
+        ))
+
+    # 15. No orphaned agents or stale leases (soft)
+    orphaned = evidence.get("orphaned_agents", 0)
+    stale = evidence.get("stale_leases", 0)
+    anomaly_count = orphaned + stale
+    criteria.append(RolloutCriterion(
+        name="no_workflow_anomalies",
+        passed=anomaly_count == 0,
+        value=anomaly_count,
+        threshold=0,
+        detail=(
+            "No orphaned agents or stale leases"
+            if anomaly_count == 0
+            else f"{orphaned} orphaned agent(s), {stale} stale lease(s)"
+        ),
+        severity="soft",
+    ))
+
+    return criteria
+
+
+def decide_stageD_extended(
+    criteria: list[RolloutCriterion],
+) -> tuple[str, str]:
+    """Determine sustained Stage D stability from extended criteria.
+
+    Returns (decision, next_action) where decision is one of:
+      - "stageD_sustained_stable"
+      - "stageD_continue_monitoring"
+      - "rollback_system_inspect_recommended"
+    """
+    hard_failures = [c for c in criteria
+                     if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria
+                     if c.severity == "soft" and not c.passed]
+
+    # Any hard failure -> rollback
+    if hard_failures:
+        reasons = ", ".join(c.name for c in hard_failures)
+        return (
+            "rollback_system_inspect_recommended",
+            f"Hard failures detected: {reasons}. "
+            f"Remove system from supported_classes and revert to Stage C. "
+            f"Investigate root cause before re-enabling system_inspect.",
+        )
+
+    # Insufficient elapsed time -> continue monitoring (priority)
+    elapsed = next(
+        (c for c in criteria if c.name == "minimum_elapsed_time"), None
+    )
+    if elapsed and not elapsed.passed:
+        return (
+            "stageD_continue_monitoring",
+            f"Insufficient elapsed time: {elapsed.value}h "
+            f"(need >= {elapsed.threshold}h). "
+            f"Continue operating Stage D and re-evaluate after more time passes.",
+        )
+
+    # Insufficient runs -> continue monitoring
+    runs = next(
+        (c for c in criteria if c.name == "extended_minimum_runs"), None
+    )
+    if runs and not runs.passed:
+        return (
+            "stageD_continue_monitoring",
+            f"Insufficient system_inspect evidence: {runs.value} runs "
+            f"(need >= {runs.threshold}). "
+            f"Continue operating Stage D and re-evaluate after more tasks.",
+        )
+
+    # Any other soft failure -> continue monitoring
+    if soft_failures:
+        reasons = ", ".join(c.name for c in soft_failures)
+        return (
+            "stageD_continue_monitoring",
+            f"Soft concerns: {reasons}. "
+            f"Continue monitoring Stage D. Do not expand system scope.",
+        )
+
+    # All clear -> sustained stable
+    return (
+        "stageD_sustained_stable",
+        "Stage D is sustained-stable. system_inspect has operated safely "
+        "over the extended monitoring window with tighter thresholds. "
+        "Scope integrity confirmed. "
+        "Extended monitoring complete. "
+        "Broader system scope expansion may be evaluated in a future phase.",
+    )
+
+
+def review_stageD_extended(
+    base: Path | None = None,
+    now_override: str = "",
+) -> StageDExtendedMonitoring:
+    """Run the extended Stage D monitoring review.
+
+    Collects evidence over the full observation window since Stage D
+    activation and evaluates tighter thresholds for sustained safety.
+
+    Decisions:
+      - stageD_sustained_stable: Stage D safe over extended window
+      - stageD_continue_monitoring: insufficient evidence or time
+      - rollback_system_inspect_recommended: hard failures detected
+
+    Args:
+        base: Repository root (defaults to BASE).
+        now_override: ISO timestamp to use as "now" (for deterministic
+            testing). If empty, uses actual current time.
+    """
+    root = base or BASE
+    state = root / "STATE"
+
+    # Collect general evidence
+    evidence = collect_evidence(root)
+
+    # Collect system_inspect-specific metrics
+    workflows = _list_json_files(state / "workflows")
+    system_inspect_metrics = _collect_system_inspect_metrics(workflows)
+
+    # Get Stage D activation record
+    activation_log = _read_jsonl(state / "activation_log.jsonl")
+    stage4_activations = [
+        r for r in activation_log
+        if r.get("activated_scope") == "system_inspect"
+        and r.get("outcome") == "activated"
+    ]
+    activation = stage4_activations[-1] if stage4_activations else {}
+    activation_ts = activation.get("attempted_at", "")
+
+    # Current time
+    now_iso = now_override or datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    # Compute elapsed time
+    elapsed_seconds = _compute_elapsed_seconds(activation_ts, now_iso)
+    elapsed_hours = elapsed_seconds / 3600.0
+
+    # Observation window
+    observation_window = {
+        "activation_at": activation_ts or "N/A",
+        "review_at": now_iso,
+        "scope": "system_inspect (read-only)",
+        "elapsed_hours": round(elapsed_hours, 2),
+        "elapsed_seconds": round(elapsed_seconds, 1),
+    }
+
+    # Count post-activation recovery anomalies
+    post_recoveries = _count_post_activation_recoveries(root, activation_ts)
+
+    # Count blocked mutation attempts since activation
+    blocked_mutations = _count_blocked_mutation_attempts(root, activation_ts)
+
+    # Verify scope integrity
+    scope_integrity = _verify_scope_integrity(root)
+
+    # Compute contract failure rate
+    contract_failure_rate = _compute_contract_failure_rate(workflows)
+
+    # Evaluate extended criteria
+    criteria = evaluate_stageD_extended(
+        evidence,
+        system_inspect_metrics,
+        post_recoveries,
+        blocked_mutations,
+        scope_integrity,
+        elapsed_seconds,
+        contract_failure_rate,
+    )
+    decision, next_action = decide_stageD_extended(criteria)
+
+    # Monitoring progress — how far toward sustained-stable
+    min_runs = EXTENDED_MIN_SYSTEM_INSPECT_RUNS
+    min_elapsed = EXTENDED_MIN_ELAPSED_SECONDS
+    sys_total = system_inspect_metrics.get("total_runs", 0)
+    monitoring_progress = {
+        "runs_completed": sys_total,
+        "runs_required": min_runs,
+        "runs_progress_pct": round(
+            min(100.0, (sys_total / min_runs) * 100), 1
+        ) if min_runs > 0 else 100.0,
+        "elapsed_hours": round(elapsed_hours, 2),
+        "elapsed_required_hours": round(min_elapsed / 3600.0, 1),
+        "elapsed_progress_pct": round(
+            min(100.0, (elapsed_seconds / min_elapsed) * 100), 1
+        ) if min_elapsed > 0 else 100.0,
+        "hard_criteria_passed": sum(
+            1 for c in criteria if c.severity == "hard" and c.passed
+        ),
+        "hard_criteria_total": sum(
+            1 for c in criteria if c.severity == "hard"
+        ),
+        "soft_criteria_passed": sum(
+            1 for c in criteria if c.severity == "soft" and c.passed
+        ),
+        "soft_criteria_total": sum(
+            1 for c in criteria if c.severity == "soft"
+        ),
+    }
+
+    return StageDExtendedMonitoring(
+        decision=decision,
+        rollout_stage=evidence.get("rollout_stage", "unknown"),
+        enabled_classes=evidence.get("supported_classes", []),
+        criteria=criteria,
+        system_inspect_metrics=system_inspect_metrics,
+        evidence_summary={
+            "total_workflows": evidence.get("total_workflows", 0),
+            "completed_workflows": evidence.get("completed_workflows", 0),
+            "failed_workflows": evidence.get("failed_workflows", 0),
+            "halted_workflows": evidence.get("halted_workflows", 0),
+            "heartbeat_overall": evidence.get("heartbeat_overall", ""),
+            "policy_violations": evidence.get("policy_violations", 0),
+            "budget_exhaustions": evidence.get("budget_exhaustions", 0),
+            "verifier_rejection_rate": evidence.get("verifier_rejection_rate"),
+            "contract_failure_rate": contract_failure_rate,
+            "orphaned_agents": evidence.get("orphaned_agents", 0),
+            "stale_leases": evidence.get("stale_leases", 0),
+            "recovery_events": evidence.get("recovery_events", 0),
+            "post_activation_recoveries": post_recoveries,
+            "blocked_mutation_attempts": blocked_mutations,
+        },
+        next_action=next_action,
+        activation_record=activation,
+        observation_window=observation_window,
+        scope_integrity=scope_integrity,
+        monitoring_progress=monitoring_progress,
+    )
+
+
+def render_stageD_extended_markdown(review: StageDExtendedMonitoring) -> str:
+    """Render extended Stage D monitoring review as operator-facing markdown."""
+    icon = {
+        "stageD_sustained_stable": "SUSTAINED STABLE",
+        "stageD_continue_monitoring": "CONTINUE MONITORING",
+        "rollback_system_inspect_recommended": "ROLLBACK",
+    }.get(review.decision, "?")
+
+    lines = [
+        "# Phase 7.19 — Extended Stage D Monitoring Window (system_inspect)",
+        f"Generated: {review.generated_at}",
+        "",
+        f"## Decision: {icon} — {review.decision}",
+        "",
+        f"**Rollout stage**: {review.rollout_stage}",
+        f"**Enabled classes**: {', '.join(review.enabled_classes)}",
+        f"**System scope**: inspect_only (read-only)",
+        "",
+        f"**Next action**: {review.next_action}",
+        "",
+    ]
+
+    # Monitoring progress
+    mp = review.monitoring_progress
+    lines.append("## Monitoring Progress")
+    lines.append("")
+    lines.append("| Dimension | Current | Required | Progress |")
+    lines.append("|-----------|---------|----------|----------|")
+    lines.append(
+        f"| system_inspect runs | {mp.get('runs_completed', 0)} "
+        f"| {mp.get('runs_required', 0)} "
+        f"| {mp.get('runs_progress_pct', 0):.0f}% |"
+    )
+    lines.append(
+        f"| Elapsed time | {mp.get('elapsed_hours', 0):.1f}h "
+        f"| {mp.get('elapsed_required_hours', 0):.0f}h "
+        f"| {mp.get('elapsed_progress_pct', 0):.0f}% |"
+    )
+    lines.append(
+        f"| Hard criteria | {mp.get('hard_criteria_passed', 0)}"
+        f"/{mp.get('hard_criteria_total', 0)} PASS | all | "
+        + ("100%" if mp.get('hard_criteria_passed', 0) == mp.get('hard_criteria_total', 0) else
+           f"{mp.get('hard_criteria_passed', 0)}/{mp.get('hard_criteria_total', 0)}") + " |"
+    )
+    lines.append(
+        f"| Soft criteria | {mp.get('soft_criteria_passed', 0)}"
+        f"/{mp.get('soft_criteria_total', 0)} PASS | all | "
+        + ("100%" if mp.get('soft_criteria_passed', 0) == mp.get('soft_criteria_total', 0) else
+           f"{mp.get('soft_criteria_passed', 0)}/{mp.get('soft_criteria_total', 0)}") + " |"
+    )
+    lines.append("")
+
+    # Observation window
+    ow = review.observation_window
+    lines.append("## Observation Window")
+    lines.append("")
+    lines.append(f"- **Activation at**: {ow.get('activation_at', 'N/A')}")
+    lines.append(f"- **Review at**: {ow.get('review_at', 'N/A')}")
+    lines.append(f"- **Elapsed**: {ow.get('elapsed_hours', 0):.1f}h ({ow.get('elapsed_seconds', 0):.0f}s)")
+    lines.append(f"- **Required**: >= {EXTENDED_MIN_ELAPSED_SECONDS / 3600:.0f}h")
+    lines.append(f"- **Scope under review**: {ow.get('scope', 'N/A')}")
+    lines.append("")
+
+    # Scope integrity
+    si = review.scope_integrity
+    lines.append("## Scope Integrity")
+    lines.append("")
+    si_status = "INTACT" if si.get("intact") else "VIOLATED"
+    lines.append(f"- **Status**: {si_status}")
+    lines.append(f"- **Detail**: {si.get('reason', 'N/A')}")
+    lines.append(f"- **system_scope**: {si.get('system_scope', 'N/A')}")
+    lines.append(f"- **system in classes**: {si.get('system_in_classes', False)}")
+    lines.append("")
+
+    # system_inspect metrics
+    m = review.system_inspect_metrics
+    lines.append("## system_inspect Metrics")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    lines.append(f"| Total runs | {m.get('total_runs', 0)} |")
+    lines.append(f"| Completed | {m.get('completed', 0)} |")
+    lines.append(f"| Failed | {m.get('failed', 0)} |")
+    lines.append(f"| Verifier rejected | {m.get('verifier_rejected', 0)} |")
+    fr = m.get("failure_rate")
+    fr_str = f"{fr:.1%}" if fr is not None else "N/A"
+    lines.append(f"| Failure rate | {fr_str} |")
+    lines.append("")
+
+    # Criteria table
+    lines.append("## Extended Monitoring Criteria")
+    lines.append("")
+    lines.append("| # | Criterion | Status | Value | Threshold | Severity | Detail |")
+    lines.append("|---|-----------|--------|-------|-----------|----------|--------|")
+    for i, c in enumerate(review.criteria, 1):
+        status = "PASS" if c.passed else "FAIL"
+        val = c.value if c.value is not None else "N/A"
+        lines.append(
+            f"| {i} | {c.name} | {status} | {val} | {c.threshold} "
+            f"| {c.severity} | {c.detail} |"
+        )
+    lines.append("")
+
+    # Evidence summary
+    ev = review.evidence_summary
+    lines.append("## Evidence Summary")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    for k, v in ev.items():
+        display = (
+            f"{v:.1%}" if isinstance(v, float)
+            else str(v) if v is not None
+            else "N/A"
+        )
+        lines.append(f"| {k} | {display} |")
+    lines.append("")
+
+    # Blocked mutation attempts
+    bma = ev.get("blocked_mutation_attempts", 0)
+    lines.append("## Blocked Mutation Attempts")
+    lines.append("")
+    if bma == 0:
+        lines.append("No mutation attempts were blocked during the extended observation window.")
+    else:
+        lines.append(
+            f"{bma} mutation attempt(s) blocked by Stage D enforcement. "
+            f"Extended threshold: {EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS}."
+        )
+    lines.append("")
+
+    # Threshold comparison
+    lines.append("## Threshold Comparison (Initial vs Extended)")
+    lines.append("")
+    lines.append("| Threshold | Initial (7.18) | Extended (7.19) |")
+    lines.append("|-----------|---------------|-----------------|")
+    lines.append(f"| Min system_inspect runs | {STAGED_MIN_SYSTEM_INSPECT_RUNS} | {EXTENDED_MIN_SYSTEM_INSPECT_RUNS} |")
+    lines.append(f"| Min elapsed time | N/A | {EXTENDED_MIN_ELAPSED_SECONDS / 3600:.0f}h |")
+    lines.append(f"| Max failure rate | {STAGED_MAX_FAILURE_RATE:.0%} | {EXTENDED_MAX_FAILURE_RATE:.0%} |")
+    lines.append(f"| Max system_inspect failure rate | {STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%} | {EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%} |")
+    lines.append(f"| Max verifier rejection rate | {STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%} | {EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%} |")
+    lines.append(f"| Max blocked mutations | {STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS} | {EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS} |")
+    lines.append(f"| Contract failure rate | N/A | {EXTENDED_MAX_CONTRACT_FAILURE_RATE:.0%} |")
+    lines.append(f"| Recovery anomalies (severity) | soft | hard |")
+    lines.append("")
+
+    # Required operator action
+    lines.append("## Required Operator Action")
+    lines.append("")
+    if review.decision == "stageD_sustained_stable":
+        lines.append("- No action required. Stage D is sustained-stable.")
+        lines.append("- Extended monitoring window complete.")
+        lines.append("- system_inspect has proven safe over sustained operation.")
+        lines.append("- Do NOT expand system scope without a future Phase evaluation.")
+    elif review.decision == "stageD_continue_monitoring":
+        lines.append("- Do NOT expand system scope.")
+        lines.append("- Continue current Stage D operation and gather more evidence.")
+        lines.append("- Re-run this extended monitoring review after more time/tasks.")
+    else:
+        lines.append("- **ROLLBACK RECOMMENDED**: Revert to Stage C immediately.")
+        lines.append("- Remove 'system' from supported_classes in feature_flags.json.")
+        lines.append("- Set stage back to 'C' and rollout_stage to 'stage3_research_code_review_code_impl'.")
+        lines.append("- Remove system_scope and system_allowed/blocked configs.")
+        lines.append("- Restart watcher service: `sudo systemctl restart novacore-watcher`")
+        lines.append("- Investigate root cause before re-enabling system_inspect.")
+    lines.append("")
+
+    # Rollback path
+    lines.append("## Rollback Path (Stage D -> Stage C)")
+    lines.append("")
+    lines.append("```bash")
+    lines.append('python3 -c "')
+    lines.append("import json; p='STATE/config/feature_flags.json'")
+    lines.append("d=json.loads(open(p).read())")
+    lines.append("d['phase7_orchestrator']['supported_classes']=['research','code_review','code_impl']")
+    lines.append("d['phase7_orchestrator']['rollout_stage']='stage3_research_code_review_code_impl'")
+    lines.append("d['phase7_orchestrator']['stage']='C'")
+    lines.append("d['phase7_orchestrator'].pop('system_scope', None)")
+    lines.append("d['phase7_orchestrator'].pop('system_allowed_operations', None)")
+    lines.append("d['phase7_orchestrator'].pop('system_blocked_operations', None)")
+    lines.append("d['phase7_orchestrator'].pop('system_allowed_skills', None)")
+    lines.append("d['phase7_orchestrator'].pop('system_blocked_skills', None)")
+    lines.append("open(p,'w').write(json.dumps(d,indent=2))")
+    lines.append("print('Rolled back to Stage C')")
+    lines.append('"')
+    lines.append("sudo systemctl restart novacore-watcher")
+    lines.append("```")
+    lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def write_stageD_extended_monitoring(
+    review: StageDExtendedMonitoring,
+    base: Path | None = None,
+) -> tuple[Path, Path]:
+    """Write extended Stage D monitoring review to WORK/ and STATE/.
+
+    Returns (md_path, json_path).
+    """
+    root = base or BASE
+
+    md_path = root / "WORK" / "phase7_stageD_extended_monitoring.md"
+    json_path = root / "STATE" / "stageD_extended_monitoring.json"
+
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(render_stageD_extended_markdown(review))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(

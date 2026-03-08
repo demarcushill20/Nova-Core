@@ -4,6 +4,57 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-08 (Session 46) — Phase 7.19: Extended Stage D Monitoring Window
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Implemented Phase 7.19 — the extended Stage D monitoring window. This establishes a longer-horizon, tighter-threshold evaluation of sustained Stage D safety before any future consideration of broader system scope.
+
+#### Extended Monitoring Design
+
+Added 15 criteria (8 hard, 7 soft) with explicit tightening versus the initial Phase 7.18 review:
+
+**New requirements not in Phase 7.18:**
+- Minimum elapsed time since activation (>= 4 hours)
+- Contract failure rate for system_inspect (<= 10%)
+- Recovery anomalies promoted from soft to hard severity
+
+**Tighter thresholds (Initial → Extended):**
+- Min system_inspect runs: 3 → 10
+- Max failure rate: 20% → 15%
+- Max system_inspect failure rate: 20% → 10%
+- Max verifier rejection rate: 20% → 10%
+- Max blocked mutations: 5 → 3
+
+Three decision states: `stageD_sustained_stable`, `stageD_continue_monitoring`, `rollback_system_inspect_recommended`.
+
+#### Live Review
+
+```
+Decision: stageD_continue_monitoring
+Hard criteria: 8/8 PASS
+Soft criteria: 5/7 PASS
+FAIL: minimum_elapsed_time (2.3h, need >= 4h)
+FAIL: extended_minimum_runs (3 runs, need >= 10)
+```
+
+Expected result — Stage D needs more time and more system_inspect runs.
+
+### Numbers
+
+- Tests added: 83
+- Total tests: 2425 (all passing)
+- Files modified: 1 (rollout_gate.py)
+- Files created: 4 (1 test file, 1 summary, 1 monitoring report, 1 monitoring JSON)
+
+### Milestone
+
+**Extended monitoring window established.** Stage D now has a two-tier validation path: initial stability review (Phase 7.18, 3 runs) proves viability, extended monitoring (Phase 7.19, 10 runs + 4h elapsed) proves sustained safety. Both are deterministic, repository-native, and read-only.
+
+---
+
 ## 2026-03-08 (Session 45) — Phase 7.18: Stage D Stability Review + Classifier Fixes
 
 **Session span:** Mar 8 UTC
