@@ -16,6 +16,12 @@ Stage C enforcement:
   plans depending on task class. Coding plans have a mandatory
   self-verification step. All Stage C plans are validated against the
   Stage C allowed/blocked skill sets. Verifier rejection blocks finalization.
+
+Stage D enforcement:
+  When routing dict has stage="D", the adapter adds system_inspect support.
+  System tasks get a read-only inspection plan using only file-ops and
+  self-verification. Shell-ops, git-ops, and task-execution are blocked.
+  All other classes continue under Stage C rules.
 """
 
 import json
@@ -70,6 +76,17 @@ _STAGE_C_BLOCKED_SKILLS = frozenset({
     "shell-ops", "git-ops", "task-execution",
 })
 
+# Stage D: skills allowed for system_inspect (read-only path)
+_STAGE_D_ALLOWED_SKILLS = frozenset({
+    "web-research", "file-ops", "self-verification",
+    "http-fetch", "reading-obsidian-memory",
+})
+
+# Stage D: skills that are blocked for system tasks (mutation-capable)
+_STAGE_D_BLOCKED_SKILLS = frozenset({
+    "shell-ops", "git-ops", "task-execution",
+})
+
 
 def build_plan_from_task(
     stem: str,
@@ -95,6 +112,16 @@ def build_plan_from_task(
     if stage == "B":
         steps = _build_stageB_research_steps(stem, task_text)
         strategy = "stageB_research"
+    elif stage == "D":
+        if task_class == "system":
+            steps = _build_stageD_inspect_steps(stem, task_text)
+            strategy = "stageD_system_inspect"
+        elif task_class in ("code_impl", "code_review"):
+            steps = _build_stageC_coding_steps(stem, task_class, task_text)
+            strategy = "stageD_coding"
+        else:
+            steps = _build_stageB_research_steps(stem, task_text)
+            strategy = "stageD_research"
     elif stage == "C":
         if task_class in ("code_impl", "code_review"):
             steps = _build_stageC_coding_steps(stem, task_class, task_text)
@@ -240,6 +267,37 @@ def _build_stageC_coding_steps(
     ]
 
 
+def _build_stageD_inspect_steps(
+    stem: str, task_text: str
+) -> list[PlanStep]:
+    """Build read-only inspection plan steps for Stage D system_inspect.
+
+    These steps use only inspect-safe skills: file-ops (for reading),
+    web-research (for documentation), and self-verification.
+    No shell-ops, git-ops, or task-execution steps.
+    """
+    return [
+        PlanStep(
+            step_id=f"{stem}_inspect",
+            skill_name="file-ops",
+            goal="Inspect system state and gather read-only information",
+            inputs={"task_text": task_text[:2000]},
+        ),
+        PlanStep(
+            step_id=f"{stem}_analyze",
+            skill_name="file-ops",
+            goal="Analyze findings and write inspection report",
+            inputs={"task_text": task_text[:2000]},
+        ),
+        PlanStep(
+            step_id=f"{stem}_verify",
+            skill_name="self-verification",
+            goal="Verify inspection completeness (MANDATORY — verifier approval required)",
+            inputs={},
+        ),
+    ]
+
+
 def _build_steps_for_class(
     stem: str, task_class: str, task_text: str
 ) -> list[PlanStep]:
@@ -370,6 +428,29 @@ def validate_stageC_plan(plan: ExecutionPlan) -> tuple[bool, str]:
         if step.skill_name in _STAGE_C_BLOCKED_SKILLS:
             return False, f"blocked_skill:{step.skill_name}:step:{step.step_id}"
         if step.skill_name not in _STAGE_C_ALLOWED_SKILLS:
+            return False, f"unknown_skill:{step.skill_name}:step:{step.step_id}"
+        if step.skill_name == "self-verification":
+            has_verifier = True
+    if not has_verifier:
+        return False, "missing_mandatory_verifier_step"
+    return True, "all_skills_allowed_verifier_present"
+
+
+def validate_stageD_plan(plan: ExecutionPlan) -> tuple[bool, str]:
+    """Validate that a Stage D system_inspect plan meets safety requirements.
+
+    Returns (valid, reason). Fails closed.
+
+    Requirements:
+    1. All skills must be in _STAGE_D_ALLOWED_SKILLS
+    2. No blocked skills (shell-ops, git-ops, task-execution)
+    3. Must include at least one self-verification step (verifier mandatory)
+    """
+    has_verifier = False
+    for step in plan.steps:
+        if step.skill_name in _STAGE_D_BLOCKED_SKILLS:
+            return False, f"blocked_skill:{step.skill_name}:step:{step.step_id}"
+        if step.skill_name not in _STAGE_D_ALLOWED_SKILLS:
             return False, f"unknown_skill:{step.skill_name}:step:{step.step_id}"
         if step.skill_name == "self-verification":
             has_verifier = True
@@ -538,6 +619,44 @@ def execute_via_orchestrator(
             }
         logger.info("STAGE B PLAN VALIDATED: %s — research-only skills confirmed", stem)
 
+    # Stage D: validate system_inspect plan (or coding/research plan)
+    elif stage == "D":
+        if task_class == "system":
+            valid, reason = validate_stageD_plan(plan)
+            if not valid:
+                logger.error("STAGE D PLAN REJECTED: %s — %s", stem, reason)
+                _persist_workflow_state(stem, "rejected", task_class, stage,
+                                       halt_reason=f"plan_validation: {reason}")
+                return {
+                    "success": False,
+                    "output_path": None,
+                    "plan_summary": {
+                        "plan_id": plan.plan_id,
+                        "task_id": stem,
+                        "status": "rejected",
+                        "error": f"Stage D plan validation failed: {reason}",
+                    },
+                }
+            logger.info("STAGE D PLAN VALIDATED: %s — inspect-only skills confirmed", stem)
+        else:
+            # Non-system under Stage D: validate with Stage C rules
+            valid, reason = validate_stageC_plan(plan)
+            if not valid:
+                logger.error("STAGE D (C-rules) PLAN REJECTED: %s — %s", stem, reason)
+                _persist_workflow_state(stem, "rejected", task_class, stage,
+                                       halt_reason=f"plan_validation: {reason}")
+                return {
+                    "success": False,
+                    "output_path": None,
+                    "plan_summary": {
+                        "plan_id": plan.plan_id,
+                        "task_id": stem,
+                        "status": "rejected",
+                        "error": f"Stage D plan validation failed: {reason}",
+                    },
+                }
+            logger.info("STAGE D PLAN VALIDATED: %s — C-rules confirmed", stem)
+
     # Stage C: validate plan before execution (must include verifier step)
     elif stage == "C":
         valid, reason = validate_stageC_plan(plan)
@@ -575,8 +694,8 @@ def execute_via_orchestrator(
             "error": str(exc),
         }
 
-    # Stage C verifier enforcement: check verification step result
-    if stage == "C" and (routing or {}).get("verifier_required", False):
+    # Stage C/D verifier enforcement: check verification step result
+    if stage in ("C", "D") and (routing or {}).get("verifier_required", False):
         verify_steps = [
             s for s in summary.get("steps", [])
             if "verify" in s.get("step_id", "")
@@ -623,7 +742,7 @@ def execute_via_orchestrator(
 
     # Phase 5.5: controlled post-execution workflow-learning promotion
     promotion_result = None
-    if summary.get("status") == "done" and stage in ("B", "C"):
+    if summary.get("status") == "done" and stage in ("B", "C", "D"):
         promotion_result = attempt_promotion(
             stem=stem,
             task_class=task_class,

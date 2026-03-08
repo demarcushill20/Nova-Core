@@ -4,6 +4,73 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-08 (Session 44) — Phase 7.16/7.17: Stage 4 Activation Gate + Live Activation
+
+**Session span:** Mar 8 UTC
+
+### What was done
+
+Completed two Phase 7 atomic steps: the activation gate assessment and the controlled live activation of the `system_inspect` scope.
+
+#### Phase 7.16 — Stage 4 Activation Gate
+
+Created a 10-criteria deterministic activation gate evaluating whether Stage 4 is safe to activate. Validates the Stage 4 rollout plan structure (7 checks), enforces hard prerequisites (Stage 3 stability, Stage 4 evaluation readiness, heartbeat healthy, no policy violations, no budget exhaustions, system class still blocked, plan valid), and soft criteria (no rollback history, no orphaned agents, no stale leases).
+
+Three decision states: `ready_to_activate_stage4`, `hold_stage4_activation`, `block_stage4_activation`. Key design insight: all soft criteria cascade to block via hard prerequisites — the hold state is only reachable for soft failures at the activation gate level itself.
+
+**Live result: `ready_to_activate_stage4` (10/10 PASS, plan valid with 0 errors).**
+
+58 tests added in `tests/test_stage4_activation_gate.py`.
+
+#### Phase 7.17 — Controlled Activation of system_inspect
+
+Executed the Stage 4 rollout — transitioning from Stage C to Stage D with `system_inspect` as a read-only scope.
+
+**Activation procedure** (`activate_stage4()` in rollout_gate.py):
+- Re-runs full activation gate at invocation time (fail-closed)
+- Snapshots pre/post config for audit
+- Updates feature_flags.json atomically (tmp + rename)
+- Writes activation record to audit trail
+
+**Scope enforcement (7 layers):**
+1. Task classifier mutate denylist — 21 regex patterns blocking mutation-intent system tasks
+2. `is_stageD_eligible()` — Stage D eligibility check (class, confidence, mutate signals)
+3. `_build_stageD_inspect_steps()` — builds read-only plans only
+4. `validate_stageD_plan()` — enforces allowed/blocked skill sets
+5. Execution-time plan validation before running Stage D plans
+6. Mandatory verifier gate for all Stage D plans
+7. Persisted feature flag constraints (allowed/blocked ops + skills)
+
+**Live activation result:**
+```
+Outcome: activated
+Stage: C → D
+Supported classes: [research, code_review, code_impl, system]
+System scope: inspect_only
+Allowed operations: 8 (status_check, log_inspection, config_review, etc.)
+Blocked operations: 12 (deployment, service_modification, process_management, etc.)
+Allowed skills: 5 (file-ops, web-research, self-verification, http-fetch, reading-obsidian-memory)
+Blocked skills: 3 (shell-ops, git-ops, task-execution)
+```
+
+Operator artifact generated with monitoring checklist, abort conditions, and rollback path (including quick rollback command).
+
+49 tests added in `tests/test_stage4_live_activation.py`.
+
+### Numbers
+
+- Tests added: 107 (58 + 49)
+- Total tests: 2317 (all passing post-activation)
+- Files modified: 3 (rollout_gate.py +863 lines, task_classifier.py +137 lines, orchestrator_adapter.py +125 lines)
+- Files created: 6 (2 test files, 2 summary artifacts, 1 activation result md, 1 activation result json)
+- State updates: feature_flags.json (stage=D), activation_log.jsonl (+1 entry)
+
+### Milestone
+
+**system_inspect is now live.** The multi-agent system can accept system-class tasks in read-only scope — architecture review, config review, dependency audits, health checks, log inspection, resource monitoring, security scans, status checks. All mutation operations remain blocked by multiple enforcement layers. This is the first time the system has access to inspect its own infrastructure, completing the Stage 4 rollout plan from Phase 7.15.
+
+---
+
 ## 2026-03-08 (Session 43) — Phase 7.14/7.15: Stage 4 Evaluation Gate + Rollout Plan
 
 **Session span:** Mar 8 UTC

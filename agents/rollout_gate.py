@@ -1,4 +1,4 @@
-"""Phase 7.11–7.15 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, and Stage 4 Rollout Plan.
+"""Phase 7.11–7.17 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, and Controlled Activation.
 
 Deterministic, repository-native evaluation of rollout readiness and stability.
 Reads existing heartbeat, metrics, and workflow state to classify rollout
@@ -12,6 +12,8 @@ Includes:
   - Phase 7.13: Post-activation Stage 3 stability review
   - Phase 7.14: Stage 4 evaluation gate (system class readiness)
   - Phase 7.15: Stage 4 rollout plan (system class planning)
+  - Phase 7.16: Stage 4 activation gate (system_inspect readiness)
+  - Phase 7.17: Controlled Stage 4 activation (system_inspect live)
 
 All criteria are threshold-based and auditable.
 No LLM judgments — pure metric evaluation.
@@ -2524,6 +2526,865 @@ def write_stage4_rollout_plan(
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(
         json.dumps(plan.to_dict(), indent=2, default=str) + "\n"
+    )
+
+    return md_path, json_path
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.16 — Stage 4 Activation Gate (system_inspect)
+# ---------------------------------------------------------------------------
+
+# Required fields in a valid Stage 4 rollout plan
+_PLAN_REQUIRED_FIELDS = frozenset({
+    "plan_status",
+    "allowed_operations",
+    "blocked_operations",
+    "allowed_skills",
+    "blocked_skills",
+    "activation_prerequisites",
+    "success_criteria",
+    "abort_conditions",
+    "rollback_procedure",
+    "system_class_status",
+})
+
+# Required sections that must be non-empty lists/dicts
+_PLAN_REQUIRED_NONEMPTY = frozenset({
+    "allowed_operations",
+    "blocked_operations",
+    "activation_prerequisites",
+    "success_criteria",
+    "abort_conditions",
+    "rollback_procedure",
+})
+
+
+def validate_stage4_plan(base: Path | None = None) -> tuple[bool, list[str]]:
+    """Validate that the Stage 4 rollout plan is structurally valid.
+
+    Checks:
+      - Plan JSON exists and is parseable
+      - All required fields present
+      - Required sections are non-empty
+      - Allowed operations are read-only (subset of STAGE4_ALLOWED_OPERATIONS)
+      - Blocked operations include all mutation ops
+      - system_class_status is "blocked"
+
+    Returns (valid, errors) where errors is a list of failure reasons.
+    """
+    root = base or BASE
+    plan_path = root / "STATE" / "stage4_rollout_plan.json"
+
+    errors: list[str] = []
+
+    # 1. File exists and is valid JSON
+    if not plan_path.exists():
+        return False, ["stage4_rollout_plan.json does not exist"]
+
+    try:
+        plan_data = json.loads(plan_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        return False, [f"stage4_rollout_plan.json is not valid JSON: {e}"]
+
+    if not isinstance(plan_data, dict):
+        return False, ["stage4_rollout_plan.json root is not a dict"]
+
+    # 2. Required fields present
+    missing = _PLAN_REQUIRED_FIELDS - set(plan_data.keys())
+    if missing:
+        errors.append(f"missing required fields: {sorted(missing)}")
+
+    # 3. Required sections non-empty
+    for field_name in _PLAN_REQUIRED_NONEMPTY:
+        val = plan_data.get(field_name)
+        if val is not None and not val:
+            errors.append(f"{field_name} is empty")
+
+    # 4. Allowed operations must be subset of defined read-only ops
+    allowed = set(plan_data.get("allowed_operations", []))
+    if allowed and not allowed.issubset(STAGE4_ALLOWED_OPERATIONS):
+        extra = sorted(allowed - STAGE4_ALLOWED_OPERATIONS)
+        errors.append(f"allowed_operations contains non-inspect ops: {extra}")
+
+    # 5. Blocked operations must include all mutation ops
+    blocked = set(plan_data.get("blocked_operations", []))
+    if blocked and not STAGE4_BLOCKED_OPERATIONS.issubset(blocked):
+        missing_blocked = sorted(STAGE4_BLOCKED_OPERATIONS - blocked)
+        errors.append(f"blocked_operations missing mutation ops: {missing_blocked}")
+
+    # 6. system_class_status must be "blocked"
+    status = plan_data.get("system_class_status", "")
+    if status != "blocked":
+        errors.append(f"system_class_status is '{status}', expected 'blocked'")
+
+    return len(errors) == 0, errors
+
+
+@dataclass
+class Stage4ActivationGate:
+    """Result of the Stage 4 activation gate evaluation."""
+    decision: str          # "ready_to_activate_stage4" | "hold_stage4_activation" | "block_stage4_activation"
+    criteria: list[RolloutCriterion] = field(default_factory=list)
+    plan_validation: dict = field(default_factory=dict)  # {"valid": bool, "errors": [...]}
+    evidence_summary: dict = field(default_factory=dict)
+    stage3_stability_decision: str = ""
+    stage4_evaluation_decision: str = ""
+    generated_at: str = ""
+    next_action: str = ""
+    blocking_criteria: list[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.generated_at:
+            self.generated_at = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+    def to_dict(self) -> dict:
+        return {
+            "decision": self.decision,
+            "criteria": [c.to_dict() for c in self.criteria],
+            "plan_validation": self.plan_validation,
+            "evidence_summary": self.evidence_summary,
+            "stage3_stability_decision": self.stage3_stability_decision,
+            "stage4_evaluation_decision": self.stage4_evaluation_decision,
+            "generated_at": self.generated_at,
+            "next_action": self.next_action,
+            "blocking_criteria": self.blocking_criteria,
+        }
+
+
+def evaluate_activation_gate_criteria(
+    evidence: dict,
+    stage3_decision: str,
+    stage4_eval_decision: str,
+    plan_valid: bool,
+    plan_errors: list[str],
+) -> list[RolloutCriterion]:
+    """Evaluate Stage 4 activation gate criteria.
+
+    These criteria determine whether the planned system_inspect slice
+    is safe to activate. All criteria use repository-native evidence.
+    """
+    criteria: list[RolloutCriterion] = []
+
+    # 1. Stage 3 stability must be stable_continue (hard)
+    criteria.append(RolloutCriterion(
+        name="stage3_stable",
+        passed=stage3_decision == "stable_continue",
+        value=stage3_decision,
+        threshold="stable_continue",
+        detail=(
+            "Stage 3 stability confirmed"
+            if stage3_decision == "stable_continue"
+            else f"Stage 3 stability is '{stage3_decision}' — must be stable_continue"
+        ),
+        severity="hard",
+    ))
+
+    # 2. Stage 4 evaluation must be ready_for_stage4_planning (hard)
+    criteria.append(RolloutCriterion(
+        name="stage4_evaluation_ready",
+        passed=stage4_eval_decision == "ready_for_stage4_planning",
+        value=stage4_eval_decision,
+        threshold="ready_for_stage4_planning",
+        detail=(
+            "Stage 4 evaluation gate passed"
+            if stage4_eval_decision == "ready_for_stage4_planning"
+            else f"Stage 4 evaluation is '{stage4_eval_decision}' — must be ready_for_stage4_planning"
+        ),
+        severity="hard",
+    ))
+
+    # 3. Heartbeat must be healthy (hard — stricter than "not unhealthy")
+    hb = evidence.get("heartbeat_overall", "")
+    criteria.append(RolloutCriterion(
+        name="heartbeat_healthy",
+        passed=hb == "healthy",
+        value=hb or "(no data)",
+        threshold="healthy",
+        detail=(
+            "Heartbeat is healthy"
+            if hb == "healthy"
+            else f"Heartbeat is '{hb or '(no data)'}' — must be 'healthy' for system activation"
+        ),
+        severity="hard",
+    ))
+
+    # 4. No policy violations (hard — zero tolerance)
+    violations = evidence.get("policy_violations", 0)
+    criteria.append(RolloutCriterion(
+        name="no_policy_violations",
+        passed=violations == 0,
+        value=violations,
+        threshold=0,
+        detail=(
+            "No policy violations"
+            if violations == 0
+            else f"{violations} policy violation(s) — activation blocked"
+        ),
+        severity="hard",
+    ))
+
+    # 5. No budget exhaustions (hard — zero tolerance)
+    budget = evidence.get("budget_exhaustions", 0)
+    criteria.append(RolloutCriterion(
+        name="no_budget_exhaustions",
+        passed=budget == 0,
+        value=budget,
+        threshold=0,
+        detail=(
+            "No budget exhaustions"
+            if budget == 0
+            else f"{budget} budget exhaustion(s) — activation blocked"
+        ),
+        severity="hard",
+    ))
+
+    # 6. System class currently blocked (hard — must not already be active)
+    supported = evidence.get("supported_classes", [])
+    system_blocked = "system" not in supported
+    criteria.append(RolloutCriterion(
+        name="system_class_blocked",
+        passed=system_blocked,
+        value="blocked" if system_blocked else "enabled",
+        threshold="blocked",
+        detail=(
+            "system class correctly blocked — ready for activation"
+            if system_blocked
+            else "system class already enabled — activation invalid"
+        ),
+        severity="hard",
+    ))
+
+    # 7. Stage 4 rollout plan is structurally valid (hard)
+    criteria.append(RolloutCriterion(
+        name="plan_valid",
+        passed=plan_valid,
+        value="valid" if plan_valid else f"invalid ({len(plan_errors)} error(s))",
+        threshold="valid",
+        detail=(
+            "Stage 4 rollout plan is structurally valid"
+            if plan_valid
+            else f"Plan validation errors: {'; '.join(plan_errors)}"
+        ),
+        severity="hard",
+    ))
+
+    # 8. No rollback events in activation history (soft — indicates instability)
+    activation_log = _read_jsonl(
+        (evidence.get("_base_path") or BASE) / "STATE" / "activation_log.jsonl"
+    )
+    rollback_events = sum(
+        1 for r in activation_log if r.get("outcome") == "rollback"
+    )
+    criteria.append(RolloutCriterion(
+        name="no_rollback_history",
+        passed=rollback_events == 0,
+        value=rollback_events,
+        threshold=0,
+        detail=(
+            "No rollback events in activation history"
+            if rollback_events == 0
+            else f"{rollback_events} rollback event(s) — indicates instability"
+        ),
+        severity="soft",
+    ))
+
+    # 9. No orphaned agents (soft)
+    orphaned = evidence.get("orphaned_agents", 0)
+    criteria.append(RolloutCriterion(
+        name="no_orphaned_agents",
+        passed=orphaned == 0,
+        value=orphaned,
+        threshold=0,
+        detail=(
+            "No orphaned agents"
+            if orphaned == 0
+            else f"{orphaned} orphaned agent(s)"
+        ),
+        severity="soft",
+    ))
+
+    # 10. No stale leases (soft)
+    stale = evidence.get("stale_leases", 0)
+    criteria.append(RolloutCriterion(
+        name="no_stale_leases",
+        passed=stale == 0,
+        value=stale,
+        threshold=0,
+        detail=(
+            "No stale leases"
+            if stale == 0
+            else f"{stale} stale lease(s)"
+        ),
+        severity="soft",
+    ))
+
+    return criteria
+
+
+def decide_activation_gate(
+    criteria: list[RolloutCriterion],
+) -> tuple[str, str]:
+    """Determine Stage 4 activation gate decision.
+
+    Returns (decision, next_action) where decision is one of:
+      - "ready_to_activate_stage4"
+      - "hold_stage4_activation"
+      - "block_stage4_activation"
+    """
+    hard_failures = [c for c in criteria
+                     if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria
+                     if c.severity == "soft" and not c.passed]
+
+    # Any hard failure → block activation
+    if hard_failures:
+        reasons = ", ".join(c.name for c in hard_failures)
+        return (
+            "block_stage4_activation",
+            f"Hard failures blocking activation: {reasons}. "
+            f"Resolve before re-evaluating. "
+            f"system_inspect must not be activated.",
+        )
+
+    # Soft failures → hold activation
+    if soft_failures:
+        reasons = ", ".join(c.name for c in soft_failures)
+        return (
+            "hold_stage4_activation",
+            f"Soft concerns: {reasons}. "
+            f"Continue monitoring. Re-evaluate after concerns resolve.",
+        )
+
+    # All clear → ready to activate
+    return (
+        "ready_to_activate_stage4",
+        "All activation gate criteria pass. "
+        "system_inspect is safe to activate under the defined protections. "
+        "A separate activation step with operator approval is required.",
+    )
+
+
+def evaluate_activation_gate(
+    base: Path | None = None,
+) -> Stage4ActivationGate:
+    """Run the Stage 4 activation gate.
+
+    Evaluates whether the planned read-only system_inspect slice is safe
+    to activate. Checks prerequisite gates (Stage 3 stability, Stage 4
+    evaluation), validates the rollout plan, and evaluates activation-specific
+    criteria.
+
+    This is a gate only — it does NOT activate system_inspect.
+
+    Decisions:
+      - ready_to_activate_stage4: all criteria pass, plan valid
+      - hold_stage4_activation: soft concerns
+      - block_stage4_activation: hard failures or invalid plan
+    """
+    root = base or BASE
+
+    # Collect general evidence
+    evidence = collect_evidence(root)
+    evidence["_base_path"] = root
+
+    # Run prerequisite gates
+    stage3_review = review_stage3_stability(root)
+    stage4_eval = evaluate_stage4(root)
+
+    # Validate the rollout plan
+    plan_valid, plan_errors = validate_stage4_plan(root)
+
+    # Evaluate activation gate criteria
+    criteria = evaluate_activation_gate_criteria(
+        evidence,
+        stage3_review.decision,
+        stage4_eval.decision,
+        plan_valid,
+        plan_errors,
+    )
+    decision, next_action = decide_activation_gate(criteria)
+
+    # Identify blocking criteria
+    blocking = [c.name for c in criteria if not c.passed]
+
+    return Stage4ActivationGate(
+        decision=decision,
+        criteria=criteria,
+        plan_validation={"valid": plan_valid, "errors": plan_errors},
+        evidence_summary={
+            "total_workflows": evidence.get("total_workflows", 0),
+            "completed_workflows": evidence.get("completed_workflows", 0),
+            "failed_workflows": evidence.get("failed_workflows", 0),
+            "halted_workflows": evidence.get("halted_workflows", 0),
+            "heartbeat_overall": evidence.get("heartbeat_overall", ""),
+            "policy_violations": evidence.get("policy_violations", 0),
+            "budget_exhaustions": evidence.get("budget_exhaustions", 0),
+            "orphaned_agents": evidence.get("orphaned_agents", 0),
+            "stale_leases": evidence.get("stale_leases", 0),
+            "recovery_events": evidence.get("recovery_events", 0),
+            "rollout_stage": evidence.get("rollout_stage", "unknown"),
+            "supported_classes": evidence.get("supported_classes", []),
+        },
+        stage3_stability_decision=stage3_review.decision,
+        stage4_evaluation_decision=stage4_eval.decision,
+        next_action=next_action,
+        blocking_criteria=blocking,
+    )
+
+
+def render_activation_gate_markdown(gate: Stage4ActivationGate) -> str:
+    """Render Stage 4 activation gate as an operator-facing markdown report."""
+    icon = {
+        "ready_to_activate_stage4": "READY",
+        "hold_stage4_activation": "HOLD",
+        "block_stage4_activation": "BLOCKED",
+    }.get(gate.decision, "?")
+
+    lines = [
+        "# Phase 7.16 — Stage 4 Activation Gate (system_inspect)",
+        f"Generated: {gate.generated_at}",
+        "",
+        f"## Decision: {icon} — {gate.decision}",
+        "",
+        f"**Stage 3 stability**: {gate.stage3_stability_decision}",
+        f"**Stage 4 evaluation**: {gate.stage4_evaluation_decision}",
+        f"**Plan valid**: {'YES' if gate.plan_validation.get('valid') else 'NO'}",
+        "",
+        f"**Next action**: {gate.next_action}",
+        "",
+    ]
+
+    # Plan validation
+    lines.append("## Plan Validation")
+    lines.append("")
+    if gate.plan_validation.get("valid"):
+        lines.append("Stage 4 rollout plan is structurally valid.")
+    else:
+        lines.append("**Plan validation FAILED:**")
+        for err in gate.plan_validation.get("errors", []):
+            lines.append(f"- {err}")
+    lines.append("")
+
+    # Activation gate criteria
+    lines.append("## Activation Gate Criteria")
+    lines.append("")
+    lines.append("| # | Criterion | Status | Value | Threshold | Severity | Detail |")
+    lines.append("|---|-----------|--------|-------|-----------|----------|--------|")
+    for i, c in enumerate(gate.criteria, 1):
+        status = "PASS" if c.passed else "FAIL"
+        val = c.value if c.value is not None else "N/A"
+        lines.append(
+            f"| {i} | {c.name} | {status} | {val} | {c.threshold} "
+            f"| {c.severity} | {c.detail} |"
+        )
+    lines.append("")
+
+    # Blocking criteria
+    if gate.blocking_criteria:
+        lines.append("## Blocking Criteria")
+        lines.append("")
+        for name in gate.blocking_criteria:
+            c = next((x for x in gate.criteria if x.name == name), None)
+            if c:
+                lines.append(f"- **{name}** ({c.severity}): {c.detail}")
+        lines.append("")
+
+    # Evidence summary
+    ev = gate.evidence_summary
+    lines.append("## Evidence Summary")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    for k, v in ev.items():
+        if isinstance(v, float):
+            display = f"{v:.1%}"
+        elif isinstance(v, list):
+            display = ", ".join(str(x) for x in v) or "(none)"
+        elif v is not None:
+            display = str(v)
+        else:
+            display = "N/A"
+        lines.append(f"| {k} | {display} |")
+    lines.append("")
+
+    # What this gate does and does not do
+    lines.append("## Scope")
+    lines.append("")
+    lines.append("This gate determines whether the planned `system_inspect` slice")
+    lines.append("is safe to activate. It does NOT:")
+    lines.append("- Activate system_inspect")
+    lines.append("- Modify feature flags")
+    lines.append("- Add system to supported_classes")
+    lines.append("- Route any tasks to the system orchestrator path")
+    lines.append("")
+    if gate.decision == "ready_to_activate_stage4":
+        lines.append("### Activation")
+        lines.append("")
+        lines.append("All criteria pass. A separate activation step with explicit")
+        lines.append("operator approval is required to proceed.")
+        lines.append("```python")
+        lines.append("# Activation step (Phase 7.17+) would:")
+        lines.append("# 1. Re-evaluate all prerequisites at activation time")
+        lines.append("# 2. Add system to supported_classes (inspect-only scope)")
+        lines.append("# 3. Enable mutate-signal filter")
+        lines.append("# 4. Write activation record to audit trail")
+        lines.append("# 5. Enable manual approval hook for system paths")
+        lines.append("```")
+    else:
+        lines.append("### Next Steps")
+        lines.append("")
+        lines.append("Resolve blocking criteria before re-evaluating.")
+        lines.append("```python")
+        lines.append("from agents.rollout_gate import evaluate_activation_gate")
+        lines.append("gate = evaluate_activation_gate()")
+        lines.append("print(gate.decision, gate.blocking_criteria)")
+        lines.append("```")
+    lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def write_activation_gate(
+    gate: Stage4ActivationGate,
+    base: Path | None = None,
+) -> tuple[Path, Path]:
+    """Write Stage 4 activation gate result to WORK/ and STATE/.
+
+    Returns (md_path, json_path).
+    """
+    root = base or BASE
+
+    md_path = root / "WORK" / "phase7_stage4_activation_gate.md"
+    json_path = root / "STATE" / "stage4_activation_gate.json"
+
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(render_activation_gate_markdown(gate))
+
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(gate.to_dict(), indent=2, default=str) + "\n"
+    )
+
+    return md_path, json_path
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.17 — Controlled Stage 4 Activation (system_inspect)
+# ---------------------------------------------------------------------------
+
+# Stage 4 target configuration
+STAGE4_CLASSES = ["research", "code_review", "code_impl", "system"]
+STAGE4_ROLLOUT_STAGE = "stage4_research_code_review_code_impl_system_inspect"
+STAGE4_ALLOWED_ROLES = ["research", "coding", "system_inspect"]
+
+
+@dataclass
+class Stage4ActivationRecord:
+    """Audit record of a Stage 4 activation attempt."""
+    attempted_at: str
+    outcome: str           # "activated" | "blocked" | "error"
+    gate_decision: str     # activation gate decision at time of activation
+    reason: str
+    pre_config: dict       # config snapshot before attempt
+    post_config: dict      # config snapshot after attempt (same if blocked)
+    blocking_criteria: list[str]
+    activated_scope: str   # "system_inspect" or ""
+    plan_validation: dict  # plan validation result at activation time
+
+    def to_dict(self) -> dict:
+        return {
+            "attempted_at": self.attempted_at,
+            "outcome": self.outcome,
+            "gate_decision": self.gate_decision,
+            "reason": self.reason,
+            "pre_config": self.pre_config,
+            "post_config": self.post_config,
+            "blocking_criteria": self.blocking_criteria,
+            "activated_scope": self.activated_scope,
+            "plan_validation": self.plan_validation,
+        }
+
+
+def activate_stage4(base: Path | None = None) -> Stage4ActivationRecord:
+    """Safe, auditable Stage 4 activation procedure for system_inspect.
+
+    1. Snapshots current config
+    2. Re-runs Stage 4 activation gate (fresh evidence)
+    3. Only activates if gate returns ready_to_activate_stage4
+    4. Updates feature_flags.json with system in inspect-only scope
+    5. Writes activation audit record to STATE/activation_log.jsonl
+    6. Returns Stage4ActivationRecord with full details
+
+    Fail-closed: any gate failure, config error, or non-ready decision
+    blocks activation and preserves current state.
+
+    Scope: system_inspect ONLY. Mutation operations remain blocked
+    via Stage D denylist in task_classifier and orchestrator_adapter.
+    """
+    root = base or BASE
+    flags_path = root / "STATE" / "config" / "feature_flags.json"
+    log_path = root / "STATE" / "activation_log.jsonl"
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # 1. Snapshot pre-activation config
+    pre_config: dict = {}
+    try:
+        pre_config = json.loads(flags_path.read_text())
+    except (json.JSONDecodeError, OSError, FileNotFoundError):
+        record = Stage4ActivationRecord(
+            attempted_at=now_iso,
+            outcome="error",
+            gate_decision="unknown",
+            reason="cannot_read_feature_flags",
+            pre_config={},
+            post_config={},
+            blocking_criteria=[],
+            activated_scope="",
+            plan_validation={},
+        )
+        _append_activation_log(log_path, record)
+        return record
+
+    # 2. Re-run activation gate with fresh evidence
+    gate = evaluate_activation_gate(root)
+
+    if gate.decision != "ready_to_activate_stage4":
+        record = Stage4ActivationRecord(
+            attempted_at=now_iso,
+            outcome="blocked",
+            gate_decision=gate.decision,
+            reason=gate.next_action,
+            pre_config=pre_config.get("phase7_orchestrator", {}),
+            post_config=pre_config.get("phase7_orchestrator", {}),
+            blocking_criteria=gate.blocking_criteria,
+            activated_scope="",
+            plan_validation=gate.plan_validation,
+        )
+        _append_activation_log(log_path, record)
+        return record
+
+    # 3. Gate approved — update feature flags for Stage 4 (system_inspect)
+    try:
+        # Re-read for freshest version
+        flags_data = json.loads(flags_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        record = Stage4ActivationRecord(
+            attempted_at=now_iso,
+            outcome="error",
+            gate_decision=gate.decision,
+            reason="cannot_read_feature_flags_for_update",
+            pre_config=pre_config.get("phase7_orchestrator", {}),
+            post_config=pre_config.get("phase7_orchestrator", {}),
+            blocking_criteria=[],
+            activated_scope="",
+            plan_validation=gate.plan_validation,
+        )
+        _append_activation_log(log_path, record)
+        return record
+
+    orch = flags_data.get("phase7_orchestrator", {})
+    orch["supported_classes"] = list(STAGE4_CLASSES)
+    orch["rollout_stage"] = STAGE4_ROLLOUT_STAGE
+    orch["stage"] = "D"
+    orch["allowed_roles"] = list(STAGE4_ALLOWED_ROLES)
+    orch["verifier_required"] = True  # mandatory for system tasks
+    orch["system_scope"] = "inspect_only"  # scope qualifier
+    orch["system_allowed_operations"] = sorted(STAGE4_ALLOWED_OPERATIONS)
+    orch["system_blocked_operations"] = sorted(STAGE4_BLOCKED_OPERATIONS)
+    orch["system_allowed_skills"] = sorted(STAGE4_ALLOWED_SKILLS)
+    orch["system_blocked_skills"] = sorted(STAGE4_BLOCKED_SKILLS)
+    orch["stage_description"] = (
+        "Stage 4 rollout — research + code_review + code_impl + system_inspect. "
+        "system_inspect is read-only: status checks, log inspection, config review, "
+        "health audits, resource monitoring, architecture review, dependency audits, "
+        "security scans. All mutation-capable system operations remain blocked. "
+        "Verifier gate mandatory. Maker-checker enforced. "
+        "Shell-ops blocked for system path."
+    )
+    orch["stage4_activation_notes"] = (
+        "Activated via Phase 7.17 controlled activation. "
+        "Scope: system_inspect (read-only only). "
+        "Mutation operations blocked via Stage D denylist. "
+        "Abort conditions: policy violation, budget exhaustion, "
+        "heartbeat unhealthy, mutate pattern detected, verifier rejection."
+    )
+    flags_data["phase7_orchestrator"] = orch
+    flags_data["version"] = flags_data.get("version", 0) + 1
+    flags_data["updated_at"] = now_iso
+
+    # Atomic write
+    flags_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = flags_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(flags_data, indent=2))
+    tmp.rename(flags_path)
+
+    # Read post-activation config
+    try:
+        post_config = json.loads(flags_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        post_config = flags_data
+
+    # 4. Write activation audit record
+    record = Stage4ActivationRecord(
+        attempted_at=now_iso,
+        outcome="activated",
+        gate_decision=gate.decision,
+        reason="Stage 4 activation applied — system_inspect added to supported_classes (read-only scope)",
+        pre_config=pre_config.get("phase7_orchestrator", {}),
+        post_config=post_config.get("phase7_orchestrator", {}),
+        blocking_criteria=[],
+        activated_scope="system_inspect",
+        plan_validation=gate.plan_validation,
+    )
+    _append_activation_log(log_path, record)
+
+    return record
+
+
+def render_stage4_activation_markdown(record: Stage4ActivationRecord) -> str:
+    """Render Stage 4 activation result as an operator-facing markdown report."""
+    icon = {
+        "activated": "ACTIVATED",
+        "blocked": "BLOCKED",
+        "error": "ERROR",
+    }.get(record.outcome, "?")
+
+    lines = [
+        "# Phase 7.17 — Stage 4 Activation Result (system_inspect)",
+        f"Attempted: {record.attempted_at}",
+        "",
+        f"## Outcome: {icon}",
+        "",
+        f"**Gate decision**: {record.gate_decision}",
+        f"**Activated scope**: {record.activated_scope or '(none)'}",
+        f"**Reason**: {record.reason}",
+        "",
+    ]
+
+    if record.outcome == "activated":
+        # Enabled scope
+        lines.append("## Enabled Scope: system_inspect (read-only)")
+        lines.append("")
+        lines.append("### Allowed Operations")
+        lines.append("")
+        for op in sorted(STAGE4_ALLOWED_OPERATIONS):
+            lines.append(f"- {op}")
+        lines.append("")
+        lines.append("### Allowed Skills")
+        lines.append("")
+        for skill in sorted(STAGE4_ALLOWED_SKILLS):
+            lines.append(f"- {skill}")
+        lines.append("")
+
+        # Still-blocked scope
+        lines.append("## Still-Blocked Scope: system_mutate")
+        lines.append("")
+        lines.append("### Blocked Operations")
+        lines.append("")
+        for op in sorted(STAGE4_BLOCKED_OPERATIONS):
+            lines.append(f"- {op}")
+        lines.append("")
+        lines.append("### Blocked Skills")
+        lines.append("")
+        for skill in sorted(STAGE4_BLOCKED_SKILLS):
+            lines.append(f"- {skill}")
+        lines.append("")
+
+        # Monitoring checklist
+        lines.append("## Monitoring Checklist")
+        lines.append("")
+        for name, threshold in STAGE4_SUCCESS_CRITERIA.items():
+            display = f"{threshold:.0%}" if isinstance(threshold, float) else str(threshold)
+            lines.append(f"- [ ] {name}: threshold = {display}")
+        lines.append("")
+
+        # Abort conditions
+        lines.append("## Abort Conditions")
+        lines.append("")
+        for i, condition in enumerate(STAGE4_ABORT_CONDITIONS, 1):
+            lines.append(f"{i}. {condition}")
+        lines.append("")
+
+        # Rollback path
+        lines.append("## Rollback Path")
+        lines.append("")
+        for i, step in enumerate(_STAGE4_ROLLBACK_STEPS, 1):
+            lines.append(f"{i}. {step}")
+        lines.append("")
+        lines.append("### Quick Rollback Command")
+        lines.append("```bash")
+        lines.append('python3 -c "')
+        lines.append("import json; p='STATE/config/feature_flags.json'")
+        lines.append("d=json.loads(open(p).read())")
+        lines.append("d['phase7_orchestrator']['supported_classes']=['research','code_review','code_impl']")
+        lines.append("d['phase7_orchestrator']['rollout_stage']='stage3_research_code_review_code_impl'")
+        lines.append("d['phase7_orchestrator']['stage']='C'")
+        lines.append("d['phase7_orchestrator'].pop('system_scope', None)")
+        lines.append("d['phase7_orchestrator'].pop('system_allowed_operations', None)")
+        lines.append("d['phase7_orchestrator'].pop('system_blocked_operations', None)")
+        lines.append("d['phase7_orchestrator'].pop('system_allowed_skills', None)")
+        lines.append("d['phase7_orchestrator'].pop('system_blocked_skills', None)")
+        lines.append("open(p,'w').write(json.dumps(d,indent=2))")
+        lines.append("print('Rolled back to Stage 3')")
+        lines.append('"')
+        lines.append("sudo systemctl restart novacore-watcher")
+        lines.append("```")
+        lines.append("")
+
+        # Config diff
+        lines.append("## Config Change")
+        lines.append("")
+        pre = record.pre_config
+        post = record.post_config
+        lines.append(f"- **supported_classes**: {pre.get('supported_classes', [])} → {post.get('supported_classes', [])}")
+        lines.append(f"- **stage**: {pre.get('stage', '?')} → {post.get('stage', '?')}")
+        lines.append(f"- **rollout_stage**: {pre.get('rollout_stage', '?')} → {post.get('rollout_stage', '?')}")
+        lines.append(f"- **system_scope**: (new) → {post.get('system_scope', '?')}")
+        lines.append("")
+
+    elif record.blocking_criteria:
+        lines.append("## Blocking Criteria")
+        lines.append("")
+        for name in record.blocking_criteria:
+            lines.append(f"- {name}")
+        lines.append("")
+
+    # Plan validation at activation time
+    pv = record.plan_validation
+    if pv:
+        lines.append("## Plan Validation at Activation Time")
+        lines.append("")
+        lines.append(f"- **Valid**: {'YES' if pv.get('valid') else 'NO'}")
+        if pv.get("errors"):
+            for err in pv["errors"]:
+                lines.append(f"  - {err}")
+        lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def write_stage4_activation_result(
+    record: Stage4ActivationRecord,
+    base: Path | None = None,
+) -> tuple[Path, Path]:
+    """Write Stage 4 activation result to WORK/ and STATE/.
+
+    Returns (md_path, json_path).
+    """
+    root = base or BASE
+
+    md_path = root / "WORK" / "phase7_stage4_activation_result.md"
+    json_path = root / "STATE" / "stage4_activation_result.json"
+
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(render_stage4_activation_markdown(record))
+
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(record.to_dict(), indent=2, default=str) + "\n"
     )
 
     return md_path, json_path

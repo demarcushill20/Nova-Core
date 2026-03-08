@@ -22,6 +22,12 @@ Stage C rollout (superset of Stage B):
   deployment, secrets, destructive operations, or overly broad scope.
   Verifier approval is mandatory for all Stage C coding tasks.
   Research tasks continue under the same rules as Stage B.
+
+Stage D rollout (superset of Stage C):
+  Adds "system" in inspect-only scope (system_inspect). Only system tasks
+  matching read-only inspect signals are eligible. Tasks matching
+  mutation signals are rejected. Verifier mandatory for all system tasks.
+  Research + code_impl + code_review continue under Stage C rules.
 """
 
 import json
@@ -147,6 +153,118 @@ _HIGH_RISK_SIGNALS: list[str] = [
 _HIGH_RISK_COMPILED: list[re.Pattern] = [
     re.compile(p, re.IGNORECASE) for p in _HIGH_RISK_SIGNALS
 ]
+
+
+# ---------------------------------------------------------------------------
+# Stage D: system_inspect — read-only system tasks only
+# ---------------------------------------------------------------------------
+# Stage D adds system tasks in inspect-only scope. Tasks classified as
+# "system" must match inspect signals and must NOT match mutate signals.
+
+STAGE_D_CLASSES = frozenset({"system"})
+
+# System-mutate signals — tasks matching any of these are rejected in Stage D.
+# These are the mutation-capable operations that remain blocked.
+_SYSTEM_MUTATE_SIGNALS: list[str] = [
+    r"\bdeploy\b", r"\bconfigure\b", r"\binstall\b", r"\bmodify\b",
+    r"\bstart\b", r"\bstop\b", r"\brestart\b", r"\benable\b", r"\bdisable\b",
+    r"\bcreate\b", r"\bdelete\b", r"\bremove\b", r"\bkill\b",
+    r"\bchmod\b", r"\bchown\b", r"\bsudo\b",
+    r"\bpip\s+install\b", r"\bapt\b",
+    r"\bsystemctl\s+(?:start|stop|restart|enable|disable)\b",
+    r"\bcron\b", r"\bbootstrap\b", r"\bself[\s-]*improv\w+\b",
+    r"\bpromote\b", r"\brollout\b", r"\bpush\b",
+]
+
+_SYSTEM_MUTATE_COMPILED: list[re.Pattern] = [
+    re.compile(p, re.IGNORECASE) for p in _SYSTEM_MUTATE_SIGNALS
+]
+
+
+def has_system_mutate_signals(task_text: str) -> tuple[bool, list[str]]:
+    """Check if a system task contains mutation intent signals.
+
+    Returns (has_mutations, matched_signals).
+    Used by Stage D to reject system tasks that involve mutation
+    operations — only read-only inspect tasks are eligible.
+    """
+    matched = []
+    for pattern in _SYSTEM_MUTATE_COMPILED:
+        m = pattern.search(task_text)
+        if m:
+            matched.append(m.group())
+    return bool(matched), matched
+
+
+def is_stageD_eligible(
+    task_class: str,
+    confidence: float,
+    task_text: str,
+    feature_flags: dict | None = None,
+) -> tuple[bool, str]:
+    """Deterministic Stage D eligibility check.
+
+    Returns (eligible, reason) where reason explains the decision.
+
+    Stage D is a superset of Stage C:
+    - Research tasks: same rules as Stage B/C (mutation denylist)
+    - Coding tasks (code_impl, code_review): same rules as Stage C
+    - System tasks: inspect-only scope (mutate denylist)
+
+    Checks performed in order for system tasks:
+    1. Feature flag master switch
+    2. Stage is "D" (explicit stage gate)
+    3. Task class is "system" and in supported_classes
+    4. Confidence above threshold
+    5. No system-mutate signals in task text (inspect-only safety gate)
+
+    For non-system tasks, delegates to Stage C rules.
+    Fails closed: any check failure → not eligible.
+    """
+    flags = feature_flags or load_feature_flags()
+
+    # 1. Master switch
+    if not flags.get("enabled", False):
+        return False, "orchestrator_disabled"
+
+    # 2. Stage gate
+    stage = flags.get("stage", "")
+    if stage != "D":
+        return False, f"stage_{stage}_not_D"
+
+    # 3. Class check
+    supported = set(flags.get("supported_classes", []))
+    is_system = task_class == "system" and task_class in supported
+    is_coding = task_class in (supported & STAGE_C_CLASSES)
+    is_research = task_class in (supported & STAGE_B_CLASSES)
+
+    if not is_system and not is_coding and not is_research:
+        return False, f"class_{task_class}_not_in_stageD"
+
+    # 4. Confidence threshold
+    min_confidence = flags.get("min_confidence", 0.5)
+    if confidence < min_confidence:
+        return False, f"confidence_{confidence}_below_{min_confidence}"
+
+    # 5. Class-specific risk checks
+    if is_system:
+        # System tasks: reject if mutation signals detected
+        has_mutate, signals = has_system_mutate_signals(task_text)
+        if has_mutate:
+            return False, f"system_mutate_signals_detected:{','.join(signals[:3])}"
+        return True, "stageD_system_inspect_eligible"
+    elif is_coding:
+        # Coding tasks: same high-risk denylist as Stage C
+        has_risk, signals = has_high_risk_signals(task_text)
+        if has_risk:
+            return False, f"high_risk_signals_detected:{','.join(signals[:3])}"
+        return True, "stageD_coding_eligible"
+    else:
+        # Research: same mutation denylist as Stage B/C
+        has_mut, signals = has_mutation_signals(task_text)
+        if has_mut:
+            return False, f"mutation_signals_detected:{','.join(signals[:3])}"
+        return True, "stageD_research_eligible"
 
 
 def classify_task(task_text: str) -> tuple[str, float]:
@@ -394,6 +512,25 @@ def classify_and_route(task_text: str) -> dict:
 
     # Stage-specific routing
     stage = flags.get("stage", "")
+
+    # Stage D: superset of Stage C (research + coding + system_inspect)
+    if stage == "D":
+        eligible, reason = is_stageD_eligible(
+            task_class, confidence, task_text, flags
+        )
+        is_system = task_class == "system"
+        is_coding = task_class in STAGE_C_CLASSES
+        return {
+            "task_class": task_class,
+            "confidence": confidence,
+            "use_orchestrator": eligible,
+            "stage": "D",
+            "allowed_roles": flags.get("allowed_roles", ["research", "coding", "system_inspect"]),
+            "verifier_required": eligible and (is_coding or is_system),
+            "system_scope": "inspect_only" if is_system else None,
+            "fallback_reason": None if eligible else reason,
+            "feature_flags": flags,
+        }
 
     # Stage C: superset of Stage B (research + low-risk coding)
     if stage == "C":
