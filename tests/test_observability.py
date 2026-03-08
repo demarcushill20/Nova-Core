@@ -248,6 +248,42 @@ class TestCollectMetrics:
         assert m.stale_lease_count == 1
         assert m.active_lease_count == 1
 
+    def test_most_rejected_tool(self, tmp_path):
+        _make_audit_trail(tmp_path, [
+            {"tool": "shell.run", "ok": False, "exit_code": -1,
+             "error": "blocked"},
+            {"tool": "shell.run", "ok": False, "exit_code": -1,
+             "error": "blocked"},
+            {"tool": "repo.files.write", "ok": False, "exit_code": -1,
+             "error": "denied"},
+        ])
+        m = collect_metrics(base=tmp_path)
+        assert m.most_rejected_tool == "shell.run"
+
+    def test_most_overloaded_role(self, tmp_path):
+        _make_delegation(tmp_path, subtask_id="s1", agent_id="a1",
+                         role="coder", status="executing")
+        _make_delegation(tmp_path, subtask_id="s2", agent_id="a2",
+                         role="coder", status="claimed")
+        _make_delegation(tmp_path, subtask_id="s3", agent_id="a3",
+                         role="research", status="executing")
+        m = collect_metrics(base=tmp_path)
+        assert m.most_overloaded_role == "coder"
+
+    def test_max_dependency_wait(self, tmp_path):
+        _make_agent_state(tmp_path, agent_id="waiter", status="waiting",
+                          updated_at=time.time() - 300)
+        m = collect_metrics(base=tmp_path)
+        assert m.max_dependency_wait_s is not None
+        assert m.max_dependency_wait_s >= 299.0
+
+    def test_no_rejected_tool_when_clean(self, tmp_path):
+        _make_audit_trail(tmp_path, [
+            {"tool": "shell.run", "ok": True, "exit_code": 0},
+        ])
+        m = collect_metrics(base=tmp_path)
+        assert m.most_rejected_tool is None
+
 
 # ---------------------------------------------------------------------------
 # 2. Health detection tests
@@ -499,3 +535,38 @@ class TestContractFailureRate:
         report = generate_health_report(base=tmp_path)
         assert any("contract failure rate" in b.lower()
                     for b in report.top_bottlenecks)
+
+
+class TestNewMetricsInReport:
+    """Test most_rejected_tool, most_overloaded_role, max_dependency_wait in report."""
+
+    def test_rejected_tool_in_bottlenecks(self, tmp_path):
+        _make_audit_trail(tmp_path, [
+            {"tool": "shell.run", "ok": False, "exit_code": -1,
+             "error": "blocked by policy"},
+        ])
+        report = generate_health_report(base=tmp_path)
+        assert any("shell.run" in b for b in report.top_bottlenecks)
+
+    def test_overloaded_role_in_bottlenecks(self, tmp_path):
+        _make_delegation(tmp_path, subtask_id="s1", role="coder",
+                         status="executing")
+        report = generate_health_report(base=tmp_path)
+        assert any("coder" in b for b in report.top_bottlenecks)
+
+    def test_new_metrics_in_markdown(self, tmp_path):
+        _make_audit_trail(tmp_path, [
+            {"tool": "shell.run", "ok": False, "exit_code": -1,
+             "error": "denied"},
+        ])
+        _make_delegation(tmp_path, subtask_id="s1", role="research",
+                         status="executing")
+        _make_agent_state(tmp_path, agent_id="w1", status="waiting",
+                          updated_at=time.time() - 120)
+        report = generate_health_report(base=tmp_path)
+        md = render_report_markdown(report)
+        assert "Most rejected tool" in md
+        assert "shell.run" in md
+        assert "Most overloaded role" in md
+        assert "research" in md
+        assert "Max dependency wait" in md

@@ -22,6 +22,8 @@ from agents.production_hardening import (
     ArchiveManager,
     ApprovalGate,
     RestartRecovery,
+    GracefulDegradation,
+    DegradationResult,
     audit_policy_denial,
     run_production_hardening,
     ARCHIVE_AFTER_S,
@@ -721,3 +723,294 @@ class TestIntegration:
         result = run_production_hardening(tmp_path)
         assert result["multi_agent_enabled"] is True
         assert isinstance(result["cleanup"], dict)
+
+    def test_rate_limits_in_summary(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_hardening": {"rate_limiting": True},
+        })
+        result = run_production_hardening(tmp_path)
+        assert isinstance(result["rate_limits"], dict)
+        assert "workflow_launch" in result["rate_limits"]
+        assert "agent_spawn" in result["rate_limits"]
+        assert "retry_burst" in result["rate_limits"]
+
+    def test_rate_limits_disabled(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_hardening": {"rate_limiting": False},
+        })
+        result = run_production_hardening(tmp_path)
+        assert result["rate_limits"] == "disabled"
+
+    def test_recovery_runs_when_multi_agent_enabled(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {"enabled": True},
+        })
+        result = run_production_hardening(tmp_path)
+        assert isinstance(result["recovery"], dict)
+        assert "total_actions" in result["recovery"]
+
+    def test_recovery_disabled_when_multi_agent_off(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {"enabled": False},
+        })
+        result = run_production_hardening(tmp_path)
+        assert result["recovery"] == "disabled"
+
+
+# ===========================================================================
+# Task-class scoping
+# ===========================================================================
+
+class TestTaskClassScoping:
+
+    def test_supported_class_allowed(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {
+                "enabled": True,
+                "supported_classes": ["research", "code_impl"],
+            }
+        })
+        ff = FeatureFlags(tmp_path)
+        assert ff.is_task_class_supported("research") is True
+        assert ff.is_task_class_supported("code_impl") is True
+
+    def test_unsupported_class_blocked(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {
+                "enabled": True,
+                "supported_classes": ["research"],
+            }
+        })
+        ff = FeatureFlags(tmp_path)
+        assert ff.is_task_class_supported("system") is False
+        assert ff.is_task_class_supported("code_impl") is False
+
+    def test_disabled_orchestrator_blocks_all_classes(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {
+                "enabled": False,
+                "supported_classes": ["research"],
+            }
+        })
+        ff = FeatureFlags(tmp_path)
+        assert ff.is_task_class_supported("research") is False
+
+    def test_missing_supported_classes_blocks_all(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {"enabled": True}
+        })
+        ff = FeatureFlags(tmp_path)
+        assert ff.is_task_class_supported("research") is False
+
+    def test_non_list_supported_classes_fails_closed(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {
+                "enabled": True,
+                "supported_classes": "research",  # string, not list
+            }
+        })
+        ff = FeatureFlags(tmp_path)
+        assert ff.is_task_class_supported("research") is False
+
+
+# ===========================================================================
+# Graceful Degradation
+# ===========================================================================
+
+class TestGracefulDegradation:
+
+    def test_orchestrator_disabled_degrades(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {"enabled": False}
+        })
+        gd = GracefulDegradation(tmp_path)
+        result = gd.check_orchestrator_available("research")
+        assert result.action == "degrade"
+        assert result.fallback == "single_agent_worker"
+        assert "multi_agent_disabled" in result.reason
+
+    def test_unsupported_task_class_degrades(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {
+                "enabled": True,
+                "supported_classes": ["research"],
+            }
+        })
+        gd = GracefulDegradation(tmp_path)
+        result = gd.check_orchestrator_available("system")
+        assert result.action == "degrade"
+        assert "task_class_not_supported" in result.reason
+
+    def test_supported_class_proceeds(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_orchestrator": {
+                "enabled": True,
+                "supported_classes": ["research"],
+            }
+        })
+        gd = GracefulDegradation(tmp_path)
+        result = gd.check_orchestrator_available("research")
+        assert result.action == "proceed"
+
+    def test_spawn_rate_exceeded_halts(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_hardening": {"rate_limiting": True}
+        })
+        rl = RateLimiter(tmp_path)
+        for _ in range(MAX_AGENT_SPAWNS_PER_HOUR):
+            rl.record_event("agent_spawn", 3600)
+
+        gd = GracefulDegradation(tmp_path)
+        result = gd.check_spawn_feasibility()
+        assert result.action == "halt"
+        assert "rate_exceeded" in result.reason
+
+    def test_spawn_within_limit_proceeds(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_hardening": {"rate_limiting": True}
+        })
+        gd = GracefulDegradation(tmp_path)
+        result = gd.check_spawn_feasibility()
+        assert result.action == "proceed"
+
+    def test_workflow_rate_exceeded_degrades(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_hardening": {"rate_limiting": True}
+        })
+        rl = RateLimiter(tmp_path)
+        for _ in range(MAX_WORKFLOWS_PER_HOUR):
+            rl.record_event("workflow_launch", 3600)
+
+        gd = GracefulDegradation(tmp_path)
+        result = gd.check_workflow_launch_feasibility()
+        assert result.action == "degrade"
+        assert result.fallback == "single_agent_worker"
+
+    def test_spawn_failure_halts_and_audits(self, tmp_path):
+        gd = GracefulDegradation(tmp_path)
+        result = gd.handle_spawn_failure("wf1", "agent_x", "timeout")
+        assert result.action == "halt"
+        assert "spawn_failed" in result.reason
+        # Check that denial was audited
+        audit_path = tmp_path / "STATE" / "policy_denials.jsonl"
+        assert audit_path.exists()
+
+    def test_missing_artifact_halts(self, tmp_path):
+        gd = GracefulDegradation(tmp_path)
+        result = gd.handle_missing_artifact(
+            "/some/path.json", "workflow state"
+        )
+        assert result.action == "halt"
+        assert "missing_artifact" in result.reason
+
+    def test_verifier_unavailable_halts(self, tmp_path):
+        gd = GracefulDegradation(tmp_path)
+        result = gd.handle_verifier_unavailable("wf1")
+        assert result.action == "halt"
+        assert "verifier_unavailable" in result.reason
+
+    def test_rate_limiting_disabled_proceeds(self, tmp_path):
+        _write_feature_flags(tmp_path, {
+            "phase7_hardening": {"rate_limiting": False}
+        })
+        gd = GracefulDegradation(tmp_path)
+        assert gd.check_spawn_feasibility().action == "proceed"
+        assert gd.check_workflow_launch_feasibility().action == "proceed"
+
+
+# ===========================================================================
+# Delegation Archival
+# ===========================================================================
+
+class TestDelegationArchival:
+
+    def test_completed_delegation_archived(self, tmp_path):
+        (tmp_path / "STATE" / "delegations").mkdir(parents=True, exist_ok=True)
+        d = {"status": "completed",
+             "completed_at": time.time() - ARCHIVE_AFTER_S - 100}
+        del_path = tmp_path / "STATE" / "delegations" / "wf1_sub1.json"
+        del_path.write_text(json.dumps(d))
+        am = ArchiveManager(tmp_path)
+        archived = am.archive_completed_delegations()
+        assert "wf1_sub1.json" in archived
+        assert not del_path.exists()
+        assert (tmp_path / "STATE" / "archive" / "delegations"
+                / "wf1_sub1.json").exists()
+
+    def test_active_delegation_not_archived(self, tmp_path):
+        (tmp_path / "STATE" / "delegations").mkdir(parents=True, exist_ok=True)
+        d = {"status": "executing", "claimed_at": time.time()}
+        del_path = tmp_path / "STATE" / "delegations" / "wf1_sub2.json"
+        del_path.write_text(json.dumps(d))
+        am = ArchiveManager(tmp_path)
+        assert am.archive_completed_delegations() == []
+        assert del_path.exists()
+
+    def test_recent_completed_delegation_not_archived(self, tmp_path):
+        (tmp_path / "STATE" / "delegations").mkdir(parents=True, exist_ok=True)
+        d = {"status": "completed", "completed_at": time.time()}
+        del_path = tmp_path / "STATE" / "delegations" / "wf1_sub3.json"
+        del_path.write_text(json.dumps(d))
+        am = ArchiveManager(tmp_path)
+        assert am.archive_completed_delegations() == []
+
+    def test_delegation_included_in_run_cleanup(self, tmp_path):
+        (tmp_path / "STATE" / "delegations").mkdir(parents=True, exist_ok=True)
+        am = ArchiveManager(tmp_path)
+        result = am.run_cleanup()
+        assert "archived_delegations" in result
+
+
+# ===========================================================================
+# Recovery Lock
+# ===========================================================================
+
+class TestRecoveryLock:
+
+    def test_recovery_creates_and_cleans_lock(self, tmp_path):
+        lock_path = tmp_path / "STATE" / "recovery.lock"
+        rr = RestartRecovery(tmp_path)
+        result = rr.reconcile()
+        assert result["total_actions"] == 0
+        # Lock should be cleaned up after recovery
+        assert not lock_path.exists()
+
+    def test_concurrent_recovery_skipped(self, tmp_path):
+        """Recovery with a live lock holder is skipped."""
+        lock_path = tmp_path / "STATE" / "recovery.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text(str(os.getpid()))  # Our PID = alive
+        rr = RestartRecovery(tmp_path)
+        result = rr.reconcile()
+        assert "skipped" in result
+        assert "concurrent_recovery" in result["skipped"]
+
+    def test_stale_lock_reclaimed(self, tmp_path):
+        """Recovery with a dead lock holder proceeds."""
+        lock_path = tmp_path / "STATE" / "recovery.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text("999999")  # Dead PID
+        rr = RestartRecovery(tmp_path)
+        result = rr.reconcile()
+        assert "skipped" not in result
+        assert not lock_path.exists()
+
+
+# ===========================================================================
+# Retry Burst Limit
+# ===========================================================================
+
+class TestRetryBurstLimit:
+
+    def test_retry_burst_within_limit(self, tmp_path):
+        rl = RateLimiter(tmp_path)
+        result = rl.check_retry_burst()
+        assert result.allowed is True
+        assert result.limit == 5
+
+    def test_retry_burst_exceeded(self, tmp_path):
+        rl = RateLimiter(tmp_path)
+        for _ in range(5):
+            rl.record_event("retry_burst", 600)
+        result = rl.check_retry_burst()
+        assert result.allowed is False

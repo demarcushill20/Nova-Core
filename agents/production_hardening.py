@@ -67,6 +67,19 @@ class FeatureFlags:
         """Return the phase7_orchestrator config block (or empty dict)."""
         return self.flags.get("phase7_orchestrator", {})
 
+    def is_task_class_supported(self, task_class: str) -> bool:
+        """Check if a task class is in the orchestrator's supported list.
+
+        Fail-closed: if supported_classes is absent or not a list,
+        no classes are supported.
+        """
+        if not self.is_multi_agent_enabled():
+            return False
+        supported = self.orchestrator_config().get("supported_classes", [])
+        if not isinstance(supported, list):
+            return False
+        return task_class in supported
+
     # --- Hardening flags ---
 
     def hardening_config(self) -> dict:
@@ -174,6 +187,137 @@ class RateLimiter:
         return self.check_rate("agent_spawn",
                                MAX_AGENT_SPAWNS_PER_HOUR, 3600)
 
+    def check_retry_burst(self) -> RateCheckResult:
+        """Check retry burst limit (max 5 retries per 10 minutes)."""
+        return self.check_rate("retry_burst", 5, 600)
+
+
+# ---------------------------------------------------------------------------
+# Graceful Degradation — safe fallback on subsystem failures
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DegradationResult:
+    """Outcome of a degradation check."""
+    action: str         # "proceed" | "degrade" | "halt"
+    reason: str
+    fallback: str = ""  # description of fallback path taken
+
+
+class GracefulDegradation:
+    """Safe fallback logic for multi-agent subsystem failures.
+
+    Prefers: safe stop > governed fallback > explicit operator status.
+    Never silently continues past a failed precondition.
+    """
+
+    def __init__(self, base: Path | None = None):
+        self.base = base or BASE
+
+    def check_orchestrator_available(
+        self, task_class: str
+    ) -> DegradationResult:
+        """Check if orchestrator is available for this task class.
+
+        Returns degrade action with fallback to single-agent when disabled.
+        """
+        ff = FeatureFlags(self.base)
+
+        if not ff.is_multi_agent_enabled():
+            return DegradationResult(
+                action="degrade",
+                reason="multi_agent_disabled",
+                fallback="single_agent_worker",
+            )
+
+        if not ff.is_task_class_supported(task_class):
+            return DegradationResult(
+                action="degrade",
+                reason=f"task_class_not_supported:{task_class}",
+                fallback="single_agent_worker",
+            )
+
+        return DegradationResult(action="proceed", reason="orchestrator_available")
+
+    def check_spawn_feasibility(self) -> DegradationResult:
+        """Check if spawning a child agent is feasible (rate limit check).
+
+        Returns halt if rate limit exceeded.
+        """
+        ff = FeatureFlags(self.base)
+        if not ff.is_rate_limiting_enabled():
+            return DegradationResult(action="proceed", reason="rate_limiting_disabled")
+
+        rl = RateLimiter(self.base)
+        spawn_check = rl.check_agent_spawn()
+        if not spawn_check.allowed:
+            return DegradationResult(
+                action="halt",
+                reason=(f"agent_spawn_rate_exceeded:"
+                        f"{spawn_check.count}/{spawn_check.limit}"),
+            )
+
+        return DegradationResult(
+            action="proceed",
+            reason=f"spawn_allowed:{spawn_check.remaining}_remaining",
+        )
+
+    def check_workflow_launch_feasibility(self) -> DegradationResult:
+        """Check if launching a new workflow is feasible (rate limit check)."""
+        ff = FeatureFlags(self.base)
+        if not ff.is_rate_limiting_enabled():
+            return DegradationResult(action="proceed", reason="rate_limiting_disabled")
+
+        rl = RateLimiter(self.base)
+        wf_check = rl.check_workflow_launch()
+        if not wf_check.allowed:
+            return DegradationResult(
+                action="degrade",
+                reason=(f"workflow_rate_exceeded:"
+                        f"{wf_check.count}/{wf_check.limit}"),
+                fallback="single_agent_worker",
+            )
+
+        return DegradationResult(
+            action="proceed",
+            reason=f"workflow_allowed:{wf_check.remaining}_remaining",
+        )
+
+    def handle_spawn_failure(
+        self, workflow_id: str, agent_id: str, error: str
+    ) -> DegradationResult:
+        """Handle a child agent spawn failure safely.
+
+        Logs the failure and returns halt with operator-visible status.
+        """
+        audit_policy_denial(agent_id, "agent.spawn", error, self.base)
+        return DegradationResult(
+            action="halt",
+            reason=f"spawn_failed:{agent_id}:{error}",
+        )
+
+    def handle_missing_artifact(
+        self, artifact_path: str, context: str
+    ) -> DegradationResult:
+        """Handle a missing runtime artifact safely."""
+        return DegradationResult(
+            action="halt",
+            reason=f"missing_artifact:{artifact_path}:{context}",
+        )
+
+    def handle_verifier_unavailable(
+        self, workflow_id: str
+    ) -> DegradationResult:
+        """Handle verifier subsystem being unavailable.
+
+        Falls back to halting the workflow rather than silently skipping
+        verification.
+        """
+        return DegradationResult(
+            action="halt",
+            reason="verifier_unavailable",
+        )
+
 
 # ---------------------------------------------------------------------------
 # Archive / Cleanup — bounded, explicit, auditable
@@ -274,6 +418,38 @@ class ArchiveManager:
 
         return archived
 
+    def archive_completed_delegations(self) -> list[str]:
+        """Move completed/failed delegation records to archive."""
+        del_dir = self.base / "STATE" / "delegations"
+        archive_dir = self.base / "STATE" / "archive" / "delegations"
+        if not del_dir.exists():
+            return []
+
+        now = time.time()
+        archived = []
+
+        for del_file in sorted(del_dir.glob("*.json")):
+            try:
+                data = json.loads(del_file.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            if data.get("status", "") not in ("completed", "failed"):
+                continue
+
+            ts = self._parse_timestamp(
+                data.get("completed_at") or data.get("claimed_at", 0),
+                del_file,
+            )
+            if now - ts < ARCHIVE_AFTER_S:
+                continue
+
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            del_file.rename(archive_dir / del_file.name)
+            archived.append(del_file.name)
+
+        return archived
+
     def cleanup_expired_leases(self) -> list[str]:
         """Remove expired lease files."""
         leases_dir = self.base / "STATE" / "leases"
@@ -362,6 +538,7 @@ class ArchiveManager:
         result = {
             "archived_workflows": self.archive_completed_workflows(),
             "archived_agents": self.archive_agent_runtime(),
+            "archived_delegations": self.archive_completed_delegations(),
             "cleaned_leases": self.cleanup_expired_leases(),
             "cleaned_tmp": self.cleanup_stale_tmp_files(),
             "cleaned_approvals": self.cleanup_old_approvals(),
@@ -529,21 +706,54 @@ class RestartRecovery:
         self.base = base or BASE
 
     def reconcile(self) -> dict:
-        """Run full restart recovery. Returns summary of actions taken."""
-        actions: list[dict] = []
+        """Run full restart recovery. Returns summary of actions taken.
 
-        actions.extend(self._cleanup_stale_pids())
-        actions.extend(self._recover_stale_leases())
-        actions.extend(self._reconcile_workflows())
-        actions.extend(self._reconcile_inprogress_tasks())
+        Uses a lock file to prevent concurrent recovery runs.
+        """
+        lock_path = self.base / "STATE" / "recovery.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self._write_recovery_log(actions)
+        # Prevent concurrent recovery
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+        except FileExistsError:
+            # Check if holder is still alive
+            try:
+                holder_pid = int(lock_path.read_text().strip())
+                os.kill(holder_pid, 0)
+                return {
+                    "actions": [],
+                    "total_actions": 0,
+                    "recovered_at": time.time(),
+                    "skipped": f"concurrent_recovery_pid_{holder_pid}",
+                }
+            except (ProcessLookupError, ValueError, OSError):
+                # Stale lock — remove and retry
+                lock_path.unlink(missing_ok=True)
+                fd = os.open(str(lock_path),
+                             os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
 
-        return {
-            "actions": actions,
-            "total_actions": len(actions),
-            "recovered_at": time.time(),
-        }
+        try:
+            actions: list[dict] = []
+
+            actions.extend(self._cleanup_stale_pids())
+            actions.extend(self._recover_stale_leases())
+            actions.extend(self._reconcile_workflows())
+            actions.extend(self._reconcile_inprogress_tasks())
+
+            self._write_recovery_log(actions)
+
+            return {
+                "actions": actions,
+                "total_actions": len(actions),
+                "recovered_at": time.time(),
+            }
+        finally:
+            lock_path.unlink(missing_ok=True)
 
     def _cleanup_stale_pids(self) -> list[dict]:
         """Remove PID files for dead processes."""
@@ -780,5 +990,29 @@ def run_production_hardening(base: Path | None = None) -> dict:
             result["cleanup_error"] = str(e)
     else:
         result["cleanup"] = "disabled"
+
+    # Rate limit status (only when enabled)
+    if ff.is_rate_limiting_enabled():
+        try:
+            rl = RateLimiter(base)
+            result["rate_limits"] = {
+                "workflow_launch": asdict(rl.check_workflow_launch()),
+                "agent_spawn": asdict(rl.check_agent_spawn()),
+                "retry_burst": asdict(rl.check_retry_burst()),
+            }
+        except Exception as e:
+            result["rate_limits_error"] = str(e)
+    else:
+        result["rate_limits"] = "disabled"
+
+    # Recovery reconciliation (only when multi-agent enabled)
+    if ff.is_multi_agent_enabled():
+        try:
+            rr = RestartRecovery(base)
+            result["recovery"] = rr.reconcile()
+        except Exception as e:
+            result["recovery_error"] = str(e)
+    else:
+        result["recovery"] = "disabled"
 
     return result

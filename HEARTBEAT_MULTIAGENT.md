@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-07T23:02:28Z
+Generated: 2026-03-08T04:44:53Z
 
 ## Overall: HEALTHY
 
@@ -21,7 +21,7 @@ Generated: 2026-03-07T23:02:28Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 12 |
+| Contract successes | 15 |
 | Contract failures | 0 |
 | Contract failure rate | 0.0% |
 | Budget exhaustions | 0 |
@@ -29,6 +29,13 @@ Generated: 2026-03-07T23:02:28Z
 | Orphaned agents | 0 |
 | Active leases | 0 |
 | Stale leases | 0 |
+| Most rejected tool | shell.run |
+| Most overloaded role | N/A |
+| Max dependency wait | N/As |
+
+## Top Bottlenecks
+
+- Most rejected tool: shell.run
 
 ## Health Findings
 

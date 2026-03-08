@@ -110,6 +110,9 @@ class MultiAgentMetrics:
     orphaned_agent_count: int = 0
     active_lease_count: int = 0
     stale_lease_count: int = 0
+    most_rejected_tool: str | None = None
+    most_overloaded_role: str | None = None
+    max_dependency_wait_s: float | None = None
     collected_at: str = ""
 
     def __post_init__(self):
@@ -283,6 +286,7 @@ def collect_metrics(base: Path | None = None) -> MultiAgentMetrics:
 
     # --- Policy violations (from tool_audit.jsonl) ---
     audit_records = _read_jsonl(state / "tool_audit.jsonl")
+    rejected_tool_counts: dict[str, int] = {}
     for rec in audit_records:
         if not rec.get("ok", True):
             # A denied tool call is a policy violation proxy
@@ -290,6 +294,26 @@ def collect_metrics(base: Path | None = None) -> MultiAgentMetrics:
             if ("denied" in reason.lower() or "blocked" in reason.lower()
                     or rec.get("exit_code") == -1):
                 m.policy_violation_count += 1
+                tool_name = rec.get("tool", "unknown")
+                rejected_tool_counts[tool_name] = (
+                    rejected_tool_counts.get(tool_name, 0) + 1
+                )
+
+    if rejected_tool_counts:
+        m.most_rejected_tool = max(
+            rejected_tool_counts, key=rejected_tool_counts.get  # type: ignore
+        )
+
+    # --- Most overloaded role (from active delegations) ---
+    role_counts: dict[str, int] = {}
+    for d in delegations:
+        if d.get("status") in ("claimed", "executing"):
+            role = d.get("role", "unknown")
+            role_counts[role] = role_counts.get(role, 0) + 1
+    if role_counts:
+        m.most_overloaded_role = max(
+            role_counts, key=role_counts.get  # type: ignore
+        )
 
     # --- Leases ---
     leases = _list_json_files(state / "leases")
@@ -299,13 +323,21 @@ def collect_metrics(base: Path | None = None) -> MultiAgentMetrics:
         if expires and expires < now:
             m.stale_lease_count += 1
 
-    # --- Orphaned agents ---
+    # --- Orphaned agents + max dependency wait ---
+    wait_times: list[float] = []
     for agent in agent_states:
         status = agent.get("status", "")
         if status == "executing":
             started = agent.get("started_at") or agent.get("updated_at", 0)
             if started and (now - started) > AGENT_EXECUTING_SLA_S:
                 m.orphaned_agent_count += 1
+        elif status == "waiting":
+            updated = agent.get("updated_at", 0)
+            if updated:
+                wait_times.append(now - updated)
+
+    if wait_times:
+        m.max_dependency_wait_s = round(max(wait_times), 2)
 
     return m
 
@@ -527,6 +559,14 @@ def generate_health_report(base: Path | None = None) -> HealthReport:
         bottlenecks.append(
             f"High verifier rejection rate: {metrics.verifier_rejection_rate:.1%}"
         )
+    if metrics.most_rejected_tool:
+        bottlenecks.append(
+            f"Most rejected tool: {metrics.most_rejected_tool}"
+        )
+    if metrics.most_overloaded_role:
+        bottlenecks.append(
+            f"Most overloaded role: {metrics.most_overloaded_role}"
+        )
 
     return HealthReport(
         overall=overall,
@@ -576,6 +616,10 @@ def render_report_markdown(report: HealthReport) -> str:
     lines.append(f"| Orphaned agents | {m.orphaned_agent_count} |")
     lines.append(f"| Active leases | {m.active_lease_count} |")
     lines.append(f"| Stale leases | {m.stale_lease_count} |")
+    lines.append(f"| Most rejected tool | {m.most_rejected_tool or 'N/A'} |")
+    lines.append(f"| Most overloaded role | {m.most_overloaded_role or 'N/A'} |")
+    lines.append(f"| Max dependency wait | "
+                 f"{m.max_dependency_wait_s or 'N/A'}s |")
     lines.append("")
 
     # --- Active workflows ---
