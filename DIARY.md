@@ -4,7 +4,7 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
-## 2026-03-08 (Session 33) — Obsidian Phases 4.5/5/5.5: Write Skill + Context Injection + Promotion
+## 2026-03-08 (Session 33) — Obsidian Phases 4.5/5/5.5/6: Write Skills + Context Injection + Promotion + Pattern Skill
 
 **Session span:** Mar 8 UTC
 
@@ -15,6 +15,8 @@ Reverse-chronological. Each entry covers one working session.
 **Phase 5 — Read-Only Agent Context Injection:** Integrated bounded, advisory vault context retrieval into the orchestrator/planner path. New module `planner/vault_context.py` provides eligibility checking, keyword extraction, vault retrieval, and context formatting. Injected into `build_plan_from_task()` → first step's inputs → step executor prompt. Eligible task classes: research, code_impl, code_review. Runtime-state queries always skip. Advisory-only — runtime truth in STATE/TASKS/LOGS/ remains authoritative. Fail-open: vault unavailability does not block execution. Max 3 notes, 2KB formatted context, deterministic (no LLM calls).
 
 **Phase 5.5 — Controlled Post-Execution Workflow-Learning Promotion:** Added bounded promotion path in `execute_via_orchestrator()` that converts successful governed workflow outcomes into Obsidian workflow-learning notes. New module `planner/workflow_promoter.py` handles eligibility (task class + grade A/B + done + 2+ steps + learning signals), compaction (frontmatter + body), and writes via existing vault_validate → vault_write. Only governed stage B/C tasks trigger promotion. Tagged `#source/auto-promoted`. Fail-open: promotion failure does not block execution.
+
+**Phase 6 — `writing-agent-patterns` Skill:** Created the second write-oriented Obsidian skill for promoting stable, repeatable Nova-Core methods into structured agent-pattern notes. Higher confidence bar than workflow-learnings: requires 2+ independent task confirmations. 7-step promotion workflow: assess maturity → search duplicates → extract pattern → compose → validate → write → verify. Target folder `20-agent-patterns/`, schema `agent-pattern` (9 required frontmatter fields). Includes pattern promotion rubric reference doc with maturity criteria, confidence levels, and anti-patterns. Completes the four-skill read-write cycle across both memory note types.
 
 ### Tests
 - 48 vault context injection tests
@@ -32,6 +34,9 @@ Reverse-chronological. Each entry covers one working session.
 - `WORK/obsidian_phase4_5_workflow_learnings_skill_summary.md` — Phase 4.5 summary
 - `WORK/obsidian_phase5_context_injection_summary.md` — Phase 5 summary
 - `WORK/obsidian_phase5_5_workflow_promotion_summary.md` — Phase 5.5 summary
+- `.claude/skills/writing-agent-patterns/SKILL.md` — new skill
+- `.claude/skills/writing-agent-patterns/reference/PATTERN_PROMOTION_RUBRIC.md` — promotion rubric
+- `WORK/obsidian_phase6_agent_patterns_skill_summary.md` — Phase 6 summary
 
 ---
 
