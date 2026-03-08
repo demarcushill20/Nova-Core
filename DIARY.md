@@ -4,20 +4,28 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
-## 2026-03-08 (Session 33) — Obsidian Phase 4.5: `capturing-workflow-learnings` Skill
+## 2026-03-08 (Session 33) — Obsidian Phases 4.5/5: Write Skill + Context Injection
 
 **Session span:** Mar 8 UTC
 
 ### What was built
 
-**Phase 4.5 — First Write-Oriented Obsidian Skill:** Created the `capturing-workflow-learnings` Claude Code skill for safely converting completed workflow outcomes into compact, reusable workflow-learning notes in the canonical synced vault. The skill uses the existing bounded write path (vault_validate → vault_write) targeting `30-workflow-learnings/`. Includes explicit activation/non-activation criteria, a 7-step capture workflow with compaction-over-transcript rules, dedup search before write, schema validation against the `workflow-learning` type (11 required frontmatter fields), and a structured output contract. Added `reference/COMPACTION_RULES.md` with anti-pattern table and size targets.
+**Phase 4.5 — `capturing-workflow-learnings` Skill:** Created the first write-oriented Obsidian skill for safely converting completed workflow outcomes into compact, reusable workflow-learning notes in the synced vault. Uses vault_validate → vault_write targeting `30-workflow-learnings/`. Includes compaction rules reference doc. Completes the read-write-retrieve skill triad.
 
-This completes the read-write-retrieve skill triad: `reading-obsidian-memory` (read) + `capturing-workflow-learnings` (write) + `retrieving-task-patterns` (retrieve).
+**Phase 5 — Read-Only Agent Context Injection:** Integrated bounded, advisory vault context retrieval into the orchestrator/planner path. New module `planner/vault_context.py` provides eligibility checking, keyword extraction, vault retrieval, and context formatting. Injected into `build_plan_from_task()` → first step's inputs → step executor prompt. Eligible task classes: research, code_impl, code_review. Runtime-state queries always skip. Advisory-only — runtime truth in STATE/TASKS/LOGS/ remains authoritative. Fail-open: vault unavailability does not block execution. Max 3 notes, 2KB formatted context, deterministic (no LLM calls).
+
+### Tests
+- 48 new vault context injection tests (eligibility, keywords, formatting, retrieval, source-truth boundary, orchestrator integration)
+- 68 existing planner/orchestrator tests pass, zero regressions
 
 ### Files changed
-- `.claude/skills/capturing-workflow-learnings/SKILL.md` — main skill definition
+- `.claude/skills/capturing-workflow-learnings/SKILL.md` — new skill
 - `.claude/skills/capturing-workflow-learnings/reference/COMPACTION_RULES.md` — compaction rules
-- `WORK/obsidian_phase4_5_workflow_learnings_skill_summary.md` — summary artifact
+- `planner/vault_context.py` — new context injection module
+- `tests/test_vault_context.py` — 48 tests
+- `tools/orchestrator_adapter.py` — 3 narrow integration changes
+- `WORK/obsidian_phase4_5_workflow_learnings_skill_summary.md` — Phase 4.5 summary
+- `WORK/obsidian_phase5_context_injection_summary.md` — Phase 5 summary
 
 ---
 

@@ -29,6 +29,7 @@ from pathlib import Path
 from planner.orchestrator import Orchestrator
 from planner.schemas import ExecutionPlan, PlanStep
 from planner.supervisor import Supervisor
+from planner.vault_context import inject_vault_context
 from tools.task_classifier import classify_task
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,10 @@ def build_plan_from_task(
     task_class, confidence = classify_task(task_text)
     plan_id = f"plan_{stem}_{int(time.time())}"
 
+    # Phase 5: inject read-only vault context for eligible tasks
+    vault_ctx = inject_vault_context(task_class, task_text)
+    advisory_context = vault_ctx.get("vault_advisory_context", "")
+
     # Stage enforcement: restrict steps based on rollout stage
     stage = (routing or {}).get("stage", "")
     if stage == "B":
@@ -96,6 +101,21 @@ def build_plan_from_task(
     else:
         steps = _build_steps_for_class(stem, task_class, task_text)
         strategy = f"orchestrated_{task_class}"
+
+    # Phase 5: inject advisory context into first step's inputs
+    if advisory_context and steps:
+        steps[0].inputs["vault_advisory_context"] = advisory_context
+        steps[0].inputs["vault_note_paths"] = vault_ctx.get("vault_note_paths", [])
+        logger.info(
+            "VAULT CONTEXT INJECTED: %s — %d notes, reason=%s",
+            stem, vault_ctx.get("vault_notes_found", 0),
+            vault_ctx.get("vault_eligibility_reason", "?"),
+        )
+    elif not vault_ctx.get("vault_context_injected", False):
+        logger.debug(
+            "VAULT CONTEXT SKIPPED: %s — reason=%s",
+            stem, vault_ctx.get("vault_eligibility_reason", "?"),
+        )
 
     return ExecutionPlan(
         plan_id=plan_id,
@@ -338,11 +358,15 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
     This is the step executor that bridges orchestrator steps to
     actual Claude worker execution.
     """
+    vault_ctx = step.inputs.get("vault_advisory_context", "")
+    vault_section = f"\n{vault_ctx}\n" if vault_ctx else ""
+
     prompt = (
         f"You are executing step '{step.step_id}' of an orchestrated plan.\n"
         f"Goal: {step.goal}\n"
         f"Skill: {step.skill_name}\n\n"
         f"Task context:\n{step.inputs.get('task_text', '(no context)')}\n\n"
+        f"{vault_section}"
         f"Execute this step and produce output. End with a ## CONTRACT block.\n"
     )
 
