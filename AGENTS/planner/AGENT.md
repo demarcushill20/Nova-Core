@@ -38,10 +38,31 @@ Decompose inbound tasks into structured, deterministic workflow plans. The Plann
 - Write plan artifacts to STATE/workflows/ and STATE/plans/.
 - Read skill definitions from SKILLS/.
 - Read agent definitions from AGENTS/.
+- Retrieve task-relevant patterns and context from the Obsidian vault (vault.read, vault.search, vault.frontmatter).
+
+## Obsidian Skills
+
+| Skill | Binding | Purpose |
+|-------|---------|---------|
+| **retrieving-task-patterns** | Bound | Retrieve agent patterns and workflow learnings relevant to the current task for plan guidance |
+
+**Not bound** (and must never be):
+- reading-obsidian-memory — planner uses the narrower retrieving-task-patterns skill
+- capturing-workflow-learnings — planner does not write to vault
+- writing-agent-patterns — planner does not promote patterns
+- auditing-obsidian-memory-safety — planner does not audit writes
+
+**Usage rules**:
+- Pattern guidance is **advisory context, not runtime directives**. Plans must stand on their own even if vault is unavailable.
+- Retrieved patterns inform subtask decomposition and role assignment but do not override deterministic routing.
+- Vault retrieval is bounded: max 2 patterns, max 1.5 KB formatted context, max 3 vault tool calls.
+- If vault is unavailable, degrade gracefully — produce the plan without pattern guidance.
+- Do not write to or modify vault notes. Planning is read-only with respect to the vault.
 
 ## Forbidden Actions
 
 - **No code implementation**: must not write, modify, or delete source code files.
+- **No vault mutation**: must not write, update, or validate vault notes (vault.write, vault.update, vault.validate).
 - **No shell execution**: must not run shell commands (shell.run).
 - **No repository mutation**: must not create, modify, or delete files outside STATE/workflows/ and STATE/plans/.
 - **No agent spawning**: must not spawn or delegate to other agents (agent.spawn).

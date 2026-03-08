@@ -4,6 +4,47 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-03-08 (Session 34) — Obsidian Phases 7.6–10: Safety Audit, Navigation, Role Binding, Auto-Sync
+
+**Session span:** Mar 8 UTC
+
+### What was built
+
+**Phase 7.6 — `auditing-obsidian-memory-safety` Skill:** Created a governance-oriented skill that validates proposed Obsidian memory writes for safety, boundedness, schema validity, provenance, and runtime-boundary compliance. 10 audit dimensions: approved folder, path safety, schema validity, required fields, provenance, runtime boundary, secret scan, write mode, ownership, size/structure. Verdict taxonomy: approve/reject/needs_human_review. Read-only tools only (vault_validate, vault_read, vault_search, vault_frontmatter) — this skill never writes. Includes runtime-boundary red flags reference doc.
+
+**Phase 8 — Index Notes, Dashboards, and Architecture Maps:** Created 6 vault navigation notes in `_meta/`: NovaCore Memory Index (top-level entry point), Agent Patterns Index (by role/confidence/task class), Workflow Learnings Index (by task class/verification/confidence), Architecture Map (graph-oriented system layers, roles, skills, execution pipeline), Task Class Map (task class → memory artifact cross-reference), Dashboard Views (5 operator Bases/dashboard definitions). 46 cross-links via `[[wikilinks]]` for graph view usability. Zero new schema fields — reuses existing frontmatter properties.
+
+**Phase 9 — Role-Skill Binding:** Bound the Obsidian skill family into Nova-Core role definitions. Research gets `reading-obsidian-memory` (vault read only). Planner gets `retrieving-task-patterns` (vault read only). Memory gets `capturing-workflow-learnings` + `writing-agent-patterns` (vault read + bounded write). Operator gets `auditing-obsidian-memory-safety` (human-invocable, not agent-bound). Coder/critic/verifier/orchestrator denied all vault tools (`vault.*`). Updated AGENTS/*.md behavioral specs, STATE/agents/registry.json tool allowlists, STATE/policies/agent_policies.json profiles. **Completes all phases of the Obsidian MCP implementation plan.**
+
+**Phase 10 — Obsidian Headless Auto-Sync:** Added operational auto-sync layer using official Obsidian Headless (`ob` CLI, released Feb 2026). New module `tools/vault_sync.py` checks daemon status after successful vault writes. Primary mode: continuous daemon (`ob sync --continuous`) watches filesystem, syncs changes automatically. Fallback: oneshot `ob sync` if daemon not running. Wired into `execute_via_orchestrator()` after promotions. Fail-open: sync failure never invalidates successful writes. Default disabled, operator-managed config. 6 structured audit fields per sync check. Includes operator setup guide.
+
+### Tests
+- 46 role binding tests (registry, policy, AGENT.md validation, cross-cutting safety)
+- 24 vault sync tests (config, skip conditions, daemon mode, oneshot mode, fail-open, audit contract)
+- 1564 total tests pass, zero regressions
+
+### Files changed
+- `.claude/skills/auditing-obsidian-memory-safety/SKILL.md` — new skill
+- `.claude/skills/auditing-obsidian-memory-safety/reference/runtime-boundary-redflags.md` — red flags checklist
+- `_meta/novacore-memory-index.md` — vault top-level index (in vault)
+- `_meta/agent-patterns-index.md` — patterns index (in vault)
+- `_meta/workflow-learnings-index.md` — learnings index (in vault)
+- `_meta/architecture-map.md` — graph-oriented architecture map (in vault)
+- `_meta/task-class-map.md` — task class cross-reference (in vault)
+- `_meta/dashboard-views.md` — operator dashboard definitions (in vault)
+- `AGENTS/research/AGENT.md` — added Obsidian skill binding
+- `AGENTS/planner/AGENT.md` — added Obsidian skill binding
+- `AGENTS/memory/AGENT.md` — rewritten with full Obsidian skill binding
+- `STATE/agents/registry.json` — vault tools in allowed/denied per agent
+- `STATE/policies/agent_policies.json` — vault tools in profiles, obsidian_skills metadata
+- `tools/vault_sync.py` — post-write sync status checker
+- `tools/orchestrator_adapter.py` — sync integration
+- `MEMORY/obsidian-headless-sync-setup.md` — operator setup guide
+- `tests/test_obsidian_role_bindings.py` — 46 tests
+- `tests/test_vault_sync.py` — 24 tests
+
+---
+
 ## 2026-03-08 (Session 33) — Obsidian Phases 4.5–7.5: Full Read-Write-Retrieve-Feedback Pipeline
 
 **Session span:** Mar 8 UTC

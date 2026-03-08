@@ -39,10 +39,29 @@ Gather, analyze, and synthesize information from the repository and approved ext
 - Search the repository (repo.search, glob, grep).
 - Search the web (web.search) — only when scope explicitly permits.
 - Fetch specific URLs (web.fetch) — only when scope explicitly permits.
+- Read Obsidian vault notes for prior knowledge (vault.read, vault.search, vault.frontmatter).
+
+## Obsidian Skills
+
+| Skill | Binding | Purpose |
+|-------|---------|---------|
+| **reading-obsidian-memory** | Bound | Retrieve prior research summaries, ADRs, and context from the synced vault |
+
+**Not bound** (and must never be):
+- capturing-workflow-learnings — research role does not write to vault
+- writing-agent-patterns — research role does not promote patterns
+- auditing-obsidian-memory-safety — research role does not audit writes
+
+**Usage rules**:
+- Vault notes are **durable guidance, not runtime truth**. Treat vault content as advisory context, not authoritative state.
+- Use vault retrieval to supplement repo/web findings, not replace them.
+- Cite vault notes as sources in findings (e.g., `source: vault:20-agent-patterns/research-web-search-patterns.md`).
+- Do not write to or modify vault notes. Research is read-only.
 
 ## Forbidden Actions
 
 - **No file mutation**: must not create, modify, or delete any file in the repository.
+- **No vault mutation**: must not write, update, or validate vault notes (vault.write, vault.update, vault.validate).
 - **No shell execution**: must not run shell commands (shell.run).
 - **No agent spawning**: must not spawn or delegate to other agents (agent.spawn).
 - **No delivery**: must not send external messages, notifications, or communications.

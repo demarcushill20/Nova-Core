@@ -34,6 +34,7 @@ from planner.pattern_retriever import retrieve_pattern_guidance
 from planner.workflow_promoter import attempt_promotion
 from planner.pattern_promoter import attempt_pattern_promotion
 from planner.pattern_feedback import init_pattern_trace, finalize_pattern_trace, log_pattern_trace
+from tools.vault_sync import check_sync_after_write
 from tools.task_classifier import classify_task
 
 logger = logging.getLogger(__name__)
@@ -609,6 +610,29 @@ def execute_via_orchestrator(
     except Exception as exc:
         logger.warning("PATTERN FEEDBACK TRACING ERROR: %s — %s", stem, exc)
 
+    # Phase 10: post-write Obsidian sync check
+    sync_result = None
+    try:
+        # Check sync for workflow-learning promotion
+        if promotion_result and promotion_result.get("promoted"):
+            sync_result = check_sync_after_write(
+                write_path=promotion_result.get("note_path", ""),
+                write_status="created",
+            )
+        # Check sync for agent-pattern promotion (may override with latest)
+        if pattern_result and pattern_result.get("promoted"):
+            sync_result = check_sync_after_write(
+                write_path=pattern_result.get("note_path", ""),
+                write_status="created",
+            )
+    except Exception as exc:
+        logger.warning("VAULT SYNC CHECK ERROR: %s — %s", stem, exc)
+        sync_result = {
+            "obsidian_sync_attempted": False,
+            "obsidian_sync_result": "error",
+            "obsidian_sync_error": str(exc),
+        }
+
     return {
         "success": summary.get("status") == "done",
         "output_path": str(output_path),
@@ -616,6 +640,7 @@ def execute_via_orchestrator(
         "promotion": promotion_result,
         "pattern_promotion": pattern_result,
         "pattern_feedback": pattern_trace,
+        "obsidian_sync": sync_result,
     }
 
 
