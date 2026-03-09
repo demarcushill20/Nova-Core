@@ -14,7 +14,7 @@ from unittest.mock import patch, AsyncMock
 
 # Load local telegram modules via importlib (same pattern as telegram_bot.py)
 _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _mod_name in ("parse", "conversation", "llm", "persona", "format", "delegation"):
+for _mod_name in ("parse", "conversation", "llm", "persona", "format", "delegation", "goals"):
     _path = os.path.join(_here, "telegram", f"{_mod_name}.py")
     if os.path.exists(_path):
         _spec = importlib.util.spec_from_file_location(_mod_name, _path)
@@ -27,6 +27,7 @@ conversation = sys.modules["tg_conversation"]
 llm = sys.modules["tg_llm"]
 persona = sys.modules["tg_persona"]
 delegation = sys.modules["tg_delegation"]
+goals = sys.modules["tg_goals"]
 
 
 # ── Persona Tests ──────────────────────────────────────────────────────────
@@ -590,6 +591,138 @@ class TestRecentCompletions(unittest.TestCase):
             )
         results = delegation.get_recent_completions(max_age_seconds=3600, limit=2)
         self.assertEqual(len(results), 2)
+
+
+# ── Phase 6: Goal Tracking & Briefing Tests ──────────────────────────────
+
+
+class TestGoalStore(unittest.TestCase):
+    def setUp(self):
+        self._orig_file = goals.GOALS_FILE
+        self.tmpdir = os.path.join(os.path.dirname(__file__), "_test_goals")
+        os.makedirs(self.tmpdir, exist_ok=True)
+        goals.GOALS_FILE = type(goals.GOALS_FILE)(
+            os.path.join(self.tmpdir, "goals.json")
+        )
+
+    def tearDown(self):
+        goals.GOALS_FILE = self._orig_file
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_add_goal(self):
+        g = goals.add_goal("Ship the API")
+        self.assertEqual(g["id"], 1)
+        self.assertEqual(g["text"], "Ship the API")
+        self.assertEqual(g["status"], "active")
+
+    def test_list_goals(self):
+        goals.add_goal("Goal A")
+        goals.add_goal("Goal B")
+        active = goals.list_goals()
+        self.assertEqual(len(active), 2)
+
+    def test_complete_goal(self):
+        g = goals.add_goal("Test goal")
+        result = goals.complete_goal(g["id"])
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "completed")
+        # Should no longer appear in active list
+        active = goals.list_goals()
+        self.assertEqual(len(active), 0)
+
+    def test_complete_nonexistent(self):
+        result = goals.complete_goal(999)
+        self.assertIsNone(result)
+
+    def test_remove_goal(self):
+        g = goals.add_goal("Remove me")
+        result = goals.remove_goal(g["id"])
+        self.assertIsNotNone(result)
+        self.assertEqual(goals.list_goals(include_completed=True), [])
+
+    def test_clear_completed(self):
+        g1 = goals.add_goal("Done goal")
+        goals.add_goal("Active goal")
+        goals.complete_goal(g1["id"])
+        count = goals.clear_completed()
+        self.assertEqual(count, 1)
+        all_goals = goals.list_goals(include_completed=True)
+        self.assertEqual(len(all_goals), 1)
+        self.assertEqual(all_goals[0]["text"], "Active goal")
+
+    def test_format_for_context_empty(self):
+        ctx = goals.format_goals_for_context()
+        self.assertEqual(ctx, "")
+
+    def test_format_for_context_with_goals(self):
+        goals.add_goal("Ship the API")
+        ctx = goals.format_goals_for_context()
+        self.assertIn("Ship the API", ctx)
+        self.assertIn("ACTIVE GOALS", ctx)
+
+    def test_format_for_display(self):
+        goals.add_goal("Goal X")
+        display = goals.format_goals_for_display()
+        self.assertIn("Goal X", display)
+        self.assertIn("#1", display)
+
+    def test_auto_increment_id(self):
+        g1 = goals.add_goal("First")
+        g2 = goals.add_goal("Second")
+        self.assertEqual(g1["id"], 1)
+        self.assertEqual(g2["id"], 2)
+
+
+class TestGoalsCommandParsing(unittest.TestCase):
+    def _parse(self, text):
+        return parse.parse_message(text, "123", 1.0)
+
+    def test_goals_list(self):
+        r = self._parse("/goals")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["action"]["action"], "goals")
+        self.assertEqual(r["action"]["subcommand"], "list")
+
+    def test_goals_add(self):
+        r = self._parse("/goals add Ship the API this week")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["action"]["subcommand"], "add")
+        self.assertEqual(r["action"]["text"], "Ship the API this week")
+
+    def test_goals_add_no_text_errors(self):
+        r = self._parse("/goals add")
+        self.assertFalse(r["ok"])
+
+    def test_goals_done(self):
+        r = self._parse("/goals done 3")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["action"]["subcommand"], "done")
+        self.assertEqual(r["action"]["goal_id"], 3)
+
+    def test_goals_done_no_id_errors(self):
+        r = self._parse("/goals done")
+        self.assertFalse(r["ok"])
+
+    def test_goals_remove(self):
+        r = self._parse("/goals remove 5")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["action"]["subcommand"], "remove")
+        self.assertEqual(r["action"]["goal_id"], 5)
+
+    def test_goals_clear(self):
+        r = self._parse("/goals clear")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["action"]["subcommand"], "clear")
+
+    def test_goals_unknown_subcommand(self):
+        r = self._parse("/goals foo")
+        self.assertFalse(r["ok"])
+
+    def test_briefing_command(self):
+        r = self._parse("/briefing")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["action"]["action"], "briefing")
 
 
 if __name__ == "__main__":

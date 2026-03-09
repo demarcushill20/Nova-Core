@@ -43,7 +43,7 @@ sys.modules["telegram.parse"] = _tg_parse
 from telegram.parse import parse_message  # noqa: E402
 
 # Register additional local telegram modules via the same shim pattern.
-for _mod_name in ("conversation", "llm", "persona", "delegation"):
+for _mod_name in ("conversation", "llm", "persona", "delegation", "goals"):
     _mod_spec = importlib.util.spec_from_file_location(
         f"telegram.{_mod_name}", os.path.join(_here, "telegram", f"{_mod_name}.py")
     )
@@ -57,6 +57,10 @@ from telegram.persona import SYSTEM_PROMPT, DELEGATION_ACK_PROMPT, SESSION_START
 from telegram.delegation import (  # noqa: E402
     DelegationTracker, find_completed_output, claim_notification,
     extract_output_summary, get_recent_completions, COMPLETION_SUMMARY_PROMPT,
+)
+from telegram.goals import (  # noqa: E402
+    add_goal, complete_goal, remove_goal, list_goals,
+    clear_completed, format_goals_for_context, format_goals_for_display,
 )
 
 ROOT = Path("/home/nova/nova-core")
@@ -94,6 +98,8 @@ _HELP_TEXT = (
     "/tail <id>     \u2014 tail worker log (/tail <id> 100 for 100 lines)\n"
     "/cancel <id>   \u2014 soft-cancel a task (/cancel last for newest)\n"
     "/mode <level>  \u2014 set notifier verbosity: compact|normal|verbose\n"
+    "/goals         \u2014 view/manage goals (add, done, remove, clear)\n"
+    "/briefing      \u2014 get a system briefing (tasks, health, goals)\n"
     "/help          \u2014 this message"
 )
 
@@ -648,6 +654,11 @@ async def handle_conversation(chat_id: str, text: str) -> str:
         effective_prompt = f"{SESSION_START_HINT}\n\n{text}"
         _log.info("SESSION_START chat=%s — injecting memory hint", chat_id)
 
+    # Inject active goals as context (Phase 6)
+    goals_context = format_goals_for_context()
+    if goals_context:
+        context_str = f"{goals_context}\n\n{context_str}" if context_str else goals_context
+
     # Inject recent task completions as context (Phase 5)
     recent = get_recent_completions(max_age_seconds=3600, limit=3)
     if recent:
@@ -687,6 +698,95 @@ async def handle_delegation_ack(chat_id: str, text: str, task_reply: str) -> str
         conversation_context=context_str,
     )
 
+    _conversations.add_assistant_message(chat_id, response)
+    return response
+
+
+# --- Goal and briefing handlers (Phase 6) ---
+
+def _handle_goals(action: dict) -> str:
+    """Handle /goals subcommands."""
+    sub = action.get("subcommand", "list")
+
+    if sub == "list":
+        return format_goals_for_display()
+    elif sub == "add":
+        goal = add_goal(action["text"])
+        return f"Goal #{goal['id']} added: {goal['text']}"
+    elif sub == "done":
+        goal = complete_goal(action["goal_id"])
+        if goal:
+            return f"Goal #{goal['id']} completed: {goal['text']}"
+        return f"Error: no active goal with ID #{action['goal_id']}"
+    elif sub == "remove":
+        goal = remove_goal(action["goal_id"])
+        if goal:
+            return f"Goal #{goal['id']} removed: {goal['text']}"
+        return f"Error: no goal with ID #{action['goal_id']}"
+    elif sub == "clear":
+        count = clear_completed()
+        return f"Cleared {count} completed goal(s)." if count else "No completed goals to clear."
+    return "Unknown goals subcommand."
+
+
+BRIEFING_PROMPT = """\
+Generate a concise system briefing for the user. Cover:
+1. Active goals and their status
+2. Recent task activity (what completed, what's running)
+3. System health (any issues?)
+
+Keep it to 5-10 sentences. Be natural, not robotic. Lead with the most important information.
+Don't use headers or bullet points unless there's a lot to cover. Reference goals by name, not ID.
+"""
+
+
+async def _handle_briefing(chat_id: str) -> str:
+    """Generate a system briefing via Claude CLI with full context."""
+    # Gather context for the briefing
+    parts = []
+
+    # Goals
+    goals_ctx = format_goals_for_context()
+    if goals_ctx:
+        parts.append(goals_ctx)
+    else:
+        parts.append("NO ACTIVE GOALS SET")
+
+    # Recent completions
+    recent = get_recent_completions(max_age_seconds=86400, limit=5)  # last 24h
+    if recent:
+        parts.append("RECENT TASK COMPLETIONS (last 24h):")
+        for r in recent:
+            parts.append(f"- {r['stem']}: {r['summary_line']}")
+    else:
+        parts.append("NO RECENT TASK COMPLETIONS")
+
+    # System health — read HEARTBEAT.md if available
+    heartbeat_path = ROOT / "HEARTBEAT.md"
+    if heartbeat_path.exists():
+        try:
+            hb = heartbeat_path.read_text(encoding="utf-8", errors="replace")
+            # Just the first 500 chars for summary
+            parts.append(f"SYSTEM HEALTH (from HEARTBEAT.md):\n{hb[:500]}")
+        except OSError:
+            parts.append("SYSTEM HEALTH: unable to read HEARTBEAT.md")
+
+    # Pending tasks
+    pending = [p.name for p in TASKS.iterdir()
+               if p.is_file() and p.suffix == ".md" and not p.name.startswith(".")]
+    if pending:
+        parts.append(f"PENDING TASKS IN QUEUE: {len(pending)}")
+    else:
+        parts.append("TASK QUEUE: empty")
+
+    context = "\n\n".join(parts)
+
+    response = await generate_response(
+        prompt=f"{BRIEFING_PROMPT}\n\nCURRENT STATE:\n{context}",
+        system_prompt=SYSTEM_PROMPT,
+    )
+
+    # Record in conversation buffer
     _conversations.add_assistant_message(chat_id, response)
     return response
 
@@ -799,6 +899,10 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         reply = handle_set_mode(chat_id, action["mode"])
     elif action_type == "get_mode":
         reply = handle_get_mode(chat_id)
+    elif action_type == "goals":
+        reply = _handle_goals(action)
+    elif action_type == "briefing":
+        reply = await _handle_briefing(chat_id)
     else:
         reply = f"Unknown action: {action_type}. Try /help"
 

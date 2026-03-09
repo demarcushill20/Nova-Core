@@ -16,7 +16,7 @@ _VALID_MODES = ("compact", "normal", "verbose")
 
 _KNOWN_COMMANDS = frozenset(
     ("run", "status", "last", "get", "tail", "cancel", "mode", "help",
-     "chat", "report")
+     "chat", "report", "goals", "briefing")
 )
 
 
@@ -180,6 +180,57 @@ def _parse_report(rest: str, chat_id: str, ts: float) -> dict:
     return result
 
 
+def _parse_goals(rest: str, chat_id: str, ts: float) -> dict:
+    """Parse /goals [subcommand] [args].
+
+    Subcommands:
+      /goals           — list goals
+      /goals add <text> — add a goal
+      /goals done <id>  — mark goal done
+      /goals remove <id> — remove a goal
+      /goals clear      — remove completed goals
+    """
+    parts = rest.strip().split(None, 1)
+    action = _base("goals", chat_id, ts)
+
+    if not parts:
+        action["subcommand"] = "list"
+        return _ok(action)
+
+    sub = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if sub == "add":
+        if not arg:
+            return _err("Error: /goals add requires text. Usage: /goals add <goal>")
+        action["subcommand"] = "add"
+        action["text"] = arg
+    elif sub == "done":
+        goal_id = parse_int(arg) if arg else None
+        if goal_id is None:
+            return _err("Error: /goals done requires a goal ID. Usage: /goals done <id>")
+        action["subcommand"] = "done"
+        action["goal_id"] = goal_id
+    elif sub == "remove":
+        goal_id = parse_int(arg) if arg else None
+        if goal_id is None:
+            return _err("Error: /goals remove requires a goal ID. Usage: /goals remove <id>")
+        action["subcommand"] = "remove"
+        action["goal_id"] = goal_id
+    elif sub == "clear":
+        action["subcommand"] = "clear"
+    else:
+        return _err(f'Error: unknown /goals subcommand "{sub}". '
+                    "Use: add, done, remove, clear")
+
+    return _ok(action)
+
+
+def _parse_briefing(chat_id: str, ts: float) -> dict:
+    """Parse /briefing — generate a system briefing."""
+    return _ok(_base("briefing", chat_id, ts))
+
+
 # --- Intent classification ---------------------------------------------------
 
 # Task keywords: report-style terms that clearly need the task queue
@@ -304,5 +355,9 @@ def parse_message(text: str, chat_id: str, ts: float) -> dict | None:
         return _parse_chat(rest, chat_id, ts)
     if cmd == "report":
         return _parse_report(rest, chat_id, ts)
+    if cmd == "goals":
+        return _parse_goals(rest, chat_id, ts)
+    if cmd == "briefing":
+        return _parse_briefing(chat_id, ts)
 
     return None  # unreachable but defensive
