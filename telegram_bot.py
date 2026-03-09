@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import asyncio
 import fcntl
 import functools
 import importlib.util
@@ -684,49 +685,52 @@ async def handle_delegation_ack(chat_id: str, text: str, task_reply: str) -> str
 
 # --- Proactive completion notifications (Phase 3) ---
 
-async def _check_completions(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Periodic job: check if any delegated tasks have completed."""
-    if not _delegations.has_pending():
-        return
-
-    for stem in _delegations.pending_stems():
-        output_path = find_completed_output(stem)
-        if output_path is None:
+async def _check_completions(app) -> None:
+    """Periodic loop: check if any delegated tasks have completed."""
+    _log.info("Completion checker started (every 15s)")
+    while True:
+        await asyncio.sleep(15)
+        if not _delegations.has_pending():
             continue
 
-        # Atomically claim the notification — if we lose, notifier handles it
-        if not claim_notification(output_path.name):
-            _delegations.complete(stem)
-            _log.info("COMPLETION claim lost for %s (notifier got it)", stem)
-            continue
+        for stem in _delegations.pending_stems():
+            output_path = find_completed_output(stem)
+            if output_path is None:
+                continue
 
-        chat_id = _delegations.complete(stem)
-        if not chat_id:
-            continue
+            # Atomically claim the notification — if we lose, notifier handles it
+            if not claim_notification(output_path.name):
+                _delegations.complete(stem)
+                _log.info("COMPLETION claim lost for %s (notifier got it)", stem)
+                continue
 
-        _log.info("COMPLETION detected: stem=%s output=%s chat=%s",
-                  stem, output_path.name, chat_id)
+            chat_id = _delegations.complete(stem)
+            if not chat_id:
+                continue
 
-        # Read output and generate natural summary
-        try:
-            output_content = extract_output_summary(output_path)
-            summary = await generate_response(
-                prompt=f"{COMPLETION_SUMMARY_PROMPT}{output_content}",
-                system_prompt=SYSTEM_PROMPT,
-            )
+            _log.info("COMPLETION detected: stem=%s output=%s chat=%s",
+                      stem, output_path.name, chat_id)
 
-            # Record in conversation buffer for continuity
-            _conversations.add_assistant_message(chat_id, summary)
+            # Read output and generate natural summary
+            try:
+                output_content = extract_output_summary(output_path)
+                summary = await generate_response(
+                    prompt=f"{COMPLETION_SUMMARY_PROMPT}{output_content}",
+                    system_prompt=SYSTEM_PROMPT,
+                )
 
-            # Send to user
-            for chunk in chunk_text(summary, chunk_size=4000):
-                await context.bot.send_message(chat_id=chat_id, text=chunk)
+                # Record in conversation buffer for continuity
+                _conversations.add_assistant_message(chat_id, summary)
 
-            _log.info("COMPLETION notified: stem=%s chat=%s len=%d",
-                      stem, chat_id, len(summary))
-        except Exception as exc:
-            _log.error("COMPLETION notification failed for %s: %s",
-                       stem, exc, exc_info=True)
+                # Send to user
+                for chunk in chunk_text(summary, chunk_size=4000):
+                    await app.bot.send_message(chat_id=chat_id, text=chunk)
+
+                _log.info("COMPLETION notified: stem=%s chat=%s len=%d",
+                          stem, chat_id, len(summary))
+            except Exception as exc:
+                _log.error("COMPLETION notification failed for %s: %s",
+                           stem, exc, exc_info=True)
 
 
 # --- Unified message handler ---
@@ -840,9 +844,10 @@ def main() -> None:
     # parse_message handles routing; non-commands return None (ignored).
     app.add_handler(MessageHandler(filters.TEXT, on_message))
 
-    # Phase 3: periodic check for completed delegated tasks (every 15s)
-    app.job_queue.run_repeating(_check_completions, interval=15, first=10)
-    _log.info("Completion checker scheduled (every 15s)")
+    # Phase 3: start background completion checker after app initializes
+    async def _post_init(application) -> None:
+        asyncio.create_task(_check_completions(application))
+    app.post_init = _post_init
 
     async def _on_error(update, context):
         from telegram.error import Conflict
