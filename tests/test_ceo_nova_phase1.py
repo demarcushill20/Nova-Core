@@ -486,5 +486,111 @@ class TestToolInstructions(unittest.TestCase):
         self.assertIn("delegation candidate", persona.SYSTEM_PROMPT)
 
 
+# ── Phase 5: Smart Intent Classification Tests ───────────────────────────
+
+
+class TestExpandedIntentClassification(unittest.TestCase):
+    """Verify that action verbs route to task and chat signals stay in chat."""
+
+    def _parse(self, text):
+        return parse.parse_message(text, "123", 1.0)
+
+    # -- Action verbs → task --
+
+    def test_refactor_routes_to_task(self):
+        r = self._parse("refactor the heartbeat module")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_implement_routes_to_task(self):
+        r = self._parse("implement the new API endpoint")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_build_routes_to_task(self):
+        r = self._parse("build a PDF export feature")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_fix_routes_to_task(self):
+        r = self._parse("fix the memory leak in the watcher")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_research_routes_to_task(self):
+        r = self._parse("research the best approach for caching")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_deploy_routes_to_task(self):
+        r = self._parse("deploy the new telegram bot version")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    # -- Chat signals override action verbs --
+
+    def test_should_we_refactor_is_chat(self):
+        r = self._parse("should we refactor the heartbeat?")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+    def test_can_you_explain_is_chat(self):
+        r = self._parse("can you explain how the watcher works?")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+    def test_what_do_you_think_is_chat(self):
+        r = self._parse("what do you think about implementing caching?")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+    def test_tell_me_about_is_chat(self):
+        r = self._parse("tell me about our deployment process")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+    # -- Pure chat stays chat --
+
+    def test_greeting_stays_chat(self):
+        r = self._parse("hey how's it going")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+    def test_thanks_stays_chat(self):
+        r = self._parse("thanks that looks great")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+    def test_opinion_stays_chat(self):
+        r = self._parse("how are we doing on the project?")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+
+class TestRecentCompletions(unittest.TestCase):
+    """Test the recent completions context injection helper."""
+
+    def setUp(self):
+        self.tmpdir = os.path.join(os.path.dirname(__file__), "_test_output2")
+        os.makedirs(self.tmpdir, exist_ok=True)
+        self._orig_output = delegation.OUTPUT
+        delegation.OUTPUT = type(delegation.OUTPUT)(self.tmpdir)
+
+    def tearDown(self):
+        delegation.OUTPUT = self._orig_output
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_returns_recent_outputs(self):
+        # Create a fresh output file
+        fname = "0042_test__20260309-020000.md"
+        (delegation.OUTPUT / fname).write_text(
+            "# Report\n**Task:** test\nThis is the result.", encoding="utf-8"
+        )
+        results = delegation.get_recent_completions(max_age_seconds=3600)
+        self.assertGreaterEqual(len(results), 1)
+        self.assertEqual(results[0]["stem"], "0042_test")
+
+    def test_returns_empty_when_no_outputs(self):
+        results = delegation.get_recent_completions(max_age_seconds=3600)
+        self.assertEqual(results, [])
+
+    def test_respects_limit(self):
+        for i in range(5):
+            fname = f"00{i:02d}_test_{i}__20260309-02000{i}.md"
+            (delegation.OUTPUT / fname).write_text(
+                f"# Report\nResult {i}", encoding="utf-8"
+            )
+        results = delegation.get_recent_completions(max_age_seconds=3600, limit=2)
+        self.assertEqual(len(results), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

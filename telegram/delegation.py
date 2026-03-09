@@ -84,6 +84,43 @@ def extract_output_summary(output_path: Path, max_chars: int = 2000) -> str:
     return text
 
 
+def get_recent_completions(max_age_seconds: int = 3600, limit: int = 3) -> list[dict]:
+    """Get recently completed OUTPUT files for context injection.
+
+    Returns a list of {"stem": ..., "summary_line": ...} for outputs
+    completed within max_age_seconds, most recent first.
+    """
+    import time
+    if not OUTPUT.exists():
+        return []
+    cutoff = time.time() - max_age_seconds
+    results = []
+    for p in sorted(OUTPUT.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if not p.is_file() or p.suffix != ".md":
+            continue
+        if p.stat().st_mtime < cutoff:
+            break
+        # Extract stem from filename pattern: {stem}__YYYYMMDD-HHMMSS.md
+        name = p.stem
+        parts = name.rsplit("__", 1)
+        stem = parts[0] if len(parts) == 2 else name
+        # Read first meaningful line as summary
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+            summary_line = ""
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and not stripped.startswith("**"):
+                    summary_line = stripped[:200]
+                    break
+            results.append({"stem": stem, "summary_line": summary_line, "path": str(p)})
+        except OSError:
+            continue
+        if len(results) >= limit:
+            break
+    return results
+
+
 COMPLETION_SUMMARY_PROMPT = """\
 A background task has completed. Summarize the result for the user naturally.
 

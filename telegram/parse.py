@@ -182,9 +182,30 @@ def _parse_report(rest: str, chat_id: str, ts: float) -> dict:
 
 # --- Intent classification ---------------------------------------------------
 
+# Task keywords: report-style terms that clearly need the task queue
 _TASK_KEYWORDS = _re.compile(
     r"\b(report|contract|full output|debug|verbose|audit"
     r"|show sources|show files|detailed)\b",
+    _re.IGNORECASE,
+)
+
+# Action verbs: implementation/engineering work that needs background processing
+_ACTION_VERBS = _re.compile(
+    r"\b(implement|refactor|build|deploy|create|fix|update|write|rewrite"
+    r"|test|review|analyze|investigate|research|scan|optimize|migrate"
+    r"|set up|install|configure|add|remove|delete|move|rename"
+    r"|generate|scaffold|upgrade|patch|redesign|rearchitect)\b",
+    _re.IGNORECASE,
+)
+
+# Chat signals: conversational patterns that override action verbs
+_CHAT_SIGNALS = _re.compile(
+    r"^(hey|hi|hello|sup|yo|what'?s up|how are|how'?s it|good morning"
+    r"|good evening|good night|thanks|thank you|ok|okay|sure|cool"
+    r"|nice|great|awesome|perfect|got it|sounds good|let'?s go"
+    r"|what do you think|how do we|should we|can you explain"
+    r"|tell me about|what is|what are|who is|when did|why did"
+    r"|remind me|what was|do you remember)\b",
     _re.IGNORECASE,
 )
 
@@ -197,8 +218,9 @@ def classify_intent(message: str) -> str:
       2. /report prefix → task
       3. /run prefix     → task
       4. Other / commands → task
-      5. Task keywords in plain text → task
-      6. Default plain text → chat
+      5. Report-style task keywords → task
+      6. Action verbs WITHOUT chat signals → task
+      7. Default plain text → chat
     """
     text = message.strip()
     if not text:
@@ -212,7 +234,14 @@ def classify_intent(message: str) -> str:
         return "task"
     if text.startswith("/"):
         return "task"
+
+    # Report-style keywords always route to task
     if _TASK_KEYWORDS.search(text):
+        return "task"
+
+    # Action verbs route to task UNLESS the message also starts with
+    # a conversational signal (e.g., "should we refactor?" → chat)
+    if _ACTION_VERBS.search(text) and not _CHAT_SIGNALS.match(text):
         return "task"
 
     return "chat"

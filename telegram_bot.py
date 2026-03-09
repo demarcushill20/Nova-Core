@@ -56,7 +56,7 @@ from telegram.llm import generate_response, format_history_for_prompt  # noqa: E
 from telegram.persona import SYSTEM_PROMPT, DELEGATION_ACK_PROMPT, SESSION_START_HINT  # noqa: E402
 from telegram.delegation import (  # noqa: E402
     DelegationTracker, find_completed_output, claim_notification,
-    extract_output_summary, COMPLETION_SUMMARY_PROMPT,
+    extract_output_summary, get_recent_completions, COMPLETION_SUMMARY_PROMPT,
 )
 
 ROOT = Path("/home/nova/nova-core")
@@ -642,11 +642,19 @@ async def handle_conversation(chat_id: str, text: str) -> str:
     context_history = history[:-1] if len(history) > 1 else []
     context_str = format_history_for_prompt(context_history)
 
-    # On session start, prepend hint to load memory context
+    # Build effective prompt with injected context
     effective_prompt = text
     if is_new_session:
         effective_prompt = f"{SESSION_START_HINT}\n\n{text}"
         _log.info("SESSION_START chat=%s — injecting memory hint", chat_id)
+
+    # Inject recent task completions as context (Phase 5)
+    recent = get_recent_completions(max_age_seconds=3600, limit=3)
+    if recent:
+        task_context = "RECENT BACKGROUND TASK RESULTS (reference if relevant):\n"
+        for r in recent:
+            task_context += f"- {r['stem']}: {r['summary_line']}\n"
+        context_str = f"{task_context}\n{context_str}" if context_str else task_context
 
     # Call Claude
     response = await generate_response(
