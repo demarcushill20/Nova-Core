@@ -43,7 +43,7 @@ sys.modules["telegram.parse"] = _tg_parse
 from telegram.parse import parse_message  # noqa: E402
 
 # Register additional local telegram modules via the same shim pattern.
-for _mod_name in ("conversation", "llm", "persona", "delegation", "goals"):
+for _mod_name in ("conversation", "llm", "persona", "delegation", "goals", "hardening"):
     _mod_spec = importlib.util.spec_from_file_location(
         f"telegram.{_mod_name}", os.path.join(_here, "telegram", f"{_mod_name}.py")
     )
@@ -61,6 +61,10 @@ from telegram.delegation import (  # noqa: E402
 from telegram.goals import (  # noqa: E402
     add_goal, complete_goal, remove_goal, list_goals,
     clear_completed, format_goals_for_context, format_goals_for_display,
+)
+from telegram.hardening import (  # noqa: E402
+    RateLimiter, CircuitBreaker, MetricsCollector, ResponseCache,
+    RATE_LIMIT_MESSAGE, CIRCUIT_OPEN_MESSAGE,
 )
 
 ROOT = Path("/home/nova/nova-core")
@@ -108,6 +112,13 @@ _conversations = ConversationManager()
 
 # --- Delegation tracker (Phase 3: proactive completion notifications) ---
 _delegations = DelegationTracker()
+
+# --- Production hardening (Phase 7) ---
+_rate_limiter = RateLimiter(per_chat_limit=10, per_chat_window=60,
+                            global_limit=30, global_window=60)
+_circuit_breaker = CircuitBreaker(failure_threshold=5, cooldown_seconds=120)
+_metrics = MetricsCollector()
+_response_cache = ResponseCache(max_size=50, ttl_seconds=300)
 
 _STATUS_LIMITS = {"compact": 5, "normal": 10, "verbose": 20}
 
@@ -634,8 +645,24 @@ async def handle_conversation(chat_id: str, text: str) -> str:
     """Handle a conversational message via Claude CLI (fast path).
 
     No task file is created. The response comes directly from Claude.
-    On session start, injects a hint to load memory context.
+    Includes rate limiting, circuit breaker, caching, and metrics.
     """
+    _metrics.record_conversation()
+    start_time = time.time()
+
+    # Rate limiting (Phase 7)
+    allowed, reason = _rate_limiter.check(chat_id)
+    if not allowed:
+        _metrics.record_rate_limit()
+        _log.warning("RATE_LIMITED chat=%s reason=%s", chat_id, reason)
+        return RATE_LIMIT_MESSAGE
+
+    # Circuit breaker (Phase 7)
+    if _circuit_breaker.is_open():
+        _metrics.record_circuit_break()
+        _log.warning("CIRCUIT_OPEN chat=%s", chat_id)
+        return CIRCUIT_OPEN_MESSAGE
+
     # Detect session start BEFORE adding the message (so the buffer is still empty/stale)
     is_new_session = _conversations.is_session_start(chat_id)
 
@@ -667,12 +694,38 @@ async def handle_conversation(chat_id: str, text: str) -> str:
             task_context += f"- {r['stem']}: {r['summary_line']}\n"
         context_str = f"{task_context}\n{context_str}" if context_str else task_context
 
+    # Response cache check (Phase 7) — skip for session starts (need fresh memory)
+    if not is_new_session:
+        cached = _response_cache.get(effective_prompt, context_str)
+        if cached:
+            _metrics.record_cache_hit()
+            _log.info("CACHE_HIT chat=%s", chat_id)
+            _conversations.add_assistant_message(chat_id, cached)
+            _rate_limiter.record(chat_id)
+            return cached
+    _metrics.record_cache_miss()
+
     # Call Claude
     response = await generate_response(
         prompt=effective_prompt,
         system_prompt=SYSTEM_PROMPT,
         conversation_context=context_str,
     )
+
+    # Track success/failure for circuit breaker
+    is_error = response.startswith("Sorry,") or response.startswith("Something went wrong")
+    if is_error:
+        _circuit_breaker.record_failure()
+        _metrics.record_error()
+    else:
+        _circuit_breaker.record_success()
+        # Cache successful responses (not errors)
+        _response_cache.put(effective_prompt, response, context_str)
+
+    # Record metrics
+    elapsed_ms = (time.time() - start_time) * 1000
+    _metrics.record_response_time(elapsed_ms)
+    _rate_limiter.record(chat_id)
 
     # Record the assistant response in conversation buffer
     _conversations.add_assistant_message(chat_id, response)
@@ -779,6 +832,18 @@ async def _handle_briefing(chat_id: str) -> str:
     else:
         parts.append("TASK QUEUE: empty")
 
+    # CEO Nova metrics (Phase 7)
+    snap = _metrics.snapshot()
+    parts.append(
+        f"CEO NOVA METRICS:\n"
+        f"- Messages processed: {snap['total_messages']}\n"
+        f"- Conversations: {snap['conversation_messages']}\n"
+        f"- Delegations: {snap['task_delegations']}\n"
+        f"- Avg response time: {snap['avg_response_time_ms']:.0f}ms\n"
+        f"- Errors: {snap['errors']}\n"
+        f"- Uptime: {snap['uptime_seconds']}s"
+    )
+
     context = "\n\n".join(parts)
 
     response = await generate_response(
@@ -796,8 +861,13 @@ async def _handle_briefing(chat_id: str) -> str:
 async def _check_completions(app) -> None:
     """Periodic loop: check if any delegated tasks have completed."""
     _log.info("Completion checker started (every 15s)")
+    _persist_counter = 0
     while True:
         await asyncio.sleep(15)
+        # Persist metrics every ~5 minutes (20 cycles * 15s)
+        _persist_counter += 1
+        if _persist_counter % 20 == 0:
+            _metrics.persist()
         if not _delegations.has_pending():
             continue
 
@@ -851,6 +921,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     ts = time.time()
 
     _log.info("MSG chat=%s len=%d text=%r", chat_id, len(text), text[:80])
+    _metrics.record_message()
 
     result = parse_message(text, chat_id, ts)
 
@@ -878,6 +949,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         reply = handle_status(chat_id)
     elif action_type == "run_task":
         # Delegate to task queue, then generate natural acknowledgment
+        _metrics.record_delegation()
         task_reply, task_stem = handle_run_task(
             chat_id, action["title"],
             action.get("body", ""),

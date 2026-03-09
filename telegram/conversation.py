@@ -1,11 +1,16 @@
 """In-memory conversation buffer for CEO Nova Telegram conversations.
 
 Stores the last N messages per chat_id with automatic eviction
-by count and age. Thread-safe for asyncio use.
+by count and age. Supports disk persistence for restart survival.
 """
 from __future__ import annotations
 
+import json
+import logging
 import time
+from pathlib import Path
+
+_log = logging.getLogger("telegram_bot.conversation")
 
 
 MAX_MESSAGES = 20
@@ -56,11 +61,20 @@ class ConversationBuffer:
             self.messages = self.messages[-MAX_MESSAGES:]
 
 
-class ConversationManager:
-    """Manages conversation buffers for multiple chat IDs."""
+PERSIST_DIR = Path("/home/nova/nova-core/STATE/conversations")
 
-    def __init__(self) -> None:
+
+class ConversationManager:
+    """Manages conversation buffers for multiple chat IDs.
+
+    Supports optional disk persistence so conversations survive bot restarts.
+    """
+
+    def __init__(self, persist: bool = True) -> None:
         self._buffers: dict[str, ConversationBuffer] = {}
+        self._persist = persist
+        if persist:
+            self._load_from_disk()
 
     def get(self, chat_id: str) -> ConversationBuffer:
         if chat_id not in self._buffers:
@@ -69,12 +83,61 @@ class ConversationManager:
 
     def add_user_message(self, chat_id: str, content: str) -> None:
         self.get(chat_id).add("user", content)
+        if self._persist:
+            self._save_chat(chat_id)
 
     def add_assistant_message(self, chat_id: str, content: str) -> None:
         self.get(chat_id).add("assistant", content)
+        if self._persist:
+            self._save_chat(chat_id)
 
     def get_history(self, chat_id: str) -> list[dict]:
         return self.get(chat_id).get_history()
 
     def is_session_start(self, chat_id: str) -> bool:
         return self.get(chat_id).is_session_start()
+
+    def _save_chat(self, chat_id: str) -> None:
+        """Persist a single chat buffer to disk."""
+        try:
+            PERSIST_DIR.mkdir(parents=True, exist_ok=True)
+            buf = self.get(chat_id)
+            data = {
+                "messages": [
+                    {"role": m.role, "content": m.content, "timestamp": m.timestamp}
+                    for m in buf.messages
+                ],
+                "last_activity": buf.last_activity,
+            }
+            path = PERSIST_DIR / f"{chat_id}.json"
+            path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+        except OSError as e:
+            _log.warning("Failed to persist chat %s: %s", chat_id, e)
+
+    def _load_from_disk(self) -> None:
+        """Restore conversation buffers from disk on startup."""
+        if not PERSIST_DIR.exists():
+            return
+        loaded = 0
+        for path in PERSIST_DIR.glob("*.json"):
+            chat_id = path.stem
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                buf = ConversationBuffer()
+                for m in data.get("messages", []):
+                    buf.messages.append(
+                        Message(
+                            role=m["role"],
+                            content=m["content"],
+                            timestamp=m["timestamp"],
+                        )
+                    )
+                buf.last_activity = data.get("last_activity", 0.0)
+                buf._evict()  # Clean stale messages
+                if buf.messages:  # Only keep non-empty buffers
+                    self._buffers[chat_id] = buf
+                    loaded += 1
+            except (json.JSONDecodeError, KeyError, OSError) as e:
+                _log.warning("Failed to load chat %s: %s", chat_id, e)
+        if loaded:
+            _log.info("Restored %d conversation(s) from disk", loaded)

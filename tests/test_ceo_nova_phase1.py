@@ -14,7 +14,7 @@ from unittest.mock import patch, AsyncMock
 
 # Load local telegram modules via importlib (same pattern as telegram_bot.py)
 _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _mod_name in ("parse", "conversation", "llm", "persona", "format", "delegation", "goals"):
+for _mod_name in ("parse", "conversation", "llm", "persona", "format", "delegation", "goals", "hardening"):
     _path = os.path.join(_here, "telegram", f"{_mod_name}.py")
     if os.path.exists(_path):
         _spec = importlib.util.spec_from_file_location(_mod_name, _path)
@@ -28,6 +28,7 @@ llm = sys.modules["tg_llm"]
 persona = sys.modules["tg_persona"]
 delegation = sys.modules["tg_delegation"]
 goals = sys.modules["tg_goals"]
+hardening = sys.modules["tg_hardening"]
 
 
 # ── Persona Tests ──────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ class TestConversationBuffer(unittest.TestCase):
 
 class TestConversationManager(unittest.TestCase):
     def setUp(self):
-        self.mgr = conversation.ConversationManager()
+        self.mgr = conversation.ConversationManager(persist=False)
 
     def test_separate_chats(self):
         self.mgr.add_user_message("chat1", "hello from chat1")
@@ -290,7 +291,7 @@ class TestLLMHelpers(unittest.TestCase):
 class TestIntegration(unittest.TestCase):
     def test_conversation_flow(self):
         """Simulate a multi-turn conversation through parse + buffer."""
-        mgr = conversation.ConversationManager()
+        mgr = conversation.ConversationManager(persist=False)
 
         # User sends greeting
         r = parse.parse_message("hey there", "c1", 1.0)
@@ -356,17 +357,17 @@ class TestSessionStartIntegration(unittest.TestCase):
     """Verify that session start detection works with conversation manager."""
 
     def test_new_chat_is_session_start(self):
-        mgr = conversation.ConversationManager()
+        mgr = conversation.ConversationManager(persist=False)
         self.assertTrue(mgr.is_session_start("brand_new_chat"))
 
     def test_active_chat_not_session_start(self):
-        mgr = conversation.ConversationManager()
+        mgr = conversation.ConversationManager(persist=False)
         mgr.add_user_message("c1", "hello")
         self.assertFalse(mgr.is_session_start("c1"))
 
     def test_session_start_only_on_first_message(self):
         """Session start should be True only before the first message."""
-        mgr = conversation.ConversationManager()
+        mgr = conversation.ConversationManager(persist=False)
         # First time — session start
         self.assertTrue(mgr.is_session_start("c1"))
         # Add a message
@@ -723,6 +724,150 @@ class TestGoalsCommandParsing(unittest.TestCase):
         r = self._parse("/briefing")
         self.assertTrue(r["ok"])
         self.assertEqual(r["action"]["action"], "briefing")
+
+
+# ── Phase 7: Production Hardening Tests ──────────────────────────────────
+
+
+class TestRateLimiter(unittest.TestCase):
+    def test_allows_within_limit(self):
+        rl = hardening.RateLimiter(per_chat_limit=3, per_chat_window=60,
+                                   global_limit=10, global_window=60)
+        for _ in range(3):
+            allowed, _ = rl.check("c1")
+            self.assertTrue(allowed)
+            rl.record("c1")
+
+    def test_blocks_over_per_chat_limit(self):
+        rl = hardening.RateLimiter(per_chat_limit=2, per_chat_window=60,
+                                   global_limit=10, global_window=60)
+        rl.record("c1")
+        rl.record("c1")
+        allowed, reason = rl.check("c1")
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "per_chat")
+
+    def test_blocks_over_global_limit(self):
+        rl = hardening.RateLimiter(per_chat_limit=10, per_chat_window=60,
+                                   global_limit=2, global_window=60)
+        rl.record("c1")
+        rl.record("c2")
+        allowed, reason = rl.check("c3")
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "global")
+
+    def test_separate_chats_have_own_limits(self):
+        rl = hardening.RateLimiter(per_chat_limit=2, per_chat_window=60,
+                                   global_limit=10, global_window=60)
+        rl.record("c1")
+        rl.record("c1")
+        allowed, _ = rl.check("c2")  # different chat
+        self.assertTrue(allowed)
+
+
+class TestCircuitBreaker(unittest.TestCase):
+    def test_closed_by_default(self):
+        cb = hardening.CircuitBreaker(failure_threshold=3)
+        self.assertFalse(cb.is_open())
+
+    def test_opens_after_threshold(self):
+        cb = hardening.CircuitBreaker(failure_threshold=3, cooldown_seconds=300)
+        for _ in range(3):
+            cb.record_failure()
+        self.assertTrue(cb.is_open())
+
+    def test_resets_on_success(self):
+        cb = hardening.CircuitBreaker(failure_threshold=3)
+        cb.record_failure()
+        cb.record_failure()
+        cb.record_success()
+        self.assertEqual(cb.failure_count, 0)
+        self.assertFalse(cb.is_open())
+
+    def test_recovers_after_cooldown(self):
+        cb = hardening.CircuitBreaker(failure_threshold=2, cooldown_seconds=0)
+        cb.record_failure()
+        cb.record_failure()
+        # cooldown=0 means immediate recovery
+        self.assertFalse(cb.is_open())
+
+
+class TestMetricsCollector(unittest.TestCase):
+    def test_records_messages(self):
+        m = hardening.MetricsCollector()
+        m.record_message()
+        m.record_message()
+        snap = m.snapshot()
+        self.assertEqual(snap["total_messages"], 2)
+
+    def test_avg_response_time(self):
+        m = hardening.MetricsCollector()
+        m.record_response_time(100)
+        m.record_response_time(200)
+        self.assertAlmostEqual(m.avg_response_time_ms, 150.0)
+
+    def test_snapshot_has_uptime(self):
+        m = hardening.MetricsCollector()
+        snap = m.snapshot()
+        self.assertIn("uptime_seconds", snap)
+
+
+class TestResponseCache(unittest.TestCase):
+    def test_cache_hit(self):
+        c = hardening.ResponseCache(max_size=10, ttl_seconds=300)
+        c.put("hello", "world")
+        self.assertEqual(c.get("hello"), "world")
+
+    def test_cache_miss(self):
+        c = hardening.ResponseCache(max_size=10, ttl_seconds=300)
+        self.assertIsNone(c.get("nonexistent"))
+
+    def test_cache_eviction(self):
+        c = hardening.ResponseCache(max_size=2, ttl_seconds=300)
+        c.put("a", "1")
+        c.put("b", "2")
+        c.put("c", "3")  # should evict oldest
+        self.assertEqual(c.size, 2)
+
+    def test_cache_ttl_expiry(self):
+        c = hardening.ResponseCache(max_size=10, ttl_seconds=0)
+        c.put("a", "1")
+        # TTL=0 means immediate expiry
+        self.assertIsNone(c.get("a"))
+
+
+class TestConversationPersistence(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = os.path.join(os.path.dirname(__file__), "_test_convos")
+        os.makedirs(self.tmpdir, exist_ok=True)
+        self._orig_dir = conversation.PERSIST_DIR
+        conversation.PERSIST_DIR = type(conversation.PERSIST_DIR)(self.tmpdir)
+
+    def tearDown(self):
+        conversation.PERSIST_DIR = self._orig_dir
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_persist_and_restore(self):
+        # Create a manager, add messages, which persists to disk
+        mgr1 = conversation.ConversationManager(persist=True)
+        mgr1.add_user_message("c1", "hello")
+        mgr1.add_assistant_message("c1", "hi there")
+
+        # Create a new manager that loads from disk
+        mgr2 = conversation.ConversationManager(persist=True)
+        h = mgr2.get_history("c1")
+        self.assertEqual(len(h), 2)
+        self.assertEqual(h[0]["content"], "hello")
+        self.assertEqual(h[1]["content"], "hi there")
+
+    def test_no_persist_mode(self):
+        mgr = conversation.ConversationManager(persist=False)
+        mgr.add_user_message("c1", "test")
+        # Should not create files
+        import glob
+        files = glob.glob(os.path.join(self.tmpdir, "*.json"))
+        self.assertEqual(len(files), 0)
 
 
 if __name__ == "__main__":
