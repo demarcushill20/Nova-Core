@@ -14,7 +14,7 @@ from unittest.mock import patch, AsyncMock
 
 # Load local telegram modules via importlib (same pattern as telegram_bot.py)
 _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _mod_name in ("parse", "conversation", "llm", "persona", "format"):
+for _mod_name in ("parse", "conversation", "llm", "persona", "format", "delegation"):
     _path = os.path.join(_here, "telegram", f"{_mod_name}.py")
     if os.path.exists(_path):
         _spec = importlib.util.spec_from_file_location(_mod_name, _path)
@@ -26,6 +26,7 @@ parse = sys.modules["tg_parse"]
 conversation = sys.modules["tg_conversation"]
 llm = sys.modules["tg_llm"]
 persona = sys.modules["tg_persona"]
+delegation = sys.modules["tg_delegation"]
 
 
 # ── Persona Tests ──────────────────────────────────────────────────────────
@@ -371,6 +372,81 @@ class TestSessionStartIntegration(unittest.TestCase):
         mgr.add_user_message("c1", "hello")
         # Now it's not a session start
         self.assertFalse(mgr.is_session_start("c1"))
+
+
+# ── Phase 3: Delegation Tracker Tests ─────────────────────────────────────
+
+
+class TestDelegationTracker(unittest.TestCase):
+    def setUp(self):
+        self.tracker = delegation.DelegationTracker()
+
+    def test_track_and_retrieve(self):
+        self.tracker.track("0042_refactor_heartbeat", "12345")
+        self.assertEqual(
+            self.tracker.get_chat_id("0042_refactor_heartbeat"), "12345"
+        )
+
+    def test_complete_returns_chat_id(self):
+        self.tracker.track("0042_foo", "12345")
+        chat_id = self.tracker.complete("0042_foo")
+        self.assertEqual(chat_id, "12345")
+        # Second call returns None (already completed)
+        self.assertIsNone(self.tracker.complete("0042_foo"))
+
+    def test_pending_stems(self):
+        self.tracker.track("0001_a", "c1")
+        self.tracker.track("0002_b", "c2")
+        stems = self.tracker.pending_stems()
+        self.assertEqual(set(stems), {"0001_a", "0002_b"})
+
+    def test_has_pending(self):
+        self.assertFalse(self.tracker.has_pending())
+        self.tracker.track("0001_a", "c1")
+        self.assertTrue(self.tracker.has_pending())
+        self.tracker.complete("0001_a")
+        self.assertFalse(self.tracker.has_pending())
+
+    def test_unknown_stem_returns_none(self):
+        self.assertIsNone(self.tracker.get_chat_id("nonexistent"))
+        self.assertIsNone(self.tracker.complete("nonexistent"))
+
+
+class TestFindCompletedOutput(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = os.path.join(os.path.dirname(__file__), "_test_output")
+        os.makedirs(self.tmpdir, exist_ok=True)
+        # Patch OUTPUT path for testing
+        self._orig_output = delegation.OUTPUT
+        delegation.OUTPUT = type(delegation.OUTPUT)(self.tmpdir)
+
+    def tearDown(self):
+        delegation.OUTPUT = self._orig_output
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_finds_matching_output(self):
+        # Create a fake output file
+        stem = "0042_refactor_heartbeat"
+        fname = f"{stem}__20260309-020000.md"
+        (delegation.OUTPUT / fname).write_text("# Output", encoding="utf-8")
+        result = delegation.find_completed_output(stem)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name, fname)
+
+    def test_returns_none_when_no_match(self):
+        result = delegation.find_completed_output("0099_nonexistent")
+        self.assertIsNone(result)
+
+
+class TestCompletionSummaryPrompt(unittest.TestCase):
+    def test_prompt_exists(self):
+        self.assertIsInstance(delegation.COMPLETION_SUMMARY_PROMPT, str)
+        self.assertGreater(len(delegation.COMPLETION_SUMMARY_PROMPT), 50)
+
+    def test_prompt_forbids_metadata(self):
+        lower = delegation.COMPLETION_SUMMARY_PROMPT.lower()
+        self.assertIn("do not include task ids", lower)
 
 
 if __name__ == "__main__":

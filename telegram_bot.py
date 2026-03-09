@@ -42,7 +42,7 @@ sys.modules["telegram.parse"] = _tg_parse
 from telegram.parse import parse_message  # noqa: E402
 
 # Register additional local telegram modules via the same shim pattern.
-for _mod_name in ("conversation", "llm", "persona"):
+for _mod_name in ("conversation", "llm", "persona", "delegation"):
     _mod_spec = importlib.util.spec_from_file_location(
         f"telegram.{_mod_name}", os.path.join(_here, "telegram", f"{_mod_name}.py")
     )
@@ -53,6 +53,10 @@ for _mod_name in ("conversation", "llm", "persona"):
 from telegram.conversation import ConversationManager  # noqa: E402
 from telegram.llm import generate_response, format_history_for_prompt  # noqa: E402
 from telegram.persona import SYSTEM_PROMPT, DELEGATION_ACK_PROMPT, SESSION_START_HINT  # noqa: E402
+from telegram.delegation import (  # noqa: E402
+    DelegationTracker, find_completed_output, claim_notification,
+    extract_output_summary, COMPLETION_SUMMARY_PROMPT,
+)
 
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
@@ -94,6 +98,9 @@ _HELP_TEXT = (
 
 # --- Conversation manager (Phase 1: CEO Nova) ---
 _conversations = ConversationManager()
+
+# --- Delegation tracker (Phase 3: proactive completion notifications) ---
+_delegations = DelegationTracker()
 
 _STATUS_LIMITS = {"compact": 5, "normal": 10, "verbose": 20}
 
@@ -338,8 +345,11 @@ def load_intent(stem: str) -> str:
 
 
 def handle_run_task(chat_id: str, title: str, body: str = "",
-                    intent: str = "task") -> str:
-    """Create a task file from a run_task action. Returns the response string."""
+                    intent: str = "task") -> tuple[str, str]:
+    """Create a task file from a run_task action.
+
+    Returns (response_string, task_stem) so callers can track the task.
+    """
     sanitized = _sanitize_title(title)
     number = _next_task_number()
     filename = f"{number}_{sanitized}.md"
@@ -356,7 +366,7 @@ def handle_run_task(chat_id: str, title: str, body: str = "",
     persist_last_task_id(stem)
 
     ts_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-    return f"Queued: {filename} ({ts_str} UTC)"
+    return f"Queued: {filename} ({ts_str} UTC)", stem
 
 
 def _find_highest_task() -> Path | None:
@@ -672,6 +682,53 @@ async def handle_delegation_ack(chat_id: str, text: str, task_reply: str) -> str
     return response
 
 
+# --- Proactive completion notifications (Phase 3) ---
+
+async def _check_completions(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic job: check if any delegated tasks have completed."""
+    if not _delegations.has_pending():
+        return
+
+    for stem in _delegations.pending_stems():
+        output_path = find_completed_output(stem)
+        if output_path is None:
+            continue
+
+        # Atomically claim the notification — if we lose, notifier handles it
+        if not claim_notification(output_path.name):
+            _delegations.complete(stem)
+            _log.info("COMPLETION claim lost for %s (notifier got it)", stem)
+            continue
+
+        chat_id = _delegations.complete(stem)
+        if not chat_id:
+            continue
+
+        _log.info("COMPLETION detected: stem=%s output=%s chat=%s",
+                  stem, output_path.name, chat_id)
+
+        # Read output and generate natural summary
+        try:
+            output_content = extract_output_summary(output_path)
+            summary = await generate_response(
+                prompt=f"{COMPLETION_SUMMARY_PROMPT}{output_content}",
+                system_prompt=SYSTEM_PROMPT,
+            )
+
+            # Record in conversation buffer for continuity
+            _conversations.add_assistant_message(chat_id, summary)
+
+            # Send to user
+            for chunk in chunk_text(summary, chunk_size=4000):
+                await context.bot.send_message(chat_id=chat_id, text=chunk)
+
+            _log.info("COMPLETION notified: stem=%s chat=%s len=%d",
+                      stem, chat_id, len(summary))
+        except Exception as exc:
+            _log.error("COMPLETION notification failed for %s: %s",
+                       stem, exc, exc_info=True)
+
+
 # --- Unified message handler ---
 
 @_guard
@@ -709,10 +766,13 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         reply = handle_status(chat_id)
     elif action_type == "run_task":
         # Delegate to task queue, then generate natural acknowledgment
-        task_reply = handle_run_task(chat_id, action["title"],
-                                     action.get("body", ""),
-                                     intent=action.get("intent", "task"))
-        _log.info("DELEGATED chat=%s task=%s", chat_id, task_reply)
+        task_reply, task_stem = handle_run_task(
+            chat_id, action["title"],
+            action.get("body", ""),
+            intent=action.get("intent", "task"),
+        )
+        _log.info("DELEGATED chat=%s task=%s stem=%s", chat_id, task_reply, task_stem)
+        _delegations.track(task_stem, chat_id)
         user_text = action.get("body", "") or action.get("title", "")
         reply = await handle_delegation_ack(chat_id, user_text, task_reply)
     elif action_type == "get_last":
@@ -779,6 +839,10 @@ def main() -> None:
     # Single handler catches ALL text (commands + non-commands).
     # parse_message handles routing; non-commands return None (ignored).
     app.add_handler(MessageHandler(filters.TEXT, on_message))
+
+    # Phase 3: periodic check for completed delegated tasks (every 15s)
+    app.job_queue.run_repeating(_check_completions, interval=15, first=10)
+    _log.info("Completion checker scheduled (every 15s)")
 
     async def _on_error(update, context):
         from telegram.error import Conflict
