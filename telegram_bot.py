@@ -52,7 +52,7 @@ for _mod_name in ("conversation", "llm", "persona"):
 
 from telegram.conversation import ConversationManager  # noqa: E402
 from telegram.llm import generate_response, format_history_for_prompt  # noqa: E402
-from telegram.persona import SYSTEM_PROMPT, DELEGATION_ACK_PROMPT  # noqa: E402
+from telegram.persona import SYSTEM_PROMPT, DELEGATION_ACK_PROMPT, SESSION_START_HINT  # noqa: E402
 
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
@@ -617,7 +617,11 @@ async def handle_conversation(chat_id: str, text: str) -> str:
     """Handle a conversational message via Claude CLI (fast path).
 
     No task file is created. The response comes directly from Claude.
+    On session start, injects a hint to load memory context.
     """
+    # Detect session start BEFORE adding the message (so the buffer is still empty/stale)
+    is_new_session = _conversations.is_session_start(chat_id)
+
     # Record the user message in conversation buffer
     _conversations.add_user_message(chat_id, text)
 
@@ -627,9 +631,15 @@ async def handle_conversation(chat_id: str, text: str) -> str:
     context_history = history[:-1] if len(history) > 1 else []
     context_str = format_history_for_prompt(context_history)
 
+    # On session start, prepend hint to load memory context
+    effective_prompt = text
+    if is_new_session:
+        effective_prompt = f"{SESSION_START_HINT}\n\n{text}"
+        _log.info("SESSION_START chat=%s — injecting memory hint", chat_id)
+
     # Call Claude
     response = await generate_response(
-        prompt=text,
+        prompt=effective_prompt,
         system_prompt=SYSTEM_PROMPT,
         conversation_context=context_str,
     )

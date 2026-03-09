@@ -312,5 +312,66 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(r["action"]["title"], "refactor the heartbeat module")
 
 
+# ── Phase 2: Memory-Aware Conversation Tests ─────────────────────────────
+
+
+class TestSessionStartHint(unittest.TestCase):
+    """Verify session-start detection and memory hint injection."""
+
+    def test_session_start_hint_exists(self):
+        self.assertIsInstance(persona.SESSION_START_HINT, str)
+        self.assertGreater(len(persona.SESSION_START_HINT), 50)
+
+    def test_session_start_hint_references_checkpoint(self):
+        self.assertIn("get_last_checkpoint", persona.SESSION_START_HINT)
+
+    def test_session_start_hint_references_project(self):
+        self.assertIn("nova-core", persona.SESSION_START_HINT)
+
+
+class TestMemoryInstructions(unittest.TestCase):
+    """Verify memory instructions are in the system prompt."""
+
+    def test_memory_section_exists(self):
+        self.assertIn("MEMORY:", persona.SYSTEM_PROMPT)
+
+    def test_query_memory_mentioned(self):
+        self.assertIn("query_memory", persona.SYSTEM_PROMPT)
+
+    def test_upsert_memory_mentioned(self):
+        self.assertIn("upsert_memory", persona.SYSTEM_PROMPT)
+
+    def test_vault_access_mentioned(self):
+        self.assertIn("nova-vault", persona.SYSTEM_PROMPT)
+
+    def test_no_file_tools_guidance(self):
+        """Ensure the prompt tells Claude not to use file editing tools."""
+        lower = persona.SYSTEM_PROMPT.lower()
+        self.assertIn("don't use file editing tools", lower)
+
+
+class TestSessionStartIntegration(unittest.TestCase):
+    """Verify that session start detection works with conversation manager."""
+
+    def test_new_chat_is_session_start(self):
+        mgr = conversation.ConversationManager()
+        self.assertTrue(mgr.is_session_start("brand_new_chat"))
+
+    def test_active_chat_not_session_start(self):
+        mgr = conversation.ConversationManager()
+        mgr.add_user_message("c1", "hello")
+        self.assertFalse(mgr.is_session_start("c1"))
+
+    def test_session_start_only_on_first_message(self):
+        """Session start should be True only before the first message."""
+        mgr = conversation.ConversationManager()
+        # First time — session start
+        self.assertTrue(mgr.is_session_start("c1"))
+        # Add a message
+        mgr.add_user_message("c1", "hello")
+        # Now it's not a session start
+        self.assertFalse(mgr.is_session_start("c1"))
+
+
 if __name__ == "__main__":
     unittest.main()
