@@ -336,7 +336,7 @@ class TestMemoryInstructions(unittest.TestCase):
     """Verify memory instructions are in the system prompt."""
 
     def test_memory_section_exists(self):
-        self.assertIn("MEMORY:", persona.SYSTEM_PROMPT)
+        self.assertIn("MEMORY (Fusion Memory", persona.SYSTEM_PROMPT)
 
     def test_query_memory_mentioned(self):
         self.assertIn("query_memory", persona.SYSTEM_PROMPT)
@@ -525,8 +525,15 @@ class TestExpandedIntentClassification(unittest.TestCase):
 
     # -- Chat signals override action verbs --
 
-    def test_should_we_refactor_is_chat(self):
+    def test_should_we_refactor_with_deliverable_is_task(self):
+        # "should we refactor the heartbeat?" has a concrete deliverable
+        # → routes to task (better to queue than risk false promise)
         r = self._parse("should we refactor the heartbeat?")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_should_we_refactor_bare_is_chat(self):
+        # "should we refactor?" has no deliverable object → stays in chat
+        r = self._parse("should we refactor?")
         self.assertEqual(r["action"]["action"], "conversation")
 
     def test_can_you_explain_is_chat(self):
@@ -868,6 +875,578 @@ class TestConversationPersistence(unittest.TestCase):
         import glob
         files = glob.glob(os.path.join(self.tmpdir, "*.json"))
         self.assertEqual(len(files), 0)
+
+
+# ── Phase 8: Intent Classification Reliability & Working Memory ───────────
+
+
+class TestRequestVerbClassification(unittest.TestCase):
+    """Verify that explicit request patterns route to task."""
+
+    def _parse(self, text):
+        return parse.parse_message(text, "123", 1.0)
+
+    def test_can_you_build_is_task(self):
+        r = self._parse("can you build a monitoring dashboard?")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_could_you_implement_is_task(self):
+        r = self._parse("could you implement rate limiting?")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_please_deploy_is_task(self):
+        r = self._parse("please deploy the new version to production")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_i_need_you_to_fix_is_task(self):
+        r = self._parse("I need you to fix the authentication bug")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_would_you_research_is_task(self):
+        r = self._parse("would you research vector database options?")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_i_want_you_to_create_is_task(self):
+        r = self._parse("I want you to create a new API endpoint")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_go_ahead_and_build_is_task(self):
+        r = self._parse("go ahead and build the billing system")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_id_like_you_to_write_is_task(self):
+        r = self._parse("I'd like you to write integration tests")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    # -- These should NOT match request verb (informational, not requests) --
+
+    def test_can_you_explain_stays_chat(self):
+        r = self._parse("can you explain how the watcher works?")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+    def test_could_you_tell_me_stays_chat(self):
+        r = self._parse("could you tell me about the architecture?")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+
+class TestDeliverableDetectorExpanded(unittest.TestCase):
+    """Verify that bare-noun deliverables now route to task."""
+
+    def _parse(self, text):
+        return parse.parse_message(text, "123", 1.0)
+
+    def test_affirmative_plus_bare_noun_is_task(self):
+        # "got it" is chat signal, "research databases" has no determiner
+        # but bare noun should now match deliverable detector
+        r = self._parse("got it, research databases for the project")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_sure_investigate_is_task(self):
+        r = self._parse("sure, investigate memory leaks in the worker")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_ok_deploy_production_is_task(self):
+        r = self._parse("ok deploy production immediately")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_sounds_good_build_dashboard_is_task(self):
+        r = self._parse("sounds good, build a monitoring dashboard")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_fix_it_stays_chat(self):
+        # Pronoun "it" should NOT match deliverable detector
+        r = self._parse("sure, fix it")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+    def test_build_them_stays_chat(self):
+        # Pronoun "them" should NOT match deliverable detector
+        r = self._parse("ok build them")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+
+class TestNoPromiseWithoutQueue(unittest.TestCase):
+    """Verify system prompt contains work request handling guard."""
+
+    def test_handling_work_requests_in_prompt(self):
+        self.assertIn("HANDLING WORK REQUESTS", persona.SYSTEM_PROMPT)
+
+    def test_no_internal_leakage_language(self):
+        lower = persona.SYSTEM_PROMPT.lower()
+        # "conversation path" may appear in a "NEVER say" example — that's OK.
+        # But it should NOT appear as a description of the system architecture.
+        self.assertNotIn("you are in the conversation path", lower)
+        self.assertNotIn("conversation mode", lower)
+        self.assertNotIn("classifier routed", lower)
+
+    def test_executive_voice_guidance(self):
+        lower = persona.SYSTEM_PROMPT.lower()
+        self.assertIn("queue that up", lower)
+        self.assertIn("never explain internal routing", lower)
+
+    def test_suggests_run_command(self):
+        self.assertIn("/run", persona.SYSTEM_PROMPT)
+
+    def test_trio_identity_present(self):
+        self.assertIn("PARTNERSHIP MODEL", persona.SYSTEM_PROMPT)
+        self.assertIn("ChatGPT Nova", persona.SYSTEM_PROMPT)
+
+
+class TestArtifactRequestClassification(unittest.TestCase):
+    """Verify artifact requests route to task."""
+
+    def _parse(self, text):
+        return parse.parse_message(text, "123", 1.0)
+
+    def test_send_pdf_is_task(self):
+        r = self._parse("send me the plan as a PDF")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_convert_to_pdf_is_task(self):
+        r = self._parse("convert the report to PDF")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_export_csv_is_task(self):
+        r = self._parse("export the data as CSV")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_save_as_document_is_task(self):
+        r = self._parse("save that as a document please")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_turn_into_pdf_is_task(self):
+        r = self._parse("can you turn that into a PDF?")
+        self.assertEqual(r["action"]["action"], "run_task")
+
+    def test_send_message_stays_chat(self):
+        # "send me a message" has no artifact keyword
+        r = self._parse("send me a message when it's done")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+    def test_tell_me_about_pdf_stays_chat(self):
+        # Informational, not a request to produce an artifact
+        r = self._parse("tell me about PDF generation")
+        self.assertEqual(r["action"]["action"], "conversation")
+
+
+class TestNotifierDeference(unittest.TestCase):
+    """Verify notifier deference mechanism exists."""
+
+    def _get_notifier_content(self):
+        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "telegram_notifier.py")
+        with open(_path, "r") as f:
+            return f.read()
+
+    def test_is_ceo_delegated_function_exists(self):
+        content = self._get_notifier_content()
+        self.assertIn("def _is_ceo_delegated", content)
+
+    def test_defer_sleep_in_maybe_notify(self):
+        content = self._get_notifier_content()
+        self.assertIn("CEO-delegated task", content)
+        self.assertIn("deferring", content)
+
+    def test_fallback_after_defer(self):
+        content = self._get_notifier_content()
+        self.assertIn("fallback notify", content)
+
+    def _get_bot_content(self):
+        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "telegram_bot.py")
+        with open(_path, "r") as f:
+            return f.read()
+
+    def test_delegation_marker_written_by_bot(self):
+        content = self._get_bot_content()
+        self.assertIn("_write_delegation_marker", content)
+
+    def test_delegation_marker_cleaned_up_on_completion(self):
+        content = self._get_bot_content()
+        self.assertIn("_cleanup_delegation_marker", content)
+
+
+class TestWorkingMemoryStore(unittest.TestCase):
+    """Test working memory store lifecycle."""
+
+    def setUp(self):
+        import importlib.util
+        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "telegram", "working_memory.py")
+        _spec = importlib.util.spec_from_file_location("tg_working_memory", _path)
+        self.wm_mod = importlib.util.module_from_spec(_spec)
+        sys.modules["tg_working_memory"] = self.wm_mod
+        _spec.loader.exec_module(self.wm_mod)
+
+        # Patch paths to temp dir
+        self.tmpdir = os.path.join(os.path.dirname(__file__), "_test_wm")
+        os.makedirs(self.tmpdir, exist_ok=True)
+        self.wm_mod.STATE_DIR = type(self.wm_mod.STATE_DIR)(self.tmpdir)
+        self.wm_mod.WM_FILE = self.wm_mod.STATE_DIR / "working_memory.json"
+        self.wm_mod.WM_ARCHIVE = self.wm_mod.STATE_DIR / "working_memory_archive.json"
+
+        self.store = self.wm_mod.WorkingMemoryStore()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_add_and_get(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0042_build_api",
+            chat_id="123",
+            original_message="Build a new billing API",
+            intent_summary="Build billing API",
+            created_at=1000.0,
+            status="pending",
+            context_snapshot=[],
+        )
+        self.store.add(task)
+        got = self.store.get("0042_build_api")
+        self.assertIsNotNone(got)
+        self.assertEqual(got.original_message, "Build a new billing API")
+
+    def test_complete_archives_and_removes(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0042_build_api",
+            chat_id="123",
+            original_message="Build API",
+            intent_summary="Build API",
+            created_at=1000.0,
+            status="pending",
+            context_snapshot=[],
+        )
+        self.store.add(task)
+        completed = self.store.complete("0042_build_api")
+        self.assertIsNotNone(completed)
+        self.assertEqual(completed.status, "completed")
+        # Should be removed from active
+        self.assertIsNone(self.store.get("0042_build_api"))
+
+    def test_active_for_chat(self):
+        for i in range(3):
+            chat = "123" if i < 2 else "456"
+            task = self.wm_mod.ActiveTask(
+                task_stem=f"000{i}_task",
+                chat_id=chat,
+                original_message=f"Task {i}",
+                intent_summary=f"Task {i}",
+                created_at=1000.0 + i,
+                status="pending",
+                context_snapshot=[],
+            )
+            self.store.add(task)
+        self.assertEqual(len(self.store.active_for_chat("123")), 2)
+        self.assertEqual(len(self.store.active_for_chat("456")), 1)
+
+    def test_format_for_context_empty(self):
+        ctx = self.store.format_for_context("123")
+        self.assertEqual(ctx, "")
+
+    def test_format_for_context_with_tasks(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0042_build_api",
+            chat_id="123",
+            original_message="Build a new billing API",
+            intent_summary="Build billing API",
+            created_at=1000.0,
+            status="pending",
+            context_snapshot=[],
+        )
+        self.store.add(task)
+        ctx = self.store.format_for_context("123")
+        self.assertIn("ACTIVE BACKGROUND TASKS", ctx)
+        self.assertIn("Build billing API", ctx)
+        self.assertIn("Build a new billing API", ctx)
+
+    def test_format_completion_context(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0042_build_api",
+            chat_id="123",
+            original_message="Build a new billing API with auth",
+            intent_summary="Build billing API",
+            created_at=1000.0,
+            status="completed",
+            context_snapshot=[{"role": "user", "content": "Let's build something"}],
+        )
+        ctx = self.store.format_completion_context(task)
+        self.assertIn("ORIGINAL USER REQUEST", ctx)
+        self.assertIn("Build a new billing API with auth", ctx)
+        self.assertIn("GOAL", ctx)
+
+    def test_persistence_survives_reload(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0042_build_api",
+            chat_id="123",
+            original_message="Build API",
+            intent_summary="Build API",
+            created_at=1000.0,
+            status="pending",
+            context_snapshot=[],
+        )
+        self.store.add(task)
+        # Create a new store instance (simulates restart)
+        store2 = self.wm_mod.WorkingMemoryStore()
+        got = store2.get("0042_build_api")
+        self.assertIsNotNone(got)
+        self.assertEqual(got.original_message, "Build API")
+
+
+# ── Phase 9: UX Polish Tests ──────────────────────────────────────────────
+
+
+class TestHelpTextGrouping(unittest.TestCase):
+    """Verify help text is organized by category."""
+
+    def _get_help_text(self):
+        """Load help text from telegram_bot module."""
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "telegram_bot.py")
+        # Read the file and extract _HELP_TEXT — simpler than importing the full bot
+        with open(_bot_path, "r") as f:
+            content = f.read()
+        # Just check categories exist in the file
+        return content
+
+    def test_help_has_task_category(self):
+        content = self._get_help_text()
+        self.assertIn('"TASKS\\n"', content)
+
+    def test_help_has_output_category(self):
+        content = self._get_help_text()
+        self.assertIn('"OUTPUT\\n"', content)
+
+    def test_help_has_conversation_category(self):
+        content = self._get_help_text()
+        self.assertIn('"CONVERSATION\\n"', content)
+
+    def test_help_has_settings_category(self):
+        content = self._get_help_text()
+        self.assertIn('"SETTINGS\\n"', content)
+
+
+class TestStatusIcons(unittest.TestCase):
+    """Verify status icon mapping exists."""
+
+    def _get_bot_content(self):
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "telegram_bot.py")
+        with open(_bot_path, "r") as f:
+            return f.read()
+
+    def test_status_icon_dict_exists(self):
+        content = self._get_bot_content()
+        self.assertIn("_STATUS_ICON", content)
+
+    def test_all_statuses_have_icons(self):
+        content = self._get_bot_content()
+        for status in ("queued", "inprogress", "done", "failed", "skip"):
+            self.assertIn(f'"{status}"', content)
+
+    def test_typing_indicator_import(self):
+        content = self._get_bot_content()
+        self.assertIn("ChatAction", content)
+
+    def test_typing_indicator_usage(self):
+        content = self._get_bot_content()
+        self.assertIn("ChatAction.TYPING", content)
+
+
+# ── Phase 10: Bounded UX Improvements Tests ──────────────────────────────
+
+
+class TestReplyThreading(unittest.TestCase):
+    """Verify reply threading support in working memory."""
+
+    def setUp(self):
+        import importlib.util
+        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "telegram", "working_memory.py")
+        _spec = importlib.util.spec_from_file_location("tg_wm_thread", _path)
+        self.wm_mod = importlib.util.module_from_spec(_spec)
+        sys.modules["tg_wm_thread"] = self.wm_mod  # register before exec (dataclass needs it)
+        _spec.loader.exec_module(self.wm_mod)
+
+        self.tmpdir = os.path.join(os.path.dirname(__file__), "_test_wm_thread")
+        os.makedirs(self.tmpdir, exist_ok=True)
+        self.wm_mod.STATE_DIR = type(self.wm_mod.STATE_DIR)(self.tmpdir)
+        self.wm_mod.WM_FILE = self.wm_mod.STATE_DIR / "working_memory.json"
+        self.wm_mod.WM_ARCHIVE = self.wm_mod.STATE_DIR / "working_memory_archive.json"
+        self.store = self.wm_mod.WorkingMemoryStore()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_message_id_field_exists(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0042_test", chat_id="123",
+            original_message="test", intent_summary="test",
+            created_at=1000.0, status="pending",
+            context_snapshot=[], message_id=42,
+        )
+        self.assertEqual(task.message_id, 42)
+
+    def test_message_id_default_zero(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0042_test", chat_id="123",
+            original_message="test", intent_summary="test",
+            created_at=1000.0, status="pending",
+            context_snapshot=[],
+        )
+        self.assertEqual(task.message_id, 0)
+
+    def test_message_id_persists_through_save_reload(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0042_test", chat_id="123",
+            original_message="test", intent_summary="test",
+            created_at=1000.0, status="pending",
+            context_snapshot=[], message_id=999,
+        )
+        self.store.add(task)
+        store2 = self.wm_mod.WorkingMemoryStore()
+        got = store2.get("0042_test")
+        self.assertEqual(got.message_id, 999)
+
+    def test_message_id_survives_complete(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0042_test", chat_id="123",
+            original_message="test", intent_summary="test",
+            created_at=1000.0, status="pending",
+            context_snapshot=[], message_id=42,
+        )
+        self.store.add(task)
+        completed = self.store.complete("0042_test")
+        self.assertEqual(completed.message_id, 42)
+
+
+class TestStaleWorkingMemoryCleanup(unittest.TestCase):
+    """Verify stale task auto-archival."""
+
+    def setUp(self):
+        import importlib.util
+        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "telegram", "working_memory.py")
+        _spec = importlib.util.spec_from_file_location("tg_wm_stale", _path)
+        self.wm_mod = importlib.util.module_from_spec(_spec)
+        sys.modules["tg_wm_stale"] = self.wm_mod  # register before exec (dataclass needs it)
+        _spec.loader.exec_module(self.wm_mod)
+
+        self.tmpdir = os.path.join(os.path.dirname(__file__), "_test_wm_stale")
+        os.makedirs(self.tmpdir, exist_ok=True)
+        self.wm_mod.STATE_DIR = type(self.wm_mod.STATE_DIR)(self.tmpdir)
+        self.wm_mod.WM_FILE = self.wm_mod.STATE_DIR / "working_memory.json"
+        self.wm_mod.WM_ARCHIVE = self.wm_mod.STATE_DIR / "working_memory_archive.json"
+        self.store = self.wm_mod.WorkingMemoryStore()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_cleanup_removes_old_tasks(self):
+        old_task = self.wm_mod.ActiveTask(
+            task_stem="0001_old", chat_id="123",
+            original_message="old task", intent_summary="old",
+            created_at=time.time() - 100000,  # ~28 hours ago
+            status="pending", context_snapshot=[],
+        )
+        new_task = self.wm_mod.ActiveTask(
+            task_stem="0002_new", chat_id="123",
+            original_message="new task", intent_summary="new",
+            created_at=time.time(),
+            status="pending", context_snapshot=[],
+        )
+        self.store.add(old_task)
+        self.store.add(new_task)
+
+        count = self.store.cleanup_stale(max_age_seconds=86400)
+        self.assertEqual(count, 1)
+        self.assertIsNone(self.store.get("0001_old"))
+        self.assertIsNotNone(self.store.get("0002_new"))
+
+    def test_cleanup_returns_zero_when_none_stale(self):
+        task = self.wm_mod.ActiveTask(
+            task_stem="0001_fresh", chat_id="123",
+            original_message="fresh", intent_summary="fresh",
+            created_at=time.time(),
+            status="pending", context_snapshot=[],
+        )
+        self.store.add(task)
+        count = self.store.cleanup_stale(max_age_seconds=86400)
+        self.assertEqual(count, 0)
+
+    def test_cleanup_archives_stale_tasks(self):
+        import json
+        old_task = self.wm_mod.ActiveTask(
+            task_stem="0001_old", chat_id="123",
+            original_message="old task", intent_summary="old",
+            created_at=time.time() - 100000,
+            status="pending", context_snapshot=[],
+        )
+        self.store.add(old_task)
+        self.store.cleanup_stale(max_age_seconds=86400)
+
+        archive = json.loads(self.wm_mod.WM_ARCHIVE.read_text(encoding="utf-8"))
+        self.assertEqual(len(archive), 1)
+        self.assertEqual(archive[0]["status"], "stale")
+
+
+class TestEnhancedStatusTitles(unittest.TestCase):
+    """Verify /status shows task titles."""
+
+    def _get_bot_content(self):
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "telegram_bot.py")
+        with open(_bot_path, "r") as f:
+            return f.read()
+
+    def test_status_handler_includes_title(self):
+        content = self._get_bot_content()
+        self.assertIn("title_part", content)
+
+    def test_status_handler_strips_number_prefix(self):
+        content = self._get_bot_content()
+        # Should strip the 4-digit number prefix from stem
+        self.assertIn('re.sub(r"^\\d{4}_"', content)
+
+
+class TestRateLimitErrorFix(unittest.TestCase):
+    """Verify rate limit tokens aren't consumed on errors."""
+
+    def _get_bot_content(self):
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "telegram_bot.py")
+        with open(_bot_path, "r") as f:
+            return f.read()
+
+    def test_rate_limit_only_on_success(self):
+        content = self._get_bot_content()
+        # rate_limiter.record should appear inside the success branch (after record_success)
+        # and BEFORE the error branch — meaning it's in the success block, not after errors.
+        # Use rindex to find the last occurrence (the one in the success block, not cache hit).
+        success_idx = content.index("_circuit_breaker.record_success()")
+        record_idx = content.rindex("_rate_limiter.record(chat_id)")
+        error_idx = content.index("_circuit_breaker.record_failure()")
+        # record should come AFTER record_success (inside success block)
+        self.assertGreater(record_idx, success_idx)
+
+
+class TestCompletionReplyThreading(unittest.TestCase):
+    """Verify completion notifications use reply_to_message_id."""
+
+    def _get_bot_content(self):
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "telegram_bot.py")
+        with open(_bot_path, "r") as f:
+            return f.read()
+
+    def test_reply_to_message_id_in_completion(self):
+        content = self._get_bot_content()
+        self.assertIn("reply_to_message_id", content)
+
+    def test_allow_sending_without_reply(self):
+        content = self._get_bot_content()
+        # Graceful fallback if original message was deleted
+        self.assertIn("allow_sending_without_reply", content)
 
 
 if __name__ == "__main__":

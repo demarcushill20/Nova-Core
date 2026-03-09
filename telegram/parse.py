@@ -256,7 +256,57 @@ _CHAT_SIGNALS = _re.compile(
     r"|nice|great|awesome|perfect|got it|sounds good|let'?s go"
     r"|what do you think|how do we|should we|can you explain"
     r"|tell me about|what is|what are|who is|when did|why did"
-    r"|remind me|what was|do you remember)\b",
+    r"|remind me|what was|do you remember"
+    # Follow-up / affirmative / deferral responses (Phase 10)
+    r"|yes|yeah|yep|yup|no|nah|nope|not really"
+    r"|do it|do that|go for it|let'?s do it|let'?s do that"
+    r"|absolutely|definitely|for sure|please do|make it so"
+    r"|not yet|maybe later|hold off|never mind|forget it"
+    r"|lgtm|ship it|works for me|I'?m good|all good"
+    r"|right|exactly|agreed|fair enough|makes sense"
+    r"|why not|go ahead)\b",
+    _re.IGNORECASE,
+)
+
+# Deliverable detector: action verb + object implies a concrete output.
+# Overrides chat signals — "should we build a billing system?" → task.
+# Determiner is optional so bare nouns also match: "research databases" → task.
+# Pronouns (it, them, me, us) are excluded — "fix it" stays in chat.
+_DELIVERABLE_RE = _re.compile(
+    r"\b(build|create|implement|write|deploy|set up|install|fix|refactor"
+    r"|generate|scaffold|migrate|redesign|configure|patch|add|move"
+    r"|delete|remove|rewrite|upgrade|optimize|research|investigate"
+    r"|analyze|scan|test|review)\s+"
+    r"(?:(?:a|an|the|my|our|new|this|that|some)\s+)*"
+    r"(?!it\b|them\b|me\b|us\b|him\b|her\b)"
+    r"[a-zA-Z]\w{2,}",
+    _re.IGNORECASE,
+)
+
+# Request verb pattern: explicit request prefix + action verb → task.
+# "Can you build...?", "Please deploy...", "I need you to implement..." → task.
+# These override chat signals because they're direct requests for work.
+_REQUEST_VERB = _re.compile(
+    r"(?:can you|could you|please|I need (?:you )?to|would you|I want (?:you )?to"
+    r"|go ahead and|I'd like (?:you )?to)\s+"
+    r"(?:implement|refactor|build|deploy|create|fix|update|write|rewrite"
+    r"|test|review|analyze|investigate|research|scan|optimize|migrate"
+    r"|set up|install|configure|add|remove|delete|move|rename"
+    r"|generate|scaffold|upgrade|patch|redesign|rearchitect)\b",
+    _re.IGNORECASE,
+)
+
+
+# Artifact request pattern: requests for file outputs that need the task queue.
+# "send me a PDF", "convert to document", "export as CSV" → task.
+# These don't contain traditional action verbs but clearly need background work.
+_ARTIFACT_REQUEST = _re.compile(
+    r"(?:send|email|give|share|export|convert|make|turn|save|download)\s+"
+    r".*\b(?:pdf|document|doc|file|attachment|spreadsheet|csv|zip|archive)\b"
+    r"|\b(?:as a pdf|to a pdf|to pdf|as pdf|into a pdf"
+    r"|as a doc|to a doc|as a document|to a document"
+    r"|as a csv|to a csv|as csv|to csv"
+    r"|as a file|to a file|as a zip)\b",
     _re.IGNORECASE,
 )
 
@@ -270,8 +320,11 @@ def classify_intent(message: str) -> str:
       3. /run prefix     → task
       4. Other / commands → task
       5. Report-style task keywords → task
-      6. Action verbs WITHOUT chat signals → task
-      7. Default plain text → chat
+      6. Artifact requests (send PDF, convert to doc) → task
+      7. Explicit request verbs (can you build...) → task
+      8. Deliverable detector (action verb + object) → task
+      9. Action verbs WITHOUT chat signals → task
+     10. Default plain text → chat
     """
     text = message.strip()
     if not text:
@@ -290,9 +343,31 @@ def classify_intent(message: str) -> str:
     if _TASK_KEYWORDS.search(text):
         return "task"
 
+    # Artifact requests: "send me a PDF", "convert to document" → task
+    # These don't use traditional action verbs but clearly need the task queue.
+    if _ARTIFACT_REQUEST.search(text):
+        return "task"
+
+    has_action = _ACTION_VERBS.search(text)
+    has_chat_signal = _CHAT_SIGNALS.match(text)
+
+    # Explicit request verbs: "can you build...", "please deploy...",
+    # "I need you to implement..." → task regardless of chat signals.
+    # These are direct requests for work, not conversational queries.
+    if _REQUEST_VERB.search(text):
+        return "task"
+
+    # Deliverable detector: if the message implies a concrete output artifact,
+    # it's a task even if it starts with a chat signal.
+    # "Should we build a billing system?" → task (has deliverable)
+    # "Sounds good, research databases" → task (bare noun deliverable)
+    # "Should we refactor?" → chat (no deliverable object)
+    if has_action and has_chat_signal and _DELIVERABLE_RE.search(text):
+        return "task"
+
     # Action verbs route to task UNLESS the message also starts with
     # a conversational signal (e.g., "should we refactor?" → chat)
-    if _ACTION_VERBS.search(text) and not _CHAT_SIGNALS.match(text):
+    if has_action and not has_chat_signal:
         return "task"
 
     return "chat"

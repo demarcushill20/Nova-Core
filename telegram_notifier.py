@@ -23,8 +23,10 @@ STATE.mkdir(parents=True, exist_ok=True)
 
 SENT_LOG = STATE / "tg_sent_outputs.txt"  # legacy; kept for backward compat reads
 NOTIFIED_DIR = STATE / "notified"         # durable marker dir (one file per output)
+CEO_DELEGATED_DIR = STATE / "ceo_delegated"  # Phase 9: CEO Nova delegation markers
 MODE_FILE = STATE / "notifier_mode.txt"
 MARKER_MAX_AGE_DAYS = 7
+CEO_DEFER_SECONDS = 20  # how long to wait for CEO Nova before fallback
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 CHAT_ID = os.environ.get("ALLOWED_CHAT_ID", "").strip()
@@ -470,6 +472,14 @@ def build_message(output_path: Path) -> str:
     verbose_full = verbose_top + "\n📄 Full Report\n" + txt.strip()
     return verbose_full
 
+def _is_ceo_delegated(output_path: Path) -> bool:
+    """Check if this task was delegated through CEO Nova."""
+    name = output_path.stem  # e.g. "0010_foo__20260305-160249"
+    m = re.match(r"^(.+?)__\d{8}-\d{6}$", name)
+    stem = m.group(1) if m else name
+    return (CEO_DELEGATED_DIR / f"{stem}.delegated").exists()
+
+
 def maybe_notify(path: Path) -> None:
     # Notify for all .md output files (numbered tasks + legacy tg_ tasks)
     if path.suffix.lower() != ".md":
@@ -478,6 +488,15 @@ def maybe_notify(path: Path) -> None:
     # Fast pre-check before expensive work
     if already_sent(path.name):
         return
+
+    # Phase 9: defer for CEO-delegated tasks — give CEO Nova priority
+    if _is_ceo_delegated(path):
+        log(f"CEO-delegated task {path.name} — deferring {CEO_DEFER_SECONDS}s for CEO Nova")
+        time.sleep(CEO_DEFER_SECONDS)
+        if already_sent(path.name):
+            log(f"CEO Nova claimed {path.name} — skipping")
+            return
+        log(f"CEO Nova didn't claim {path.name} after {CEO_DEFER_SECONDS}s — fallback notify")
 
     # Atomic claim — O_CREAT|O_EXCL guarantees exactly one winner,
     # even across multiple processes or threads.

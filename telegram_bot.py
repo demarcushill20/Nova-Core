@@ -26,8 +26,9 @@ sys.path = [p for p in sys.path if os.path.realpath(p) != os.path.realpath(_here
 sys.modules.pop("telegram", None)
 sys.modules.pop("telegram.ext", None)
 
-from telegram import Update  # noqa: E402  — python-telegram-bot library
-from telegram.ext import Application, MessageHandler, ContextTypes, filters  # noqa: E402
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup  # noqa: E402  — python-telegram-bot library
+from telegram.ext import Application, MessageHandler, CallbackQueryHandler, ContextTypes, filters  # noqa: E402
+from telegram.constants import ChatAction  # noqa: E402
 
 sys.path = _path_backup  # restore
 
@@ -43,13 +44,13 @@ sys.modules["telegram.parse"] = _tg_parse
 from telegram.parse import parse_message  # noqa: E402
 
 # Register additional local telegram modules via the same shim pattern.
-for _mod_name in ("conversation", "llm", "persona", "delegation", "goals", "hardening"):
+for _mod_name in ("conversation", "llm", "persona", "delegation", "goals", "hardening", "working_memory"):
     _mod_spec = importlib.util.spec_from_file_location(
         f"telegram.{_mod_name}", os.path.join(_here, "telegram", f"{_mod_name}.py")
     )
     _mod_obj = importlib.util.module_from_spec(_mod_spec)
+    sys.modules[f"telegram.{_mod_name}"] = _mod_obj  # register before exec (dataclass needs it)
     _mod_spec.loader.exec_module(_mod_obj)
-    sys.modules[f"telegram.{_mod_name}"] = _mod_obj
 
 from telegram.conversation import ConversationManager  # noqa: E402
 from telegram.llm import generate_response, format_history_for_prompt  # noqa: E402
@@ -66,6 +67,7 @@ from telegram.hardening import (  # noqa: E402
     RateLimiter, CircuitBreaker, MetricsCollector, ResponseCache,
     RATE_LIMIT_MESSAGE, CIRCUIT_OPEN_MESSAGE,
 )
+from telegram.working_memory import WorkingMemoryStore, ActiveTask  # noqa: E402
 
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
@@ -76,9 +78,10 @@ STATE = ROOT / "STATE"
 CANCEL_DIR = STATE / "cancel"
 RUNNING_DIR = STATE / "running"
 INTENTS_DIR = STATE / "intents"
+CEO_DELEGATED_DIR = STATE / "ceo_delegated"
 CHAT_MODES_FILE = STATE / "chat_modes.json"
 
-for _d in (TASKS, OUTPUT, LOGS, STATE, CANCEL_DIR, RUNNING_DIR, INTENTS_DIR):
+for _d in (TASKS, OUTPUT, LOGS, STATE, CANCEL_DIR, RUNNING_DIR, INTENTS_DIR, CEO_DELEGATED_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # --- Logging setup ---
@@ -91,19 +94,23 @@ _log.addHandler(_log_handler)
 # --- Protocol constants (from PROTOCOL/telegram_commands.md v1.1) ---
 
 _HELP_TEXT = (
-    "NovaCore Commands:\n"
+    "NovaCore Commands\n"
     "Just type anything \u2014 casual questions get a clean reply.\n\n"
-    "/run <title>   \u2014 queue a task (full structured output)\n"
-    "/chat <text>   \u2014 force clean chat reply (no report junk)\n"
+    "TASKS\n"
+    "/run <title>   \u2014 queue a task\n"
     "/report <text> \u2014 force full structured report\n"
-    "/status        \u2014 show recent tasks and their status\n"
-    "/last          \u2014 show most recent task details\n"
-    "/get <file>    \u2014 retrieve output file (/get <file> 2 for page 2)\n"
-    "/tail <id>     \u2014 tail worker log (/tail <id> 100 for 100 lines)\n"
-    "/cancel <id>   \u2014 soft-cancel a task (/cancel last for newest)\n"
-    "/mode <level>  \u2014 set notifier verbosity: compact|normal|verbose\n"
-    "/goals         \u2014 view/manage goals (add, done, remove, clear)\n"
-    "/briefing      \u2014 get a system briefing (tasks, health, goals)\n"
+    "/status        \u2014 show recent tasks\n"
+    "/last          \u2014 show most recent task\n"
+    "/cancel <id>   \u2014 soft-cancel (/cancel last for newest)\n\n"
+    "OUTPUT\n"
+    "/get <file>    \u2014 retrieve output (/get <file> 2 for page 2)\n"
+    "/tail <id>     \u2014 tail worker log (/tail <id> 100)\n\n"
+    "CONVERSATION\n"
+    "/chat <text>   \u2014 force clean chat reply\n"
+    "/goals         \u2014 manage goals (add, done, remove, clear)\n"
+    "/briefing      \u2014 system briefing\n\n"
+    "SETTINGS\n"
+    "/mode <level>  \u2014 compact | normal | verbose\n"
     "/help          \u2014 this message"
 )
 
@@ -120,7 +127,19 @@ _circuit_breaker = CircuitBreaker(failure_threshold=5, cooldown_seconds=120)
 _metrics = MetricsCollector()
 _response_cache = ResponseCache(max_size=50, ttl_seconds=300)
 
+# --- Working memory (Phase 8) ---
+_working_memory = WorkingMemoryStore()
+
 _STATUS_LIMITS = {"compact": 5, "normal": 10, "verbose": 20}
+
+# Unicode status indicators for /status display (no emoji — plain text safe)
+_STATUS_ICON = {
+    "queued":      "\u25cb",  # ○
+    "inprogress":  "\u25c9",  # ◉
+    "done":        "\u2713",  # ✓
+    "failed":      "\u2717",  # ✗
+    "skip":        "\u2014",  # —
+}
 
 # Extension-to-status mapping — ordered longest-first for matching
 _EXT_STATUS = [
@@ -186,6 +205,32 @@ LAST_TASK_FILE = STATE / "last_task_id.txt"
 def persist_last_task_id(task_id: str) -> None:
     CANCEL_DIR.mkdir(parents=True, exist_ok=True)
     LAST_TASK_FILE.write_text(task_id, encoding="utf-8")
+
+
+def _write_delegation_marker(stem: str) -> None:
+    """Mark a task as CEO-delegated so the notifier defers."""
+    CEO_DELEGATED_DIR.mkdir(parents=True, exist_ok=True)
+    marker = CEO_DELEGATED_DIR / f"{stem}.delegated"
+    marker.write_text(f"{time.time()}\n", encoding="utf-8")
+
+
+def _cleanup_delegation_marker(stem: str) -> None:
+    """Remove delegation marker after CEO Nova delivers the notification."""
+    marker = CEO_DELEGATED_DIR / f"{stem}.delegated"
+    marker.unlink(missing_ok=True)
+
+
+def _cleanup_stale_delegation_markers(max_age_seconds: int = 86400) -> None:
+    """Remove delegation markers older than max_age_seconds."""
+    if not CEO_DELEGATED_DIR.exists():
+        return
+    cutoff = time.time() - max_age_seconds
+    for marker in CEO_DELEGATED_DIR.glob("*.delegated"):
+        try:
+            if marker.stat().st_mtime < cutoff:
+                marker.unlink()
+        except OSError:
+            pass
 
 
 def read_last_task_id() -> str | None:
@@ -325,7 +370,12 @@ def handle_status(chat_id: str) -> str:
         ts_str = mtime.strftime("%Y-%m-%d %H:%M")
         # Use the leading number if available, else the full stem
         display_id = _task_number(name)
-        lines.append(f"#{display_id} {stem}  {status}  {ts_str} UTC")
+        icon = _STATUS_ICON.get(status, "?")
+        # Extract brief title from stem (strip number prefix, replace _ with spaces)
+        title_part = re.sub(r"^\d{4}_", "", stem).replace("_", " ")
+        if len(title_part) > 40:
+            title_part = title_part[:37] + "..."
+        lines.append(f"{icon} #{display_id} {title_part}  [{status}] {ts_str}")
 
     return "\n".join(lines)
 
@@ -686,6 +736,11 @@ async def handle_conversation(chat_id: str, text: str) -> str:
     if goals_context:
         context_str = f"{goals_context}\n\n{context_str}" if context_str else goals_context
 
+    # Inject active working memory tasks as context (Phase 8)
+    wm_context = _working_memory.format_for_context(chat_id)
+    if wm_context:
+        context_str = f"{wm_context}\n\n{context_str}" if context_str else wm_context
+
     # Inject recent task completions as context (Phase 5)
     recent = get_recent_completions(max_age_seconds=3600, limit=3)
     if recent:
@@ -721,11 +776,13 @@ async def handle_conversation(chat_id: str, text: str) -> str:
         _circuit_breaker.record_success()
         # Cache successful responses (not errors)
         _response_cache.put(effective_prompt, response, context_str)
+        # Only consume rate limit tokens on successful responses —
+        # don't penalize users for system failures
+        _rate_limiter.record(chat_id)
 
     # Record metrics
     elapsed_ms = (time.time() - start_time) * 1000
     _metrics.record_response_time(elapsed_ms)
-    _rate_limiter.record(chat_id)
 
     # Record the assistant response in conversation buffer
     _conversations.add_assistant_message(chat_id, response)
@@ -739,6 +796,24 @@ async def handle_delegation_ack(chat_id: str, text: str, task_reply: str) -> str
     _conversations.add_user_message(chat_id, text)
 
     context_str = format_history_for_prompt(_conversations.get_history(chat_id)[:-1])
+
+    # Phase 8: inject active task context for goal-aware ack
+    wm_context = _working_memory.format_for_context(chat_id)
+    if wm_context:
+        context_str = f"{wm_context}\n\n{context_str}" if context_str else wm_context
+
+    # Inject goals context (same as handle_conversation)
+    goals_context = format_goals_for_context()
+    if goals_context:
+        context_str = f"{goals_context}\n\n{context_str}" if context_str else goals_context
+
+    # Inject recent completions for continuity
+    recent = get_recent_completions(max_age_seconds=3600, limit=3)
+    if recent:
+        task_context = "RECENT BACKGROUND TASK RESULTS:\n"
+        for r in recent:
+            task_context += f"- {r['stem']}: {r['summary_line']}\n"
+        context_str = f"{task_context}\n{context_str}" if context_str else task_context
 
     prompt = (
         f"{DELEGATION_ACK_PROMPT}\n\n"
@@ -868,6 +943,12 @@ async def _check_completions(app) -> None:
         _persist_counter += 1
         if _persist_counter % 20 == 0:
             _metrics.persist()
+            # Cleanup stale working memory entries (>24h old)
+            stale_count = _working_memory.cleanup_stale(max_age_seconds=86400)
+            if stale_count:
+                _log.info("WM_CLEANUP archived %d stale task(s)", stale_count)
+            # Phase 9: cleanup stale delegation markers (>24h old)
+            _cleanup_stale_delegation_markers(max_age_seconds=86400)
         if not _delegations.has_pending():
             continue
 
@@ -892,17 +973,35 @@ async def _check_completions(app) -> None:
             # Read output and generate natural summary
             try:
                 output_content = extract_output_summary(output_path)
+
+                # Phase 8: inject original request context from working memory
+                wm_task = _working_memory.complete(stem)
+                wm_prefix = ""
+                reply_to = None
+                if wm_task:
+                    wm_prefix = _working_memory.format_completion_context(wm_task) + "\n\n"
+                    if wm_task.message_id:
+                        reply_to = wm_task.message_id
+
                 summary = await generate_response(
-                    prompt=f"{COMPLETION_SUMMARY_PROMPT}{output_content}",
+                    prompt=f"{wm_prefix}{COMPLETION_SUMMARY_PROMPT}{output_content}",
                     system_prompt=SYSTEM_PROMPT,
                 )
 
                 # Record in conversation buffer for continuity
                 _conversations.add_assistant_message(chat_id, summary)
 
-                # Send to user
-                for chunk in chunk_text(summary, chunk_size=4000):
-                    await app.bot.send_message(chat_id=chat_id, text=chunk)
+                # Send to user — reply to original message if available
+                chunks = chunk_text(summary, chunk_size=4000)
+                for i, chunk in enumerate(chunks):
+                    kwargs = {"chat_id": chat_id, "text": chunk}
+                    if i == 0 and reply_to:
+                        kwargs["reply_to_message_id"] = reply_to
+                        kwargs["allow_sending_without_reply"] = True
+                    await app.bot.send_message(**kwargs)
+
+                # Phase 9: clean up delegation marker after CEO Nova delivers
+                _cleanup_delegation_marker(stem)
 
                 _log.info("COMPLETION notified: stem=%s chat=%s len=%d",
                           stem, chat_id, len(summary))
@@ -939,6 +1038,13 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     action_type = action["action"]
     _log.info("ACTION chat=%s type=%s", chat_id, action_type)
 
+    # Send typing indicator for slow operations (Phase 9: UX polish)
+    if action_type in ("conversation", "run_task", "briefing"):
+        try:
+            await update.effective_chat.send_action(ChatAction.TYPING)
+        except Exception:
+            pass  # non-critical — don't block on failure
+
     # Dispatch all actions — extract explicit args from the parsed action dict
     if action_type == "conversation":
         # CEO Nova fast conversation path — no task queue
@@ -957,7 +1063,27 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         _log.info("DELEGATED chat=%s task=%s stem=%s", chat_id, task_reply, task_stem)
         _delegations.track(task_stem, chat_id)
+
+        # Phase 9: write delegation marker so notifier defers to CEO Nova
+        _write_delegation_marker(task_stem)
+
+        # Phase 8: capture working memory for this task
         user_text = action.get("body", "") or action.get("title", "")
+        original_msg = text  # raw user message before parsing
+        context_snap = _conversations.get_history(chat_id)[-10:]  # last 10 msgs
+        task_path = str(TASKS / f"{task_stem}.md")
+        _working_memory.add(ActiveTask(
+            task_stem=task_stem,
+            chat_id=chat_id,
+            original_message=original_msg,
+            intent_summary=action.get("title", original_msg)[:150],
+            created_at=time.time(),
+            status="pending",
+            context_snapshot=context_snap,
+            task_file=task_path,
+            message_id=update.message.message_id,
+        ))
+
         reply = await handle_delegation_ack(chat_id, user_text, task_reply)
     elif action_type == "get_last":
         reply = handle_get_last(chat_id)
