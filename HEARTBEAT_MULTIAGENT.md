@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-08T22:38:21Z
+Generated: 2026-03-09T02:08:29Z
 
 ## Overall: HEALTHY
 
@@ -8,7 +8,7 @@ Generated: 2026-03-08T22:38:21Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 34 |
+| Completed workflows | 38 |
 | Failed workflows | 0 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
@@ -21,7 +21,7 @@ Generated: 2026-03-08T22:38:21Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 71 |
+| Contract successes | 77 |
 | Contract failures | 0 |
 | Contract failure rate | 0.0% |
 | Budget exhaustions | 0 |
@@ -69,6 +69,10 @@ Generated: 2026-03-08T22:38:21Z
 | 0127_System_inspect_Nova-Core_heartbeat_health__heartbeat_outputs__and_health-report_ | ? | completed | - |
 | 0128_System_inspect_current_Stage_D_inspect_only_scope_enforcement__allowed_operation | ? | completed | - |
 | 0129_System_inspect_STATE_workflows__activation_log_records__and_Stage_D_stability_ar | ? | completed | - |
+| 0130_System_report_Nova-Core_heartbeat_health__recent_heartbeat_outputs__and_current_ | ? | completed | - |
+| 0131_System_report_current_Stage_D_and_system_report_scope_enforcement__allowed_opera | ? | completed | - |
+| 0132_System_report_STATE_workflows__activation_log_records__and_current_stability-mon | ? | completed | - |
+| 0133_System_report_recent_heartbeat_history__task_queue_health__and_watcher_recovery_ | ? | completed | - |
 | test_integration | ? | completed | - |
 | test_no_promo | ? | completed | - |
 

@@ -41,6 +41,19 @@ sys.modules["telegram.parse"] = _tg_parse
 
 from telegram.parse import parse_message  # noqa: E402
 
+# Register additional local telegram modules via the same shim pattern.
+for _mod_name in ("conversation", "llm", "persona"):
+    _mod_spec = importlib.util.spec_from_file_location(
+        f"telegram.{_mod_name}", os.path.join(_here, "telegram", f"{_mod_name}.py")
+    )
+    _mod_obj = importlib.util.module_from_spec(_mod_spec)
+    _mod_spec.loader.exec_module(_mod_obj)
+    sys.modules[f"telegram.{_mod_name}"] = _mod_obj
+
+from telegram.conversation import ConversationManager  # noqa: E402
+from telegram.llm import generate_response, format_history_for_prompt  # noqa: E402
+from telegram.persona import SYSTEM_PROMPT, DELEGATION_ACK_PROMPT  # noqa: E402
+
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
 OUTPUT = ROOT / "OUTPUT"
@@ -78,6 +91,9 @@ _HELP_TEXT = (
     "/mode <level>  \u2014 set notifier verbosity: compact|normal|verbose\n"
     "/help          \u2014 this message"
 )
+
+# --- Conversation manager (Phase 1: CEO Nova) ---
+_conversations = ConversationManager()
 
 _STATUS_LIMITS = {"compact": 5, "normal": 10, "verbose": 20}
 
@@ -595,6 +611,57 @@ def _guard(func):
     return wrapper
 
 
+# --- CEO Nova conversation handler ---
+
+async def handle_conversation(chat_id: str, text: str) -> str:
+    """Handle a conversational message via Claude CLI (fast path).
+
+    No task file is created. The response comes directly from Claude.
+    """
+    # Record the user message in conversation buffer
+    _conversations.add_user_message(chat_id, text)
+
+    # Build conversation context from buffer (excluding the message we just added)
+    history = _conversations.get_history(chat_id)
+    # Remove the last entry (the current message) — it's in the prompt already
+    context_history = history[:-1] if len(history) > 1 else []
+    context_str = format_history_for_prompt(context_history)
+
+    # Call Claude
+    response = await generate_response(
+        prompt=text,
+        system_prompt=SYSTEM_PROMPT,
+        conversation_context=context_str,
+    )
+
+    # Record the assistant response in conversation buffer
+    _conversations.add_assistant_message(chat_id, response)
+
+    return response
+
+
+async def handle_delegation_ack(chat_id: str, text: str, task_reply: str) -> str:
+    """Generate a natural acknowledgment after delegating to Nova-Core."""
+    # Record in conversation buffer
+    _conversations.add_user_message(chat_id, text)
+
+    context_str = format_history_for_prompt(_conversations.get_history(chat_id)[:-1])
+
+    prompt = (
+        f"{DELEGATION_ACK_PROMPT}\n\n"
+        f"The user said: {text}\n"
+        f"The task has been queued successfully."
+    )
+    response = await generate_response(
+        prompt=prompt,
+        system_prompt=SYSTEM_PROMPT,
+        conversation_context=context_str,
+    )
+
+    _conversations.add_assistant_message(chat_id, response)
+    return response
+
+
 # --- Unified message handler ---
 
 @_guard
@@ -623,13 +690,21 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     _log.info("ACTION chat=%s type=%s", chat_id, action_type)
 
     # Dispatch all actions — extract explicit args from the parsed action dict
-    if action_type == "show_help":
+    if action_type == "conversation":
+        # CEO Nova fast conversation path — no task queue
+        reply = await handle_conversation(chat_id, action["text"])
+    elif action_type == "show_help":
         reply = handle_help()
     elif action_type == "get_status":
         reply = handle_status(chat_id)
     elif action_type == "run_task":
-        reply = handle_run_task(chat_id, action["title"], action.get("body", ""),
-                                intent=action.get("intent", "task"))
+        # Delegate to task queue, then generate natural acknowledgment
+        task_reply = handle_run_task(chat_id, action["title"],
+                                     action.get("body", ""),
+                                     intent=action.get("intent", "task"))
+        _log.info("DELEGATED chat=%s task=%s", chat_id, task_reply)
+        user_text = action.get("body", "") or action.get("title", "")
+        reply = await handle_delegation_ack(chat_id, user_text, task_reply)
     elif action_type == "get_last":
         reply = handle_get_last(chat_id)
     elif action_type == "get_output":
@@ -645,7 +720,9 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     else:
         reply = f"Unknown action: {action_type}. Try /help"
 
-    await update.message.reply_text(reply)
+    # Send response, chunking if needed for Telegram's 4096 char limit
+    for chunk in chunk_text(reply, chunk_size=4000):
+        await update.message.reply_text(chunk)
 
 
 # --- Single-instance lock ---

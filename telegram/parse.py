@@ -163,11 +163,13 @@ def _parse_help(chat_id: str, ts: float) -> dict:
 
 
 def _parse_chat(rest: str, chat_id: str, ts: float) -> dict:
-    """Parse /chat <text> — force chat-mode task."""
-    result = _parse_run(rest, chat_id, ts)
-    if result.get("ok"):
-        result["action"]["intent"] = "chat"
-    return result
+    """Parse /chat <text> — force conversation path (no task queue)."""
+    text = rest.strip()
+    if not text:
+        return _err("Error: /chat requires text. Usage: /chat <message>")
+    action = _base("conversation", chat_id, ts)
+    action["text"] = text
+    return _ok(action)
 
 
 def _parse_report(rest: str, chat_id: str, ts: float) -> dict:
@@ -234,11 +236,18 @@ def parse_message(text: str, chat_id: str, ts: float) -> dict | None:
     if len(text) > _MAX_MSG_LEN:
         return _err(f"Error: message too long (max {_MAX_MSG_LEN} chars)")
 
-    # Plain text (no leading /) → treat as /run with auto-classified intent
+    # Plain text (no leading /) → classify intent first
     if not text.startswith("/"):
+        intent = classify_intent(text)
+        if intent == "chat":
+            # Fast conversation path — no task file needed
+            action = _base("conversation", chat_id, ts)
+            action["text"] = text
+            return _ok(action)
+        # Task intent → create task file via run_task
         result = _parse_run(text, chat_id, ts)
         if result.get("ok"):
-            result["action"]["intent"] = classify_intent(text)
+            result["action"]["intent"] = "task"
         return result
 
     cmd, rest = normalize_command(text)
