@@ -345,10 +345,10 @@ class TestMemoryInstructions(unittest.TestCase):
     def test_vault_access_mentioned(self):
         self.assertIn("nova-vault", persona.SYSTEM_PROMPT)
 
-    def test_no_file_tools_guidance(self):
-        """Ensure the prompt tells Claude not to use file editing tools."""
+    def test_no_write_tools_guidance(self):
+        """Ensure the prompt tells Claude not to use write/edit/bash tools."""
         lower = persona.SYSTEM_PROMPT.lower()
-        self.assertIn("don't use file editing tools", lower)
+        self.assertIn("do not use write, edit, or bash", lower)
 
 
 class TestSessionStartIntegration(unittest.TestCase):
@@ -447,6 +447,43 @@ class TestCompletionSummaryPrompt(unittest.TestCase):
     def test_prompt_forbids_metadata(self):
         lower = delegation.COMPLETION_SUMMARY_PROMPT.lower()
         self.assertIn("do not include task ids", lower)
+
+
+# ── Phase 4: Tool Integration Tests ──────────────────────────────────────
+
+
+class TestToolInstructions(unittest.TestCase):
+    """Verify tool integration instructions in system prompt."""
+
+    def test_tools_section_exists(self):
+        self.assertIn("TOOLS:", persona.SYSTEM_PROMPT)
+
+    def test_web_search_mentioned(self):
+        lower = persona.SYSTEM_PROMPT.lower()
+        self.assertIn("brave search", lower)
+        self.assertIn("tavily", lower)
+
+    def test_system_status_guidance(self):
+        self.assertIn("HEARTBEAT.md", persona.SYSTEM_PROMPT)
+
+    def test_tool_restrictions_section(self):
+        self.assertIn("TOOL RESTRICTIONS:", persona.SYSTEM_PROMPT)
+
+    def test_no_write_tools(self):
+        lower = persona.SYSTEM_PROMPT.lower()
+        self.assertIn("do not use write", lower)
+
+    def test_read_allowed(self):
+        lower = persona.SYSTEM_PROMPT.lower()
+        self.assertIn("you may use read", lower)
+
+    def test_web_search_allowed(self):
+        lower = persona.SYSTEM_PROMPT.lower()
+        self.assertIn("you may use web search", lower)
+
+    def test_delegation_threshold(self):
+        """Prompt should guide when to delegate vs use tools directly."""
+        self.assertIn("delegation candidate", persona.SYSTEM_PROMPT)
 
 
 if __name__ == "__main__":
