@@ -310,6 +310,18 @@ _ARTIFACT_REQUEST = _re.compile(
     _re.IGNORECASE,
 )
 
+# Memory-persistence request pattern: save/store/remember to memory/obsidian/vault.
+# Routes to task queue because conversation path lacks write access to vault/obsidian.
+_MEMORY_PERSIST_REQUEST = _re.compile(
+    r"(?:save|store|remember|write|add|put|log|record|persist|keep)\s+"
+    r".*\b(?:memory|obsidian|vault|notes?|knowledge|diary)\b"
+    r"|\b(?:to memory|in memory|to obsidian|in obsidian|to the vault|in the vault"
+    r"|to your notes|in your notes|to your memory|in your memory"
+    r"|to (?:the )?knowledge base|remember (?:this|that) (?:for later|across sessions)"
+    r"|don't forget|make a note)\b",
+    _re.IGNORECASE,
+)
+
 
 def classify_intent(message: str) -> str:
     """Classify a raw user message as 'chat' or 'task'.
@@ -321,10 +333,11 @@ def classify_intent(message: str) -> str:
       4. Other / commands → task
       5. Report-style task keywords → task
       6. Artifact requests (send PDF, convert to doc) → task
-      7. Explicit request verbs (can you build...) → task
-      8. Deliverable detector (action verb + object) → task
-      9. Action verbs WITHOUT chat signals → task
-     10. Default plain text → chat
+      7. Memory-persistence requests (save to obsidian, remember this) → task
+      8. Explicit request verbs (can you build...) → task
+      9. Deliverable detector (action verb + object) → task
+     10. Action verbs WITHOUT chat signals → task
+     11. Default plain text → chat
     """
     text = message.strip()
     if not text:
@@ -346,6 +359,11 @@ def classify_intent(message: str) -> str:
     # Artifact requests: "send me a PDF", "convert to document" → task
     # These don't use traditional action verbs but clearly need the task queue.
     if _ARTIFACT_REQUEST.search(text):
+        return "task"
+
+    # Memory-persistence requests: "save this to obsidian", "remember this" → task
+    # Conversation path cannot write to vault/obsidian — delegate to task queue.
+    if _MEMORY_PERSIST_REQUEST.search(text):
         return "task"
 
     has_action = _ACTION_VERBS.search(text)
@@ -371,6 +389,14 @@ def classify_intent(message: str) -> str:
         return "task"
 
     return "chat"
+
+
+def is_memory_persist_request(text: str) -> bool:
+    """Check if a message is a memory-persistence request.
+
+    Used by the dispatcher to select the right acknowledgment prompt.
+    """
+    return bool(_MEMORY_PERSIST_REQUEST.search(text))
 
 
 # --- Main entry point --------------------------------------------------------

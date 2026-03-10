@@ -41,10 +41,10 @@ _tg_parse = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_tg_parse)
 sys.modules["telegram.parse"] = _tg_parse
 
-from telegram.parse import parse_message  # noqa: E402
+from telegram.parse import parse_message, is_memory_persist_request  # noqa: E402
 
 # Register additional local telegram modules via the same shim pattern.
-for _mod_name in ("conversation", "llm", "persona", "delegation", "goals", "hardening", "working_memory"):
+for _mod_name in ("conversation", "llm", "persona", "delegation", "goals", "hardening", "working_memory", "recent_completions", "recap"):
     _mod_spec = importlib.util.spec_from_file_location(
         f"telegram.{_mod_name}", os.path.join(_here, "telegram", f"{_mod_name}.py")
     )
@@ -54,7 +54,7 @@ for _mod_name in ("conversation", "llm", "persona", "delegation", "goals", "hard
 
 from telegram.conversation import ConversationManager  # noqa: E402
 from telegram.llm import generate_response, format_history_for_prompt  # noqa: E402
-from telegram.persona import SYSTEM_PROMPT, DELEGATION_ACK_PROMPT, SESSION_START_HINT  # noqa: E402
+from telegram.persona import SYSTEM_PROMPT, DELEGATION_ACK_PROMPT, SESSION_START_HINT, MEMORY_PERSIST_ACK_PROMPT  # noqa: E402
 from telegram.delegation import (  # noqa: E402
     DelegationTracker, find_completed_output, claim_notification,
     extract_output_summary, get_recent_completions, COMPLETION_SUMMARY_PROMPT,
@@ -68,6 +68,14 @@ from telegram.hardening import (  # noqa: E402
     RATE_LIMIT_MESSAGE, CIRCUIT_OPEN_MESSAGE,
 )
 from telegram.working_memory import WorkingMemoryStore, ActiveTask  # noqa: E402
+from telegram.recent_completions import (  # noqa: E402
+    record_completion as rc_record_completion,
+    format_for_context as rc_format_for_context,
+    cleanup as rc_cleanup,
+)
+from telegram.recap import (  # noqa: E402
+    update_recap, format_for_context as recap_format_for_context,
+)
 
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
@@ -728,26 +736,64 @@ async def handle_conversation(chat_id: str, text: str) -> str:
     # Build effective prompt with injected context
     effective_prompt = text
     if is_new_session:
-        effective_prompt = f"{SESSION_START_HINT}\n\n{text}"
-        _log.info("SESSION_START chat=%s — injecting memory hint", chat_id)
+        # Phase 10: session reconstruction pipeline — pre-fetch all context
+        # server-side instead of telling the LLM to fetch its own context.
+        reconstruction_parts: list[str] = []
 
-    # Inject active goals as context (Phase 6)
-    goals_context = format_goals_for_context()
-    if goals_context:
-        context_str = f"{goals_context}\n\n{context_str}" if context_str else goals_context
+        # 1. Conversation recap (most important — what were we talking about?)
+        recap_ctx = recap_format_for_context(chat_id)
+        if recap_ctx:
+            reconstruction_parts.append(recap_ctx)
 
-    # Inject active working memory tasks as context (Phase 8)
-    wm_context = _working_memory.format_for_context(chat_id)
-    if wm_context:
-        context_str = f"{wm_context}\n\n{context_str}" if context_str else wm_context
+        # 2. Recent completions (4-hour window — "did you finish that?")
+        rc_ctx = rc_format_for_context(chat_id=chat_id)
+        if rc_ctx:
+            reconstruction_parts.append(rc_ctx)
 
-    # Inject recent task completions as context (Phase 5)
-    recent = get_recent_completions(max_age_seconds=3600, limit=3)
-    if recent:
-        task_context = "RECENT BACKGROUND TASK RESULTS (reference if relevant):\n"
-        for r in recent:
-            task_context += f"- {r['stem']}: {r['summary_line']}\n"
-        context_str = f"{task_context}\n{context_str}" if context_str else task_context
+        # 3. Active working memory tasks
+        wm_ctx = _working_memory.format_for_context(chat_id)
+        if wm_ctx:
+            reconstruction_parts.append(wm_ctx)
+
+        # 4. Goals
+        goals_ctx = format_goals_for_context()
+        if goals_ctx:
+            reconstruction_parts.append(goals_ctx)
+
+        if reconstruction_parts:
+            reconstruction_block = "\n\n".join(reconstruction_parts)
+            effective_prompt = (
+                f"{SESSION_START_HINT}\n\n"
+                f"{reconstruction_block}\n\n"
+                f"USER MESSAGE:\n{text}"
+            )
+        else:
+            effective_prompt = (
+                f"{SESSION_START_HINT}\n\n"
+                f"No recent session context available.\n\n"
+                f"USER MESSAGE:\n{text}"
+            )
+        _log.info("SESSION_RESTART chat=%s — injected %d context sources",
+                   chat_id, len(reconstruction_parts))
+    else:
+        # Normal (non-restart) context injection
+        # Inject active goals as context (Phase 6)
+        goals_context = format_goals_for_context()
+        if goals_context:
+            context_str = f"{goals_context}\n\n{context_str}" if context_str else goals_context
+
+        # Inject active working memory tasks as context (Phase 8)
+        wm_context = _working_memory.format_for_context(chat_id)
+        if wm_context:
+            context_str = f"{wm_context}\n\n{context_str}" if context_str else wm_context
+
+        # Inject recent task completions as context (Phase 5)
+        recent = get_recent_completions(max_age_seconds=3600, limit=3)
+        if recent:
+            task_context = "RECENT BACKGROUND TASK RESULTS (reference if relevant):\n"
+            for r in recent:
+                task_context += f"- {r['stem']}: {r['summary_line']}\n"
+            context_str = f"{task_context}\n{context_str}" if context_str else task_context
 
     # Response cache check (Phase 7) — skip for session starts (need fresh memory)
     if not is_new_session:
@@ -787,10 +833,18 @@ async def handle_conversation(chat_id: str, text: str) -> str:
     # Record the assistant response in conversation buffer
     _conversations.add_assistant_message(chat_id, response)
 
+    # Phase 10: persist conversation recap for session reconstruction
+    if not is_error:
+        try:
+            update_recap(chat_id, text, response)
+        except Exception as exc:
+            _log.warning("RECAP_UPDATE failed: %s", exc)
+
     return response
 
 
-async def handle_delegation_ack(chat_id: str, text: str, task_reply: str) -> str:
+async def handle_delegation_ack(chat_id: str, text: str, task_reply: str,
+                                ack_prompt: str = "") -> str:
     """Generate a natural acknowledgment after delegating to Nova-Core."""
     # Record in conversation buffer
     _conversations.add_user_message(chat_id, text)
@@ -815,8 +869,9 @@ async def handle_delegation_ack(chat_id: str, text: str, task_reply: str) -> str
             task_context += f"- {r['stem']}: {r['summary_line']}\n"
         context_str = f"{task_context}\n{context_str}" if context_str else task_context
 
+    effective_ack = ack_prompt or DELEGATION_ACK_PROMPT
     prompt = (
-        f"{DELEGATION_ACK_PROMPT}\n\n"
+        f"{effective_ack}\n\n"
         f"The user said: {text}\n"
         f"The task has been queued successfully."
     )
@@ -827,6 +882,13 @@ async def handle_delegation_ack(chat_id: str, text: str, task_reply: str) -> str
     )
 
     _conversations.add_assistant_message(chat_id, response)
+
+    # Phase 10: persist recap (delegation acks are important commitments)
+    try:
+        update_recap(chat_id, text, response)
+    except Exception as exc:
+        _log.warning("RECAP_UPDATE failed (delegation): %s", exc)
+
     return response
 
 
@@ -949,6 +1011,8 @@ async def _check_completions(app) -> None:
                 _log.info("WM_CLEANUP archived %d stale task(s)", stale_count)
             # Phase 9: cleanup stale delegation markers (>24h old)
             _cleanup_stale_delegation_markers(max_age_seconds=86400)
+            # Phase 10: cleanup expired recent completions (>4h old)
+            rc_cleanup()
         if not _delegations.has_pending():
             continue
 
@@ -1002,6 +1066,21 @@ async def _check_completions(app) -> None:
 
                 # Phase 9: clean up delegation marker after CEO Nova delivers
                 _cleanup_delegation_marker(stem)
+
+                # Phase 10: record in recent-completions store for
+                # session reconstruction (survives conversation buffer expiry)
+                try:
+                    rc_record_completion(
+                        task_stem=stem,
+                        chat_id=chat_id,
+                        original_message=(wm_task.original_message if wm_task else ""),
+                        intent_summary=(wm_task.intent_summary if wm_task else stem),
+                        output_file=str(output_path),
+                        output_summary_line=output_content[:200].split("\n")[0],
+                        completion_response=summary[:300],
+                    )
+                except Exception as rc_exc:
+                    _log.warning("RC_RECORD failed for %s: %s", stem, rc_exc)
 
                 _log.info("COMPLETION notified: stem=%s chat=%s len=%d",
                           stem, chat_id, len(summary))
@@ -1084,7 +1163,12 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             message_id=update.message.message_id,
         ))
 
-        reply = await handle_delegation_ack(chat_id, user_text, task_reply)
+        # Phase 10: use memory-persist ack prompt for save/store requests
+        _ack_prompt = ""
+        if is_memory_persist_request(text):
+            _ack_prompt = MEMORY_PERSIST_ACK_PROMPT
+        reply = await handle_delegation_ack(chat_id, user_text, task_reply,
+                                            ack_prompt=_ack_prompt)
     elif action_type == "get_last":
         reply = handle_get_last(chat_id)
     elif action_type == "get_output":

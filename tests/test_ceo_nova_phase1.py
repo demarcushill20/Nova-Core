@@ -325,27 +325,37 @@ class TestSessionStartHint(unittest.TestCase):
         self.assertIsInstance(persona.SESSION_START_HINT, str)
         self.assertGreater(len(persona.SESSION_START_HINT), 50)
 
-    def test_session_start_hint_references_checkpoint(self):
-        self.assertIn("get_last_checkpoint", persona.SESSION_START_HINT)
-
-    def test_session_start_hint_references_project(self):
-        self.assertIn("nova-core", persona.SESSION_START_HINT)
+    def test_session_start_hint_pre_loaded_context(self):
+        """Phase 10: hint tells LLM to use pre-loaded context, not fetch its own."""
+        self.assertIn("pre-loaded", persona.SESSION_START_HINT.lower())
+        self.assertIn("do not call memory tools", persona.SESSION_START_HINT.lower()
+                       .replace("don't", "do not"))
 
 
 class TestMemoryInstructions(unittest.TestCase):
-    """Verify memory instructions are in the system prompt."""
+    """Verify memory instructions are in the system prompt (Phase 10: honest capability contract)."""
 
     def test_memory_section_exists(self):
-        self.assertIn("MEMORY (Fusion Memory", persona.SYSTEM_PROMPT)
+        self.assertIn("MEMORY:", persona.SYSTEM_PROMPT)
 
-    def test_query_memory_mentioned(self):
-        self.assertIn("query_memory", persona.SYSTEM_PROMPT)
+    def test_pre_loaded_context_instruction(self):
+        """Phase 10: LLM should use pre-loaded context, not call memory tools."""
+        lower = persona.SYSTEM_PROMPT.lower()
+        self.assertIn("pre-loaded", lower)
 
-    def test_upsert_memory_mentioned(self):
-        self.assertIn("upsert_memory", persona.SYSTEM_PROMPT)
+    def test_fusion_memory_mentioned(self):
+        """Fusion Memory is still available for targeted queries."""
+        self.assertIn("Fusion Memory", persona.SYSTEM_PROMPT)
 
-    def test_vault_access_mentioned(self):
-        self.assertIn("nova-vault", persona.SYSTEM_PROMPT)
+    def test_no_false_vault_write_claim(self):
+        """Phase 10: must NOT claim vault write access (subprocess doesn't have it)."""
+        lower = persona.SYSTEM_PROMPT.lower()
+        # Should not claim read/write access to Obsidian as a direct tool
+        self.assertNotIn("obsidian vault (nova-vault)", lower)
+
+    def test_delegate_obsidian_requests(self):
+        """Phase 10: Obsidian/vault requests must be in REQUESTS YOU MUST DELEGATE."""
+        self.assertIn("memory/obsidian/vault", persona.SYSTEM_PROMPT)
 
     def test_no_write_tools_guidance(self):
         """Ensure the prompt tells Claude not to use write/edit/bash tools."""
@@ -460,10 +470,9 @@ class TestToolInstructions(unittest.TestCase):
     def test_tools_section_exists(self):
         self.assertIn("TOOLS:", persona.SYSTEM_PROMPT)
 
-    def test_web_search_mentioned(self):
-        lower = persona.SYSTEM_PROMPT.lower()
-        self.assertIn("brave search", lower)
-        self.assertIn("tavily", lower)
+    def test_web_search_delegated(self):
+        """Phase 10: web search is in delegation list, not direct tools."""
+        self.assertIn("Search the web", persona.SYSTEM_PROMPT)
 
     def test_system_status_guidance(self):
         self.assertIn("HEARTBEAT.md", persona.SYSTEM_PROMPT)
@@ -479,13 +488,13 @@ class TestToolInstructions(unittest.TestCase):
         lower = persona.SYSTEM_PROMPT.lower()
         self.assertIn("you may use read", lower)
 
-    def test_web_search_allowed(self):
-        lower = persona.SYSTEM_PROMPT.lower()
-        self.assertIn("you may use web search", lower)
+    def test_web_search_delegated(self):
+        """Phase 10: web search is delegated, not direct."""
+        self.assertIn("web search", persona.SYSTEM_PROMPT.lower())
 
     def test_delegation_threshold(self):
         """Prompt should guide when to delegate vs use tools directly."""
-        self.assertIn("delegation candidate", persona.SYSTEM_PROMPT)
+        self.assertIn("delegate instead", persona.SYSTEM_PROMPT)
 
 
 # ── Phase 5: Smart Intent Classification Tests ───────────────────────────

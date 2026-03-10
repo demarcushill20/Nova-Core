@@ -59,14 +59,33 @@ class WorkingMemoryStore:
             task.status = status
             self._save()
 
-    def complete(self, task_stem: str) -> ActiveTask | None:
-        """Mark task completed, archive it, return the task for context."""
+    def complete(self, task_stem: str,
+                 output_file: str = "",
+                 output_summary_line: str = "",
+                 completion_response: str = "") -> ActiveTask | None:
+        """Mark task completed, archive it, record in recent completions, return task."""
         task = self._tasks.pop(task_stem, None)
         if task:
             task.status = "completed"
             self._archive(task)
             self._save()
             _log.info("WM_COMPLETE stem=%s summary=%r", task_stem, task.intent_summary[:80])
+
+            # Record in recent completions store for session reconstruction
+            try:
+                from telegram.recent_completions import record_completion
+                record_completion(
+                    task_stem=task_stem,
+                    chat_id=task.chat_id,
+                    original_message=task.original_message,
+                    intent_summary=task.intent_summary,
+                    output_file=output_file,
+                    output_summary_line=output_summary_line,
+                    completion_response=completion_response,
+                )
+            except Exception as e:
+                _log.warning("Failed to record recent completion for %s: %s",
+                             task_stem, e)
         return task
 
     def active_tasks(self) -> list[ActiveTask]:
