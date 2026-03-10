@@ -26,7 +26,7 @@ from agents.blackboard import (
     Blackboard, Delegation, WorkflowState,
     AgentRuntimeState, ChildContract,
 )
-from agents.policy_engine import PolicyEngine, PolicyViolation
+from agents.policy_engine import PolicyEngine, PolicyViolation, ElevatedToolRequest
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +208,14 @@ class WorkflowEngine:
 
     def check_tool_policy(self, workflow_id: str, agent_id: str,
                           tool_name: str) -> None:
-        """Check tool policy and halt on violation."""
+        """Check tool policy and halt on violation or elevated tool request."""
         try:
             self.policy.enforce(agent_id, tool_name)
         except PolicyViolation as e:
             self._halt(workflow_id, HALT_POLICY_VIOLATION, str(e))
+        except ElevatedToolRequest as e:
+            self._halt(workflow_id, HALT_POLICY_VIOLATION,
+                       f"Elevated tool requires approval: {e}")
 
     def check_verifier_rejections(self, workflow_id: str,
                                   rejection_count: int) -> None:
