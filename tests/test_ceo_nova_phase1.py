@@ -347,15 +347,13 @@ class TestMemoryInstructions(unittest.TestCase):
         """Fusion Memory is still available for targeted queries."""
         self.assertIn("Fusion Memory", persona.SYSTEM_PROMPT)
 
-    def test_no_false_vault_write_claim(self):
-        """Phase 10: must NOT claim vault write access (subprocess doesn't have it)."""
-        lower = persona.SYSTEM_PROMPT.lower()
-        # Should not claim read/write access to Obsidian as a direct tool
-        self.assertNotIn("obsidian vault (nova-vault)", lower)
+    def test_vault_access_claimed(self):
+        """Phase 11: subprocess has nova-vault MCP — persona claims it."""
+        self.assertIn("nova-vault", persona.SYSTEM_PROMPT)
 
-    def test_delegate_obsidian_requests(self):
-        """Phase 10: Obsidian/vault requests must be in REQUESTS YOU MUST DELEGATE."""
-        self.assertIn("memory/obsidian/vault", persona.SYSTEM_PROMPT)
+    def test_vault_handled_inline(self):
+        """Phase 11: vault requests are NOT in delegation list (handled inline)."""
+        self.assertNotIn("Save this to memory/obsidian/vault", persona.SYSTEM_PROMPT)
 
     def test_no_write_tools_guidance(self):
         """Ensure the prompt tells Claude not to use write/edit/bash tools."""
@@ -470,9 +468,9 @@ class TestToolInstructions(unittest.TestCase):
     def test_tools_section_exists(self):
         self.assertIn("TOOLS:", persona.SYSTEM_PROMPT)
 
-    def test_web_search_delegated(self):
-        """Phase 10: web search is in delegation list, not direct tools."""
-        self.assertIn("Search the web", persona.SYSTEM_PROMPT)
+    def test_web_search_available(self):
+        """Phase 11: web search is a direct tool via brave-search MCP."""
+        self.assertIn("brave-search", persona.SYSTEM_PROMPT)
 
     def test_system_status_guidance(self):
         self.assertIn("HEARTBEAT.md", persona.SYSTEM_PROMPT)
@@ -486,15 +484,15 @@ class TestToolInstructions(unittest.TestCase):
 
     def test_read_allowed(self):
         lower = persona.SYSTEM_PROMPT.lower()
-        self.assertIn("you may use read", lower)
+        self.assertIn("you may read local files", lower)
 
-    def test_web_search_delegated(self):
-        """Phase 10: web search is delegated, not direct."""
-        self.assertIn("web search", persona.SYSTEM_PROMPT.lower())
+    def test_web_search_direct(self):
+        """Phase 11: web search is available as a direct MCP tool."""
+        self.assertIn("Web Search", persona.SYSTEM_PROMPT)
 
-    def test_delegation_threshold(self):
-        """Prompt should guide when to delegate vs use tools directly."""
-        self.assertIn("delegate instead", persona.SYSTEM_PROMPT)
+    def test_direct_action_guidance(self):
+        """Prompt should guide CEO Nova to use tools directly."""
+        self.assertIn("USE TOOLS DIRECTLY", persona.SYSTEM_PROMPT)
 
 
 # ── Phase 5: Smart Intent Classification Tests ───────────────────────────

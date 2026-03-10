@@ -12,7 +12,7 @@ import os
 _log = logging.getLogger("telegram_bot.llm")
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
-CONVERSATION_TIMEOUT = 60  # seconds — generous for Opus
+CONVERSATION_TIMEOUT = 120  # seconds — accounts for MCP server startup + Opus inference
 MODEL = "claude-opus-4-6"
 
 

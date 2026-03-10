@@ -311,7 +311,7 @@ _ARTIFACT_REQUEST = _re.compile(
 )
 
 # Memory-persistence request pattern: save/store/remember to memory/obsidian/vault.
-# Routes to task queue because conversation path lacks write access to vault/obsidian.
+# CEO Nova handles these inline via nova-vault and nova-memory MCP tools.
 _MEMORY_PERSIST_REQUEST = _re.compile(
     r"(?:save|store|remember|write|add|put|log|record|persist|keep)\s+"
     r".*\b(?:memory|obsidian|vault|notes?|knowledge|diary)\b"
@@ -333,7 +333,8 @@ def classify_intent(message: str) -> str:
       4. Other / commands → task
       5. Report-style task keywords → task
       6. Artifact requests (send PDF, convert to doc) → task
-      7. Memory-persistence requests (save to obsidian, remember this) → task
+      7. Memory-persistence requests (save to obsidian, remember this) → chat
+         (CEO Nova handles these inline via nova-vault/nova-memory MCP)
       8. Explicit request verbs (can you build...) → task
       9. Deliverable detector (action verb + object) → task
      10. Action verbs WITHOUT chat signals → task
@@ -361,10 +362,10 @@ def classify_intent(message: str) -> str:
     if _ARTIFACT_REQUEST.search(text):
         return "task"
 
-    # Memory-persistence requests: "save this to obsidian", "remember this" → task
-    # Conversation path cannot write to vault/obsidian — delegate to task queue.
+    # Memory-persistence requests: "save this to obsidian", "remember this" → chat
+    # CEO Nova handles these inline via nova-vault and nova-memory MCP tools.
     if _MEMORY_PERSIST_REQUEST.search(text):
-        return "task"
+        return "chat"
 
     has_action = _ACTION_VERBS.search(text)
     has_chat_signal = _CHAT_SIGNALS.match(text)

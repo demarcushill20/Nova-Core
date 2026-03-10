@@ -206,7 +206,11 @@ class TestRecentCompletions(unittest.TestCase):
 
 
 class TestMemoryPersistIntent(unittest.TestCase):
-    """Test memory-persistence request classification."""
+    """Test memory-persistence request classification.
+
+    Memory-persist requests route to conversation (chat) so CEO Nova
+    can handle them inline via nova-vault and nova-memory MCP tools.
+    """
 
     def _intent(self, text):
         return tg_parse.classify_intent(text)
@@ -215,35 +219,35 @@ class TestMemoryPersistIntent(unittest.TestCase):
         return tg_parse.is_memory_persist_request(text)
 
     def test_save_to_memory(self):
-        self.assertEqual(self._intent("save this to memory"), "task")
+        self.assertEqual(self._intent("save this to memory"), "chat")
         self.assertTrue(self._is_persist("save this to memory"))
 
     def test_save_to_obsidian(self):
-        self.assertEqual(self._intent("save it to your obsidian memory"), "task")
+        self.assertEqual(self._intent("save it to your obsidian memory"), "chat")
         self.assertTrue(self._is_persist("save it to your obsidian memory"))
 
     def test_add_to_vault(self):
-        self.assertEqual(self._intent("Can you add this to the vault"), "task")
+        self.assertEqual(self._intent("Can you add this to the vault"), "chat")
         self.assertTrue(self._is_persist("Can you add this to the vault"))
 
     def test_remember_this(self):
-        self.assertEqual(self._intent("remember this in obsidian"), "task")
+        self.assertEqual(self._intent("remember this in obsidian"), "chat")
         self.assertTrue(self._is_persist("remember this in obsidian"))
 
     def test_write_to_notes(self):
-        self.assertEqual(self._intent("write this to notes"), "task")
+        self.assertEqual(self._intent("write this to notes"), "chat")
         self.assertTrue(self._is_persist("write this to notes"))
 
     def test_store_in_memory(self):
-        self.assertEqual(self._intent("store this in memory"), "task")
+        self.assertEqual(self._intent("store this in memory"), "chat")
         self.assertTrue(self._is_persist("store this in memory"))
 
     def test_make_a_note(self):
-        self.assertEqual(self._intent("make a note of this"), "task")
+        self.assertEqual(self._intent("make a note of this"), "chat")
         self.assertTrue(self._is_persist("make a note of this"))
 
     def test_dont_forget(self):
-        self.assertEqual(self._intent("don't forget this for next time"), "task")
+        self.assertEqual(self._intent("don't forget this for next time"), "chat")
         self.assertTrue(self._is_persist("don't forget this for next time"))
 
     def test_casual_remember_is_chat(self):
@@ -259,34 +263,45 @@ class TestMemoryPersistIntent(unittest.TestCase):
 
 
 class TestCapabilityContract(unittest.TestCase):
-    """Verify persona only claims capabilities the subprocess actually has."""
+    """Verify persona accurately reflects the subprocess's MCP tool access."""
 
-    def test_no_brave_search_claim(self):
-        """Subprocess doesn't have brave-search MCP — don't claim it."""
-        self.assertNotIn("Brave Search", persona.SYSTEM_PROMPT)
+    def test_brave_search_available(self):
+        """Subprocess has brave-search MCP — persona should reference web search."""
+        self.assertIn("brave-search", persona.SYSTEM_PROMPT)
 
-    def test_no_tavily_claim(self):
-        """Subprocess doesn't have tavily MCP — don't claim it."""
-        self.assertNotIn("Tavily", persona.SYSTEM_PROMPT)
+    def test_tavily_available(self):
+        """Subprocess has tavily MCP — persona should reference deep research."""
+        self.assertIn("tavily", persona.SYSTEM_PROMPT)
 
-    def test_no_vault_write_claim(self):
-        """Subprocess doesn't have nova-vault MCP — don't claim write access."""
-        lower = persona.SYSTEM_PROMPT.lower()
-        # Should not claim vault as a direct tool
-        self.assertNotIn("obsidian vault (nova-vault)", lower)
+    def test_vault_available(self):
+        """Subprocess has nova-vault MCP — persona should reference Obsidian."""
+        self.assertIn("nova-vault", persona.SYSTEM_PROMPT)
 
-    def test_fusion_memory_honest(self):
-        """Fusion Memory is available — but framed as 'may query', not 'always use'."""
+    def test_fusion_memory_available(self):
+        """Fusion Memory is available — pre-loaded context + direct query."""
         self.assertIn("Fusion Memory", persona.SYSTEM_PROMPT)
         self.assertIn("pre-loaded", persona.SYSTEM_PROMPT.lower())
 
-    def test_delegation_list_complete(self):
-        """All non-capabilities are in the delegation list."""
+    def test_fetch_available(self):
+        """Subprocess has fetch MCP — persona should reference web fetch."""
+        self.assertIn("fetch", persona.SYSTEM_PROMPT.lower())
+
+    def test_playwright_available(self):
+        """Subprocess has playwright MCP — persona should reference browser."""
+        self.assertIn("playwright", persona.SYSTEM_PROMPT)
+
+    def test_delegation_list_scoped(self):
+        """Only heavy-work items are in the delegation list."""
         prompt = persona.SYSTEM_PROMPT
-        self.assertIn("Save this to memory/obsidian/vault", prompt)
-        self.assertIn("Search the web", prompt)
+        # Heavy work still delegates
         self.assertIn("Send me a PDF/file/document", prompt)
-        self.assertIn("Research", prompt)
+        # Quick actions are NOT in delegation list — handled inline
+        self.assertNotIn("Save this to memory/obsidian/vault", prompt)
+        self.assertNotIn("Search the web for...", prompt)
+
+    def test_direct_action_encouraged(self):
+        """Persona tells CEO Nova to use tools directly."""
+        self.assertIn("USE TOOLS DIRECTLY", persona.SYSTEM_PROMPT)
 
     def test_session_start_no_memory_fetch(self):
         """Session start hint should NOT tell LLM to call memory tools."""

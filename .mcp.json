@@ -4,6 +4,35 @@
       "command": "bash",
       "args": ["/home/nova/Nova_AI_Fusion_Memory_MCP/run_mcp_local.sh"],
       "env": {}
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@brave/brave-search-mcp-server"],
+      "env": {
+        "BRAVE_API_KEY": "BSAw07ayhWXJU2Boh1sRDe8HaGmRe_o"
+      }
+    },
+    "tavily": {
+      "command": "npx",
+      "args": ["-y", "tavily-mcp@latest"],
+      "env": {
+        "TAVILY_API_KEY": "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"
+      }
+    },
+    "fetch": {
+      "command": "/home/nova/.local/bin/uv",
+      "args": ["tool", "run", "mcp-server-fetch"],
+      "env": {}
+    },
+    "nova-vault": {
+      "command": "python3",
+      "args": ["/home/nova/nova-core/tools/mcp_vault_server.py"],
+      "env": {}
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--executable-path", "/home/nova/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome"],
+      "env": {}
     }
   }
 }
