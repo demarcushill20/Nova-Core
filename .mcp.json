@@ -8,16 +8,12 @@
     "brave-search": {
       "command": "npx",
       "args": ["-y", "@brave/brave-search-mcp-server"],
-      "env": {
-        "BRAVE_API_KEY": "BSAw07ayhWXJU2Boh1sRDe8HaGmRe_o"
-      }
+      "env": {}
     },
     "tavily": {
       "command": "npx",
       "args": ["-y", "tavily-mcp@latest"],
-      "env": {
-        "TAVILY_API_KEY": "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"
-      }
+      "env": {}
     },
     "fetch": {
       "command": "/home/nova/.local/bin/uv",

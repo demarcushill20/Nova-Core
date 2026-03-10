@@ -8,12 +8,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 _log = logging.getLogger("telegram_bot.llm")
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
 CONVERSATION_TIMEOUT = 120  # seconds — accounts for MCP server startup + Opus inference
 MODEL = "claude-opus-4-6"
+
+# Load MCP API keys from .mcp.env (gitignored) into process environment
+_MCP_ENV_FILE = Path(__file__).resolve().parent.parent / ".mcp.env"
+if _MCP_ENV_FILE.is_file():
+    for _line in _MCP_ENV_FILE.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _key, _, _val = _line.partition("=")
+            os.environ.setdefault(_key.strip(), _val.strip())
 
 
 async def generate_response(
