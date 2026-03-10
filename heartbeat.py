@@ -298,6 +298,231 @@ def inject_repair_task(checks: list) -> None:
     print(f"Injected repair task: {task_path}")
 
 
+# --- LLM-driven proactive heartbeat ------------------------------------------
+
+# Active hours (UTC) — only run LLM heartbeat during these hours
+ACTIVE_HOURS_START = int(os.environ.get("HEARTBEAT_ACTIVE_START", "6"))
+ACTIVE_HOURS_END = int(os.environ.get("HEARTBEAT_ACTIVE_END", "23"))
+
+# Model for heartbeat reasoning — Haiku for cost efficiency (~$0.01/cycle)
+HEARTBEAT_MODEL = os.environ.get("HEARTBEAT_MODEL", "claude-haiku-4-5-20251001")
+HEARTBEAT_TIMEOUT = 90  # seconds
+
+CHECKLIST_FILE = BASE / "HEARTBEAT_CHECKLIST.md"
+HEARTBEAT_AGENT_LOG = LOGS_DIR / "heartbeat_agent.log"
+
+
+def _gather_extended_state(checks: list) -> str:
+    """Collect system state summary for the LLM heartbeat agent."""
+    parts = []
+
+    # Deterministic check results
+    parts.append("## Deterministic Health Checks")
+    for c in checks:
+        mark = "PASS" if c["ok"] else "FAIL"
+        parts.append(f"  [{mark}] {c['name']}: {c['detail']}")
+
+    # Pending tasks (with age)
+    pending = [
+        p for p in TASKS_DIR.glob("*.md")
+        if not any(p.name.endswith(s)
+                   for s in (".inprogress", ".done", ".failed", ".cancelled"))
+    ]
+    if pending:
+        parts.append(f"\n## Pending Tasks ({len(pending)})")
+        now = datetime.now(timezone.utc)
+        for p in sorted(pending, key=lambda x: x.stat().st_mtime):
+            age_min = (now - datetime.fromtimestamp(
+                p.stat().st_mtime, tz=timezone.utc)).total_seconds() / 60
+            parts.append(f"  - {p.stem} ({round(age_min)}min old)")
+
+    # Recent failed tasks (last 2 hours)
+    failed = list(TASKS_DIR.glob("*.failed"))
+    now = datetime.now(timezone.utc)
+    recent_failed = []
+    for f in failed:
+        age_hr = (now - datetime.fromtimestamp(
+            f.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
+        if age_hr < 2:
+            recent_failed.append(f)
+    if recent_failed:
+        parts.append(f"\n## Recently Failed Tasks ({len(recent_failed)})")
+        for f in recent_failed:
+            parts.append(f"  - {f.stem}")
+
+    # Recent outputs (last 4 hours)
+    outputs = sorted(
+        OUTPUT_DIR.glob("*.md"),
+        key=lambda p: p.stat().st_mtime, reverse=True,
+    )
+    recent_outputs = []
+    for o in outputs[:10]:
+        age_hr = (now - datetime.fromtimestamp(
+            o.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
+        if age_hr < 4:
+            recent_outputs.append((o, age_hr))
+    if recent_outputs:
+        parts.append(f"\n## Recent Outputs ({len(recent_outputs)} in last 4h)")
+        for o, age in recent_outputs:
+            parts.append(f"  - {o.stem} ({round(age, 1)}h ago)")
+
+    # Goals
+    goals_file = STATE_DIR / "goals.json"
+    if goals_file.exists():
+        try:
+            goals = json.loads(goals_file.read_text())
+            active = [g for g in goals if g.get("status") != "done"]
+            if active:
+                parts.append(f"\n## Active Goals ({len(active)})")
+                for g in active:
+                    parts.append(f"  - [{g.get('id', '?')}] {g.get('text', '?')}")
+        except Exception:
+            pass
+
+    # Last heartbeat agent action (to avoid repeating)
+    if HEARTBEAT_AGENT_LOG.exists():
+        try:
+            lines = HEARTBEAT_AGENT_LOG.read_text().strip().splitlines()
+            if lines:
+                parts.append(f"\n## Last Agent Action")
+                parts.append(f"  {lines[-1][:200]}")
+        except Exception:
+            pass
+
+    return "\n".join(parts)
+
+
+def _run_heartbeat_agent(checks: list) -> None:
+    """LLM-driven heartbeat: reads checklist + state, decides whether to act.
+
+    Runs AFTER deterministic health checks. Only during active hours.
+    Uses Haiku for cost efficiency.
+    """
+    current_hour = datetime.now(timezone.utc).hour
+    if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
+        print(f"[heartbeat-agent] Outside active hours "
+              f"({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
+        return
+
+    if not CHECKLIST_FILE.exists():
+        print("[heartbeat-agent] No HEARTBEAT_CHECKLIST.md, skipping")
+        return
+
+    checklist = CHECKLIST_FILE.read_text()
+    system_state = _gather_extended_state(checks)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    prompt = (
+        f"You are Nova, running a periodic heartbeat check.\n\n"
+        f"Current time: {now}\n\n"
+        f"## Your Checklist\n{checklist}\n\n"
+        f"## Current System State\n{system_state}\n\n"
+        f"Review each checklist item against the system state. "
+        f"Only flag things that genuinely need attention — no false alarms. "
+        f"If nothing needs attention, respond with exactly: HEARTBEAT_OK"
+    )
+
+    claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
+
+    try:
+        result = subprocess.run(
+            [claude_bin, "-p", "--model", HEARTBEAT_MODEL,
+             "--dangerously-skip-permissions", prompt],
+            capture_output=True, text=True, timeout=HEARTBEAT_TIMEOUT,
+            cwd=str(BASE),
+        )
+        response = result.stdout.strip()
+
+        if not response:
+            _log_agent("EMPTY_RESPONSE — agent returned nothing")
+            return
+
+        if "HEARTBEAT_OK" in response:
+            _log_agent("HEARTBEAT_OK")
+            print("[heartbeat-agent] All clear — HEARTBEAT_OK")
+            return
+
+        # Agent flagged something — parse and act
+        _log_agent(f"ACTION: {response[:300]}")
+        print(f"[heartbeat-agent] Action needed: {response[:200]}")
+        _handle_agent_actions(response)
+
+    except subprocess.TimeoutExpired:
+        _log_agent("TIMEOUT")
+        print(f"[heartbeat-agent] Timed out after {HEARTBEAT_TIMEOUT}s")
+    except FileNotFoundError:
+        _log_agent(f"CLAUDE_NOT_FOUND: {claude_bin}")
+        print(f"[heartbeat-agent] Claude binary not found: {claude_bin}")
+    except Exception as e:
+        _log_agent(f"ERROR: {e}")
+        print(f"[heartbeat-agent] Error: {e}")
+
+
+def _handle_agent_actions(response: str) -> None:
+    """Parse agent response and execute actions (notify or create task)."""
+    # Try to extract JSON actions from the response
+    actions = _extract_json_actions(response)
+
+    if actions:
+        for action in actions:
+            action_type = action.get("type", "")
+            if action_type == "notify":
+                msg = action.get("message", "")
+                if msg:
+                    _send_telegram(f"🤖 Nova Heartbeat Agent:\n{msg}")
+            elif action_type == "task":
+                title = action.get("title", "heartbeat_proactive")
+                body = action.get("body", "")
+                _inject_proactive_task(title, body)
+    else:
+        # No structured JSON — treat the whole response as a notification
+        _send_telegram(f"🤖 Nova Heartbeat Agent:\n{response[:500]}")
+
+
+def _extract_json_actions(text: str) -> list | None:
+    """Try to extract a JSON action array from the agent's response."""
+    import re
+    # Look for JSON array in the response (possibly in a code block)
+    json_match = re.search(r'\[[\s\S]*?\]', text)
+    if json_match:
+        try:
+            data = json.loads(json_match.group())
+            if isinstance(data, list) and all(isinstance(d, dict) for d in data):
+                return data
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return None
+
+
+def _inject_proactive_task(title: str, body: str) -> None:
+    """Create a proactive task file for the watcher to pick up."""
+    # Rate-limit: max 2 proactive tasks per heartbeat cycle
+    existing = list(TASKS_DIR.glob("hb_proactive_*.md"))
+    recent = [p for p in existing
+              if not any(p.name.endswith(s)
+                         for s in (".done", ".failed", ".cancelled"))]
+    if len(recent) >= 2:
+        print("[heartbeat-agent] Rate limit: 2 proactive tasks already pending")
+        return
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    import re
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", title.strip()).strip("_").lower()[:50]
+    stem = f"hb_proactive_{ts}_{slug}"
+    task_path = TASKS_DIR / f"{stem}.md"
+    content = f"# Heartbeat Proactive Task\n\n{body}" if body else f"# {title}"
+    task_path.write_text(content)
+    print(f"[heartbeat-agent] Injected proactive task: {task_path.name}")
+
+
+def _log_agent(message: str) -> None:
+    """Append to heartbeat agent log."""
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).isoformat()
+    with open(HEARTBEAT_AGENT_LOG, "a") as f:
+        f.write(f"[{ts}] {message}\n")
+
+
 # --- Main --------------------------------------------------------------------
 
 
@@ -370,6 +595,12 @@ def main() -> int:
     else:
         print("[heartbeat] Some checks FAILED. Alerting...")
         inject_repair_task(checks)
+
+    # --- LLM-driven proactive heartbeat ---
+    try:
+        _run_heartbeat_agent(checks)
+    except Exception as e:
+        print(f"[heartbeat-agent] Failed (non-fatal): {e}")
 
     # Append to heartbeat log
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
