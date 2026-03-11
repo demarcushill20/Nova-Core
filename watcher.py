@@ -18,6 +18,11 @@ from pathlib import Path
 from tools.contracts import validate_contract
 from tools.skills import load_skills, select_skills, render_append_prompt
 from tools.task_classifier import classify_and_route
+from agents.session_manager import SessionManager
+from agents.memory_engine import (
+    retrieve_related_patterns, format_retrieval_for_planner,
+    capture_direct_task_memory,
+)
 
 # --- Configuration ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -36,6 +41,33 @@ MAX_SUPERVISOR_ATTEMPTS = 2  # total attempts per task (1 original + up to 1 ret
 
 METRICS_FILE = STATE_DIR / "metrics.json"
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
+
+# Stopwords for keyword extraction (memory retrieval)
+_STOPWORDS = frozenset(
+    "the a an is are was were be been being have has had do does did "
+    "will would shall should may might can could of in to for on with "
+    "at by from as into through during before after above below between "
+    "out up down off over under again further then once here there when "
+    "where why how all each every both few more most other some such no "
+    "not only own same so than too very and but or nor if this that "
+    "these those it its my your his her our their what which who whom "
+    "please also just about using use used create make".split()
+)
+
+
+def _extract_keywords(task_text: str, max_keywords: int = 10) -> list[str]:
+    """Extract meaningful keywords from task text for memory retrieval."""
+    import re
+    words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", task_text.lower())
+    seen = set()
+    keywords = []
+    for w in words:
+        if w not in _STOPWORDS and w not in seen:
+            seen.add(w)
+            keywords.append(w)
+            if len(keywords) >= max_keywords:
+                break
+    return keywords
 
 DISPATCH_PROMPT_TEMPLATE = """\
 You are the NovaCore Executive Agent. Execute the task described below.
@@ -65,19 +97,28 @@ REQUIRED STEPS — complete every one, in order:
 
 5. Do NOT rename the task file — the dispatcher handles lifecycle.
 
-6. SELF-CHECK (mandatory before exiting):
+6. SAVE TO MEMORY SYSTEMS (mandatory for research/planning tasks):
+   If this task involves research, analysis, or planning:
+   a) Save a dense summary to Fusion Memory via `upsert_memory` with:
+      - metadata: {{"category": "research", "project": "nova-core"}}
+   b) Save full findings to Obsidian Vault via `vault_write` with:
+      - path: "40-research/<topic-slug>.md" (or "00-inbox/" for plans)
+      - frontmatter must include: source: "nova-core-memory", tags with "#type/research"
+   If this task is NOT research/planning, skip this step.
+
+7. SELF-CHECK (mandatory before exiting):
    - List the contents of {output_dir}/ and confirm your report file exists.
    - List the contents of {work_dir}/ and confirm any work artifacts exist.
    - If any required file is missing, create it NOW before exiting.
 
-7. CONTRACT BLOCK (mandatory — your output report WILL BE REJECTED without this):
+8. CONTRACT BLOCK (mandatory — your output report WILL BE REJECTED without this):
    Your output report MUST end with a ## CONTRACT block containing ALL of these fields.
    Copy this template and fill in every field — do not omit any:
 
    ## CONTRACT
    summary: <one-line description of what was done>
    files_changed: <comma-separated list of files created or modified, or "none" if no files changed>
-   verification: <how you confirmed correctness — e.g. "ran tests: 10/10 pass", "confirmed file exists", or "not run" if unable>
+   verification: <how you confirmed correctness — e.g. "ran tests", "confirmed file exists", or "not run">
    confidence: <low | medium | high>
 
    Rules:
@@ -92,6 +133,9 @@ Begin immediately. Do not ask questions or wait for prompts."""
 # --- Ensure directories exist ---
 for _d in (TASKS_DIR, OUTPUT_DIR, WORK_DIR, LOGS_DIR, STATE_DIR, CANCEL_DIR, RUNNING_DIR):
     _d.mkdir(parents=True, exist_ok=True)
+
+# --- Session manager (Phase 5) ---
+_session_mgr = SessionManager()
 
 # --- Logging setup ---
 logger = logging.getLogger("watcher")
@@ -480,7 +524,7 @@ def _execute_worker(
                 if stderr:
                     wf.write("\n=== STDERR (partial) ===\n")
                     wf.write(stderr)
-                wf.write(f"\n=== EXIT CODE: -1 (timeout) ===\n")
+                wf.write("\n=== EXIT CODE: -1 (timeout) ===\n")
                 wf.write(f"=== END: {end_utc} ===\n")
             return -1
 
@@ -502,7 +546,7 @@ def _execute_worker(
         logger.exception("EXECUTION ERROR: %s", stem)
         with open(worker_log, "a") as wf:
             wf.write(f"\n=== EXCEPTION: {exc} ===\n")
-            wf.write(f"=== EXIT CODE: -1 (error) ===\n")
+            wf.write("=== EXIT CODE: -1 (error) ===\n")
             wf.write(f"=== END: {end_utc} ===\n")
 
     finally:
@@ -597,14 +641,18 @@ def dispatch(task_path: Path):
                 orch_error = orch_result.get("plan_summary", {}).get("error", "orchestrator_rejected")
                 logger.warning("ORCHESTRATOR REJECTED: %s — %s", stem, orch_error)
                 passed = False
-            if passed:
-                done_path = inprogress_path.with_name(f"{stem}.md.done")
-                inprogress_path.rename(done_path)
-                logger.info("TASK SUCCEEDED (orchestrator): %s → %s", stem, done_path.name)
-            else:
-                failed_path = inprogress_path.with_name(f"{stem}.md.failed")
-                inprogress_path.rename(failed_path)
-                logger.warning("TASK FAILED (orchestrator): %s → %s", stem, failed_path.name)
+            try:
+                if passed:
+                    done_path = inprogress_path.with_name(f"{stem}.md.done")
+                    inprogress_path.rename(done_path)
+                    logger.info("TASK SUCCEEDED (orchestrator): %s → %s", stem, done_path.name)
+                else:
+                    failed_path = inprogress_path.with_name(f"{stem}.md.failed")
+                    inprogress_path.rename(failed_path)
+                    logger.warning("TASK FAILED (orchestrator): %s → %s", stem, failed_path.name)
+            except FileNotFoundError:
+                logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
+            _session_mgr.record_task_completion(stem, success=passed)
             return
         except Exception as exc:
             logger.error("ORCHESTRATOR ERROR for %s: %s — falling back to worker", stem, exc)
@@ -614,6 +662,7 @@ def dispatch(task_path: Path):
                 failed_path = inprogress_path.with_name(f"{stem}.md.failed")
                 inprogress_path.rename(failed_path)
                 logger.error("TASK FAILED (no fallback): %s", stem)
+                _session_mgr.record_task_completion(stem, success=False)
                 return
 
     # --- Skill activation ---
@@ -629,6 +678,24 @@ def dispatch(task_path: Path):
         logger.info("SKILL INJECTION: %s (%d bytes)",
                      skill_injection_path.name, len(append_prompt_content.encode("utf-8")))
 
+    # --- Session tracking (Phase 5) ---
+    _session_mgr.record_task_start(stem)
+    session_context = _session_mgr.build_context_injection(stem)
+
+    # --- Memory retrieval (learning loop) ---
+    memory_context = ""
+    try:
+        task_class = routing.get("task_class", "unknown")
+        keywords = _extract_keywords(task_text)
+        if keywords:
+            patterns = retrieve_related_patterns(task_class, keywords)
+            if patterns:
+                memory_context = format_retrieval_for_planner(patterns)
+                logger.info("MEMORY CONTEXT: %d prior pattern(s) for class=%s keywords=%s",
+                            len(patterns), task_class, keywords[:5])
+    except Exception as exc:
+        logger.warning("Memory retrieval failed (non-fatal): %s", exc)
+
     # --- Build prompt ---
     prompt = DISPATCH_PROMPT_TEMPLATE.format(
         task_path=inprogress_path,
@@ -637,6 +704,15 @@ def dispatch(task_path: Path):
         work_dir=WORK_DIR,
         logs_dir=LOGS_DIR,
     )
+    context_prefix = ""
+    if session_context:
+        context_prefix += session_context + "\n\n"
+        logger.info("SESSION CONTEXT: injected %d bytes from session %s",
+                     len(session_context), _session_mgr.get_or_create_session().session_id)
+    if memory_context:
+        context_prefix += memory_context + "\n\n"
+    if context_prefix:
+        prompt = context_prefix + prompt
 
     # --- Deterministic worker log ---
     cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions",
@@ -665,7 +741,8 @@ def dispatch(task_path: Path):
         wf.write(f"=== WORKER LOG: {stem} ===\n")
         wf.write(f"=== START: {start_utc} ===\n")
         wf.write(f"=== SKILLS: {', '.join(selected_names) or '(none)'} ===\n")
-        wf.write(f"=== COMMAND: {CLAUDE_BIN} -p --verbose --dangerously-skip-permissions{skill_flag_note} <prompt> ===\n\n")
+        cmd_str = f"{CLAUDE_BIN} -p --verbose --dangerously-skip-permissions{skill_flag_note}"
+        wf.write(f"=== COMMAND: {cmd_str} <prompt> ===\n\n")
 
     try:
         # Strip CLAUDECODE so the child doesn't refuse to start
@@ -700,7 +777,7 @@ def dispatch(task_path: Path):
                 if stderr:
                     wf.write("\n=== STDERR (partial) ===\n")
                     wf.write(stderr)
-                wf.write(f"\n=== EXIT CODE: -1 (timeout) ===\n")
+                wf.write("\n=== EXIT CODE: -1 (timeout) ===\n")
                 wf.write(f"=== END: {end_utc} ===\n")
             # skip the normal log-write below
             exit_code = -1
@@ -725,7 +802,7 @@ def dispatch(task_path: Path):
         logger.exception("EXECUTION ERROR: %s", stem)
         with open(worker_log, "a") as wf:
             wf.write(f"\n=== EXCEPTION: {exc} ===\n")
-            wf.write(f"=== EXIT CODE: -1 (error) ===\n")
+            wf.write("=== EXIT CODE: -1 (error) ===\n")
             wf.write(f"=== END: {end_utc} ===\n")
 
     finally:
@@ -738,15 +815,132 @@ def dispatch(task_path: Path):
     for msg in messages:
         logger.info("VERIFY: %s", msg)
 
-    # --- Finalize task lifecycle ---
+    # --- Test gate: run pytest after contract validation ---
     if passed:
-        done_path = inprogress_path.with_name(f"{stem}.md.done")
-        inprogress_path.rename(done_path)
-        logger.info("TASK SUCCEEDED: %s → %s", stem, done_path.name)
-    else:
-        failed_path = inprogress_path.with_name(f"{stem}.md.failed")
-        inprogress_path.rename(failed_path)
-        logger.warning("TASK FAILED: %s → %s (missing artifacts)", stem, failed_path.name)
+        gate_result = _run_test_gate(stem)
+        test_passed = _apply_test_gate_result(stem, gate_result)
+        if not test_passed:
+            # Tests failed — don't block delivery, but log it
+            # (confidence already downgraded to 'low' by _apply_test_gate_result)
+            logger.warning("TEST GATE: %s — tests failed, delivering with low confidence", stem)
+
+    # --- Finalize task lifecycle ---
+    try:
+        if passed:
+            done_path = inprogress_path.with_name(f"{stem}.md.done")
+            inprogress_path.rename(done_path)
+            logger.info("TASK SUCCEEDED: %s → %s", stem, done_path.name)
+        else:
+            failed_path = inprogress_path.with_name(f"{stem}.md.failed")
+            inprogress_path.rename(failed_path)
+            logger.warning("TASK FAILED: %s → %s (missing artifacts)", stem, failed_path.name)
+    except FileNotFoundError:
+        logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
+
+    # --- Session completion recording (Phase 5) ---
+    _session_mgr.record_task_completion(stem, success=passed)
+
+    # --- Memory capture (learning loop) ---
+    try:
+        contract = _session_mgr._extract_task_summary(stem)
+        if contract.get("summary"):
+            task_class = routing.get("task_class", "unknown")
+            mem_path = capture_direct_task_memory(
+                task_stem=stem, task_class=task_class,
+                contract=contract, success=passed,
+            )
+            if mem_path:
+                logger.info("MEMORY CAPTURE: %s → %s", stem, mem_path.name)
+    except Exception as exc:
+        logger.warning("Memory capture failed (non-fatal): %s", exc)
+
+
+PYTEST_TIMEOUT = 120  # seconds — hard timeout for the test gate
+
+
+def _run_test_gate(stem: str) -> dict:
+    """Run pytest as a quality gate after contract validation.
+
+    Returns dict with keys:
+      - status: "pass" | "fail" | "timeout" | "error"
+      - summary: human-readable summary string
+      - output: raw pytest output (truncated)
+    """
+    logger.info("TEST GATE: running pytest for %s", stem)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests/", "-x",
+             f"--timeout={PYTEST_TIMEOUT}", "-q", "--tb=short"],
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            timeout=PYTEST_TIMEOUT + 10,  # outer timeout slightly longer
+        )
+        # Truncate output to avoid bloating the output file
+        combined = (result.stdout or "") + (result.stderr or "")
+        truncated = combined[-2000:] if len(combined) > 2000 else combined
+
+        if result.returncode == 0:
+            logger.info("TEST GATE PASSED: %s (exit 0)", stem)
+            return {"status": "pass", "summary": "All tests passed", "output": truncated}
+        else:
+            logger.warning("TEST GATE FAILED: %s (exit %d)", stem, result.returncode)
+            return {"status": "fail", "summary": f"pytest exited with code {result.returncode}",
+                    "output": truncated}
+
+    except subprocess.TimeoutExpired:
+        logger.warning("TEST GATE TIMEOUT: %s (exceeded %ds) — skipping gate", stem, PYTEST_TIMEOUT)
+        return {"status": "timeout", "summary": f"pytest timed out after {PYTEST_TIMEOUT}s",
+                "output": ""}
+    except Exception as exc:
+        logger.warning("TEST GATE ERROR: %s — %s — skipping gate", stem, exc)
+        return {"status": "error", "summary": f"pytest error: {exc}", "output": ""}
+
+
+def _apply_test_gate_result(stem: str, gate_result: dict) -> bool:
+    """Apply test gate result to the output file.
+
+    Returns True if delivery should proceed, False if tests failed.
+    On failure: appends failure summary and downgrades confidence to 'low'.
+    On timeout/error: logs warning, returns True (don't block delivery).
+    """
+    if gate_result["status"] == "pass":
+        return True
+
+    if gate_result["status"] in ("timeout", "error"):
+        # Don't block delivery on timeout or error
+        logger.warning("TEST GATE SKIPPED: %s — %s", stem, gate_result["summary"])
+        return True
+
+    # status == "fail" — append failure summary and downgrade confidence
+    output_file = _find_recent_output(stem)
+    if not output_file:
+        return False
+
+    # Append test failure summary to output
+    failure_block = (
+        "\n\n---\n## TEST GATE FAILURE\n\n"
+        f"**Status:** {gate_result['summary']}\n\n"
+        "```\n"
+        f"{gate_result['output']}\n"
+        "```\n"
+    )
+    with output_file.open("a", encoding="utf-8") as f:
+        f.write(failure_block)
+
+    # Downgrade confidence to 'low' in the CONTRACT block
+    text = output_file.read_text(encoding="utf-8")
+    import re
+    text = re.sub(
+        r"(confidence:\s*)(high|medium)",
+        r"\1low",
+        text,
+        count=1,
+    )
+    output_file.write_text(text, encoding="utf-8")
+
+    logger.warning("TEST GATE: %s — confidence downgraded to low, failure summary appended", stem)
+    return False
 
 
 def scan_and_dispatch():

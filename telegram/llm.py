@@ -13,7 +13,7 @@ from pathlib import Path
 _log = logging.getLogger("telegram_bot.llm")
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
-CONVERSATION_TIMEOUT = 120  # seconds — accounts for MCP server startup + Opus inference
+CONVERSATION_TIMEOUT = 300  # seconds — Opus 4.6 + MCP tools need time for complex queries
 MODEL = "claude-opus-4-6"
 
 # Load MCP API keys from .mcp.env (gitignored) into process environment
