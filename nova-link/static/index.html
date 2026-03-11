@@ -91,10 +91,38 @@
   <!-- Chat Page -->
   <div id="page-chat" class="page">
     <div class="chat-container">
+      <!-- Voice mode toggle -->
+      <div class="chat-mode-bar">
+        <button id="mode-text" class="mode-btn active" onclick="setChatMode('text')">Text</button>
+        <button id="mode-voice" class="mode-btn" onclick="setChatMode('voice')">Voice</button>
+        <button id="tts-toggle" class="tts-btn" onclick="toggleTTS()" title="Toggle voice responses">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path id="tts-waves" d="M15.54 8.46a5 5 0 0 1 0 7.07 M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          </svg>
+        </button>
+      </div>
+
       <div class="chat-messages" id="chat-messages"></div>
-      <div class="chat-input-bar">
+
+      <!-- Text input mode -->
+      <div class="chat-input-bar" id="text-input-bar">
         <input type="text" id="chat-input" placeholder="Message Nova..." autocomplete="off">
         <button onclick="sendChat()">Send</button>
+      </div>
+
+      <!-- Voice input mode -->
+      <div class="voice-input-bar" id="voice-input-bar" style="display:none">
+        <div id="voice-status" class="voice-status">Tap to speak</div>
+        <button id="mic-btn" class="mic-btn" onclick="toggleVoice()">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+        <div id="voice-transcript" class="voice-transcript"></div>
       </div>
     </div>
   </div>

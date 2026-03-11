@@ -123,6 +123,10 @@ async function loadHealthChecks() {
 // --- Chat ---
 const chatMessages = [];
 let chatHistoryLoaded = false;
+let chatMode = 'text';  // 'text' or 'voice'
+let ttsEnabled = true;
+let isListening = false;
+let recognition = null;
 
 async function loadChatHistory() {
   if (chatHistoryLoaded) return;
@@ -161,6 +165,7 @@ async function sendChat() {
 
   if (data && data.response) {
     chatMessages.push({ role: 'assistant', content: data.response });
+    if (ttsEnabled) speak(data.response);
   } else {
     chatMessages.push({ role: 'assistant', content: 'No response received.' });
   }
@@ -176,6 +181,175 @@ function renderChat() {
     return `<div class="chat-bubble ${m.role}">${escapeHtml(m.content)}</div>`;
   }).join('');
   el.scrollTop = el.scrollHeight;
+}
+
+// --- Voice Mode ---
+function setChatMode(mode) {
+  chatMode = mode;
+  document.getElementById('mode-text').classList.toggle('active', mode === 'text');
+  document.getElementById('mode-voice').classList.toggle('active', mode === 'voice');
+  document.getElementById('text-input-bar').style.display = mode === 'text' ? 'flex' : 'none';
+  document.getElementById('voice-input-bar').style.display = mode === 'voice' ? 'flex' : 'none';
+
+  if (mode === 'text' && isListening) stopListening();
+  if (mode === 'voice') initSpeechRecognition();
+}
+
+function toggleTTS() {
+  ttsEnabled = !ttsEnabled;
+  document.getElementById('tts-toggle').classList.toggle('active', ttsEnabled);
+  if (!ttsEnabled) window.speechSynthesis.cancel();
+  toast(ttsEnabled ? 'Voice responses on' : 'Voice responses off');
+}
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+
+  // Clean up text for speech (remove markdown, code blocks, etc.)
+  const clean = text
+    .replace(/```[\s\S]*?```/g, 'code block omitted')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/#{1,6}\s/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[-*]\s/g, '')
+    .trim();
+
+  // Split long text into chunks (speechSynthesis has limits)
+  const chunks = [];
+  const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [clean];
+  let current = '';
+  for (const s of sentences) {
+    if ((current + s).length > 200) {
+      if (current) chunks.push(current.trim());
+      current = s;
+    } else {
+      current += s;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+
+  // Queue utterances
+  for (const chunk of chunks) {
+    const utter = new SpeechSynthesisUtterance(chunk);
+    utter.rate = 1.0;
+    utter.pitch = 1.0;
+
+    // Prefer a natural-sounding voice
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v =>
+      v.name.includes('Samantha') || v.name.includes('Karen') ||
+      v.name.includes('Google') || v.name.includes('Natural')
+    ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+    if (preferred) utter.voice = preferred;
+
+    window.speechSynthesis.speak(utter);
+  }
+}
+
+function initSpeechRecognition() {
+  if (recognition) return;
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    toast('Speech recognition not supported');
+    setChatMode('text');
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onresult = (e) => {
+    const transcript = Array.from(e.results)
+      .map(r => r[0].transcript)
+      .join('');
+    document.getElementById('voice-transcript').textContent = transcript;
+
+    // If final result, send the message
+    if (e.results[e.results.length - 1].isFinal) {
+      if (transcript.trim()) {
+        sendVoiceMessage(transcript.trim());
+      }
+    }
+  };
+
+  recognition.onstart = () => {
+    isListening = true;
+    document.getElementById('mic-btn').classList.add('listening');
+    document.getElementById('voice-status').textContent = 'Listening...';
+    document.getElementById('voice-transcript').textContent = '';
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    document.getElementById('mic-btn').classList.remove('listening');
+    document.getElementById('voice-status').textContent = 'Tap to speak';
+  };
+
+  recognition.onerror = (e) => {
+    isListening = false;
+    document.getElementById('mic-btn').classList.remove('listening');
+    if (e.error === 'not-allowed') {
+      document.getElementById('voice-status').textContent = 'Mic access denied — check settings';
+    } else {
+      document.getElementById('voice-status').textContent = 'Tap to speak';
+    }
+  };
+}
+
+function toggleVoice() {
+  if (isListening) {
+    stopListening();
+  } else {
+    startListening();
+  }
+}
+
+function startListening() {
+  if (!recognition) initSpeechRecognition();
+  if (!recognition) return;
+  // Stop any ongoing TTS so it doesn't interfere
+  window.speechSynthesis.cancel();
+  try { recognition.start(); } catch { /* already started */ }
+}
+
+function stopListening() {
+  if (recognition && isListening) {
+    try { recognition.stop(); } catch { /* already stopped */ }
+  }
+}
+
+async function sendVoiceMessage(text) {
+  // Add to chat and send
+  chatMessages.push({ role: 'user', content: text });
+  renderChat();
+
+  chatMessages.push({ role: 'typing', content: '' });
+  renderChat();
+
+  document.getElementById('voice-status').textContent = 'Nova is thinking...';
+  document.getElementById('voice-transcript').textContent = '';
+
+  const data = await api('/api/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message: text }),
+  });
+
+  chatMessages.pop();
+
+  if (data && data.response) {
+    chatMessages.push({ role: 'assistant', content: data.response });
+    if (ttsEnabled) speak(data.response);
+  } else {
+    chatMessages.push({ role: 'assistant', content: 'No response received.' });
+  }
+  renderChat();
+  document.getElementById('voice-status').textContent = 'Tap to speak';
 }
 
 // --- Reports ---
@@ -315,6 +489,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chat-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
   });
+
+  // Init TTS voices (Safari loads them async)
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  }
+  document.getElementById('tts-toggle').classList.add('active');
 
   // Register service worker
   if ('serviceWorker' in navigator) {
