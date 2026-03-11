@@ -772,6 +772,96 @@ def _log_research(message: str) -> None:
         f.write(f"[{ts}] {message}\n")
 
 
+def _scan_codebase() -> str:
+    """Scan the nova-core codebase and return a structured snapshot."""
+    parts = []
+
+    # Recent git log (last 15 commits)
+    try:
+        result = subprocess.run(
+            ["git", "log", "--oneline", "-15", "--no-decorate"],
+            capture_output=True, text=True, timeout=10, cwd=str(BASE),
+        )
+        if result.stdout.strip():
+            parts.append("### Recent Commits (last 15)")
+            parts.append(result.stdout.strip())
+    except Exception:
+        pass
+
+    # File tree — top-level + key directories
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"],
+            capture_output=True, text=True, timeout=10, cwd=str(BASE),
+        )
+        if result.stdout.strip():
+            files = result.stdout.strip().splitlines()
+            # Group by top-level directory
+            dirs: dict[str, list[str]] = {}
+            for f in files:
+                top = f.split("/")[0] if "/" in f else "(root)"
+                dirs.setdefault(top, []).append(f)
+            parts.append(f"\n### File Tree ({len(files)} tracked files)")
+            for d in sorted(dirs):
+                parts.append(f"  {d}/ — {len(dirs[d])} files")
+            # List Python files explicitly (these are the codebase)
+            py_files = [f for f in files if f.endswith(".py")]
+            parts.append(f"\n### Python Modules ({len(py_files)})")
+            for f in py_files:
+                parts.append(f"  {f}")
+    except Exception:
+        pass
+
+    # Code stats — lines of Python
+    try:
+        total_lines = 0
+        for py in BASE.rglob("*.py"):
+            if ".venv" in str(py) or "__pycache__" in str(py):
+                continue
+            try:
+                total_lines += len(py.read_text().splitlines())
+            except Exception:
+                pass
+        parts.append("\n### Code Stats")
+        parts.append(f"  Total Python lines: {total_lines:,}")
+    except Exception:
+        pass
+
+    # Recent file changes (modified in last 24h)
+    try:
+        now = datetime.now(timezone.utc)
+        recently_modified = []
+        for py in BASE.rglob("*.py"):
+            if ".venv" in str(py) or "__pycache__" in str(py):
+                continue
+            age_hr = (now - datetime.fromtimestamp(
+                py.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
+            if age_hr < 24:
+                recently_modified.append((py.relative_to(BASE), round(age_hr, 1)))
+        if recently_modified:
+            parts.append("\n### Recently Modified (last 24h)")
+            for f, age in sorted(recently_modified, key=lambda x: x[1]):
+                parts.append(f"  {f} ({age}h ago)")
+    except Exception:
+        pass
+
+    # Uncommitted changes
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, timeout=10, cwd=str(BASE),
+        )
+        if result.stdout.strip():
+            lines = result.stdout.strip().splitlines()
+            parts.append(f"\n### Uncommitted Changes ({len(lines)})")
+            for line in lines[:20]:
+                parts.append(f"  {line}")
+    except Exception:
+        pass
+
+    return "\n".join(parts) if parts else "(codebase scan failed)"
+
+
 def _build_research_prompt() -> str:
     """Build the comprehensive research cycle prompt."""
     now = datetime.now(timezone.utc)
@@ -803,16 +893,19 @@ def _build_research_prompt() -> str:
         except Exception:
             pass
 
+    # Scan the codebase
+    codebase_snapshot = _scan_codebase()
+
     return f"""\
 You are Nova, an autonomous AI agent. This is your RESEARCH CYCLE.
 Current time: {ts}
 
-YOUR MISSION: Scan your memory and codebase for context, then conduct deep
-research on a topic of your choice, create a research report, and save it to
-BOTH of your memory systems. You have 10 minutes.
+YOUR MISSION: Scan your codebase AND both memory systems for context, then
+conduct deep research on a topic of your choice, create a research report,
+and save it to BOTH of your memory systems. You have 10 minutes.
 
 ═══════════════════════════════════════════════════════════════
-STEP 1: CONTEXT GATHERING — scan both memory systems first
+STEP 1: CONTEXT GATHERING — scan codebase + both memory systems
 ═══════════════════════════════════════════════════════════════
 
 1a. Query Fusion Memory for prior research:
@@ -824,10 +917,13 @@ STEP 1: CONTEXT GATHERING — scan both memory systems first
     - Call `vault_list` on path "40-research" to see what exists
     - Call `vault_search` with query="research" to find research notes
 
-1c. Review recent outputs (DO NOT repeat these topics):
+1c. Codebase snapshot (your own code — look for gaps, patterns, opportunities):
+{codebase_snapshot}
+
+1d. Review recent outputs (DO NOT repeat these topics):
 {recent_str}
 
-1d. Active goals to align research with:
+1e. Active goals to align research with:
 {goals_str}
 
 ═══════════════════════════════════════════════════════════════
@@ -837,6 +933,7 @@ STEP 2: CHOOSE A RESEARCH TOPIC
 Pick ONE topic that:
 - Has NOT been researched before (check memory + recent outputs above)
 - Aligns with an active goal when possible
+- Is informed by the codebase scan — what does nova-core need right now?
 - Is actionable — results should improve nova-core
 - Has enough depth for a substantive report
 
