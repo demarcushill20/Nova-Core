@@ -515,6 +515,12 @@ RESEARCH_COOLDOWN_MINUTES = 55  # skip if ran less than 55 min ago
 RESEARCH_COOLDOWN_FILE = STATE_DIR / "last_research_cycle.json"
 RESEARCH_LOG = LOGS_DIR / "research_cycle.log"
 
+# Planning cycle configuration — runs every 3rd active cycle
+PLANNING_TIMEOUT = 600  # 10 minutes for planning
+PLANNING_COOLDOWN_MINUTES = 80  # ~every 3rd heartbeat (90 min)
+PLANNING_COOLDOWN_FILE = STATE_DIR / "last_planning_cycle.json"
+PLANNING_LOG = LOGS_DIR / "planning_cycle.log"
+
 
 def _gather_extended_state(checks: list) -> str:
     """Collect system state summary for the LLM heartbeat agent."""
@@ -1099,6 +1105,295 @@ def _run_research_cycle() -> None:
         print(f"[research-cycle] Error: {e}")
 
 
+# --- Autonomous Planning Cycle -----------------------------------------------
+
+
+def _planning_cooldown_ok() -> bool:
+    """Check if enough time has passed since the last planning cycle."""
+    if not PLANNING_COOLDOWN_FILE.exists():
+        return True
+    try:
+        data = json.loads(PLANNING_COOLDOWN_FILE.read_text())
+        last_run = data.get("last_run_utc", "")
+        if not last_run:
+            return True
+        last_dt = datetime.fromisoformat(last_run)
+        age_min = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
+        return age_min >= PLANNING_COOLDOWN_MINUTES
+    except Exception:
+        return True
+
+
+def _update_planning_cooldown(plan_title: str, success: bool) -> None:
+    """Record that a planning cycle ran."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    data = {
+        "last_run_utc": datetime.now(timezone.utc).isoformat(),
+        "plan_title": plan_title[:200],
+        "success": success,
+    }
+    PLANNING_COOLDOWN_FILE.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def _log_planning(message: str) -> None:
+    """Append to planning cycle log."""
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).isoformat()
+    with open(PLANNING_LOG, "a") as f:
+        f.write(f"[{ts}] {message}\n")
+
+
+def _build_planning_prompt() -> str:
+    """Build the planning cycle prompt — create or revise implementation plans."""
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    date_str = now.strftime("%Y-%m-%d")
+    stamp = now.strftime("%Y%m%d-%H%M%S")
+
+    # Reuse the codebase scan
+    codebase_snapshot = _scan_codebase()
+
+    # Gather recent OUTPUT file names
+    recent_outputs = []
+    if OUTPUT_DIR.exists():
+        for f in sorted(OUTPUT_DIR.glob("*.md"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
+            recent_outputs.append(f.stem)
+    recent_str = "\n".join(f"  - {t}" for t in recent_outputs) or "  (none)"
+
+    # Gather active goals
+    goals_str = "(no active goals)"
+    goals_file = STATE_DIR / "goals.json"
+    if goals_file.exists():
+        try:
+            data = json.loads(goals_file.read_text())
+            goals_list = data.get("goals", []) if isinstance(data, dict) else data
+            active = [g for g in goals_list if g.get("status") != "done"]
+            if active:
+                goals_str = "\n".join(
+                    f"  - [{g.get('id', '?')}] {g.get('text', '?')}"
+                    for g in active
+                )
+        except Exception:
+            pass
+
+    return f"""\
+You are Nova, an autonomous AI agent. This is your PLANNING CYCLE.
+Current time: {ts}
+
+YOUR MISSION: Scan your codebase AND both memory systems for full context,
+then either CREATE a new phased implementation plan or REVISE an existing
+plan based on new research findings. Save the plan to BOTH memory systems.
+You have 10 minutes.
+
+═══════════════════════════════════════════════════════════════
+STEP 1: DEEP CONTEXT GATHERING
+═══════════════════════════════════════════════════════════════
+
+1a. Query Fusion Memory for existing plans and recent research:
+    - Call `get_last_checkpoint` to see session state
+    - Call `query_memory` with query="implementation plan nova-core phases"
+    - Call `query_memory` with query="recent research findings discoveries"
+    - Call `query_memory` with query="enhancement plan revision"
+
+1b. Scan Obsidian Vault for existing plans and patterns:
+    - Call `vault_search` with query="implementation plan"
+    - Call `vault_search` with query="enhancement"
+    - Call `vault_list` on path "40-research" to see recent research
+
+1c. Codebase snapshot (your own code — understand what exists):
+{codebase_snapshot}
+
+1d. Recent outputs (research reports to build plans from):
+{recent_str}
+
+1e. Active goals:
+{goals_str}
+
+═══════════════════════════════════════════════════════════════
+STEP 2: DECIDE — CREATE NEW or REVISE EXISTING
+═══════════════════════════════════════════════════════════════
+
+Based on your context scan, decide:
+
+A) CREATE a new plan if:
+   - No current plan exists, OR
+   - The existing plan is fully completed, OR
+   - New research has revealed a completely new direction
+
+B) REVISE an existing plan if:
+   - A current plan exists but new research has been done since last revision
+   - Some phases are complete and need updating
+   - Priorities have shifted based on new findings
+
+When revising: read the existing plan fully, note what's done, what's
+changed, and what new research suggests. Don't start from scratch.
+
+═══════════════════════════════════════════════════════════════
+STEP 3: BUILD THE PLAN
+═══════════════════════════════════════════════════════════════
+
+Your plan MUST follow this structure:
+
+# Nova-Core Enhancement Plan v<N> — {date_str}
+
+## Vision
+One paragraph describing the overall direction.
+
+## Current State
+What's built, what's working, what's missing. Reference the codebase scan.
+
+## Phase-by-Phase Implementation
+
+### Phase <N>: <Name> (priority: high/medium/low)
+**Goal:** What this phase achieves
+**Prerequisites:** What must be done first
+**Steps:**
+1. Step with specific file paths and code changes
+2. Step with specific commands or configurations
+3. Step with verification criteria
+**Estimated complexity:** small/medium/large
+**Success criteria:** How to know it's done
+
+(Repeat for each phase — aim for 3-7 phases)
+
+## Research Gaps
+Topics that need research before certain phases can start.
+
+## Quick Wins
+Small improvements (< 30 min each) that can be done immediately.
+
+═══════════════════════════════════════════════════════════════
+STEP 4: WRITE OUTPUT REPORT
+═══════════════════════════════════════════════════════════════
+
+Create file: /home/nova/nova-core/OUTPUT/hb_plan_{stamp}.md
+
+Include the full plan plus a ## CONTRACT block at the end.
+
+═══════════════════════════════════════════════════════════════
+STEP 5: SAVE TO FUSION MEMORY (MANDATORY)
+═══════════════════════════════════════════════════════════════
+
+Call `upsert_memory` with:
+- content: Plan summary with phase names and priorities (500-1000 chars)
+- id: "plan_{date_str}_<plan_slug>"
+- metadata: {{
+    "category": "decision",
+    "project": "nova-core",
+    "topic": "enhancement_plan",
+    "date": "{date_str}",
+    "confidence": "high",
+    "source": "heartbeat_planning_cycle",
+    "plan_version": "<version number>"
+  }}
+
+═══════════════════════════════════════════════════════════════
+STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY)
+═══════════════════════════════════════════════════════════════
+
+Call `vault_write` with:
+- path: "00-inbox/plan-nova-core-{date_str}.md"
+- frontmatter:
+    type: "research-summary"
+    research_id: "plan-nova-core-{date_str}"
+    title: "Nova-Core Enhancement Plan"
+    topic: "implementation-planning"
+    date_researched: "{date_str}"
+    sources_count: 0
+    confidence: "high"
+    source: "nova-core-memory"
+    tags:
+      - "#type/research"
+      - "planning"
+      - "heartbeat-planning"
+- body: Full plan content
+
+═══════════════════════════════════════════════════════════════
+STEP 7: SELF-CHECK
+═══════════════════════════════════════════════════════════════
+
+Verify:
+1. OUTPUT file exists at /home/nova/nova-core/OUTPUT/hb_plan_{stamp}.md
+2. upsert_memory returned success
+3. vault_write returned success
+If any failed, retry ONCE.
+
+## CONTRACT (at end of OUTPUT report)
+summary: <one-line: created or revised plan>
+files_changed: OUTPUT/hb_plan_{stamp}.md
+verification: OUTPUT exists, upsert_memory success, vault_write success
+confidence: high
+
+BEGIN NOW. Start with Step 1 — gather context from memory and codebase."""
+
+
+def _run_planning_cycle() -> None:
+    """Autonomous planning cycle: scan context, create or revise plans.
+
+    Runs every 3rd active cycle (~90 min). Same self-awareness layers as
+    research, but output is an implementation plan instead of a report.
+    """
+    current_hour = datetime.now(timezone.utc).hour
+    if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
+        print(f"[planning-cycle] Outside active hours "
+              f"({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
+        return
+
+    if not _planning_cooldown_ok():
+        print("[planning-cycle] Cooldown active — skipping (ran recently)")
+        return
+
+    print("[planning-cycle] Starting autonomous planning cycle...")
+    prompt = _build_planning_prompt()
+
+    claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
+
+    try:
+        child_env = os.environ.copy()
+        child_env.pop("CLAUDECODE", None)
+
+        result = subprocess.run(
+            [claude_bin, "-p", "--model", HEARTBEAT_MODEL,
+             "--dangerously-skip-permissions", prompt],
+            capture_output=True, text=True, timeout=PLANNING_TIMEOUT,
+            cwd=str(BASE),
+            env=child_env,
+        )
+        response = result.stdout.strip()
+
+        if not response:
+            _log_planning("EMPTY_RESPONSE")
+            _update_planning_cooldown("unknown", success=False)
+            print("[planning-cycle] Empty response from Claude")
+            return
+
+        # Extract plan title from response
+        plan_title = "unknown"
+        for line in response.splitlines()[:30]:
+            if line.startswith("#") and len(line) > 3:
+                plan_title = line.lstrip("# ").strip()[:100]
+                break
+
+        _log_planning(f"COMPLETED: {plan_title}")
+        _update_planning_cooldown(plan_title, success=True)
+        print(f"[planning-cycle] Completed: {plan_title}")
+
+        _send_telegram(f"📋 Planning Cycle Complete:\n{plan_title}")
+
+    except subprocess.TimeoutExpired:
+        _log_planning(f"TIMEOUT after {PLANNING_TIMEOUT}s")
+        _update_planning_cooldown("timeout", success=False)
+        print(f"[planning-cycle] Timed out after {PLANNING_TIMEOUT}s")
+    except FileNotFoundError:
+        _log_planning(f"CLAUDE_NOT_FOUND: {claude_bin}")
+        print(f"[planning-cycle] Claude binary not found: {claude_bin}")
+    except Exception as e:
+        _log_planning(f"ERROR: {e}")
+        _update_planning_cooldown("error", success=False)
+        print(f"[planning-cycle] Error: {e}")
+
+
 # --- Main --------------------------------------------------------------------
 
 
@@ -1186,11 +1481,15 @@ def main() -> int:
     except Exception as e:
         print(f"[heartbeat-agent] Failed (non-fatal): {e}")
 
-    # --- Autonomous research cycle ---
+    # --- Autonomous cycles: planning (every ~3rd) or research ---
+    # Planning takes priority when its cooldown is met; otherwise research runs.
     try:
-        _run_research_cycle()
+        if _planning_cooldown_ok():
+            _run_planning_cycle()
+        else:
+            _run_research_cycle()
     except Exception as e:
-        print(f"[research-cycle] Failed (non-fatal): {e}")
+        print(f"[autonomous-cycle] Failed (non-fatal): {e}")
 
     # Append to heartbeat log
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
