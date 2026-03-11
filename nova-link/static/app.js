@@ -147,6 +147,7 @@ async function sendChat() {
   const msg = input.value.trim();
   if (!msg) return;
 
+  unlockTTS();
   input.value = '';
   chatMessages.push({ role: 'user', content: msg });
   renderChat();
@@ -185,6 +186,7 @@ function renderChat() {
 
 // --- Voice Mode ---
 function setChatMode(mode) {
+  unlockTTS();
   chatMode = mode;
   document.getElementById('mode-text').classList.toggle('active', mode === 'text');
   document.getElementById('mode-voice').classList.toggle('active', mode === 'voice');
@@ -202,8 +204,21 @@ function toggleTTS() {
   toast(ttsEnabled ? 'Voice responses on' : 'Voice responses off');
 }
 
+// iOS Safari requires speechSynthesis to be triggered from a user gesture.
+// We "unlock" it by speaking an empty utterance on the first tap, then
+// the real speech works from async callbacks afterwards.
+let ttsUnlocked = false;
+
+function unlockTTS() {
+  if (ttsUnlocked || !('speechSynthesis' in window)) return;
+  const utter = new SpeechSynthesisUtterance('');
+  utter.volume = 0;
+  window.speechSynthesis.speak(utter);
+  ttsUnlocked = true;
+}
+
 function speak(text) {
-  if (!('speechSynthesis' in window)) return;
+  if (!('speechSynthesis' in window) || !ttsEnabled) return;
   window.speechSynthesis.cancel();
 
   // Clean up text for speech (remove markdown, code blocks, etc.)
@@ -217,7 +232,9 @@ function speak(text) {
     .replace(/[-*]\s/g, '')
     .trim();
 
-  // Split long text into chunks (speechSynthesis has limits)
+  if (!clean) return;
+
+  // Split long text into chunks (speechSynthesis has limits ~200 chars)
   const chunks = [];
   const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [clean];
   let current = '';
@@ -231,22 +248,30 @@ function speak(text) {
   }
   if (current.trim()) chunks.push(current.trim());
 
+  // Pick a voice
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = voices.find(v =>
+    v.name.includes('Samantha') || v.name.includes('Karen') ||
+    v.name.includes('Google') || v.name.includes('Natural')
+  ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+
   // Queue utterances
   for (const chunk of chunks) {
     const utter = new SpeechSynthesisUtterance(chunk);
     utter.rate = 1.0;
     utter.pitch = 1.0;
-
-    // Prefer a natural-sounding voice
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v =>
-      v.name.includes('Samantha') || v.name.includes('Karen') ||
-      v.name.includes('Google') || v.name.includes('Natural')
-    ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
     if (preferred) utter.voice = preferred;
-
     window.speechSynthesis.speak(utter);
   }
+
+  // iOS workaround: speechSynthesis can pause in background, keep it alive
+  const keepAlive = setInterval(() => {
+    if (!window.speechSynthesis.speaking) {
+      clearInterval(keepAlive);
+    } else {
+      window.speechSynthesis.resume();
+    }
+  }, 5000);
 }
 
 function initSpeechRecognition() {
@@ -313,6 +338,7 @@ function toggleVoice() {
 function startListening() {
   if (!recognition) initSpeechRecognition();
   if (!recognition) return;
+  unlockTTS();
   // Stop any ongoing TTS so it doesn't interfere
   window.speechSynthesis.cancel();
   try { recognition.start(); } catch { /* already started */ }

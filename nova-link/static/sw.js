@@ -1,5 +1,5 @@
 // Nova-Link Service Worker — offline caching + push notifications
-const CACHE_NAME = 'nova-link-v2';
+const CACHE_NAME = 'nova-link-v3';
 const PRECACHE = ['/', '/static/app.css', '/static/app.js'];
 
 self.addEventListener('install', (e) => {
