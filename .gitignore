@@ -25,6 +25,9 @@ LOGS/
 *.env
 .env
 
+# Google Workspace credentials
+.config/nova-core/google/
+
 # Playwright MCP cache
 .playwright-mcp/
 
