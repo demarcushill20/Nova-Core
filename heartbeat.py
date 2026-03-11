@@ -502,12 +502,18 @@ def inject_repair_task(checks: list) -> None:
 ACTIVE_HOURS_START = int(os.environ.get("HEARTBEAT_ACTIVE_START", "6"))
 ACTIVE_HOURS_END = int(os.environ.get("HEARTBEAT_ACTIVE_END", "23"))
 
-# Model for heartbeat reasoning — Haiku for cost efficiency (~$0.01/cycle)
+# Model for heartbeat reasoning
 HEARTBEAT_MODEL = os.environ.get("HEARTBEAT_MODEL", "claude-opus-4-6")
 HEARTBEAT_TIMEOUT = 90  # seconds
 
 CHECKLIST_FILE = BASE / "HEARTBEAT_CHECKLIST.md"
 HEARTBEAT_AGENT_LOG = LOGS_DIR / "heartbeat_agent.log"
+
+# Autonomous research cycle configuration
+RESEARCH_TIMEOUT = 600  # 10 minutes for deep research
+RESEARCH_COOLDOWN_MINUTES = 55  # skip if ran less than 55 min ago
+RESEARCH_COOLDOWN_FILE = STATE_DIR / "last_research_cycle.json"
+RESEARCH_LOG = LOGS_DIR / "research_cycle.log"
 
 
 def _gather_extended_state(checks: list) -> str:
@@ -728,6 +734,274 @@ def _log_agent(message: str) -> None:
         f.write(f"[{ts}] {message}\n")
 
 
+# --- Autonomous Research Cycle -----------------------------------------------
+
+
+def _research_cooldown_ok() -> bool:
+    """Check if enough time has passed since the last research cycle."""
+    if not RESEARCH_COOLDOWN_FILE.exists():
+        return True
+    try:
+        data = json.loads(RESEARCH_COOLDOWN_FILE.read_text())
+        last_run = data.get("last_run_utc", "")
+        if not last_run:
+            return True
+        last_dt = datetime.fromisoformat(last_run)
+        age_min = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
+        return age_min >= RESEARCH_COOLDOWN_MINUTES
+    except Exception:
+        return True
+
+
+def _update_research_cooldown(topic: str, success: bool) -> None:
+    """Record that a research cycle ran."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    data = {
+        "last_run_utc": datetime.now(timezone.utc).isoformat(),
+        "topic": topic[:200],
+        "success": success,
+    }
+    RESEARCH_COOLDOWN_FILE.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def _log_research(message: str) -> None:
+    """Append to research cycle log."""
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).isoformat()
+    with open(RESEARCH_LOG, "a") as f:
+        f.write(f"[{ts}] {message}\n")
+
+
+def _build_research_prompt() -> str:
+    """Build the comprehensive research cycle prompt."""
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    date_str = now.strftime("%Y-%m-%d")
+    stamp = now.strftime("%Y%m%d-%H%M%S")
+
+    # Gather recent OUTPUT file names for topic deduplication
+    recent_topics = []
+    if OUTPUT_DIR.exists():
+        for f in sorted(OUTPUT_DIR.glob("*.md"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
+            recent_topics.append(f.stem)
+    recent_str = "\n".join(f"  - {t}" for t in recent_topics) or "  (none)"
+
+    # Gather active goals
+    goals_str = "(no active goals)"
+    goals_file = STATE_DIR / "goals.json"
+    if goals_file.exists():
+        try:
+            data = json.loads(goals_file.read_text())
+            goals_list = data.get("goals", []) if isinstance(data, dict) else data
+            active = [g for g in goals_list if g.get("status") != "done"]
+            if active:
+                goals_str = "\n".join(
+                    f"  - [{g.get('id', '?')}] {g.get('text', '?')}"
+                    for g in active
+                )
+        except Exception:
+            pass
+
+    return f"""\
+You are Nova, an autonomous AI agent. This is your RESEARCH CYCLE.
+Current time: {ts}
+
+YOUR MISSION: Scan your memory and codebase for context, then conduct deep
+research on a topic of your choice, create a research report, and save it to
+BOTH of your memory systems. You have 10 minutes.
+
+═══════════════════════════════════════════════════════════════
+STEP 1: CONTEXT GATHERING — scan both memory systems first
+═══════════════════════════════════════════════════════════════
+
+1a. Query Fusion Memory for prior research:
+    - Call `get_last_checkpoint` to see session state
+    - Call `query_memory` with query="research topics completed nova-core"
+    - Call `query_memory` with query="knowledge gaps improvement areas"
+
+1b. Scan Obsidian Vault for existing research:
+    - Call `vault_list` on path "40-research" to see what exists
+    - Call `vault_search` with query="research" to find research notes
+
+1c. Review recent outputs (DO NOT repeat these topics):
+{recent_str}
+
+1d. Active goals to align research with:
+{goals_str}
+
+═══════════════════════════════════════════════════════════════
+STEP 2: CHOOSE A RESEARCH TOPIC
+═══════════════════════════════════════════════════════════════
+
+Pick ONE topic that:
+- Has NOT been researched before (check memory + recent outputs above)
+- Aligns with an active goal when possible
+- Is actionable — results should improve nova-core
+- Has enough depth for a substantive report
+
+Topic categories (pick one, go deep):
+- New MCP servers or tools for agent capabilities
+- Autonomous agent architecture patterns (self-healing, reflection, planning)
+- Production hardening for AI agent runtimes
+- Memory/RAG innovations and knowledge graph techniques
+- Code quality and testing automation for AI-generated code
+- Security practices for autonomous AI systems
+- Monitoring and observability for agent runtimes
+- Task scheduling and workflow orchestration
+- Self-improvement and meta-learning in AI agents
+- Cost optimization for LLM-powered systems
+
+═══════════════════════════════════════════════════════════════
+STEP 3: DEEP WEB RESEARCH (use multiple tools)
+═══════════════════════════════════════════════════════════════
+
+- Run 3-5 search queries using `brave_web_search` and/or `tavily_search`
+- Use `tavily_research` for at least one deep synthesis query
+- Fetch 2-3 authoritative full pages using `fetch`
+- Cross-reference findings across multiple sources
+- Prefer sources from 2025-2026
+
+═══════════════════════════════════════════════════════════════
+STEP 4: WRITE OUTPUT REPORT
+═══════════════════════════════════════════════════════════════
+
+Create file: /home/nova/nova-core/OUTPUT/hb_research_{stamp}.md
+
+Include:
+- # Title with topic and date
+- ## Executive Summary (2-3 paragraphs)
+- ## Key Findings (numbered, detailed)
+- ## Recommendations for Nova-Core (specific, actionable)
+- ## Sources (URLs with brief descriptions)
+- ## CONTRACT block (required — see below)
+
+═══════════════════════════════════════════════════════════════
+STEP 5: SAVE TO FUSION MEMORY (MANDATORY — do not skip)
+═══════════════════════════════════════════════════════════════
+
+Call `upsert_memory` with these exact parameters:
+- content: Dense summary of findings (500-1000 chars)
+- id: "research_{date_str}_<topic_slug>"
+- metadata: {{
+    "category": "research",
+    "project": "nova-core",
+    "topic": "<the research topic>",
+    "date": "{date_str}",
+    "confidence": "high",
+    "source": "heartbeat_research_cycle"
+  }}
+
+═══════════════════════════════════════════════════════════════
+STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY — do not skip)
+═══════════════════════════════════════════════════════════════
+
+Call `vault_write` with these exact parameters:
+- path: "40-research/<topic-slug>-{date_str}.md"
+- frontmatter (MUST match this schema exactly):
+    type: "research-summary"
+    research_id: "rs-<topic-slug>-{date_str}"
+    title: "<Research Title>"
+    topic: "<topic category>"
+    date_researched: "{date_str}"
+    sources_count: <integer — number of sources>
+    confidence: "high"
+    source: "nova-core-memory"
+    tags:
+      - "#type/research"
+      - "<topic-tag>"
+      - "heartbeat-research"
+- body: Full research content (findings + recommendations + sources)
+
+IMPORTANT: The frontmatter must include `source: "nova-core-memory"` and
+tags must include "#type/research". Without these, vault_write will reject.
+
+═══════════════════════════════════════════════════════════════
+STEP 7: SELF-CHECK
+═══════════════════════════════════════════════════════════════
+
+Before exiting, verify:
+1. OUTPUT file exists at /home/nova/nova-core/OUTPUT/hb_research_{stamp}.md
+2. upsert_memory returned success
+3. vault_write returned success
+If any failed, retry ONCE.
+
+## CONTRACT (at end of OUTPUT report)
+summary: <one-line description>
+files_changed: OUTPUT/hb_research_{stamp}.md
+verification: OUTPUT exists, upsert_memory success, vault_write success
+confidence: high
+
+BEGIN NOW. Start with Step 1 — query your memory systems."""
+
+
+def _run_research_cycle() -> None:
+    """Autonomous research cycle: query memories, pick topic, research, save.
+
+    Runs a full Claude session with 600s timeout. Only during active hours.
+    Respects cooldown to avoid running back-to-back.
+    """
+    current_hour = datetime.now(timezone.utc).hour
+    if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
+        print(f"[research-cycle] Outside active hours "
+              f"({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
+        return
+
+    if not _research_cooldown_ok():
+        print("[research-cycle] Cooldown active — skipping (ran recently)")
+        return
+
+    print("[research-cycle] Starting autonomous research cycle...")
+    prompt = _build_research_prompt()
+
+    claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
+
+    try:
+        child_env = os.environ.copy()
+        child_env.pop("CLAUDECODE", None)
+
+        result = subprocess.run(
+            [claude_bin, "-p", "--model", HEARTBEAT_MODEL,
+             "--dangerously-skip-permissions", prompt],
+            capture_output=True, text=True, timeout=RESEARCH_TIMEOUT,
+            cwd=str(BASE),
+            env=child_env,
+        )
+        response = result.stdout.strip()
+
+        if not response:
+            _log_research("EMPTY_RESPONSE")
+            _update_research_cooldown("unknown", success=False)
+            print("[research-cycle] Empty response from Claude")
+            return
+
+        # Extract topic from response for logging
+        topic = "unknown"
+        for line in response.splitlines()[:30]:
+            if line.startswith("#") and len(line) > 3:
+                topic = line.lstrip("# ").strip()[:100]
+                break
+
+        _log_research(f"COMPLETED: {topic}")
+        _update_research_cooldown(topic, success=True)
+        print(f"[research-cycle] Completed: {topic}")
+
+        # Notify via Telegram
+        _send_telegram(f"🔬 Research Cycle Complete:\n{topic}")
+
+    except subprocess.TimeoutExpired:
+        _log_research(f"TIMEOUT after {RESEARCH_TIMEOUT}s")
+        _update_research_cooldown("timeout", success=False)
+        print(f"[research-cycle] Timed out after {RESEARCH_TIMEOUT}s")
+    except FileNotFoundError:
+        _log_research(f"CLAUDE_NOT_FOUND: {claude_bin}")
+        print(f"[research-cycle] Claude binary not found: {claude_bin}")
+    except Exception as e:
+        _log_research(f"ERROR: {e}")
+        _update_research_cooldown("error", success=False)
+        print(f"[research-cycle] Error: {e}")
+
+
 # --- Main --------------------------------------------------------------------
 
 
@@ -814,6 +1088,12 @@ def main() -> int:
         _run_heartbeat_agent(checks)
     except Exception as e:
         print(f"[heartbeat-agent] Failed (non-fatal): {e}")
+
+    # --- Autonomous research cycle ---
+    try:
+        _run_research_cycle()
+    except Exception as e:
+        print(f"[research-cycle] Failed (non-fatal): {e}")
 
     # Append to heartbeat log
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
