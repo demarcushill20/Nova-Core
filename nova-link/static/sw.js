@@ -1,5 +1,5 @@
 // Nova-Link Service Worker — offline caching + push notifications
-const CACHE_NAME = 'nova-link-v1';
+const CACHE_NAME = 'nova-link-v2';
 const PRECACHE = ['/', '/static/app.css', '/static/app.js'];
 
 self.addEventListener('install', (e) => {
@@ -19,14 +19,19 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Network-first for API calls, cache-first for static assets
-  if (e.request.url.includes('/api/')) {
-    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
-  } else {
-    e.respondWith(
-      caches.match(e.request).then((r) => r || fetch(e.request))
-    );
-  }
+  // Network-first for everything — fall back to cache only when offline
+  e.respondWith(
+    fetch(e.request)
+      .then((r) => {
+        // Update cache with fresh response
+        if (r.ok) {
+          const clone = r.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(e.request, clone));
+        }
+        return r;
+      })
+      .catch(() => caches.match(e.request))
+  );
 });
 
 self.addEventListener('push', (e) => {
