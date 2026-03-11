@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Nova-Link">
+  <meta name="theme-color" content="#0a0a0f">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="stylesheet" href="/static/app.css">
+  <title>Nova-Link</title>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>Nova-Link</h1>
+    <div style="display:flex;align-items:center">
+      <span id="status-dot" class="status-dot unknown"></span>
+      <span id="status-text" style="font-size:13px;font-weight:600">Loading...</span>
+    </div>
+  </div>
+
+  <!-- Navigation -->
+  <div class="nav">
+    <button data-page="dashboard" class="active" onclick="switchPage('dashboard')">Dashboard</button>
+    <button data-page="chat" onclick="switchPage('chat')">Chat</button>
+    <button data-page="reports" onclick="switchPage('reports')">Reports</button>
+    <button data-page="controls" onclick="switchPage('controls')">Controls</button>
+  </div>
+
+  <!-- Dashboard Page -->
+  <div id="page-dashboard" class="page active">
+    <!-- Heartbeat -->
+    <div class="card" onclick="loadHealthChecks()">
+      <div class="card-title">Heartbeat</div>
+      <div class="card-value" id="hb-checks">--/--</div>
+      <div class="card-detail">checks passed &middot; <span id="hb-time">--</span></div>
+    </div>
+
+    <!-- Health checks (hidden until tapped) -->
+    <div class="card" style="display:none">
+      <div class="card-title">Health Checks</div>
+      <div id="health-checks-detail"></div>
+    </div>
+
+    <!-- Tasks -->
+    <div class="card">
+      <div class="card-title">Task Queue</div>
+      <div class="grid-3">
+        <div style="text-align:center">
+          <div class="card-value" id="tasks-pending">-</div>
+          <div class="card-detail">Pending</div>
+        </div>
+        <div style="text-align:center">
+          <div class="card-value" style="color:var(--green)" id="tasks-done">-</div>
+          <div class="card-detail">Done</div>
+        </div>
+        <div style="text-align:center">
+          <div class="card-value" style="color:var(--red)" id="tasks-failed">-</div>
+          <div class="card-detail">Failed</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Services -->
+    <div class="card">
+      <div class="card-title">Services</div>
+      <div id="services-list"></div>
+    </div>
+
+    <!-- Goals -->
+    <div class="card">
+      <div class="card-title">Active Goals</div>
+      <div id="goals-list"></div>
+    </div>
+
+    <!-- Research & Planning -->
+    <div class="card">
+      <div class="card-title">Last Research Cycle</div>
+      <div class="card-detail" id="last-research">--</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Last Planning Cycle</div>
+      <div class="card-detail" id="last-planning">--</div>
+    </div>
+  </div>
+
+  <!-- Chat Page -->
+  <div id="page-chat" class="page">
+    <div class="chat-container">
+      <div class="chat-messages" id="chat-messages"></div>
+      <div class="chat-input-bar">
+        <input type="text" id="chat-input" placeholder="Message Nova..." autocomplete="off">
+        <button onclick="sendChat()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reports Page -->
+  <div id="page-reports" class="page">
+    <div id="reports-list"></div>
+    <div id="report-detail" style="display:none"></div>
+  </div>
+
+  <!-- Controls Page -->
+  <div id="page-controls" class="page">
+    <div class="card">
+      <div class="card-title">Services</div>
+      <div id="control-services"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Actions</div>
+      <button class="control-btn primary" onclick="triggerHeartbeat()">
+        Trigger Heartbeat
+      </button>
+      <button class="control-btn" onclick="injectTask()">
+        Inject Task
+      </button>
+      <button class="control-btn" onclick="loadDashboard(); switchPage('dashboard'); toast('Refreshed!')">
+        Refresh Dashboard
+      </button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
