@@ -127,6 +127,7 @@ let chatMode = 'text';  // 'text' or 'voice'
 let ttsEnabled = true;
 let isListening = false;
 let recognition = null;
+let selectedVoice = null;
 
 async function loadChatHistory() {
   if (chatHistoryLoaded) return;
@@ -248,19 +249,17 @@ function speak(text) {
   }
   if (current.trim()) chunks.push(current.trim());
 
-  // Pick a voice
-  const voices = window.speechSynthesis.getVoices();
-  const preferred = voices.find(v =>
-    v.name.includes('Samantha') || v.name.includes('Karen') ||
-    v.name.includes('Google') || v.name.includes('Natural')
-  ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+  // Get voice settings
+  const voice = getSelectedVoice();
+  const rate = parseFloat(localStorage.getItem('nova-tts-speed') || '1');
+  const pitch = parseFloat(localStorage.getItem('nova-tts-pitch') || '1');
 
   // Queue utterances
   for (const chunk of chunks) {
     const utter = new SpeechSynthesisUtterance(chunk);
-    utter.rate = 1.0;
-    utter.pitch = 1.0;
-    if (preferred) utter.voice = preferred;
+    utter.rate = rate;
+    utter.pitch = pitch;
+    if (voice) utter.voice = voice;
     window.speechSynthesis.speak(utter);
   }
 
@@ -272,6 +271,105 @@ function speak(text) {
       window.speechSynthesis.resume();
     }
   }, 5000);
+}
+
+// --- Voice Settings ---
+function getSelectedVoice() {
+  const voices = window.speechSynthesis.getVoices();
+  const saved = localStorage.getItem('nova-tts-voice');
+  if (saved) {
+    const match = voices.find(v => v.name === saved);
+    if (match) return match;
+  }
+  // Default: prefer natural English voice
+  return voices.find(v =>
+    v.name.includes('Samantha') || v.name.includes('Karen') ||
+    v.name.includes('Google') || v.name.includes('Natural')
+  ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+}
+
+function populateVoiceSelect() {
+  const select = document.getElementById('voice-select');
+  if (!select) return;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return;
+
+  const saved = localStorage.getItem('nova-tts-voice');
+  select.innerHTML = '';
+
+  // Group by language
+  const groups = {};
+  for (const v of voices) {
+    const lang = v.lang.split('-')[0].toUpperCase();
+    if (!groups[lang]) groups[lang] = [];
+    groups[lang].push(v);
+  }
+
+  // English first, then others
+  const sortedLangs = Object.keys(groups).sort((a, b) => {
+    if (a === 'EN') return -1;
+    if (b === 'EN') return 1;
+    return a.localeCompare(b);
+  });
+
+  for (const lang of sortedLangs) {
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = lang;
+    for (const v of groups[lang]) {
+      const opt = document.createElement('option');
+      opt.value = v.name;
+      opt.textContent = v.name + (v.localService ? '' : ' (network)');
+      if (v.name === saved) opt.selected = true;
+      optgroup.appendChild(opt);
+    }
+    select.appendChild(optgroup);
+  }
+
+  // If nothing was saved, select the default
+  if (!saved) {
+    const def = getSelectedVoice();
+    if (def) select.value = def.name;
+  }
+}
+
+function toggleVoiceSettings() {
+  const panel = document.getElementById('voice-settings');
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) populateVoiceSelect();
+}
+
+function saveVoiceSetting() {
+  const select = document.getElementById('voice-select');
+  const speed = document.getElementById('voice-speed');
+  const pitch = document.getElementById('voice-pitch');
+  if (select.value) localStorage.setItem('nova-tts-voice', select.value);
+  localStorage.setItem('nova-tts-speed', speed.value);
+  localStorage.setItem('nova-tts-pitch', pitch.value);
+}
+
+function updateSpeedLabel() {
+  const val = document.getElementById('voice-speed').value;
+  document.getElementById('speed-label').textContent = parseFloat(val).toFixed(1) + 'x';
+}
+
+function updatePitchLabel() {
+  const val = document.getElementById('voice-pitch').value;
+  document.getElementById('pitch-label').textContent = parseFloat(val).toFixed(1) + 'x';
+}
+
+function testVoice() {
+  unlockTTS();
+  speak('Hey, this is Nova. How does this voice sound?');
+}
+
+function loadVoiceSettings() {
+  const speed = localStorage.getItem('nova-tts-speed') || '1';
+  const pitch = localStorage.getItem('nova-tts-pitch') || '1';
+  document.getElementById('voice-speed').value = speed;
+  document.getElementById('voice-pitch').value = pitch;
+  updateSpeedLabel();
+  updatePitchLabel();
 }
 
 function initSpeechRecognition() {
@@ -519,9 +617,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Init TTS voices (Safari loads them async)
   if ('speechSynthesis' in window) {
     window.speechSynthesis.getVoices();
-    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => {
+      window.speechSynthesis.getVoices();
+      populateVoiceSelect();
+    };
   }
   document.getElementById('tts-toggle').classList.add('active');
+  loadVoiceSettings();
 
   // Register service worker
   if ('serviceWorker' in navigator) {

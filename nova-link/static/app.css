@@ -261,6 +261,77 @@ body {
   border-color: var(--accent);
 }
 
+/* --- Voice settings panel --- */
+.voice-settings {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+}
+
+.voice-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.voice-setting-row:last-of-type { border-bottom: none; }
+
+.voice-setting-row label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  width: 50px;
+}
+
+.voice-setting-row select {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.speed-control {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.speed-control input[type="range"] {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  outline: none;
+}
+
+.speed-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.speed-control span {
+  font-size: 13px;
+  color: var(--text-dim);
+  min-width: 35px;
+  text-align: right;
+}
+
 /* --- Voice input --- */
 .voice-input-bar {
   display: flex;
