@@ -28,6 +28,11 @@ LOGS_DIR = BASE / "LOGS"
 DISK_WARN_PERCENT = 85
 ORPHAN_INPROGRESS_MINUTES = 15
 MAX_PENDING_TASKS = 10
+BACKUP_DIR = Path("/home/nova/backups")
+BACKUP_MAX_AGE_HOURS = 26  # alert if no backup in ~1 day
+LOG_SIZE_WARN_MB = 50
+STATE_DIR_WARN_FILES = 50000
+GW_TOKEN_FILE = Path.home() / ".config" / "nova-core" / "google" / "token.json"
 
 SERVICES = [
     "novacore-watcher",
@@ -162,6 +167,30 @@ def check_stale_workers() -> dict:
     return {"name": "stale_workers", "ok": ok, "detail": detail}
 
 
+def check_state_files() -> dict:
+    """Validate structure of critical state files (e.g., goals.json)."""
+    issues = []
+    goals_file = STATE_DIR / "goals.json"
+    if goals_file.exists():
+        try:
+            data = json.loads(goals_file.read_text())
+            if isinstance(data, list):
+                issues.append("goals.json is bare array (expected dict wrapper)")
+            elif isinstance(data, dict):
+                if "goals" not in data or "next_id" not in data:
+                    issues.append("goals.json missing 'goals' or 'next_id' keys")
+            else:
+                issues.append("goals.json has unexpected type")
+        except json.JSONDecodeError as e:
+            issues.append(f"goals.json invalid JSON: {e}")
+        except OSError as e:
+            issues.append(f"goals.json read error: {e}")
+
+    ok = len(issues) == 0
+    detail = "all valid" if ok else "; ".join(issues)
+    return {"name": "state_files", "ok": ok, "detail": detail}
+
+
 def check_metrics() -> dict:
     """Check STATE/metrics.json for anomalous failure rates."""
     metrics_file = STATE_DIR / "metrics.json"
@@ -186,6 +215,175 @@ def check_metrics() -> dict:
     except Exception as e:
         return {"name": "metrics", "ok": False,
                 "detail": f"parse error: {e}"}
+
+
+def check_google_workspace() -> dict:
+    """Check that the Google Workspace OAuth token is valid."""
+    if not GW_TOKEN_FILE.exists():
+        return {"name": "google_workspace", "ok": True,
+                "detail": "not configured (no token)"}
+    try:
+        data = json.loads(GW_TOKEN_FILE.read_text())
+        has_refresh = bool(data.get("refresh_token"))
+        expiry = data.get("expiry", "")
+        if expiry:
+            # Token file stores expiry as ISO string
+            exp_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            if exp_dt < now and not has_refresh:
+                return {"name": "google_workspace", "ok": False,
+                        "detail": "token expired, no refresh token"}
+        detail = "token valid" if has_refresh else "token present (no refresh)"
+        return {"name": "google_workspace", "ok": has_refresh,
+                "detail": detail}
+    except Exception as e:
+        return {"name": "google_workspace", "ok": False,
+                "detail": f"token check failed: {e}"}
+
+
+def check_backup() -> dict:
+    """Verify a recent backup exists in /home/nova/backups/."""
+    if not BACKUP_DIR.exists():
+        return {"name": "backup", "ok": False,
+                "detail": f"backup dir missing: {BACKUP_DIR}"}
+
+    tarballs = sorted(BACKUP_DIR.glob("*.tar.gz"), key=lambda p: p.stat().st_mtime,
+                      reverse=True)
+    if not tarballs:
+        return {"name": "backup", "ok": False, "detail": "no backups found"}
+
+    latest = tarballs[0]
+    age_hr = (datetime.now(timezone.utc) - datetime.fromtimestamp(
+        latest.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
+    size_mb = round(latest.stat().st_size / (1024 ** 2), 1)
+    ok = age_hr < BACKUP_MAX_AGE_HOURS
+    detail = f"{latest.name} ({round(age_hr, 1)}h ago, {size_mb}MB)"
+    if not ok:
+        detail += " — STALE"
+    return {"name": "backup", "ok": ok, "detail": detail}
+
+
+def check_ruff() -> dict:
+    """Run ruff on staged/tracked Python files and report violation count."""
+    try:
+        result = subprocess.run(
+            ["ruff", "check", "--select", "E,F,W", "--statistics",
+             "--quiet", str(BASE)],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            return {"name": "ruff", "ok": True, "detail": "0 violations"}
+        lines = result.stdout.strip().splitlines()
+        count = len(lines)
+        detail = f"{count} violation(s)"
+        if lines:
+            detail += f" — top: {lines[0][:80]}"
+        # Informational, not blocking — ok=True but report count
+        return {"name": "ruff", "ok": True, "detail": detail}
+    except FileNotFoundError:
+        return {"name": "ruff", "ok": True, "detail": "ruff not installed"}
+    except subprocess.TimeoutExpired:
+        return {"name": "ruff", "ok": True, "detail": "timed out (30s)"}
+    except Exception as e:
+        return {"name": "ruff", "ok": True, "detail": f"check failed: {e}"}
+
+
+def check_memory_systems() -> dict:
+    """Check connectivity to Fusion Memory and Obsidian Vault."""
+    issues = []
+
+    # Fusion Memory: check if the MCP server entry point exists
+    fusion_server = Path.home() / "Nova_AI_Fusion_Memory_MCP" / "mcp_server.py"
+    if not fusion_server.exists():
+        issues.append("Fusion Memory mcp_server.py missing")
+
+    # Obsidian Vault: check if vault directory exists and has content
+    vault_dir = Path("/home/nova/nova-vault")
+    if not vault_dir.exists():
+        issues.append("Obsidian vault dir missing")
+    else:
+        meta_dir = vault_dir / "_meta"
+        if not meta_dir.exists() or not list(meta_dir.glob("*.md")):
+            issues.append("Obsidian vault _meta/ empty or missing")
+
+    ok = len(issues) == 0
+    detail = "both reachable" if ok else "; ".join(issues)
+    return {"name": "memory_systems", "ok": ok, "detail": detail}
+
+
+def check_log_sizes() -> dict:
+    """Check for oversized log files that need rotation."""
+    large = []
+    if LOGS_DIR.exists():
+        for log_file in LOGS_DIR.iterdir():
+            if log_file.is_file():
+                size_mb = log_file.stat().st_size / (1024 ** 2)
+                if size_mb > LOG_SIZE_WARN_MB:
+                    large.append(f"{log_file.name} ({round(size_mb, 1)}MB)")
+
+    ok = len(large) == 0
+    if ok:
+        total_mb = 0
+        if LOGS_DIR.exists():
+            total_mb = sum(f.stat().st_size for f in LOGS_DIR.iterdir()
+                          if f.is_file()) / (1024 ** 2)
+        detail = f"all under {LOG_SIZE_WARN_MB}MB (total: {round(total_mb, 1)}MB)"
+    else:
+        detail = f"{len(large)} oversized: {', '.join(large)}"
+    return {"name": "log_sizes", "ok": ok, "detail": detail}
+
+
+def check_state_bloat() -> dict:
+    """Check for STATE/ subdirectories with excessive file counts."""
+    bloated = []
+    if STATE_DIR.exists():
+        for subdir in STATE_DIR.iterdir():
+            if subdir.is_dir():
+                try:
+                    count = sum(1 for _ in subdir.iterdir())
+                    if count > STATE_DIR_WARN_FILES:
+                        bloated.append(f"{subdir.name}/ ({count} files)")
+                except PermissionError:
+                    pass
+
+    ok = len(bloated) == 0
+    detail = "all clean" if ok else f"bloated: {', '.join(bloated)}"
+    return {"name": "state_bloat", "ok": ok, "detail": detail}
+
+
+def check_pip_audit() -> dict:
+    """Run pip-audit monthly. Only runs on the 1st and 15th of the month."""
+    now = datetime.now(timezone.utc)
+    if now.day not in (1, 15):
+        return {"name": "pip_audit", "ok": True,
+                "detail": f"skipped (runs on 1st/15th, today is {now.day}th)"}
+    try:
+        result = subprocess.run(
+            ["pip-audit", "--format", "json", "--progress-spinner", "off"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout) if result.stdout.strip() else []
+            if not data:
+                return {"name": "pip_audit", "ok": True,
+                        "detail": "0 vulnerabilities"}
+            vuln_count = len(data) if isinstance(data, list) else 0
+            return {"name": "pip_audit", "ok": vuln_count == 0,
+                    "detail": f"{vuln_count} vulnerable package(s)"}
+        else:
+            # pip-audit returns non-zero when vulnerabilities found
+            detail = result.stdout[:200] if result.stdout else result.stderr[:200]
+            return {"name": "pip_audit", "ok": False,
+                    "detail": f"vulnerabilities found: {detail}"}
+    except FileNotFoundError:
+        return {"name": "pip_audit", "ok": True,
+                "detail": "pip-audit not installed"}
+    except subprocess.TimeoutExpired:
+        return {"name": "pip_audit", "ok": True,
+                "detail": "timed out (120s)"}
+    except Exception as e:
+        return {"name": "pip_audit", "ok": True,
+                "detail": f"check failed: {e}"}
 
 
 # --- Output ------------------------------------------------------------------
@@ -370,8 +568,15 @@ def _gather_extended_state(checks: list) -> str:
     goals_file = STATE_DIR / "goals.json"
     if goals_file.exists():
         try:
-            goals = json.loads(goals_file.read_text())
-            active = [g for g in goals if g.get("status") != "done"]
+            data = json.loads(goals_file.read_text())
+            # Handle both dict-wrapped and bare-array formats
+            if isinstance(data, dict):
+                goals_list = data.get("goals", [])
+            elif isinstance(data, list):
+                goals_list = data
+            else:
+                goals_list = []
+            active = [g for g in goals_list if g.get("status") != "done"]
             if active:
                 parts.append(f"\n## Active Goals ({len(active)})")
                 for g in active:
@@ -384,7 +589,7 @@ def _gather_extended_state(checks: list) -> str:
         try:
             lines = HEARTBEAT_AGENT_LOG.read_text().strip().splitlines()
             if lines:
-                parts.append(f"\n## Last Agent Action")
+                parts.append("\n## Last Agent Action")
                 parts.append(f"  {lines[-1][:200]}")
         except Exception:
             pass
@@ -496,13 +701,13 @@ def _extract_json_actions(text: str) -> list | None:
 
 def _inject_proactive_task(title: str, body: str) -> None:
     """Create a proactive task file for the watcher to pick up."""
-    # Rate-limit: max 2 proactive tasks per heartbeat cycle
+    # Rate-limit: max 4 pending proactive tasks (allows research pipeline to build up)
     existing = list(TASKS_DIR.glob("hb_proactive_*.md"))
     recent = [p for p in existing
               if not any(p.name.endswith(s)
                          for s in (".done", ".failed", ".cancelled"))]
-    if len(recent) >= 2:
-        print("[heartbeat-agent] Rate limit: 2 proactive tasks already pending")
+    if len(recent) >= 4:
+        print("[heartbeat-agent] Rate limit: 4 proactive tasks already pending")
         return
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -541,7 +746,15 @@ def main() -> int:
     checks.append(check_task_queue())
     checks.append(check_last_output())
     checks.append(check_stale_workers())
+    checks.append(check_state_files())
     checks.append(check_metrics())
+    checks.append(check_google_workspace())
+    checks.append(check_backup())
+    checks.append(check_ruff())
+    checks.append(check_memory_systems())
+    checks.append(check_log_sizes())
+    checks.append(check_state_bloat())
+    checks.append(check_pip_audit())
 
     write_heartbeat(checks)
 
