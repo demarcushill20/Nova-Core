@@ -503,7 +503,7 @@ ACTIVE_HOURS_START = int(os.environ.get("HEARTBEAT_ACTIVE_START", "6"))
 ACTIVE_HOURS_END = int(os.environ.get("HEARTBEAT_ACTIVE_END", "23"))
 
 # Model for heartbeat reasoning — Haiku for cost efficiency (~$0.01/cycle)
-HEARTBEAT_MODEL = os.environ.get("HEARTBEAT_MODEL", "claude-haiku-4-5-20251001")
+HEARTBEAT_MODEL = os.environ.get("HEARTBEAT_MODEL", "claude-opus-4-6")
 HEARTBEAT_TIMEOUT = 90  # seconds
 
 CHECKLIST_FILE = BASE / "HEARTBEAT_CHECKLIST.md"
