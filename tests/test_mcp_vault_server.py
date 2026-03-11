@@ -32,7 +32,6 @@ import os
 import textwrap
 import time
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -46,7 +45,6 @@ from tools.mcp_vault_server import (
     _safe_resolve,
     _score_match,
     _tokenize,
-    _write_timestamps,
     detect_sensitive_content,
     validate_frontmatter,
     validate_vault_path,
@@ -59,7 +57,6 @@ from tools.mcp_vault_server import (
     vault_validate,
     vault_write,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -862,7 +859,10 @@ def _vault_config(vault_dir, **overrides):
         "sync_model": "obsidian-sync",
         "canonical": True,
         "human_editable": True,
-        "nova_core_managed_folders": ["00-inbox", "20-agent-patterns", "30-workflow-learnings", "40-research", "70-debugging"],
+        "nova_core_managed_folders": [
+            "00-inbox", "20-agent-patterns", "30-workflow-learnings",
+            "40-research", "70-debugging",
+        ],
         "human_managed_folders": ["10-adrs", "50-playbooks", "60-project", "80-references", "90-diary"],
         "created": "2026-03-07",
     }

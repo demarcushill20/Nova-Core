@@ -15,12 +15,8 @@ from unittest.mock import patch
 
 from watcher import (
     _update_metrics,
-    _check_contract,
-    _maybe_create_retry,
     verify_artifacts,
-    METRICS_FILE,
 )
-
 
 # --- Sample outputs ----------------------------------------------------------
 

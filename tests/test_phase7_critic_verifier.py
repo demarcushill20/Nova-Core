@@ -9,17 +9,16 @@ Acceptance criteria covered:
   6. contract validation rejects missing required contract structure for gated paths
 """
 
-import json
-import time
 from pathlib import Path
 
-from agents.blackboard import Blackboard, ChildContract
-from agents.critic import CriticEngine, CriticReview, CriticIssue, ReplanSignal
-from agents.verifier import VerifierEngine, VerificationReport, VerificationCheck
+from agents.blackboard import Blackboard
+from agents.critic import CriticEngine
+from agents.verifier import VerifierEngine
 from agents.workflow_gate import (
-    WorkflowGate, RerouteDecision, validate_contract_fields,
+    RerouteDecision,
+    WorkflowGate,
+    validate_contract_fields,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -537,7 +536,7 @@ class TestWorkflowGate:
         gate = WorkflowGate(blackboard=bb)
         # Create objection with file_not_found (retryable)
         fpath = "/nonexistent/file.md"
-        review = gate.run_critic_review(
+        gate.run_critic_review(
             "wf_57", "node_a",
             deliverables={"missing": fpath},
         )

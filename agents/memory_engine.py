@@ -21,7 +21,6 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 BASE = Path(os.environ.get("NOVACORE_ROOT", "/home/nova/nova-core"))
 MEMORY_DIR = BASE / "MEMORY"
@@ -508,3 +507,75 @@ def capture_workflow_memory(
     )
 
     return write_memory_artifact(artifact, target=target, base=base)
+
+
+def capture_direct_task_memory(
+    task_stem: str,
+    task_class: str,
+    contract: dict,
+    success: bool,
+    base: Path | None = None,
+) -> Path | None:
+    """Capture memory from a direct worker task (non-orchestrator path).
+
+    Uses the CONTRACT block from the output report to build a lightweight
+    memory artifact. This closes the learning loop for tasks that bypass
+    the multi-agent orchestrator.
+
+    Args:
+        task_stem: Task identifier (e.g. "0200_build_auth").
+        task_class: Classification from task_classifier.
+        contract: Dict with summary, files_changed, verification, confidence.
+        success: Whether the task passed verification.
+        base: Override MEMORY/ directory (for testing).
+
+    Returns:
+        Path to written artifact, or None if contract has no useful summary.
+    """
+    summary = contract.get("summary", "").strip()
+    if not summary:
+        return None
+
+    ts = int(time.time())
+    artifact_id = f"mem_{task_stem}_{ts}"
+    confidence = contract.get("confidence", "medium")
+    if confidence not in VALID_CONFIDENCE:
+        confidence = "medium"
+
+    if task_class not in VALID_TASK_CLASSES:
+        task_class = "unknown"
+
+    verification = contract.get("verification", "")
+    if success and verification and verification != "not run":
+        v_outcome = "approved"
+    elif not success:
+        v_outcome = "rejected"
+    else:
+        v_outcome = "not_verified"
+
+    files = contract.get("files_changed", "none")
+    patterns = [f"direct_worker: {summary}"] if success else []
+    failures = [] if success else [f"direct_worker: {summary}"]
+
+    guidance = summary
+    if files and files != "none":
+        guidance += f" (files: {files})"
+
+    artifact = MemoryArtifact(
+        artifact_id=artifact_id,
+        workflow_id=task_stem,
+        task_summary=summary[:500],
+        task_class=task_class,
+        roles_involved=["direct_worker"],
+        key_decisions=[summary],
+        successful_patterns=patterns,
+        failure_patterns=failures,
+        verification_outcome=v_outcome,
+        reusable_guidance=guidance[:500],
+        confidence=confidence,
+    )
+
+    try:
+        return write_memory_artifact(artifact, target="workflow_learnings", base=base)
+    except ValueError:
+        return None  # artifact already exists or validation failed

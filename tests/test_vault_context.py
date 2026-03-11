@@ -7,17 +7,16 @@ injection integration, and source-truth boundaries.
 import pytest
 
 from planner.vault_context import (
-    MAX_CONTEXT_SIZE,
-    MAX_VAULT_NOTES,
     _ELIGIBLE_TASK_CLASSES,
     _INELIGIBLE_TASK_CLASSES,
+    MAX_CONTEXT_SIZE,
+    MAX_VAULT_NOTES,
     extract_keywords,
     format_vault_context,
     inject_vault_context,
     is_eligible_for_vault_context,
     retrieve_vault_context,
 )
-
 
 # ============================================================================
 # Eligibility
@@ -202,7 +201,6 @@ class TestVaultRetrieval:
         """Retrieval never returns more than MAX_VAULT_NOTES."""
         import planner.vault_context as vc
 
-        original_retrieve = vc.retrieve_vault_context
 
         def mock_retrieve(tc, kw, max_notes=3):
             # Verify the cap is enforced inside the function
@@ -393,7 +391,6 @@ class TestOrchestratorIntegration:
         # Mock subprocess to capture the prompt
         captured_prompts = []
         import subprocess as sp
-        original_run = sp.run
 
         def mock_run(cmd, **kwargs):
             # The prompt is the last element of cmd

@@ -1428,7 +1428,7 @@ def main() -> int:
 
     # --- Phase 7.6: multi-agent heartbeat ---
     try:
-        from agents.observability import run_multiagent_heartbeat, Severity
+        from agents.observability import Severity, run_multiagent_heartbeat
         ma_report = run_multiagent_heartbeat()
         ma_ok = ma_report.overall == Severity.HEALTHY
         checks.append({

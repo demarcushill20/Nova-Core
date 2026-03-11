@@ -2,7 +2,7 @@
 
 import pytest
 
-from utils.workflow_status import is_terminal_status, TERMINAL_STATUSES
+from utils.workflow_status import TERMINAL_STATUSES, is_terminal_status
 
 
 @pytest.mark.parametrize("status", ["completed", "failed", "rejected", "halted"])

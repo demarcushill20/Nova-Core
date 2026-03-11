@@ -2,20 +2,17 @@
 
 import json
 import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 from dataclasses import dataclass, field
-import pytest
+from pathlib import Path
+from unittest.mock import patch
 
 from planner.pattern_feedback import (
-    init_pattern_trace,
-    finalize_pattern_trace,
-    log_pattern_trace,
-    _compute_usefulness,
-    _build_rationale,
     USEFULNESS_VALUES,
+    _compute_usefulness,
+    finalize_pattern_trace,
+    init_pattern_trace,
+    log_pattern_trace,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -264,33 +261,31 @@ class TestFinalizePatternTrace:
 
 class TestLogPatternTrace:
     def test_logs_to_jsonl(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("planner.pattern_feedback.LOGS_DIR", Path(tmpdir)):
-                trace = {
-                    "task_id": "0064",
-                    "usefulness": "useful",
-                    "trace_finalized": True,
-                }
-                result = log_pattern_trace(trace)
+        with tempfile.TemporaryDirectory() as tmpdir, patch("planner.pattern_feedback.LOGS_DIR", Path(tmpdir)):
+            trace = {
+                "task_id": "0064",
+                "usefulness": "useful",
+                "trace_finalized": True,
+            }
+            result = log_pattern_trace(trace)
 
-                assert result is True
-                log_path = Path(tmpdir) / "pattern_feedback.jsonl"
-                assert log_path.exists()
+            assert result is True
+            log_path = Path(tmpdir) / "pattern_feedback.jsonl"
+            assert log_path.exists()
 
-                content = log_path.read_text()
-                parsed = json.loads(content.strip())
-                assert parsed["task_id"] == "0064"
-                assert parsed["usefulness"] == "useful"
+            content = log_path.read_text()
+            parsed = json.loads(content.strip())
+            assert parsed["task_id"] == "0064"
+            assert parsed["usefulness"] == "useful"
 
     def test_appends_multiple(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("planner.pattern_feedback.LOGS_DIR", Path(tmpdir)):
-                log_pattern_trace({"task_id": "a", "usefulness": "useful"})
-                log_pattern_trace({"task_id": "b", "usefulness": "neutral"})
+        with tempfile.TemporaryDirectory() as tmpdir, patch("planner.pattern_feedback.LOGS_DIR", Path(tmpdir)):
+            log_pattern_trace({"task_id": "a", "usefulness": "useful"})
+            log_pattern_trace({"task_id": "b", "usefulness": "neutral"})
 
-                log_path = Path(tmpdir) / "pattern_feedback.jsonl"
-                lines = log_path.read_text().strip().split("\n")
-                assert len(lines) == 2
+            log_path = Path(tmpdir) / "pattern_feedback.jsonl"
+            lines = log_path.read_text().strip().split("\n")
+            assert len(lines) == 2
 
     def test_fail_open(self):
         """Logging failure returns False, does not raise."""
@@ -307,8 +302,9 @@ class TestLogPatternTrace:
 class TestSafetyBoundaries:
     def test_no_vault_writes(self):
         """pattern_feedback module has no vault write imports."""
-        import planner.pattern_feedback as pf
         import inspect
+
+        import planner.pattern_feedback as pf
         source = inspect.getsource(pf)
         assert "vault_write" not in source
         assert "vault_update" not in source
@@ -346,17 +342,19 @@ class TestSafetyBoundaries:
 
 class TestOrchestratorIntegration:
     def test_feedback_imports(self):
-        import tools.orchestrator_adapter as oa
         from planner.pattern_feedback import (
-            init_pattern_trace, finalize_pattern_trace, log_pattern_trace,
+            finalize_pattern_trace,
+            init_pattern_trace,
+            log_pattern_trace,
         )
         assert callable(init_pattern_trace)
         assert callable(finalize_pattern_trace)
         assert callable(log_pattern_trace)
 
     def test_feedback_in_execute_via_orchestrator(self):
-        import tools.orchestrator_adapter as oa
         import inspect
+
+        import tools.orchestrator_adapter as oa
         source = inspect.getsource(oa.execute_via_orchestrator)
         assert "init_pattern_trace" in source
         assert "finalize_pattern_trace" in source
@@ -365,7 +363,8 @@ class TestOrchestratorIntegration:
 
     def test_pattern_feedback_key_in_return(self):
         """Return dict includes pattern_feedback key."""
-        import tools.orchestrator_adapter as oa
         import inspect
+
+        import tools.orchestrator_adapter as oa
         source = inspect.getsource(oa.execute_via_orchestrator)
         assert '"pattern_feedback"' in source

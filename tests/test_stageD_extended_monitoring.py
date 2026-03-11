@@ -14,43 +14,33 @@ Tests cover:
 """
 
 import json
-import pytest
 from pathlib import Path
 
 from agents.rollout_gate import (
-    StageDExtendedMonitoring,
-    RolloutCriterion,
-    evaluate_stageD_extended,
-    decide_stageD_extended,
-    review_stageD_extended,
-    render_stageD_extended_markdown,
-    write_stageD_extended_monitoring,
-    _compute_elapsed_seconds,
-    _compute_contract_failure_rate,
-    _collect_system_inspect_metrics,
-    _count_blocked_mutation_attempts,
-    _classify_post_activation_recoveries,
-    _verify_scope_integrity,
-    EXTENDED_MIN_ELAPSED_SECONDS,
-    EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
-    EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
-    EXTENDED_MAX_FAILURE_RATE,
-    EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-    EXTENDED_MAX_POLICY_VIOLATIONS,
-    EXTENDED_MAX_BUDGET_EXHAUSTIONS,
-    EXTENDED_MAX_RECOVERY_ANOMALIES,
     EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS,
     EXTENDED_MAX_CONTRACT_FAILURE_RATE,
-    EXTENDED_HEARTBEAT_REQUIRED,
-    STAGED_MIN_SYSTEM_INSPECT_RUNS,
+    EXTENDED_MAX_FAILURE_RATE,
+    EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+    EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+    EXTENDED_MIN_ELAPSED_SECONDS,
+    EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
+    STAGE4_ALLOWED_OPERATIONS,
+    STAGE4_BLOCKED_OPERATIONS,
+    STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS,
     STAGED_MAX_FAILURE_RATE,
     STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
     STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-    STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS,
-    STAGE4_ALLOWED_OPERATIONS,
-    STAGE4_BLOCKED_OPERATIONS,
+    STAGED_MIN_SYSTEM_INSPECT_RUNS,
+    StageDExtendedMonitoring,
+    _classify_post_activation_recoveries,
+    _compute_contract_failure_rate,
+    _compute_elapsed_seconds,
+    decide_stageD_extended,
+    evaluate_stageD_extended,
+    render_stageD_extended_markdown,
+    review_stageD_extended,
+    write_stageD_extended_monitoring,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,7 +69,10 @@ def _populate_extended_env(root: Path, num_system_runs: int = 10) -> None:
             "system_scope": "inspect_only",
             "system_allowed_operations": sorted(STAGE4_ALLOWED_OPERATIONS),
             "system_blocked_operations": sorted(STAGE4_BLOCKED_OPERATIONS),
-            "system_allowed_skills": ["file-ops", "http-fetch", "reading-obsidian-memory", "self-verification", "web-research"],
+            "system_allowed_skills": [
+                "file-ops", "http-fetch", "reading-obsidian-memory",
+                "self-verification", "web-research",
+            ],
             "system_blocked_skills": ["git-ops", "shell-ops", "task-execution"],
         },
         "version": 8,
@@ -908,9 +901,19 @@ class TestArtifactGeneration:
             criteria=criteria,
             system_inspect_metrics=_healthy_sys_metrics(12),
             evidence_summary={},
-            observation_window={"activation_at": "T1", "review_at": "T2", "elapsed_hours": 5.0, "elapsed_seconds": 18000.0, "scope": "system_inspect (read-only)"},
+            observation_window={
+                "activation_at": "T1", "review_at": "T2",
+                "elapsed_hours": 5.0, "elapsed_seconds": 18000.0,
+                "scope": "system_inspect (read-only)",
+            },
             scope_integrity=_intact_scope(),
-            monitoring_progress={"runs_completed": 12, "runs_required": 10, "runs_progress_pct": 100.0, "elapsed_hours": 5.0, "elapsed_required_hours": 4.0, "elapsed_progress_pct": 100.0, "hard_criteria_passed": 8, "hard_criteria_total": 8, "soft_criteria_passed": 7, "soft_criteria_total": 7},
+            monitoring_progress={
+                "runs_completed": 12, "runs_required": 10,
+                "runs_progress_pct": 100.0, "elapsed_hours": 5.0,
+                "elapsed_required_hours": 4.0, "elapsed_progress_pct": 100.0,
+                "hard_criteria_passed": 8, "hard_criteria_total": 8,
+                "soft_criteria_passed": 7, "soft_criteria_total": 7,
+            },
         )
         md = render_stageD_extended_markdown(review)
         assert "SUSTAINED STABLE" in md
@@ -928,9 +931,19 @@ class TestArtifactGeneration:
             criteria=criteria,
             system_inspect_metrics=_healthy_sys_metrics(5),
             evidence_summary={},
-            observation_window={"activation_at": "T1", "review_at": "T2", "elapsed_hours": 2.0, "elapsed_seconds": 7200.0, "scope": "system_inspect (read-only)"},
+            observation_window={
+                "activation_at": "T1", "review_at": "T2",
+                "elapsed_hours": 2.0, "elapsed_seconds": 7200.0,
+                "scope": "system_inspect (read-only)",
+            },
             scope_integrity=_intact_scope(),
-            monitoring_progress={"runs_completed": 5, "runs_required": 10, "runs_progress_pct": 50.0, "elapsed_hours": 2.0, "elapsed_required_hours": 4.0, "elapsed_progress_pct": 50.0, "hard_criteria_passed": 8, "hard_criteria_total": 8, "soft_criteria_passed": 5, "soft_criteria_total": 7},
+            monitoring_progress={
+                "runs_completed": 5, "runs_required": 10,
+                "runs_progress_pct": 50.0, "elapsed_hours": 2.0,
+                "elapsed_required_hours": 4.0, "elapsed_progress_pct": 50.0,
+                "hard_criteria_passed": 8, "hard_criteria_total": 8,
+                "soft_criteria_passed": 5, "soft_criteria_total": 7,
+            },
         )
         md = render_stageD_extended_markdown(review)
         assert "CONTINUE MONITORING" in md
@@ -949,7 +962,11 @@ class TestArtifactGeneration:
             criteria=criteria,
             system_inspect_metrics=_healthy_sys_metrics(12),
             evidence_summary={},
-            observation_window={"activation_at": "T1", "review_at": "T2", "elapsed_hours": 5.0, "elapsed_seconds": 18000.0, "scope": "system_inspect (read-only)"},
+            observation_window={
+                "activation_at": "T1", "review_at": "T2",
+                "elapsed_hours": 5.0, "elapsed_seconds": 18000.0,
+                "scope": "system_inspect (read-only)",
+            },
             scope_integrity=_intact_scope(),
             monitoring_progress={},
         )
@@ -968,9 +985,19 @@ class TestArtifactGeneration:
             criteria=criteria,
             system_inspect_metrics=_healthy_sys_metrics(12),
             evidence_summary={},
-            observation_window={"activation_at": "T1", "review_at": "T2", "elapsed_hours": 5.0, "elapsed_seconds": 18000.0, "scope": "test"},
+            observation_window={
+                "activation_at": "T1", "review_at": "T2",
+                "elapsed_hours": 5.0, "elapsed_seconds": 18000.0,
+                "scope": "test",
+            },
             scope_integrity=_intact_scope(),
-            monitoring_progress={"runs_completed": 12, "runs_required": 10, "runs_progress_pct": 100.0, "elapsed_hours": 5.0, "elapsed_required_hours": 4.0, "elapsed_progress_pct": 100.0, "hard_criteria_passed": 8, "hard_criteria_total": 8, "soft_criteria_passed": 7, "soft_criteria_total": 7},
+            monitoring_progress={
+                "runs_completed": 12, "runs_required": 10,
+                "runs_progress_pct": 100.0, "elapsed_hours": 5.0,
+                "elapsed_required_hours": 4.0, "elapsed_progress_pct": 100.0,
+                "hard_criteria_passed": 8, "hard_criteria_total": 8,
+                "soft_criteria_passed": 7, "soft_criteria_total": 7,
+            },
         )
         md = render_stageD_extended_markdown(review)
         assert "Threshold Comparison" in md
@@ -988,9 +1015,19 @@ class TestArtifactGeneration:
             criteria=criteria,
             system_inspect_metrics=_healthy_sys_metrics(5),
             evidence_summary={},
-            observation_window={"activation_at": "T1", "review_at": "T2", "elapsed_hours": 2.0, "elapsed_seconds": 7200.0, "scope": "test"},
+            observation_window={
+                "activation_at": "T1", "review_at": "T2",
+                "elapsed_hours": 2.0, "elapsed_seconds": 7200.0,
+                "scope": "test",
+            },
             scope_integrity=_intact_scope(),
-            monitoring_progress={"runs_completed": 5, "runs_required": 10, "runs_progress_pct": 50.0, "elapsed_hours": 2.0, "elapsed_required_hours": 4.0, "elapsed_progress_pct": 50.0, "hard_criteria_passed": 8, "hard_criteria_total": 8, "soft_criteria_passed": 5, "soft_criteria_total": 7},
+            monitoring_progress={
+                "runs_completed": 5, "runs_required": 10,
+                "runs_progress_pct": 50.0, "elapsed_hours": 2.0,
+                "elapsed_required_hours": 4.0, "elapsed_progress_pct": 50.0,
+                "hard_criteria_passed": 8, "hard_criteria_total": 8,
+                "soft_criteria_passed": 5, "soft_criteria_total": 7,
+            },
         )
         md = render_stageD_extended_markdown(review)
         assert "Monitoring Progress" in md

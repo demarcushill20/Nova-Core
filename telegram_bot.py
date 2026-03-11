@@ -12,8 +12,8 @@ import re
 import signal
 import sys
 import time
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 # --- Import shim ---
 # Our local telegram/ directory shadows the installed python-telegram-bot
@@ -26,9 +26,9 @@ sys.path = [p for p in sys.path if os.path.realpath(p) != os.path.realpath(_here
 sys.modules.pop("telegram", None)
 sys.modules.pop("telegram.ext", None)
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup  # noqa: E402  — python-telegram-bot library
-from telegram.ext import Application, MessageHandler, CallbackQueryHandler, ContextTypes, filters  # noqa: E402
+from telegram import Update  # noqa: E402  — python-telegram-bot library
 from telegram.constants import ChatAction  # noqa: E402
+from telegram.ext import Application, ContextTypes, MessageHandler, filters  # noqa: E402
 
 sys.path = _path_backup  # restore
 
@@ -41,10 +41,13 @@ _tg_parse = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_tg_parse)
 sys.modules["telegram.parse"] = _tg_parse
 
-from telegram.parse import parse_message, is_memory_persist_request  # noqa: E402
+from telegram.parse import is_memory_persist_request, parse_message  # noqa: E402
 
 # Register additional local telegram modules via the same shim pattern.
-for _mod_name in ("conversation", "llm", "persona", "delegation", "goals", "hardening", "working_memory", "recent_completions", "recap"):
+for _mod_name in (  # noqa: E501
+    "conversation", "llm", "persona", "delegation", "goals",
+    "hardening", "working_memory", "recent_completions", "recap",
+):
     _mod_spec = importlib.util.spec_from_file_location(
         f"telegram.{_mod_name}", os.path.join(_here, "telegram", f"{_mod_name}.py")
     )
@@ -53,29 +56,53 @@ for _mod_name in ("conversation", "llm", "persona", "delegation", "goals", "hard
     _mod_spec.loader.exec_module(_mod_obj)
 
 from telegram.conversation import ConversationManager  # noqa: E402
-from telegram.llm import generate_response, format_history_for_prompt  # noqa: E402
-from telegram.persona import SYSTEM_PROMPT, DELEGATION_ACK_PROMPT, SESSION_START_HINT, MEMORY_PERSIST_ACK_PROMPT  # noqa: E402
 from telegram.delegation import (  # noqa: E402
-    DelegationTracker, find_completed_output, claim_notification,
-    extract_output_summary, get_recent_completions, COMPLETION_SUMMARY_PROMPT,
+    COMPLETION_SUMMARY_PROMPT,
+    DelegationTracker,
+    claim_notification,
+    extract_output_summary,
+    find_completed_output,
+    get_recent_completions,
 )
 from telegram.goals import (  # noqa: E402
-    add_goal, complete_goal, remove_goal, list_goals,
-    clear_completed, format_goals_for_context, format_goals_for_display,
+    add_goal,
+    clear_completed,
+    complete_goal,
+    format_goals_for_context,
+    format_goals_for_display,
+    remove_goal,
 )
 from telegram.hardening import (  # noqa: E402
-    RateLimiter, CircuitBreaker, MetricsCollector, ResponseCache,
-    RATE_LIMIT_MESSAGE, CIRCUIT_OPEN_MESSAGE,
+    CIRCUIT_OPEN_MESSAGE,
+    RATE_LIMIT_MESSAGE,
+    CircuitBreaker,
+    MetricsCollector,
+    RateLimiter,
+    ResponseCache,
 )
-from telegram.working_memory import WorkingMemoryStore, ActiveTask  # noqa: E402
-from telegram.recent_completions import (  # noqa: E402
-    record_completion as rc_record_completion,
-    format_for_context as rc_format_for_context,
-    cleanup as rc_cleanup,
+from telegram.llm import format_history_for_prompt, generate_response  # noqa: E402
+from telegram.persona import (  # noqa: E402
+    DELEGATION_ACK_PROMPT,
+    MEMORY_PERSIST_ACK_PROMPT,
+    SESSION_START_HINT,
+    SYSTEM_PROMPT,
 )
 from telegram.recap import (  # noqa: E402
-    update_recap, format_for_context as recap_format_for_context,
+    format_for_context as recap_format_for_context,
 )
+from telegram.recap import (  # noqa: E402
+    update_recap,
+)
+from telegram.recent_completions import (  # noqa: E402
+    cleanup as rc_cleanup,
+)
+from telegram.recent_completions import (  # noqa: E402
+    format_for_context as rc_format_for_context,
+)
+from telegram.recent_completions import (  # noqa: E402
+    record_completion as rc_record_completion,
+)
+from telegram.working_memory import ActiveTask, WorkingMemoryStore  # noqa: E402
 
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
@@ -1125,68 +1152,75 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             pass  # non-critical — don't block on failure
 
     # Dispatch all actions — extract explicit args from the parsed action dict
-    if action_type == "conversation":
-        # CEO Nova fast conversation path — no task queue
-        reply = await handle_conversation(chat_id, action["text"])
-    elif action_type == "show_help":
-        reply = handle_help()
-    elif action_type == "get_status":
-        reply = handle_status(chat_id)
-    elif action_type == "run_task":
-        # Delegate to task queue, then generate natural acknowledgment
-        _metrics.record_delegation()
-        task_reply, task_stem = handle_run_task(
-            chat_id, action["title"],
-            action.get("body", ""),
-            intent=action.get("intent", "task"),
-        )
-        _log.info("DELEGATED chat=%s task=%s stem=%s", chat_id, task_reply, task_stem)
-        _delegations.track(task_stem, chat_id)
+    try:
+        if action_type == "conversation":
+            # CEO Nova fast conversation path — no task queue
+            reply = await handle_conversation(chat_id, action["text"])
+        elif action_type == "show_help":
+            reply = handle_help()
+        elif action_type == "get_status":
+            reply = handle_status(chat_id)
+        elif action_type == "run_task":
+            # Delegate to task queue, then generate natural acknowledgment
+            _metrics.record_delegation()
+            task_reply, task_stem = handle_run_task(
+                chat_id, action["title"],
+                action.get("body", ""),
+                intent=action.get("intent", "task"),
+            )
+            _log.info("DELEGATED chat=%s task=%s stem=%s", chat_id, task_reply, task_stem)
+            _delegations.track(task_stem, chat_id)
 
-        # Phase 9: write delegation marker so notifier defers to CEO Nova
-        _write_delegation_marker(task_stem)
+            # Phase 9: write delegation marker so notifier defers to CEO Nova
+            _write_delegation_marker(task_stem)
 
-        # Phase 8: capture working memory for this task
-        user_text = action.get("body", "") or action.get("title", "")
-        original_msg = text  # raw user message before parsing
-        context_snap = _conversations.get_history(chat_id)[-10:]  # last 10 msgs
-        task_path = str(TASKS / f"{task_stem}.md")
-        _working_memory.add(ActiveTask(
-            task_stem=task_stem,
-            chat_id=chat_id,
-            original_message=original_msg,
-            intent_summary=action.get("title", original_msg)[:150],
-            created_at=time.time(),
-            status="pending",
-            context_snapshot=context_snap,
-            task_file=task_path,
-            message_id=update.message.message_id,
-        ))
+            # Phase 8: capture working memory for this task
+            user_text = action.get("body", "") or action.get("title", "")
+            original_msg = text  # raw user message before parsing
+            context_snap = _conversations.get_history(chat_id)[-10:]  # last 10 msgs
+            task_path = str(TASKS / f"{task_stem}.md")
+            _working_memory.add(ActiveTask(
+                task_stem=task_stem,
+                chat_id=chat_id,
+                original_message=original_msg,
+                intent_summary=action.get("title", original_msg)[:150],
+                created_at=time.time(),
+                status="pending",
+                context_snapshot=context_snap,
+                task_file=task_path,
+                message_id=update.message.message_id,
+            ))
 
-        # Phase 10: use memory-persist ack prompt for save/store requests
-        _ack_prompt = ""
-        if is_memory_persist_request(text):
-            _ack_prompt = MEMORY_PERSIST_ACK_PROMPT
-        reply = await handle_delegation_ack(chat_id, user_text, task_reply,
-                                            ack_prompt=_ack_prompt)
-    elif action_type == "get_last":
-        reply = handle_get_last(chat_id)
-    elif action_type == "get_output":
-        reply = handle_get_output(chat_id, action["filename"], action.get("page", 1))
-    elif action_type == "tail_log":
-        reply = handle_tail_log(chat_id, action["task_id"], action.get("lines", 50))
-    elif action_type == "cancel_task":
-        reply = handle_cancel_task(chat_id, action["task_id"])
-    elif action_type == "set_mode":
-        reply = handle_set_mode(chat_id, action["mode"])
-    elif action_type == "get_mode":
-        reply = handle_get_mode(chat_id)
-    elif action_type == "goals":
-        reply = _handle_goals(action)
-    elif action_type == "briefing":
-        reply = await _handle_briefing(chat_id)
-    else:
-        reply = f"Unknown action: {action_type}. Try /help"
+            # Phase 10: use memory-persist ack prompt for save/store requests
+            _ack_prompt = ""
+            if is_memory_persist_request(text):
+                _ack_prompt = MEMORY_PERSIST_ACK_PROMPT
+            reply = await handle_delegation_ack(chat_id, user_text, task_reply,
+                                                ack_prompt=_ack_prompt)
+        elif action_type == "get_last":
+            reply = handle_get_last(chat_id)
+        elif action_type == "get_output":
+            reply = handle_get_output(chat_id, action["filename"], action.get("page", 1))
+        elif action_type == "tail_log":
+            reply = handle_tail_log(chat_id, action["task_id"], action.get("lines", 50))
+        elif action_type == "cancel_task":
+            reply = handle_cancel_task(chat_id, action["task_id"])
+        elif action_type == "set_mode":
+            reply = handle_set_mode(chat_id, action["mode"])
+        elif action_type == "get_mode":
+            reply = handle_get_mode(chat_id)
+        elif action_type == "goals":
+            reply = _handle_goals(action)
+        elif action_type == "briefing":
+            reply = await _handle_briefing(chat_id)
+        else:
+            reply = f"Unknown action: {action_type}. Try /help"
+    except Exception as exc:
+        _log.error("DISPATCH_ERROR chat=%s action=%s: %s",
+                   chat_id, action_type, exc, exc_info=True)
+        reply = ("I ran into an internal error processing your message. "
+                 "The issue has been logged and I'll try to recover. "
+                 "Please try again in a moment.")
 
     # Send response, chunking if needed for Telegram's 4096 char limit
     for chunk in chunk_text(reply, chunk_size=4000):

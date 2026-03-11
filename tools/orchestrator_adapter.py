@@ -26,22 +26,22 @@ Stage D enforcement:
 
 import json
 import logging
-import subprocess
 import os
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from planner.orchestrator import Orchestrator
+from planner.pattern_feedback import finalize_pattern_trace, init_pattern_trace, log_pattern_trace
+from planner.pattern_promoter import attempt_pattern_promotion
+from planner.pattern_retriever import retrieve_pattern_guidance
 from planner.schemas import ExecutionPlan, PlanStep
 from planner.supervisor import Supervisor
 from planner.vault_context import inject_vault_context
-from planner.pattern_retriever import retrieve_pattern_guidance
 from planner.workflow_promoter import attempt_promotion
-from planner.pattern_promoter import attempt_pattern_promotion
-from planner.pattern_feedback import init_pattern_trace, finalize_pattern_trace, log_pattern_trace
-from tools.vault_sync import check_sync_after_write
 from tools.task_classifier import classify_task
+from tools.vault_sync import check_sync_after_write
 
 logger = logging.getLogger(__name__)
 
@@ -996,7 +996,7 @@ def _build_orchestrator_report(
     # Files changed: collect from step outputs
     files_changed = "none"
 
-    report += f"\n## CONTRACT\n"
+    report += "\n## CONTRACT\n"
     report += f"summary: Orchestrated execution of {stem} via Phase 7 pipeline ({plan.strategy})\n"
     report += f"files_changed: {files_changed}\n"
     report += f"verification: Orchestrator supervisor evaluated all steps; grade={evaluation.get('grade', 'N/A')}\n"

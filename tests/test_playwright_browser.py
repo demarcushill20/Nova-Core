@@ -18,15 +18,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tools.adapters.playwright_browser import (
-    _validate_url,
-    _validate_output_path,
     _find_chromium,
     _find_ld_library_path,
-    ensure_chromium,
-    browser_screenshot,
+    _validate_output_path,
+    _validate_url,
     browser_pdf,
+    browser_screenshot,
+    ensure_chromium,
 )
-
 
 # ── URL Validation ──────────────────────────────────────────────────────────
 
@@ -396,8 +395,9 @@ class TestRunPlaywrightCli:
            return_value="/fake/libs")
     @patch("tools.adapters.playwright_browser.subprocess.run")
     def test_timeout_returns_error(self, mock_run, _ld, _cr):
-        from tools.adapters.playwright_browser import _run_playwright_cli
         import subprocess as sp
+
+        from tools.adapters.playwright_browser import _run_playwright_cli
         mock_run.side_effect = sp.TimeoutExpired(cmd=["npx"], timeout=30)
 
         result = _run_playwright_cli(["screenshot", "http://x.com", "/tmp/x.png"])

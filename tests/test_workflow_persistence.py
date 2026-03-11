@@ -11,19 +11,15 @@ Tests cover:
 """
 
 import json
-import os
-import time
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from tools.orchestrator_adapter import (
-    _persist_workflow_state,
-    _ORCHESTRATOR_STATUS_MAP,
-)
 from agents.rollout_gate import collect_evidence
-
+from tools.orchestrator_adapter import (
+    _ORCHESTRATOR_STATUS_MAP,
+    _persist_workflow_state,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -92,7 +88,7 @@ class TestPersistWorkflowState:
 
     def test_failed_workflow_written(self, state_dir):
         """Failed orchestrator run writes failed workflow."""
-        result = _persist_workflow_state("task_002", "failed", "code_review", "C")
+        _persist_workflow_state("task_002", "failed", "code_review", "C")
 
         data = json.loads((state_dir / "workflows" / "task_002.json").read_text())
         assert data["status"] == "failed"
@@ -101,7 +97,7 @@ class TestPersistWorkflowState:
 
     def test_rejected_workflow_written(self, state_dir):
         """Plan validation rejection writes rejected workflow with halt_reason."""
-        result = _persist_workflow_state(
+        _persist_workflow_state(
             "task_003", "rejected", "code_impl", "C",
             halt_reason="plan_validation: missing self-verification step",
         )
@@ -247,7 +243,7 @@ class TestRolloutGateCompatibility:
 
     def test_three_completed_meets_minimum(self, evidence_root, monkeypatch):
         """3 completed workflows meet the MIN_COMPLETED_WORKFLOWS threshold."""
-        from agents.rollout_gate import evaluate_rollout, MIN_COMPLETED_WORKFLOWS
+        from agents.rollout_gate import MIN_COMPLETED_WORKFLOWS, evaluate_rollout
 
         monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR",
                             evidence_root / "STATE")

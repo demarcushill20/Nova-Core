@@ -1,9 +1,8 @@
 """Tests for tools/adapters/telegram_send_file.py"""
 
-import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from tools.adapters.telegram_send_file import telegram_send_file
 
@@ -87,13 +86,12 @@ class TestTelegramSendFile:
         with patch.dict("os.environ", {
             "TELEGRAM_BOT_TOKEN": "fake:token",
             "ALLOWED_CHAT_ID": "123456",
-        }):
-            with patch("tools.adapters.telegram_send_file.httpx.Client", return_value=mock_client):
-                result = telegram_send_file(
-                    path="OUTPUT/test.pdf",
-                    caption="Test caption",
-                    _sandbox=tmp_sandbox,
-                )
+        }), patch("tools.adapters.telegram_send_file.httpx.Client", return_value=mock_client):
+            result = telegram_send_file(
+                path="OUTPUT/test.pdf",
+                caption="Test caption",
+                _sandbox=tmp_sandbox,
+            )
 
         assert result["ok"] is True
         assert result["file_sent"] is True
@@ -120,12 +118,11 @@ class TestTelegramSendFile:
         with patch.dict("os.environ", {
             "TELEGRAM_BOT_TOKEN": "fake:token",
             "ALLOWED_CHAT_ID": "123456",
-        }):
-            with patch("tools.adapters.telegram_send_file.httpx.Client", return_value=mock_client):
-                result = telegram_send_file(
-                    path="OUTPUT/test.pdf",
-                    _sandbox=tmp_sandbox,
-                )
+        }), patch("tools.adapters.telegram_send_file.httpx.Client", return_value=mock_client):
+            result = telegram_send_file(
+                path="OUTPUT/test.pdf",
+                _sandbox=tmp_sandbox,
+            )
 
         assert result["ok"] is False
         assert result["file_sent"] is False
@@ -149,8 +146,8 @@ class TestRunnerIntegration:
 
     def test_runner_dispatches_pdf_generate(self, tmp_sandbox):
         """Runner dispatches pdf.generate to the adapter."""
-        from tools.runner import run_tool
         from tools.registry import load_registry
+        from tools.runner import run_tool
 
         reg = load_registry()
         result = run_tool(

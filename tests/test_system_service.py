@@ -11,7 +11,6 @@ from tools.adapters.system_service import (
     service_status,
 )
 
-
 # --- Realistic systemctl status output samples --------------------------------
 
 ACTIVE_OUTPUT = """\
@@ -40,7 +39,8 @@ FAILED_OUTPUT = """\
 ● novacore-notifier.service - NovaCore Telegram Notifier
      Loaded: loaded (/etc/systemd/system/novacore-notifier.service; enabled; vendor preset: enabled)
      Active: failed (Result: exit-code) since Mon 2026-03-02 11:30:00 UTC; 4h ago
-    Process: 160000 ExecStart=/home/nova/nova-core/.venv/bin/python3 telegram_notifier.py (code=exited, status=1/FAILURE)
+    Process: 160000 ExecStart=/home/nova/nova-core/.venv/bin/python3 \
+telegram_notifier.py (code=exited, status=1/FAILURE)
    Main PID: 160000 (code=exited, status=1/FAILURE)
 Mar 02 11:30:00 nova python3[160000]: Traceback (most recent call last):
 Mar 02 11:30:00 nova python3[160000]:   File "telegram_notifier.py", line 1, in <module>

@@ -8,9 +8,9 @@ import re
 from pathlib import Path
 
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 
 def _resolve_repo_root() -> Path:

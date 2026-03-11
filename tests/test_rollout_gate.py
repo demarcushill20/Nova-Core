@@ -23,26 +23,16 @@ import os
 import time
 
 import pytest
-from pathlib import Path
 
 from agents.rollout_gate import (
-    RolloutCriterion,
-    RolloutEvaluation,
+    MIN_COMPLETED_WORKFLOWS,
     collect_evidence,
     evaluate_criteria,
-    decide,
     evaluate_rollout,
-    render_evaluation_markdown,
     render_evaluation_json,
+    render_evaluation_markdown,
     write_evaluation_report,
-    MIN_COMPLETED_WORKFLOWS,
-    MAX_FAILURE_RATE,
-    MAX_VERIFIER_REJECTION_RATE,
-    MAX_CONTRACT_FAILURE_RATE,
-    MAX_POLICY_VIOLATIONS,
-    MAX_BUDGET_EXHAUSTIONS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -562,12 +552,10 @@ class TestDecision_EdgeCases:
 # Part 9 — Stage 3 Readiness Check
 # ===================================================================
 
-from agents.rollout_gate import (
+from agents.rollout_gate import (  # noqa: E402
+    activate_stage3,
     check_stage3_readiness,
     render_readiness_markdown,
-    activate_stage3,
-    ReadinessReport,
-    ActivationRecord,
 )
 
 
@@ -767,7 +755,7 @@ class TestActivation_AuditTrail:
         activate_stage3(tmp_path)
         log_path = tmp_path / "STATE" / "activation_log.jsonl"
         assert log_path.exists()
-        entries = [json.loads(l) for l in log_path.read_text().strip().splitlines()]
+        entries = [json.loads(lease) for lease in log_path.read_text().strip().splitlines()]
         assert len(entries) == 1
         assert entries[0]["outcome"] == "blocked"
 
@@ -777,7 +765,7 @@ class TestActivation_AuditTrail:
         activate_stage3(tmp_path)
         log_path = tmp_path / "STATE" / "activation_log.jsonl"
         assert log_path.exists()
-        entries = [json.loads(l) for l in log_path.read_text().strip().splitlines()]
+        entries = [json.loads(lease) for lease in log_path.read_text().strip().splitlines()]
         assert len(entries) == 1
         assert entries[0]["outcome"] == "activated"
 
@@ -793,7 +781,7 @@ class TestActivation_AuditTrail:
         # Second attempt: ready
         activate_stage3(tmp_path)
         log_path = tmp_path / "STATE" / "activation_log.jsonl"
-        entries = [json.loads(l) for l in log_path.read_text().strip().splitlines()]
+        entries = [json.loads(lease) for lease in log_path.read_text().strip().splitlines()]
         assert len(entries) == 2
         assert entries[0]["outcome"] == "blocked"
         assert entries[1]["outcome"] == "activated"

@@ -12,34 +12,28 @@ Tests cover:
 
 import json
 import time
+
 import pytest
-from pathlib import Path
 
 from agents.rollout_gate import (
-    Stage4Evaluation,
+    MAX_CONTRACT_FAILURE_RATE,
+    STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
+    STAGE3_MAX_FAILURE_RATE,
+    STAGE3_MAX_RECOVERY_ANOMALIES,
+    STAGE3_MAX_VERIFIER_REJECTION_RATE,
+    STAGE3_MIN_CODE_IMPL_RUNS,
+    STAGE4_MAX_CODE_IMPL_FAILURE_RATE,
+    STAGE4_MAX_CONTRACT_FAILURE_RATE,
+    STAGE4_MAX_FAILURE_RATE,
+    STAGE4_MAX_RECOVERY_ANOMALIES,
+    STAGE4_MAX_VERIFIER_REJECTION_RATE,
+    STAGE4_MIN_CODE_IMPL_RUNS,
     RolloutCriterion,
-    evaluate_stage4_criteria,
     decide_stage4_readiness,
     evaluate_stage4,
     render_stage4_evaluation_markdown,
     write_stage4_evaluation,
-    STAGE4_MIN_CODE_IMPL_RUNS,
-    STAGE4_MAX_CODE_IMPL_FAILURE_RATE,
-    STAGE4_MAX_FAILURE_RATE,
-    STAGE4_MAX_VERIFIER_REJECTION_RATE,
-    STAGE4_MAX_CONTRACT_FAILURE_RATE,
-    STAGE4_MAX_RECOVERY_ANOMALIES,
-    STAGE4_MIN_TOTAL_COMPLETED,
-    STAGE3_MIN_CODE_IMPL_RUNS,
-    STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
-    STAGE3_MAX_FAILURE_RATE,
-    STAGE3_MAX_VERIFIER_REJECTION_RATE,
-    STAGE3_MAX_RECOVERY_ANOMALIES,
-    MAX_CONTRACT_FAILURE_RATE,
-    MAX_POLICY_VIOLATIONS,
-    MAX_BUDGET_EXHAUSTIONS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

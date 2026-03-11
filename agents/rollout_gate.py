@@ -1,4 +1,8 @@
-"""Phase 7.11–7.23 — Rollout Evaluation Gate, Activation, Stability Review, Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation, Stage D Monitoring, Extended Monitoring, Broader System Scope Evaluation, Rollout Plan, System Report Activation, and System Report Stability Monitoring.
+"""Phase 7.11-7.23 -- Rollout Evaluation Gate, Activation, Stability Review,
+
+Stage 4 Evaluation, Rollout Plan, Activation Gate, Controlled Activation,
+Stage D Monitoring, Extended Monitoring, Broader System Scope Evaluation,
+Rollout Plan, System Report Activation, and System Report Stability Monitoring.
 
 Deterministic, repository-native evaluation of rollout readiness and stability.
 Reads existing heartbeat, metrics, and workflow state to classify rollout
@@ -488,8 +492,8 @@ def collect_evidence(base: Path | None = None) -> dict:
 
     # --- Stale leases ---
     leases = _list_json_files(state / "leases")
-    stale = sum(1 for l in leases
-                if l.get("expires_at", 0) and l["expires_at"] < now)
+    stale = sum(1 for lease in leases
+                if lease.get("expires_at", 0) and lease["expires_at"] < now)
     ev["stale_leases"] = stale
 
     # --- Recovery events ---
@@ -538,7 +542,7 @@ def evaluate_criteria(evidence: dict) -> list[RolloutCriterion]:
         detail=(
             f"Current heartbeat: {hb or '(no data)'}"
             if hb != "unhealthy"
-            else f"Heartbeat is UNHEALTHY — rollout unsafe"
+            else "Heartbeat is UNHEALTHY — rollout unsafe"
         ),
         severity="hard",
     ))
@@ -2366,10 +2370,16 @@ def render_stage4_evaluation_markdown(evaluation: Stage4Evaluation) -> str:
     lines.append("| Criterion | Stage 3 Threshold | Stage 4 Threshold |")
     lines.append("|-----------|-------------------|-------------------|")
     lines.append(f"| code_impl minimum runs | {STAGE3_MIN_CODE_IMPL_RUNS} | {STAGE4_MIN_CODE_IMPL_RUNS} |")
-    lines.append(f"| code_impl failure rate | {STAGE3_MAX_CODE_IMPL_FAILURE_RATE:.0%} | {STAGE4_MAX_CODE_IMPL_FAILURE_RATE:.0%} |")
+    s3 = f"{STAGE3_MAX_CODE_IMPL_FAILURE_RATE:.0%}"
+    s4 = f"{STAGE4_MAX_CODE_IMPL_FAILURE_RATE:.0%}"
+    lines.append(f"| code_impl failure rate | {s3} | {s4} |")
     lines.append(f"| Overall failure rate | {STAGE3_MAX_FAILURE_RATE:.0%} | {STAGE4_MAX_FAILURE_RATE:.0%} |")
-    lines.append(f"| Verifier rejection rate | {STAGE3_MAX_VERIFIER_REJECTION_RATE:.0%} | {STAGE4_MAX_VERIFIER_REJECTION_RATE:.0%} |")
-    lines.append(f"| Contract failure rate | {MAX_CONTRACT_FAILURE_RATE:.0%} | {STAGE4_MAX_CONTRACT_FAILURE_RATE:.0%} |")
+    s3v = f"{STAGE3_MAX_VERIFIER_REJECTION_RATE:.0%}"
+    s4v = f"{STAGE4_MAX_VERIFIER_REJECTION_RATE:.0%}"
+    lines.append(f"| Verifier rejection rate | {s3v} | {s4v} |")
+    s3c = f"{MAX_CONTRACT_FAILURE_RATE:.0%}"
+    s4c = f"{STAGE4_MAX_CONTRACT_FAILURE_RATE:.0%}"
+    lines.append(f"| Contract failure rate | {s3c} | {s4c} |")
     lines.append(f"| Recovery anomalies | {STAGE3_MAX_RECOVERY_ANOMALIES} | {STAGE4_MAX_RECOVERY_ANOMALIES} |")
     lines.append("")
 
@@ -2708,7 +2718,10 @@ def render_stage4_plan_markdown(plan: Stage4RolloutPlan) -> str:
     lines.append("4. **Heartbeat prerequisite** — must be `healthy` (not just `not unhealthy`)")
     lines.append("5. **Zero-tolerance abort** — any policy violation or budget exhaustion triggers immediate rollback")
     lines.append("6. **shell-ops blocked** — no shell execution in system inspection path")
-    lines.append("7. **Tighter success criteria** — failure rate, rejection rate, and contract failure thresholds lower than Stage 3")
+    lines.append(
+        "7. **Tighter success criteria** — failure rate, rejection rate,"
+        " and contract failure thresholds lower than Stage 3"
+    )
     lines.append("")
 
     # Activation prerequisites
@@ -3610,7 +3623,9 @@ def render_stage4_activation_markdown(record: Stage4ActivationRecord) -> str:
         lines.append("")
         pre = record.pre_config
         post = record.post_config
-        lines.append(f"- **supported_classes**: {pre.get('supported_classes', [])} → {post.get('supported_classes', [])}")
+        pre_cls = pre.get('supported_classes', [])
+        post_cls = post.get('supported_classes', [])
+        lines.append(f"- **supported_classes**: {pre_cls} → {post_cls}")
         lines.append(f"- **stage**: {pre.get('stage', '?')} → {post.get('stage', '?')}")
         lines.append(f"- **rollout_stage**: {pre.get('rollout_stage', '?')} → {post.get('rollout_stage', '?')}")
         lines.append(f"- **system_scope**: (new) → {post.get('system_scope', '?')}")
@@ -4203,7 +4218,7 @@ def render_stageD_stability_markdown(review: StageDStabilityReview) -> str:
         "",
         f"**Rollout stage**: {review.rollout_stage}",
         f"**Enabled classes**: {', '.join(review.enabled_classes)}",
-        f"**System scope**: inspect_only (read-only)",
+        "**System scope**: inspect_only (read-only)",
         "",
         f"**Next action**: {review.next_action}",
         "",
@@ -4368,7 +4383,9 @@ class StageDExtendedMonitoring:
     observation window with tighter thresholds than the initial Phase 7.18
     stability review.
     """
-    decision: str          # "stageD_sustained_stable" | "stageD_continue_monitoring" | "rollback_system_inspect_recommended"
+    # "stageD_sustained_stable" | "stageD_continue_monitoring"
+    # | "rollback_system_inspect_recommended"
+    decision: str
     rollout_stage: str
     enabled_classes: list[str] = field(default_factory=list)
     criteria: list[RolloutCriterion] = field(default_factory=list)
@@ -4597,11 +4614,10 @@ def evaluate_stageD_extended(
     if recovery_classification is not None:
         unresolved = recovery_classification.get("unresolved", post_activation_recoveries)
         resolved = recovery_classification.get("resolved", 0)
-        total_rec = recovery_classification.get("total", post_activation_recoveries)
+        recovery_classification.get("total", post_activation_recoveries)
     else:
         unresolved = post_activation_recoveries
         resolved = 0
-        total_rec = post_activation_recoveries
 
     if unresolved == 0 and resolved > 0:
         rec_detail = (
@@ -4998,7 +5014,7 @@ def render_stageD_extended_markdown(review: StageDExtendedMonitoring) -> str:
         "",
         f"**Rollout stage**: {review.rollout_stage}",
         f"**Enabled classes**: {', '.join(review.enabled_classes)}",
-        f"**System scope**: inspect_only (read-only)",
+        "**System scope**: inspect_only (read-only)",
         "",
         f"**Next action**: {review.next_action}",
         "",
@@ -5121,11 +5137,17 @@ def render_stageD_extended_markdown(review: StageDExtendedMonitoring) -> str:
     lines.append(f"| Min system_inspect runs | {STAGED_MIN_SYSTEM_INSPECT_RUNS} | {EXTENDED_MIN_SYSTEM_INSPECT_RUNS} |")
     lines.append(f"| Min elapsed time | N/A | {EXTENDED_MIN_ELAPSED_SECONDS / 3600:.0f}h |")
     lines.append(f"| Max failure rate | {STAGED_MAX_FAILURE_RATE:.0%} | {EXTENDED_MAX_FAILURE_RATE:.0%} |")
-    lines.append(f"| Max system_inspect failure rate | {STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%} | {EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%} |")
-    lines.append(f"| Max verifier rejection rate | {STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%} | {EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%} |")
-    lines.append(f"| Max blocked mutations | {STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS} | {EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS} |")
+    si_s = f"{STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%}"
+    si_e = f"{EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%}"
+    lines.append(f"| Max system_inspect failure rate | {si_s} | {si_e} |")
+    vr_s = f"{STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%}"
+    vr_e = f"{EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%}"
+    lines.append(f"| Max verifier rejection rate | {vr_s} | {vr_e} |")
+    bm_s = STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS
+    bm_e = EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS
+    lines.append(f"| Max blocked mutations | {bm_s} | {bm_e} |")
     lines.append(f"| Contract failure rate | N/A | {EXTENDED_MAX_CONTRACT_FAILURE_RATE:.0%} |")
-    lines.append(f"| Recovery anomalies (severity) | soft | hard |")
+    lines.append("| Recovery anomalies (severity) | soft | hard |")
     lines.append("")
 
     # Required operator action
@@ -5217,7 +5239,9 @@ class BroaderSystemScopeEvaluation:
     governed to justify planning for a broader bounded system scope.
     Evaluation only — does not activate anything.
     """
-    decision: str          # "ready_for_broader_system_scope_planning" | "hold_broader_system_scope" | "block_broader_system_scope"
+    # "ready_for_broader_system_scope_planning"
+    # | "hold_broader_system_scope" | "block_broader_system_scope"
+    decision: str
     rollout_stage: str
     enabled_classes: list[str] = field(default_factory=list)
     criteria: list[RolloutCriterion] = field(default_factory=list)
@@ -5677,7 +5701,7 @@ def render_broader_system_scope_markdown(
         "",
         f"**Rollout stage**: {review.rollout_stage}",
         f"**Enabled classes**: {', '.join(review.enabled_classes)}",
-        f"**Current system scope**: inspect_only (read-only)",
+        "**Current system scope**: inspect_only (read-only)",
         f"**Extended monitoring**: {review.extended_monitoring_decision}",
         "",
         f"**Next action**: {review.next_action}",
@@ -6744,7 +6768,10 @@ def evaluate_system_report_stability(
             passed=rejection_rate <= REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
             value=round(rejection_rate, 4),
             threshold=REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
-            detail=f"Verifier rejection rate {rejection_rate:.1%} (max {REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE:.0%})",
+            detail=(
+                f"Verifier rejection rate {rejection_rate:.1%}"
+                f" (max {REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE:.0%})"
+            ),
             severity="soft",
         ))
     else:
@@ -6894,7 +6921,10 @@ def review_system_report_stability(
         "runs_pct": min(100, round(100 * report_metrics["total_runs"] / runs_target)) if runs_target else 100,
         "elapsed_hours": elapsed_hours,
         "elapsed_target_hours": elapsed_target,
-        "elapsed_pct": min(100, round(100 * elapsed_seconds / REPORT_STABILITY_MIN_ELAPSED_SECONDS)) if REPORT_STABILITY_MIN_ELAPSED_SECONDS else 100,
+        "elapsed_pct": (
+            min(100, round(100 * elapsed_seconds / REPORT_STABILITY_MIN_ELAPSED_SECONDS))
+            if REPORT_STABILITY_MIN_ELAPSED_SECONDS else 100
+        ),
     }
 
     evidence = {
@@ -6959,12 +6989,23 @@ def render_system_report_stability_markdown(
         "",
         f"- **system_report activated at**: {review.observation_window.get('activation_at', 'N/A')}",
         f"- **Review at**: {review.observation_window.get('review_at', 'N/A')}",
-        f"- **Elapsed**: {review.observation_window.get('elapsed_hours', 0)}h ({review.observation_window.get('elapsed_seconds', 0)}s)",
+        (
+            f"- **Elapsed**: {review.observation_window.get('elapsed_hours', 0)}h"
+            f" ({review.observation_window.get('elapsed_seconds', 0)}s)"
+        ),
         "",
         "## Monitoring Progress",
         "",
-        f"- **Runs**: {review.monitoring_progress.get('runs_completed', 0)}/{review.monitoring_progress.get('runs_target', 0)} ({review.monitoring_progress.get('runs_pct', 0)}%)",
-        f"- **Elapsed**: {review.monitoring_progress.get('elapsed_hours', 0)}h/{review.monitoring_progress.get('elapsed_target_hours', 0)}h ({review.monitoring_progress.get('elapsed_pct', 0)}%)",
+        (
+            f"- **Runs**: {review.monitoring_progress.get('runs_completed', 0)}"
+            f"/{review.monitoring_progress.get('runs_target', 0)}"
+            f" ({review.monitoring_progress.get('runs_pct', 0)}%)"
+        ),
+        (
+            f"- **Elapsed**: {review.monitoring_progress.get('elapsed_hours', 0)}h"
+            f"/{review.monitoring_progress.get('elapsed_target_hours', 0)}h"
+            f" ({review.monitoring_progress.get('elapsed_pct', 0)}%)"
+        ),
         "",
         "## Scope Integrity",
         "",

@@ -9,21 +9,19 @@ Covers:
 - Checklist file requirement
 """
 import json
-import os
 import sys
 import tempfile
-import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Add project root to path
 _here = str(Path(__file__).resolve().parent.parent)
 if _here not in sys.path:
     sys.path.insert(0, _here)
 
-import heartbeat
+import heartbeat  # noqa: E402
 
 
 class TestActiveHoursGating(unittest.TestCase):
@@ -193,13 +191,15 @@ class TestProactiveTaskInjection(unittest.TestCase):
         content = tasks[0].read_text()
         self.assertIn("Clean up old files", content)
 
-    def test_rate_limits_at_two(self):
-        """Should not create more than 2 pending proactive tasks."""
+    def test_rate_limits_at_four(self):
+        """Should not create more than 4 pending proactive tasks."""
         heartbeat._inject_proactive_task("Task 1", "body 1")
         heartbeat._inject_proactive_task("Task 2", "body 2")
-        heartbeat._inject_proactive_task("Task 3", "body 3")  # should be blocked
+        heartbeat._inject_proactive_task("Task 3", "body 3")
+        heartbeat._inject_proactive_task("Task 4", "body 4")
+        heartbeat._inject_proactive_task("Task 5", "body 5")  # should be blocked
         tasks = list(heartbeat.TASKS_DIR.glob("hb_proactive_*.md"))
-        self.assertEqual(len(tasks), 2)
+        self.assertEqual(len(tasks), 4)
 
     def test_completed_tasks_dont_count(self):
         """Completed (.done) proactive tasks shouldn't count toward rate limit."""
@@ -283,9 +283,10 @@ class TestChecklistFileExists(unittest.TestCase):
     def test_checklist_has_sections(self):
         content = Path("/home/nova/nova-core/HEARTBEAT_CHECKLIST.md").read_text()
         self.assertIn("Task Queue", content)
-        self.assertIn("Follow-ups", content)
-        self.assertIn("Proactive", content)
+        self.assertIn("Research", content)
+        self.assertIn("Planning", content)
         self.assertIn("System Health", content)
+        self.assertIn("Memory", content)
 
     def test_checklist_has_response_format(self):
         content = Path("/home/nova/nova-core/HEARTBEAT_CHECKLIST.md").read_text()

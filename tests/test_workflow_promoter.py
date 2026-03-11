@@ -4,20 +4,15 @@ Phase 5.5: verifies eligibility rules, compaction, promotion execution,
 and safety boundaries for workflow-learning vault promotion.
 """
 
-import pytest
 import time
 
 from planner.workflow_promoter import (
-    _LEARNING_SIGNALS,
-    _MIN_LEARNING_SIGNALS,
     _MIN_PROMOTION_GRADES,
-    _MIN_STEPS_FOR_PROMOTION,
     _PROMOTABLE_TASK_CLASSES,
     attempt_promotion,
     compact_workflow_learning,
     is_eligible_for_promotion,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -302,7 +297,6 @@ class TestAttemptPromotion:
 
     def test_eligible_with_mock_vault(self, monkeypatch):
         """Eligible workflow with mocked vault tools promotes successfully."""
-        import planner.workflow_promoter as wp
 
         def mock_validate(frontmatter, body):
             return {"valid": True, "errors": []}
@@ -473,7 +467,8 @@ class TestOrchestratorIntegration:
         monkeypatch.setattr(oa, "Supervisor", lambda: None)
 
         # Mock vault tools for both context injection and promotion
-        import types, sys
+        import sys
+        import types
         mock_module = types.ModuleType("tools.mcp_vault_server")
         mock_module.vault_validate = lambda frontmatter, body="": {"valid": True, "errors": []}
         mock_module.vault_write = lambda path, frontmatter, body: {"path": path, "size": 100}

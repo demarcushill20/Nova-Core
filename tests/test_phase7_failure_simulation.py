@@ -28,34 +28,45 @@ from pathlib import Path
 import pytest
 
 from agents.blackboard import (
-    Blackboard, ChildContract, Delegation, WorkflowState,
     AgentRuntimeState,
+    Blackboard,
+    ChildContract,
+    WorkflowState,
 )
 from agents.coordination import (
-    CoordinationLayer, NodeState, Lease, LeaseConflict,
+    CoordinationLayer,
+    Lease,
+    NodeState,
 )
-from agents.critic import CriticEngine, CriticReview
 from agents.memory_engine import (
-    MemoryArtifact, write_memory_artifact, validate_memory_artifact,
-    capture_workflow_memory,
+    MemoryArtifact,
+    validate_memory_artifact,
+    write_memory_artifact,
 )
 from agents.observability import (
-    collect_metrics, detect_health_issues, generate_health_report, Severity,
+    Severity,
+    collect_metrics,
+    detect_health_issues,
 )
 from agents.policy_engine import PolicyEngine, PolicyViolation
 from agents.production_hardening import (
-    FeatureFlags, RateLimiter, ArchiveManager, RestartRecovery,
-    ApprovalGate, run_production_hardening,
+    ApprovalGate,
+    ArchiveManager,
+    FeatureFlags,
+    RateLimiter,
+    RestartRecovery,
+    run_production_hardening,
 )
 from agents.verifier import VerifierEngine
 from agents.workflow_engine import (
-    WorkflowEngine, WorkflowHalt, WorkflowLimits,
-    HALT_BUDGET_EXHAUSTED, HALT_VERIFIER_REJECTED, HALT_POLICY_VIOLATION,
+    WorkflowEngine,
+    WorkflowHalt,
 )
 from agents.workflow_gate import (
-    WorkflowGate, RerouteDecision, validate_contract_fields,
+    RerouteDecision,
+    WorkflowGate,
+    validate_contract_fields,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -291,7 +302,7 @@ class TestCriticObjectionReplan:
         gate = WorkflowGate(blackboard=bb)
 
         # Empty deliverable value → empty_deliverable reason_code → retryable
-        fpath = _make_file(tmp_path, "out.md", "content")
+        _make_file(tmp_path, "out.md", "content")
         review = gate.run_critic_review(
             "wf_obj_3", "node_c",
             deliverables={"empty_val": ""},  # empty string → high severity
@@ -414,7 +425,7 @@ class TestStaleLease:
         coord._write_lease(lease)
 
         # Recover — should fail the node
-        state = coord.recover_workflow("wf_stale_3")
+        coord.recover_workflow("wf_stale_3")
         nodes = coord.get_node_states("wf_stale_3")
         assert nodes["A"].status == "failed"
 
@@ -501,7 +512,7 @@ class TestDependencyTimeout:
     """Observability detects agents waiting too long on dependencies."""
 
     def test_dependency_wait_warning(self, tmp_path):
-        bb = _bb(tmp_path)
+        _bb(tmp_path)
 
         # Agent waiting beyond SLA — write file directly because
         # set_agent_state() overwrites updated_at with time.time()
@@ -1192,9 +1203,9 @@ class TestApprovalGate:
 # ===========================================================================
 
 if __name__ == "__main__":
+    import inspect
     import sys
     import tempfile
-    import inspect
 
     test_classes = [
         TestChildContractMissing,

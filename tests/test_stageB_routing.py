@@ -12,29 +12,25 @@ Tests cover:
   9. Feature flag fail-closed defaults
 """
 
-import json
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
+from tools.orchestrator_adapter import (
+    _STAGE_B_ALLOWED_SKILLS,
+    _STAGE_B_BLOCKED_SKILLS,
+    _build_stageB_research_steps,
+    build_plan_from_task,
+    validate_stageB_plan,
+)
 from tools.task_classifier import (
-    classify_task,
+    STAGE_B_CLASSES,
+    _default_flags,
     classify_and_route,
+    classify_task,
     has_mutation_signals,
     is_stageB_eligible,
     should_use_orchestrator,
-    load_feature_flags,
-    STAGE_B_CLASSES,
-    _default_flags,
 )
-from tools.orchestrator_adapter import (
-    build_plan_from_task,
-    validate_stageB_plan,
-    _build_stageB_research_steps,
-    _STAGE_B_ALLOWED_SKILLS,
-    _STAGE_B_BLOCKED_SKILLS,
-)
-
 
 # ---------------------------------------------------------------------------
 # Feature flag fixtures
@@ -107,7 +103,10 @@ class TestEligibleResearchRouting:
         assert eligible is True
 
     def test_investigation_task_eligible(self):
-        task = "Investigate and analyze how other open-source projects handle plugin architectures and compare approaches"
+        task = (
+            "Investigate and analyze how other open-source projects"
+            " handle plugin architectures and compare approaches"
+        )
         cls, conf = classify_task(task)
         assert cls == "research"
         assert conf >= 0.5
@@ -337,7 +336,7 @@ class TestStageBPlanValidation:
 
     def test_plan_with_shell_ops_rejected(self):
         """Manually constructed plan with shell-ops should be rejected."""
-        from planner.schemas import PlanStep, ExecutionPlan
+        from planner.schemas import ExecutionPlan, PlanStep
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",
@@ -357,7 +356,7 @@ class TestStageBPlanValidation:
         assert "blocked_skill:shell-ops" in reason
 
     def test_plan_with_git_ops_rejected(self):
-        from planner.schemas import PlanStep, ExecutionPlan
+        from planner.schemas import ExecutionPlan, PlanStep
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",
@@ -377,7 +376,7 @@ class TestStageBPlanValidation:
         assert "blocked_skill:git-ops" in reason
 
     def test_plan_with_task_execution_rejected(self):
-        from planner.schemas import PlanStep, ExecutionPlan
+        from planner.schemas import ExecutionPlan, PlanStep
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",

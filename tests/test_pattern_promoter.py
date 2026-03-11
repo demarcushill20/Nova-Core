@@ -1,18 +1,13 @@
 """Tests for planner/pattern_promoter.py — Phase 6.5 agent-pattern promotion."""
 
-import time
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from planner.pattern_promoter import (
+    _build_pattern_payload,
     _extract_keywords,
     _keyword_overlap,
     assess_pattern_candidate,
     attempt_pattern_promotion,
-    _build_pattern_payload,
-    _MIN_CONVERGING_LEARNINGS,
-    _MIN_KEYWORD_OVERLAP,
-    _PATTERN_ELIGIBLE_CLASSES,
 )
 
 # All vault tool patches target the source module because the functions
@@ -544,8 +539,9 @@ class TestOrchestratorIntegration:
 
     def test_integration_only_after_learning_promoted(self):
         """Pattern promotion only triggers when learning was promoted."""
-        import tools.orchestrator_adapter as oa
         import inspect
+
+        import tools.orchestrator_adapter as oa
         source = inspect.getsource(oa.execute_via_orchestrator)
         assert "attempt_pattern_promotion" in source
         assert 'promotion_result.get("promoted")' in source

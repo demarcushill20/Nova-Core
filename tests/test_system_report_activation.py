@@ -11,42 +11,35 @@ Covers:
 """
 
 import json
-import os
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 # Ensure project root is importable
 import sys
+import tempfile
+from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tools.task_classifier import (
-    validate_system_shell_command,
-    SYSTEM_SHELL_ALLOWLIST,
-    SYSTEM_SHELL_DENYLIST,
-)
 from agents.rollout_gate import (
     SystemReportActivationGate,
-    evaluate_system_report_activation,
-    decide_system_report_activation,
+    _verify_shell_enforcement,
     activate_system_report_scope,
     deactivate_system_report_scope,
+    decide_system_report_activation,
+    evaluate_system_report_activation,
     write_system_report_activation_gate,
-    _verify_shell_enforcement,
-    REPORT_REQUIRED_BROADER_DECISION,
-)
-from tools.orchestrator_adapter import (
-    _build_stageD_report_steps,
-    validate_stageD_report_plan,
-    validate_stageD_plan,
-    _get_system_scope,
-    _STAGE_D_REPORT_ALLOWED_SKILLS,
-    _STAGE_D_REPORT_BLOCKED_SKILLS,
 )
 from planner.schemas import ExecutionPlan, PlanStep
-
+from tools.orchestrator_adapter import (
+    _STAGE_D_REPORT_ALLOWED_SKILLS,
+    _STAGE_D_REPORT_BLOCKED_SKILLS,
+    _build_stageD_report_steps,
+    _get_system_scope,
+    validate_stageD_plan,
+    validate_stageD_report_plan,
+)
+from tools.task_classifier import (
+    validate_system_shell_command,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

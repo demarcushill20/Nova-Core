@@ -7,22 +7,24 @@ before marking tasks as done.
 """
 
 import json
+import logging
 import os
 import signal
 import subprocess
 import sys
 import time
-import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from tools.contracts import validate_contract
-from tools.skills import load_skills, select_skills, render_append_prompt
-from tools.task_classifier import classify_and_route
-from agents.session_manager import SessionManager
+
 from agents.memory_engine import (
-    retrieve_related_patterns, format_retrieval_for_planner,
     capture_direct_task_memory,
+    format_retrieval_for_planner,
+    retrieve_related_patterns,
 )
+from agents.session_manager import SessionManager
+from tools.contracts import validate_contract
+from tools.skills import load_skills, render_append_prompt, select_skills
+from tools.task_classifier import classify_and_route
 
 # --- Configuration ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -43,16 +45,21 @@ METRICS_FILE = STATE_DIR / "metrics.json"
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
 
 # Stopwords for keyword extraction (memory retrieval)
-_STOPWORDS = frozenset(
-    "the a an is are was were be been being have has had do does did "
-    "will would shall should may might can could of in to for on with "
-    "at by from as into through during before after above below between "
-    "out up down off over under again further then once here there when "
-    "where why how all each every both few more most other some such no "
-    "not only own same so than too very and but or nor if this that "
-    "these those it its my your his her our their what which who whom "
-    "please also just about using use used create make".split()
-)
+_STOPWORDS = frozenset([
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
+    "should", "may", "might", "can", "could", "of", "in", "to", "for",
+    "on", "with", "at", "by", "from", "as", "into", "through", "during",
+    "before", "after", "above", "below", "between", "out", "up", "down",
+    "off", "over", "under", "again", "further", "then", "once", "here",
+    "there", "when", "where", "why", "how", "all", "each", "every",
+    "both", "few", "more", "most", "other", "some", "such", "no", "not",
+    "only", "own", "same", "so", "than", "too", "very", "and", "but",
+    "or", "nor", "if", "this", "that", "these", "those", "it", "its",
+    "my", "your", "his", "her", "our", "their", "what", "which", "who",
+    "whom", "please", "also", "just", "about", "using", "use", "used",
+    "create", "make",
+])
 
 
 def _extract_keywords(task_text: str, max_keywords: int = 10) -> list[str]:

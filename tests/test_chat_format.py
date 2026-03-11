@@ -1,14 +1,13 @@
 """Tests for intent classification + report stripping."""
 
-import sys
 import os
+import sys
 
 # Ensure the project root is on sys.path so local telegram/ resolves.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from telegram.parse import classify_intent
 from telegram.format import strip_report_sections
-
+from telegram.parse import classify_intent
 
 # ---------------------------------------------------------------------------
 # classify_intent

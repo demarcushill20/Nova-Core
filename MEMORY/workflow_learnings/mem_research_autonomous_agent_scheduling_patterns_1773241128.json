@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_research_autonomous_agent_scheduling_patterns_1773241128",
+  "workflow_id": "research_autonomous_agent_scheduling_patterns",
+  "task_summary": "Researched autonomous agent scheduling patterns across 5 dimensions \u2014 task prioritization, MCP tools, adaptive heartbeat, event-driven architecture \u2014 with 5 actionable recommendations for nova-core",
+  "task_class": "research",
+  "roles_involved": [
+    "direct_worker"
+  ],
+  "key_decisions": [
+    "Researched autonomous agent scheduling patterns across 5 dimensions \u2014 task prioritization, MCP tools, adaptive heartbeat, event-driven architecture \u2014 with 5 actionable recommendations for nova-core"
+  ],
+  "successful_patterns": [
+    "direct_worker: Researched autonomous agent scheduling patterns across 5 dimensions \u2014 task prioritization, MCP tools, adaptive heartbeat, event-driven architecture \u2014 with 5 actionable recommendations for nova-core"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "approved",
+  "reusable_guidance": "Researched autonomous agent scheduling patterns across 5 dimensions \u2014 task prioritization, MCP tools, adaptive heartbeat, event-driven architecture \u2014 with 5 actionable recommendations for nova-core (files: OUTPUT/research_autonomous_agent_scheduling_patterns__20260311-145339.md (created))",
+  "created_at": "2026-03-11T14:58:48Z",
+  "confidence": "low"
+}

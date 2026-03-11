@@ -21,24 +21,23 @@ from pathlib import Path
 import pytest
 
 from agents.blackboard import (
-    Blackboard, ChildContract, Delegation, WorkflowState,
+    Blackboard,
+    ChildContract,
 )
-from agents.coordination import CoordinationLayer, NodeState, LeaseConflict
-from agents.critic import CriticEngine
+from agents.coordination import CoordinationLayer, LeaseConflict, NodeState
 from agents.memory_engine import (
-    capture_workflow_memory, retrieve_related_patterns,
-    write_memory_artifact, MemoryArtifact,
+    capture_workflow_memory,
+    retrieve_related_patterns,
 )
 from agents.observability import (
-    collect_metrics, detect_health_issues, generate_health_report,
+    collect_metrics,
+    generate_health_report,
     run_multiagent_heartbeat,
 )
 from agents.production_hardening import FeatureFlags, run_production_hardening
-from agents.verifier import VerifierEngine
 from agents.workflow_engine import WorkflowEngine, WorkflowHalt, WorkflowLimits
 from agents.workflow_gate import WorkflowGate, validate_contract_fields
 from agents.workflow_graph import WorkflowGraphBuilder, render_markdown
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -206,7 +205,7 @@ class TestGovernedWorkflowLifecycle:
                                 {"status": "completed"})
 
         # 6. Delegate second subtask (depends on research)
-        d2 = engine.delegate("wf_e2e_1", "code", "coder_001",
+        engine.delegate("wf_e2e_1", "code", "coder_001",
                              "coder", "Implement the feature")
 
         # 7. Claim and complete second subtask
@@ -272,7 +271,7 @@ class TestGovernedWorkflowLifecycle:
         engine = WorkflowEngine(blackboard=bb)
 
         engine.create_workflow("wf_metrics_1", "task_m1")
-        d = engine.delegate("wf_metrics_1", "sub1", "agent_1", "coder", "Do X")
+        engine.delegate("wf_metrics_1", "sub1", "agent_1", "coder", "Do X")
         engine.claim_delegation("wf_metrics_1", "sub1", "agent_1")
         time.sleep(0.01)  # measurable latency
         contract = _child_contract("wf_metrics_1", "sub1", "agent_1")
@@ -501,7 +500,7 @@ class TestObservabilityIntegrated:
         contract = _child_contract("wf_obs_2", "sub1", "agent_1")
         engine.complete_delegation("wf_obs_2", "sub1", "agent_1", contract)
 
-        synthesis = engine.synthesize_workflow("wf_obs_2")
+        engine.synthesize_workflow("wf_obs_2")
 
         metrics = collect_metrics(base=tmp_path)
         assert metrics.completed_workflows == 1
@@ -524,7 +523,7 @@ class TestObservabilityIntegrated:
         engine = WorkflowEngine(blackboard=bb)
         engine.create_workflow("wf_obs_4", "task_obs4")
 
-        report = run_multiagent_heartbeat(base=tmp_path)
+        run_multiagent_heartbeat(base=tmp_path)
         md_path = tmp_path / "HEARTBEAT_MULTIAGENT.md"
         json_path = tmp_path / "STATE" / "heartbeat_multiagent.json"
         assert md_path.exists()
@@ -737,7 +736,7 @@ class TestBudgetExhaustion:
         limits = WorkflowLimits(max_workflow_runtime_s=0)
         engine = WorkflowEngine(blackboard=bb, limits=limits)
 
-        wf = engine.create_workflow("wf_budget_1", "task_b1",
+        engine.create_workflow("wf_budget_1", "task_b1",
                                      budget={"max_runtime_s": 0})
 
         # Any stop-condition check should halt
@@ -862,9 +861,9 @@ class TestChildContractSchemaAlignment:
 # ===========================================================================
 
 if __name__ == "__main__":
+    import inspect
     import sys
     import tempfile
-    import inspect
 
     test_classes = [
         TestGovernedWorkflowLifecycle,

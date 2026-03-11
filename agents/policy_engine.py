@@ -17,7 +17,7 @@ Policy sources:
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 BASE = Path("/home/nova/nova-core")

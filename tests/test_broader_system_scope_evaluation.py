@@ -14,42 +14,34 @@ Tests cover:
 """
 
 import json
-import pytest
 from pathlib import Path
 
 from agents.rollout_gate import (
-    BroaderSystemScopeEvaluation,
-    RolloutCriterion,
-    evaluate_broader_system_scope,
-    decide_broader_system_scope,
-    review_broader_system_scope,
-    render_broader_system_scope_markdown,
-    write_broader_system_scope_evaluation,
-    _count_stageD_rollbacks,
-    _compute_elapsed_seconds,
-    BROADER_MIN_SYSTEM_INSPECT_RUNS,
-    BROADER_MIN_ELAPSED_SECONDS,
+    BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS,
+    BROADER_MAX_CONTRACT_FAILURE_RATE,
     BROADER_MAX_FAILURE_RATE,
     BROADER_MAX_SYSTEM_INSPECT_FAILURE_RATE,
     BROADER_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-    BROADER_MAX_POLICY_VIOLATIONS,
-    BROADER_MAX_BUDGET_EXHAUSTIONS,
-    BROADER_MAX_RECOVERY_ANOMALIES,
-    BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS,
-    BROADER_MAX_CONTRACT_FAILURE_RATE,
-    BROADER_HEARTBEAT_REQUIRED,
+    BROADER_MIN_ELAPSED_SECONDS,
+    BROADER_MIN_SYSTEM_INSPECT_RUNS,
     BROADER_REQUIRED_EXTENDED_DECISION,
-    EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
-    EXTENDED_MIN_ELAPSED_SECONDS,
+    EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS,
+    EXTENDED_MAX_CONTRACT_FAILURE_RATE,
     EXTENDED_MAX_FAILURE_RATE,
     EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
     EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-    EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS,
-    EXTENDED_MAX_CONTRACT_FAILURE_RATE,
+    EXTENDED_MIN_ELAPSED_SECONDS,
+    EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
     STAGE4_ALLOWED_OPERATIONS,
     STAGE4_BLOCKED_OPERATIONS,
+    BroaderSystemScopeEvaluation,
+    _count_stageD_rollbacks,
+    decide_broader_system_scope,
+    evaluate_broader_system_scope,
+    render_broader_system_scope_markdown,
+    review_broader_system_scope,
+    write_broader_system_scope_evaluation,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -77,7 +69,10 @@ def _populate_broader_env(root: Path, num_system_runs: int = 15) -> None:
             "system_scope": "inspect_only",
             "system_allowed_operations": sorted(STAGE4_ALLOWED_OPERATIONS),
             "system_blocked_operations": sorted(STAGE4_BLOCKED_OPERATIONS),
-            "system_allowed_skills": ["file-ops", "http-fetch", "reading-obsidian-memory", "self-verification", "web-research"],
+            "system_allowed_skills": [
+                "file-ops", "http-fetch", "reading-obsidian-memory",
+                "self-verification", "web-research",
+            ],
             "system_blocked_skills": ["git-ops", "shell-ops", "task-execution"],
         },
         "version": 9,
@@ -366,7 +361,11 @@ class TestBlockBroaderScope:
         assert decision == "block_broader_system_scope"
 
     def test_scope_violated(self):
-        broken = {"intact": False, "reason": "scope tampered", "system_scope": "mutate", "system_in_classes": True, "stage": "D"}
+        broken = {
+            "intact": False, "reason": "scope tampered",
+            "system_scope": "mutate", "system_in_classes": True,
+            "stage": "D",
+        }
         criteria = evaluate_broader_system_scope(
             _healthy_evidence(), _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
@@ -675,7 +674,11 @@ class TestArtifactGeneration:
             system_inspect_metrics=_healthy_sys_metrics(20),
             evidence_summary={},
             extended_monitoring_decision="stageD_sustained_stable",
-            observation_window={"activation_at": "T1", "review_at": "T2", "elapsed_hours": 10.0, "elapsed_seconds": 36000.0, "scope": "system_inspect (read-only)"},
+            observation_window={
+                "activation_at": "T1", "review_at": "T2",
+                "elapsed_hours": 10.0, "elapsed_seconds": 36000.0,
+                "scope": "system_inspect (read-only)",
+            },
             scope_integrity=_intact_scope(),
         )
         md = render_broader_system_scope_markdown(review)
@@ -696,7 +699,11 @@ class TestArtifactGeneration:
             criteria=criteria,
             evidence_summary={},
             extended_monitoring_decision="stageD_sustained_stable",
-            observation_window={"activation_at": "T1", "review_at": "T2", "elapsed_hours": 3.0, "elapsed_seconds": 10800.0, "scope": "test"},
+            observation_window={
+                "activation_at": "T1", "review_at": "T2",
+                "elapsed_hours": 3.0, "elapsed_seconds": 10800.0,
+                "scope": "test",
+            },
             scope_integrity=_intact_scope(),
         )
         md = render_broader_system_scope_markdown(review)
@@ -717,7 +724,11 @@ class TestArtifactGeneration:
             criteria=criteria,
             evidence_summary={},
             extended_monitoring_decision="stageD_sustained_stable",
-            observation_window={"activation_at": "T1", "review_at": "T2", "elapsed_hours": 10.0, "elapsed_seconds": 36000.0, "scope": "test"},
+            observation_window={
+                "activation_at": "T1", "review_at": "T2",
+                "elapsed_hours": 10.0, "elapsed_seconds": 36000.0,
+                "scope": "test",
+            },
             scope_integrity=_intact_scope(),
         )
         md = render_broader_system_scope_markdown(review)
@@ -732,7 +743,11 @@ class TestArtifactGeneration:
             criteria=criteria,
             evidence_summary={},
             extended_monitoring_decision="stageD_sustained_stable",
-            observation_window={"activation_at": "T1", "review_at": "T2", "elapsed_hours": 10.0, "elapsed_seconds": 36000.0, "scope": "test"},
+            observation_window={
+                "activation_at": "T1", "review_at": "T2",
+                "elapsed_hours": 10.0, "elapsed_seconds": 36000.0,
+                "scope": "test",
+            },
             scope_integrity=_intact_scope(),
         )
         md = render_broader_system_scope_markdown(review)

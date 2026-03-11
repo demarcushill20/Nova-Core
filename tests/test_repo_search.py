@@ -15,13 +15,8 @@ Validates:
 """
 
 import json
-import os
-from pathlib import Path
-
-import pytest
 
 from tools.adapters.repo_search import repo_search
-
 
 # --- Basic search -----------------------------------------------------------
 
@@ -234,8 +229,8 @@ def test_hidden_dirs_skipped(tmp_path):
 
 def test_runner_dispatch(tmp_path):
     """repo.search is callable through run_tool."""
-    from tools.runner import run_tool
     from tools.registry import load_registry
+    from tools.runner import run_tool
 
     (tmp_path / "runner_test.txt").write_text("search_target_xyz\n", encoding="utf-8")
 

@@ -3,7 +3,6 @@
 import pytest
 
 from planner.schemas import (
-    ExecutionEvaluation,
     HealthFinding,
     ImprovementPlan,
     PlanEvaluation,

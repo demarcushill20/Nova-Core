@@ -95,6 +95,34 @@ while IFS= read -r file; do
     fi
 done <<< "$FILES"
 
+# ─── Check 4: ruff lint on staged Python files ────────────────────────────────
+
+PY_FILES=$(echo "$FILES" | grep '\.py$' || true)
+
+if [ -n "$PY_FILES" ]; then
+    echo "Running ruff on staged Python files..."
+    RUFF_BIN="${RUFF_BIN:-ruff}"
+    # Also check ~/.local/bin where pip --user installs
+    if ! command -v "$RUFF_BIN" &>/dev/null && [ -x "$HOME/.local/bin/ruff" ]; then
+        RUFF_BIN="$HOME/.local/bin/ruff"
+    fi
+    if command -v "$RUFF_BIN" &>/dev/null || [ -x "$RUFF_BIN" ]; then
+        RUFF_OUTPUT=$( echo "$PY_FILES" | xargs "$RUFF_BIN" check --select E,F,W --output-format concise 2>&1 ) || true
+        if [ -n "$RUFF_OUTPUT" ]; then
+            echo "$RUFF_OUTPUT"
+            RUFF_ERRORS=$(echo "$RUFF_OUTPUT" | grep -cE '^\S+:[0-9]+:[0-9]+:' || true)
+            if [ "$RUFF_ERRORS" -gt 0 ]; then
+                echo -e "${RED}ruff: ${RUFF_ERRORS} issue(s) in staged files.${NC}"
+                VIOLATIONS=$((VIOLATIONS + RUFF_ERRORS))
+            fi
+        else
+            echo -e "${GREEN}ruff: clean.${NC}"
+        fi
+    else
+        echo "ruff not found — skipping lint check."
+    fi
+fi
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 
 echo ""

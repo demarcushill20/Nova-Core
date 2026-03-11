@@ -19,8 +19,10 @@ _here = str(Path(__file__).resolve().parent.parent)
 if _here not in sys.path:
     sys.path.insert(0, _here)
 
-from agents.policy_engine import (
-    PolicyEngine, PolicyDecision, PolicyViolation, ElevatedToolRequest,
+from agents.policy_engine import (  # noqa: E402
+    ElevatedToolRequest,
+    PolicyEngine,
+    PolicyViolation,
 )
 
 

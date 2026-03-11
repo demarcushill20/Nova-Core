@@ -14,14 +14,12 @@ State paths added:
   STATE/delegations/<wf>_<subtask>.json         — extended with retry/reassignment metadata
 """
 
-import json
 import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
-from agents.blackboard import Blackboard, WorkflowState, Delegation
+from agents.blackboard import Blackboard
 
 BASE = Path(os.environ.get("NOVACORE_ROOT", "/home/nova/nova-core"))
 STATE = BASE / "STATE"
@@ -352,7 +350,7 @@ class CoordinationLayer:
 
         node_states = self.get_node_states(workflow_id)
         leases = self.list_leases(workflow_id)
-        lease_map = {l.node_id: l for l in leases}
+        lease_map = {lease.node_id: lease for lease in leases}
 
         # Classify nodes
         pending = []
@@ -407,7 +405,7 @@ class CoordinationLayer:
             "stale_nodes": stale,
             "latest_checkpoint": self.get_latest_checkpoint(workflow_id),
             "delegations": self.bb.list_delegations(workflow_id),
-            "active_leases": [l.to_dict() for l in leases if not l.is_expired],
+            "active_leases": [lease.to_dict() for lease in leases if not lease.is_expired],
         }
 
     def recover_workflow(self, workflow_id: str) -> dict:

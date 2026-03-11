@@ -13,30 +13,27 @@ Covers:
 """
 
 import json
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
-
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.rollout_gate import (
+    REPORT_STABILITY_MIN_ELAPSED_SECONDS,
+    REPORT_STABILITY_MIN_RUNS,
     SystemReportStabilityReview,
-    evaluate_system_report_stability,
-    decide_system_report_stability,
-    review_system_report_stability,
-    render_system_report_stability_markdown,
-    write_system_report_stability_review,
     _collect_post_activation_system_workflows,
     _collect_system_report_metrics,
     _count_shell_audit_violations,
     _verify_system_report_scope_integrity,
-    REPORT_STABILITY_MIN_RUNS,
-    REPORT_STABILITY_MIN_ELAPSED_SECONDS,
+    decide_system_report_stability,
+    evaluate_system_report_stability,
+    render_system_report_stability_markdown,
+    review_system_report_stability,
+    write_system_report_stability_review,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

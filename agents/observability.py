@@ -199,7 +199,7 @@ def collect_metrics(base: Path | None = None) -> MultiAgentMetrics:
     """
     root = base or BASE
     state = root / "STATE"
-    work = root / "WORK"
+    root / "WORK"
 
     m = MultiAgentMetrics()
     now = time.time()
@@ -503,7 +503,7 @@ def detect_health_issues(base: Path | None = None) -> list[HealthFinding]:
                     category="orphan",
                     severity=Severity.WARNING,
                     subject=agent_id,
-                    detail=f"Delegation references agent with no runtime record",
+                    detail="Delegation references agent with no runtime record",
                 ))
 
     return findings

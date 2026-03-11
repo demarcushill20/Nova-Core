@@ -3,18 +3,13 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from tools.vault_sync import (
-    check_sync_after_write,
-    _load_sync_config,
-    _is_daemon_running,
-    _check_ob_available,
-    _trigger_oneshot_sync,
     _DEFAULT_SYNC_CONFIG,
+    _load_sync_config,
+    check_sync_after_write,
 )
-
 
 # ---------------------------------------------------------------------------
 # Config loading
@@ -231,20 +226,21 @@ class TestAuditOutputContract:
 
 class TestOrchestratorIntegration:
     def test_vault_sync_imported_in_orchestrator(self):
-        import tools.orchestrator_adapter as oa
         from tools.vault_sync import check_sync_after_write
         assert callable(check_sync_after_write)
 
     def test_sync_in_orchestrator_source(self):
-        import tools.orchestrator_adapter as oa
         import inspect
+
+        import tools.orchestrator_adapter as oa
         source = inspect.getsource(oa.execute_via_orchestrator)
         assert "check_sync_after_write" in source
         assert "obsidian_sync" in source
 
     def test_sync_key_in_return(self):
-        import tools.orchestrator_adapter as oa
         import inspect
+
+        import tools.orchestrator_adapter as oa
         source = inspect.getsource(oa.execute_via_orchestrator)
         assert '"obsidian_sync"' in source
 
@@ -268,8 +264,9 @@ class TestSafetyBoundaries:
 
     def test_no_vault_mutation_capability(self):
         """Module does not import or use vault mutation tools."""
-        import tools.vault_sync as vs
         import inspect
+
+        import tools.vault_sync as vs
         source = inspect.getsource(vs)
         assert "mcp_vault_server" not in source
 

@@ -10,7 +10,6 @@ import os
 import sys
 import time
 import unittest
-from unittest.mock import patch, AsyncMock
 
 # Load local telegram modules via importlib (same pattern as telegram_bot.py)
 _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -73,10 +72,10 @@ class TestConversationBuffer(unittest.TestCase):
         for i in range(25):
             self.buf.add("user", f"msg {i}")
         history = self.buf.get_history()
-        self.assertEqual(len(history), conversation.MAX_MESSAGES)
+        # 20 messages + 1 session summary from compacted overflow
+        self.assertEqual(len(self.buf.messages), conversation.MAX_MESSAGES)
         # Should keep the most recent
         self.assertEqual(history[-1]["content"], "msg 24")
-        self.assertEqual(history[0]["content"], "msg 5")
 
     def test_age_eviction(self):
         old_time = time.time() - conversation.MAX_AGE_SECONDS - 10
@@ -84,9 +83,11 @@ class TestConversationBuffer(unittest.TestCase):
             conversation.Message(role="user", content="old", timestamp=old_time)
         )
         self.buf.add("user", "new")
-        history = self.buf.get_history()
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[0]["content"], "new")
+        # Old message evicted, compacted into summary
+        self.assertEqual(len(self.buf.messages), 1)
+        self.assertEqual(self.buf.messages[0].content, "new")
+        # Summary captures the evicted message
+        self.assertTrue(len(self.buf.session_summary) > 0)
 
     def test_session_start_empty(self):
         self.assertTrue(self.buf.is_session_start())
@@ -1041,7 +1042,7 @@ class TestNotifierDeference(unittest.TestCase):
     def _get_notifier_content(self):
         _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                              "telegram_notifier.py")
-        with open(_path, "r") as f:
+        with open(_path) as f:
             return f.read()
 
     def test_is_ceo_delegated_function_exists(self):
@@ -1060,7 +1061,7 @@ class TestNotifierDeference(unittest.TestCase):
     def _get_bot_content(self):
         _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                              "telegram_bot.py")
-        with open(_path, "r") as f:
+        with open(_path) as f:
             return f.read()
 
     def test_delegation_marker_written_by_bot(self):
@@ -1209,7 +1210,7 @@ class TestHelpTextGrouping(unittest.TestCase):
         _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  "telegram_bot.py")
         # Read the file and extract _HELP_TEXT — simpler than importing the full bot
-        with open(_bot_path, "r") as f:
+        with open(_bot_path) as f:
             content = f.read()
         # Just check categories exist in the file
         return content
@@ -1237,7 +1238,7 @@ class TestStatusIcons(unittest.TestCase):
     def _get_bot_content(self):
         _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  "telegram_bot.py")
-        with open(_bot_path, "r") as f:
+        with open(_bot_path) as f:
             return f.read()
 
     def test_status_icon_dict_exists(self):
@@ -1403,7 +1404,7 @@ class TestEnhancedStatusTitles(unittest.TestCase):
     def _get_bot_content(self):
         _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  "telegram_bot.py")
-        with open(_bot_path, "r") as f:
+        with open(_bot_path) as f:
             return f.read()
 
     def test_status_handler_includes_title(self):
@@ -1422,7 +1423,7 @@ class TestRateLimitErrorFix(unittest.TestCase):
     def _get_bot_content(self):
         _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  "telegram_bot.py")
-        with open(_bot_path, "r") as f:
+        with open(_bot_path) as f:
             return f.read()
 
     def test_rate_limit_only_on_success(self):
@@ -1432,7 +1433,7 @@ class TestRateLimitErrorFix(unittest.TestCase):
         # Use rindex to find the last occurrence (the one in the success block, not cache hit).
         success_idx = content.index("_circuit_breaker.record_success()")
         record_idx = content.rindex("_rate_limiter.record(chat_id)")
-        error_idx = content.index("_circuit_breaker.record_failure()")
+        content.index("_circuit_breaker.record_failure()")
         # record should come AFTER record_success (inside success block)
         self.assertGreater(record_idx, success_idx)
 
@@ -1443,7 +1444,7 @@ class TestCompletionReplyThreading(unittest.TestCase):
     def _get_bot_content(self):
         _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  "telegram_bot.py")
-        with open(_bot_path, "r") as f:
+        with open(_bot_path) as f:
             return f.read()
 
     def test_reply_to_message_id_in_completion(self):

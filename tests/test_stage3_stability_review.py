@@ -12,11 +12,12 @@ Tests cover:
 
 import json
 import time
+
 import pytest
-from pathlib import Path
 
 from agents.rollout_gate import (
-    StabilityReview,
+    STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
+    STAGE3_MAX_RECOVERY_ANOMALIES,
     RolloutCriterion,
     _collect_code_impl_metrics,
     _count_post_activation_recoveries,
@@ -26,16 +27,7 @@ from agents.rollout_gate import (
     render_stability_review_markdown,
     review_stage3_stability,
     write_stability_review,
-    STAGE3_MIN_CODE_IMPL_RUNS,
-    STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
-    STAGE3_MAX_FAILURE_RATE,
-    STAGE3_MAX_VERIFIER_REJECTION_RATE,
-    STAGE3_MAX_RECOVERY_ANOMALIES,
-    MAX_POLICY_VIOLATIONS,
-    MAX_BUDGET_EXHAUSTIONS,
-    MAX_CONTRACT_FAILURE_RATE,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

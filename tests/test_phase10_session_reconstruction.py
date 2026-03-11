@@ -10,11 +10,10 @@ Covers:
 import json
 import os
 import sys
-import time
 import tempfile
+import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 # --- Import shim (same as telegram_bot.py) ---
 _here = str(Path(__file__).resolve().parent.parent)
@@ -27,7 +26,7 @@ sys.path = _path_backup
 if _here not in sys.path:
     sys.path.insert(0, _here)
 
-import importlib.util
+import importlib.util  # noqa: E402
 
 # Load local telegram modules directly
 for _mod_name in ("parse", "persona", "conversation", "recap", "recent_completions", "working_memory"):
@@ -39,11 +38,10 @@ for _mod_name in ("parse", "persona", "conversation", "recap", "recent_completio
     sys.modules[f"telegram.{_mod_name}"] = _mod
     _spec.loader.exec_module(_mod)
 
-from telegram import parse as tg_parse
-from telegram import persona
-from telegram import recap as tg_recap
-from telegram import recent_completions as tg_rc
-
+from telegram import parse as tg_parse  # noqa: E402
+from telegram import persona  # noqa: E402
+from telegram import recap as tg_recap  # noqa: E402
+from telegram import recent_completions as tg_rc  # noqa: E402
 
 # ── Conversation Recap Tests ─────────────────────────────────────────────
 

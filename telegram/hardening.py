@@ -45,7 +45,7 @@ class RateLimiter:
 
         Returns (allowed, reason). If not allowed, reason explains why.
         """
-        now = time.time()
+        time.time()
 
         # Global limit
         self._global_timestamps = self._prune(self._global_timestamps, self.global_window)

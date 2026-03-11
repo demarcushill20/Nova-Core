@@ -1,0 +1,31 @@
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = [".venv", "venv", "WORK"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort (import sorting) — auto-fixable
+    "UP",   # pyupgrade — modernize syntax
+    "B",    # flake8-bugbear — common bugs
+    "SIM",  # flake8-simplify — simplifications
+]
+ignore = [
+    "E501",   # line-too-long — handled by formatter
+    "E731",   # lambda-assignment — used intentionally in this codebase
+    "E741",   # ambiguous-variable-name — false positives on short names
+    "SIM105", # suppressible-exception — contextlib.suppress not always clearer
+    "SIM108", # if-else-block-instead-of-if-exp — readability preference
+    "SIM300", # yoda-conditions — not harmful
+    "B011",   # assert-false — used in tests
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agents", "planner", "telegram", "utils"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

@@ -3,15 +3,14 @@
 import pytest
 
 from planner.evaluator import (
+    _DURATION_MAX,
+    _EXECUTION_BASE,
+    _RETRY_PENALTY_PER,
+    _VERIFICATION_MAX,
     Evaluator,
     _compute_duration_score,
     _compute_verification_score,
     _score_to_grade,
-    _EXECUTION_BASE,
-    _CONTRACT_BONUS,
-    _VERIFICATION_MAX,
-    _DURATION_MAX,
-    _RETRY_PENALTY_PER,
 )
 from planner.schemas import (
     ExecutionEvaluation,

@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from planner.contract_audit import ContractAudit
 from planner.schemas import ContractAuditRecord, ContractAuditSummary
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

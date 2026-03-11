@@ -10,10 +10,8 @@ Validates:
 
 import time
 from pathlib import Path
-from unittest.mock import patch
 
 from tools.runner import _execute_with_audit, run_tool
-
 
 # --- Minimal registry for testing -------------------------------------------
 
@@ -134,7 +132,7 @@ def test_envelope_duration_zero_floor():
 
 def test_run_tool_returns_envelope(tmp_path):
     """run_tool returns an envelope with tool, ok, duration_ms, result."""
-    audit_file = tmp_path / "audit.jsonl"
+    tmp_path / "audit.jsonl"
     registry = {
         "sandbox_root": str(tmp_path),
         "audit_log": "audit.jsonl",
@@ -162,7 +160,7 @@ def test_run_tool_returns_envelope(tmp_path):
 
 def test_run_tool_unregistered_returns_error_envelope(tmp_path):
     """Unregistered tool in run_tool returns error envelope, not exception."""
-    audit_file = tmp_path / "audit.jsonl"
+    tmp_path / "audit.jsonl"
     registry = {
         "sandbox_root": str(tmp_path),
         "audit_log": "audit.jsonl",
@@ -177,7 +175,7 @@ def test_run_tool_unregistered_returns_error_envelope(tmp_path):
 
 def test_run_tool_blocked_command_envelope(tmp_path):
     """Blocked shell command returns error envelope."""
-    audit_file = tmp_path / "audit.jsonl"
+    tmp_path / "audit.jsonl"
     registry = {
         "sandbox_root": str(tmp_path),
         "audit_log": "audit.jsonl",

@@ -10,40 +10,33 @@ Tests cover:
 """
 
 import json
-import time
-import pytest
 from pathlib import Path
 
+import pytest
+
 from agents.rollout_gate import (
-    Stage4ActivationRecord,
-    activate_stage4,
-    evaluate_activation_gate,
-    render_stage4_activation_markdown,
-    write_stage4_activation_result,
+    STAGE4_ALLOWED_OPERATIONS,
+    STAGE4_ALLOWED_ROLES,
+    STAGE4_ALLOWED_SKILLS,
+    STAGE4_BLOCKED_OPERATIONS,
+    STAGE4_BLOCKED_SKILLS,
     STAGE4_CLASSES,
     STAGE4_ROLLOUT_STAGE,
-    STAGE4_ALLOWED_ROLES,
-    STAGE4_ALLOWED_OPERATIONS,
-    STAGE4_BLOCKED_OPERATIONS,
-    STAGE4_ALLOWED_SKILLS,
-    STAGE4_BLOCKED_SKILLS,
+    activate_stage4,
+    render_stage4_activation_markdown,
+    write_stage4_activation_result,
 )
-
-from tools.task_classifier import (
-    classify_task,
-    classify_and_route,
-    is_stageD_eligible,
-    has_system_mutate_signals,
-    STAGE_D_CLASSES,
-)
-
 from tools.orchestrator_adapter import (
-    build_plan_from_task,
-    validate_stageD_plan,
     _STAGE_D_ALLOWED_SKILLS,
     _STAGE_D_BLOCKED_SKILLS,
+    build_plan_from_task,
+    validate_stageD_plan,
 )
-
+from tools.task_classifier import (
+    classify_and_route,
+    has_system_mutate_signals,
+    is_stageD_eligible,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

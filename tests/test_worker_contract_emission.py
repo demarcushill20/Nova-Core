@@ -8,10 +8,9 @@ These tests exercise the generation path (prompt template) and validate
 that outputs produced according to that template pass contract validation.
 """
 
-from tools.contracts import validate_contract
 from tools.adapters.contracts_validate import contracts_validate
+from tools.contracts import validate_contract
 from watcher import DISPATCH_PROMPT_TEMPLATE
-
 
 # --- Tests for dispatch prompt template content ------------------------------
 
@@ -286,8 +285,8 @@ def test_cross_validator_compliant_outputs():
 
 def test_cross_validator_required_fields_match():
     """Both validators must require the same four fields."""
-    from tools.contracts import _REQUIRED_FIELDS as watcher_required
     from tools.adapters.contracts_validate import REQUIRED_FIELDS as planner_required
+    from tools.contracts import _REQUIRED_FIELDS as watcher_required
     assert set(watcher_required) == set(planner_required), (
         f"Required fields diverge: watcher={watcher_required}, planner={planner_required}"
     )
@@ -339,8 +338,8 @@ def test_evaluator_penalises_invalid_contract():
 
 def test_supervisor_continues_on_valid_contract():
     """Supervisor returns action=continue for valid contracts."""
-    from planner.supervisor import Supervisor
     from planner.schemas import PlanStep, StepResult
+    from planner.supervisor import Supervisor
 
     step = PlanStep(step_id="s1", skill_name="file-ops", goal="test")
     result = StepResult(step_id="s1", status="success", contract_valid=True)
@@ -350,8 +349,8 @@ def test_supervisor_continues_on_valid_contract():
 
 def test_supervisor_retries_on_invalid_contract():
     """Supervisor returns action=retry for invalid contracts under retry limit."""
-    from planner.supervisor import Supervisor
     from planner.schemas import PlanStep, StepResult
+    from planner.supervisor import Supervisor
 
     step = PlanStep(step_id="s1", skill_name="file-ops", goal="test")
     result = StepResult(

@@ -19,14 +19,11 @@ import os
 import time
 
 import pytest
-from pathlib import Path
 
 from agents.production_hardening import (
-    DegradationResult,
     FeatureFlags,
     GracefulDegradation,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -1158,7 +1155,7 @@ class TestRollout_Stage3_VerifierEnforcement:
 
     def test_code_impl_gets_verifier_required(self, tmp_path):
         """code_impl is in STAGE_C_CLASSES → verifier_required=True from classifier."""
-        from tools.task_classifier import is_stageC_eligible, STAGE_C_CLASSES
+        from tools.task_classifier import STAGE_C_CLASSES
         assert "code_impl" in STAGE_C_CLASSES
 
     def test_code_impl_eligible_low_risk(self, tmp_path):
@@ -1185,7 +1182,6 @@ class TestRollout_Stage3_VerifierEnforcement:
 
     def test_code_impl_classifier_sets_verifier_required(self, tmp_path):
         """classify_and_route() sets verifier_required for code_impl."""
-        from tools.task_classifier import classify_and_route
         # Temporarily set env so classifier loads our flags
         flags_path = tmp_path / "STATE" / "config" / "feature_flags.json"
         full_flags = {
@@ -1195,10 +1191,10 @@ class TestRollout_Stage3_VerifierEnforcement:
 
         # Use a task that classifies as code_impl
         import tools.task_classifier as tc
-        old_path = tc.flags_path if hasattr(tc, 'flags_path') else None
+        tc.flags_path if hasattr(tc, 'flags_path') else None
 
         # Directly test with the flags dict
-        from tools.task_classifier import is_stageC_eligible, STAGE_C_CLASSES
+        from tools.task_classifier import STAGE_C_CLASSES, is_stageC_eligible
         eligible, _ = is_stageC_eligible(
             "code_impl", 0.8, "Refactor the module", _stage3_flags()
         )

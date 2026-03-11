@@ -14,36 +14,26 @@ Tests cover:
   11. Stage C constant definitions
 """
 
-import json
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
+from tools.orchestrator_adapter import (
+    _STAGE_C_ALLOWED_SKILLS,
+    _STAGE_C_BLOCKED_SKILLS,
+    _build_stageC_coding_steps,
+    build_plan_from_task,
+    validate_stageC_plan,
+)
 from tools.task_classifier import (
-    classify_task,
-    classify_and_route,
-    has_mutation_signals,
-    has_high_risk_signals,
-    is_stageB_eligible,
-    is_stageC_eligible,
-    should_use_orchestrator,
-    load_feature_flags,
     STAGE_B_CLASSES,
     STAGE_C_CLASSES,
     _default_flags,
+    classify_and_route,
+    classify_task,
+    has_high_risk_signals,
+    is_stageB_eligible,
+    is_stageC_eligible,
 )
-from tools.orchestrator_adapter import (
-    build_plan_from_task,
-    validate_stageB_plan,
-    validate_stageC_plan,
-    _build_stageB_research_steps,
-    _build_stageC_coding_steps,
-    _STAGE_B_ALLOWED_SKILLS,
-    _STAGE_B_BLOCKED_SKILLS,
-    _STAGE_C_ALLOWED_SKILLS,
-    _STAGE_C_BLOCKED_SKILLS,
-)
-
 
 # ---------------------------------------------------------------------------
 # Feature flag fixtures
@@ -413,7 +403,7 @@ class TestStageCPlanValidation:
         assert valid is True
 
     def test_plan_without_verifier_rejected(self):
-        from planner.schemas import PlanStep, ExecutionPlan
+        from planner.schemas import ExecutionPlan, PlanStep
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",
@@ -440,7 +430,7 @@ class TestStageCPlanValidation:
         assert "missing_mandatory_verifier_step" in reason
 
     def test_plan_with_shell_ops_rejected(self):
-        from planner.schemas import PlanStep, ExecutionPlan
+        from planner.schemas import ExecutionPlan, PlanStep
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",
@@ -460,7 +450,7 @@ class TestStageCPlanValidation:
         assert "blocked_skill:shell-ops" in reason
 
     def test_plan_with_git_ops_rejected(self):
-        from planner.schemas import PlanStep, ExecutionPlan
+        from planner.schemas import ExecutionPlan, PlanStep
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",
@@ -480,7 +470,7 @@ class TestStageCPlanValidation:
         assert "blocked_skill:git-ops" in reason
 
     def test_plan_with_task_execution_rejected(self):
-        from planner.schemas import PlanStep, ExecutionPlan
+        from planner.schemas import ExecutionPlan, PlanStep
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",

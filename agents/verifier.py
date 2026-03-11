@@ -12,11 +12,9 @@ Verdicts:
   - incomplete:  some checks cannot be evaluated (inconclusive)
 """
 
-import json
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 from agents.blackboard import Blackboard
 

@@ -13,7 +13,6 @@ from tools.adapters.git_repo import (
     parse_porcelain,
 )
 
-
 # --- Porcelain output samples ------------------------------------------------
 
 CLEAN_REPO = """\
@@ -228,7 +227,10 @@ index 111aaaa..222bbbb 100644
 
 NO_CHANGES_DIFF = ""
 
-LARGE_FILE_DIFF = "diff --git a/big.py b/big.py\nindex aaa..bbb 100644\n--- a/big.py\n+++ b/big.py\n@@ -1,5 +1,30 @@\n" + "\n".join(
+LARGE_FILE_DIFF = (
+    "diff --git a/big.py b/big.py\nindex aaa..bbb 100644\n"
+    "--- a/big.py\n+++ b/big.py\n@@ -1,5 +1,30 @@\n"
+) + "\n".join(
     f"+line {i}" for i in range(1, 51)
 )
 

@@ -2,7 +2,6 @@
 
 from tools.contracts import validate_contract
 
-
 # --- Sample texts ------------------------------------------------------------
 
 VALID_WITH_FILES = """\

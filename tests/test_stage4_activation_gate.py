@@ -11,29 +11,28 @@ Tests cover:
 
 import json
 import time
-import pytest
 from pathlib import Path
 
+import pytest
+
 from agents.rollout_gate import (
-    Stage4ActivationGate,
-    RolloutCriterion,
-    evaluate_activation_gate_criteria,
-    decide_activation_gate,
-    evaluate_activation_gate,
-    validate_stage4_plan,
-    render_activation_gate_markdown,
-    write_activation_gate,
-    STAGE4_ALLOWED_OPERATIONS,
-    STAGE4_BLOCKED_OPERATIONS,
-    STAGE4_ALLOWED_SKILLS,
-    STAGE4_BLOCKED_SKILLS,
-    STAGE4_ACTIVATION_PREREQUISITES,
-    STAGE4_SUCCESS_CRITERIA,
-    STAGE4_ABORT_CONDITIONS,
     _PLAN_REQUIRED_FIELDS,
     _PLAN_REQUIRED_NONEMPTY,
+    STAGE4_ABORT_CONDITIONS,
+    STAGE4_ACTIVATION_PREREQUISITES,
+    STAGE4_ALLOWED_OPERATIONS,
+    STAGE4_ALLOWED_SKILLS,
+    STAGE4_BLOCKED_OPERATIONS,
+    STAGE4_BLOCKED_SKILLS,
+    STAGE4_SUCCESS_CRITERIA,
+    RolloutCriterion,
+    decide_activation_gate,
+    evaluate_activation_gate,
+    evaluate_activation_gate_criteria,
+    render_activation_gate_markdown,
+    validate_stage4_plan,
+    write_activation_gate,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -424,7 +423,11 @@ class TestDecisionLogic:
         """Create a full set of passing criteria, then override specifics."""
         base = [
             RolloutCriterion("stage3_stable", True, "stable_continue", "stable_continue", "ok", "hard"),
-            RolloutCriterion("stage4_evaluation_ready", True, "ready_for_stage4_planning", "ready_for_stage4_planning", "ok", "hard"),
+            RolloutCriterion(
+                "stage4_evaluation_ready", True,
+                "ready_for_stage4_planning", "ready_for_stage4_planning",
+                "ok", "hard",
+            ),
             RolloutCriterion("heartbeat_healthy", True, "healthy", "healthy", "ok", "hard"),
             RolloutCriterion("no_policy_violations", True, 0, 0, "ok", "hard"),
             RolloutCriterion("no_budget_exhaustions", True, 0, 0, "ok", "hard"),

@@ -8,12 +8,10 @@ Validates:
 - Runner dispatch produces envelope
 """
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
 from tools.adapters.logs_tool import logs_tail
-
 
 # --- Mock journalctl output --------------------------------------------------
 
@@ -176,7 +174,7 @@ def test_runner_dispatch_envelope(tmp_path):
     """run_tool('logs.tail', ...) returns a proper envelope."""
     from tools.runner import run_tool
 
-    audit_file = tmp_path / "audit.jsonl"
+    tmp_path / "audit.jsonl"
     registry = {
         "sandbox_root": str(tmp_path),
         "audit_log": "audit.jsonl",

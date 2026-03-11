@@ -12,33 +12,26 @@ Tests cover:
 """
 
 import json
-import pytest
 from pathlib import Path
 
+import pytest
+
 from agents.rollout_gate import (
-    StageDStabilityReview,
+    STAGE4_ALLOWED_OPERATIONS,
+    STAGE4_BLOCKED_OPERATIONS,
+    STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS,
+    STAGED_MIN_SYSTEM_INSPECT_RUNS,
     RolloutCriterion,
-    evaluate_stageD_stability,
-    decide_stageD_stability,
-    review_stageD_stability,
-    render_stageD_stability_markdown,
-    write_stageD_stability_review,
+    StageDStabilityReview,
     _collect_system_inspect_metrics,
     _count_blocked_mutation_attempts,
     _verify_scope_integrity,
-    STAGED_MIN_SYSTEM_INSPECT_RUNS,
-    STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
-    STAGED_MAX_FAILURE_RATE,
-    STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-    STAGED_MAX_POLICY_VIOLATIONS,
-    STAGED_MAX_BUDGET_EXHAUSTIONS,
-    STAGED_MAX_RECOVERY_ANOMALIES,
-    STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS,
-    STAGED_HEARTBEAT_REQUIRED,
-    STAGE4_ALLOWED_OPERATIONS,
-    STAGE4_BLOCKED_OPERATIONS,
+    decide_stageD_stability,
+    evaluate_stageD_stability,
+    render_stageD_stability_markdown,
+    review_stageD_stability,
+    write_stageD_stability_review,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,7 +60,10 @@ def _populate_stageD_env(root: Path) -> None:
             "system_scope": "inspect_only",
             "system_allowed_operations": sorted(STAGE4_ALLOWED_OPERATIONS),
             "system_blocked_operations": sorted(STAGE4_BLOCKED_OPERATIONS),
-            "system_allowed_skills": ["file-ops", "http-fetch", "reading-obsidian-memory", "self-verification", "web-research"],
+            "system_allowed_skills": [
+                "file-ops", "http-fetch", "reading-obsidian-memory",
+                "self-verification", "web-research",
+            ],
             "system_blocked_skills": ["git-ops", "shell-ops", "task-execution"],
         },
         "version": 8,
@@ -1023,7 +1019,11 @@ class TestArtifactGeneration:
             enabled_classes=["research", "code_review", "code_impl", "system"],
             system_inspect_metrics=_healthy_sys_metrics(),
             evidence_summary={"heartbeat_overall": "healthy", "blocked_mutation_attempts": 0},
-            observation_window={"activation_at": "2026-03-08T14:00:00Z", "review_at": "2026-03-08T16:00:00Z", "scope": "system_inspect (read-only)"},
+            observation_window={
+                "activation_at": "2026-03-08T14:00:00Z",
+                "review_at": "2026-03-08T16:00:00Z",
+                "scope": "system_inspect (read-only)",
+            },
             scope_integrity=_intact_scope(),
             next_action="Stage D is stable.",
         )
@@ -1038,9 +1038,19 @@ class TestArtifactGeneration:
             decision="hold_stageD",
             rollout_stage="stage4_research_code_review_code_impl_system_inspect",
             enabled_classes=["research", "code_review", "code_impl", "system"],
-            system_inspect_metrics={"total_runs": 0, "completed": 0, "failed": 0, "verifier_rejected": 0, "failure_rate": None},
-            evidence_summary={"heartbeat_overall": "healthy", "blocked_mutation_attempts": 0},
-            observation_window={"activation_at": "2026-03-08T14:00:00Z", "review_at": "2026-03-08T16:00:00Z", "scope": "system_inspect (read-only)"},
+            system_inspect_metrics={
+                "total_runs": 0, "completed": 0, "failed": 0,
+                "verifier_rejected": 0, "failure_rate": None,
+            },
+            evidence_summary={
+                "heartbeat_overall": "healthy",
+                "blocked_mutation_attempts": 0,
+            },
+            observation_window={
+                "activation_at": "2026-03-08T14:00:00Z",
+                "review_at": "2026-03-08T16:00:00Z",
+                "scope": "system_inspect (read-only)",
+            },
             scope_integrity=_intact_scope(),
             next_action="Insufficient evidence.",
         )
@@ -1054,8 +1064,15 @@ class TestArtifactGeneration:
             rollout_stage="stage4_research_code_review_code_impl_system_inspect",
             enabled_classes=["research", "code_review", "code_impl", "system"],
             system_inspect_metrics=_healthy_sys_metrics(),
-            evidence_summary={"heartbeat_overall": "unhealthy", "blocked_mutation_attempts": 0},
-            observation_window={"activation_at": "2026-03-08T14:00:00Z", "review_at": "2026-03-08T16:00:00Z", "scope": "system_inspect (read-only)"},
+            evidence_summary={
+                "heartbeat_overall": "unhealthy",
+                "blocked_mutation_attempts": 0,
+            },
+            observation_window={
+                "activation_at": "2026-03-08T14:00:00Z",
+                "review_at": "2026-03-08T16:00:00Z",
+                "scope": "system_inspect (read-only)",
+            },
             scope_integrity=_intact_scope(),
             next_action="Rollback to Stage C.",
         )
@@ -1069,7 +1086,11 @@ class TestArtifactGeneration:
             decision="stable_continue_stageD",
             rollout_stage="stage4_test",
             enabled_classes=["research"],
-            observation_window={"activation_at": "2026-03-08T14:00:00Z", "review_at": "2026-03-08T16:00:00Z", "scope": "system_inspect (read-only)"},
+            observation_window={
+                "activation_at": "2026-03-08T14:00:00Z",
+                "review_at": "2026-03-08T16:00:00Z",
+                "scope": "system_inspect (read-only)",
+            },
             scope_integrity=_intact_scope(),
         )
         md = render_stageD_stability_markdown(review)

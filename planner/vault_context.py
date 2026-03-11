@@ -143,7 +143,7 @@ def retrieve_vault_context(
     max_notes = min(max_notes, MAX_VAULT_NOTES)
 
     try:
-        from tools.mcp_vault_server import vault_search, vault_read
+        from tools.mcp_vault_server import vault_search
     except ImportError:
         logger.warning("vault MCP server not available — skipping context injection")
         return []

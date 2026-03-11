@@ -9,24 +9,21 @@ Acceptance criteria covered:
 """
 
 import json
-import time
 from pathlib import Path
 
 import pytest
 
 from agents.memory_engine import (
+    MAX_RETRIEVAL_RESULTS,
+    REQUIRED_FIELDS,
     MemoryArtifact,
+    capture_workflow_memory,
+    compact_workflow_summary,
+    format_retrieval_for_planner,
+    retrieve_related_patterns,
     validate_memory_artifact,
     write_memory_artifact,
-    compact_workflow_summary,
-    retrieve_related_patterns,
-    format_retrieval_for_planner,
-    capture_workflow_memory,
-    MAX_RETRIEVAL_RESULTS,
-    MAX_ARTIFACT_SIZE,
-    REQUIRED_FIELDS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -12,7 +12,7 @@ from pathlib import Path
 # Ensure project root is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tools.skills import load_skills, select_skills, render_append_prompt
+from tools.skills import load_skills, render_append_prompt, select_skills
 
 
 def main():

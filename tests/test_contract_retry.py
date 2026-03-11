@@ -12,15 +12,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from watcher import (
-    _is_retry_task,
-    _original_stem,
     _create_retry_task,
+    _is_retry_task,
     _maybe_create_retry,
+    _original_stem,
     verify_artifacts,
-    TASKS_DIR,
-    OUTPUT_DIR,
 )
-
 
 # --- Sample outputs ----------------------------------------------------------
 

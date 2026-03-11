@@ -3,15 +3,13 @@
 import json
 import os
 import sys
-import tempfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import heartbeat
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -268,9 +266,8 @@ class TestSendTelegram:
         with mock.patch.dict(os.environ, {
             "TELEGRAM_BOT_TOKEN": "test",
             "ALLOWED_CHAT_ID": "123",
-        }):
-            with mock.patch("urllib.request.urlopen") as m:
-                heartbeat._send_telegram("hello")
+        }), mock.patch("urllib.request.urlopen") as m:
+            heartbeat._send_telegram("hello")
         m.assert_called_once()
 
 

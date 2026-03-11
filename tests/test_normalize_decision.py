@@ -2,7 +2,7 @@
 
 import pytest
 
-from agents.rollout_gate import normalize_decision, VALID_DECISIONS
+from agents.rollout_gate import VALID_DECISIONS, normalize_decision
 
 
 class TestNormalizeDecision:

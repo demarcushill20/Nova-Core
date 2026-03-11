@@ -16,24 +16,20 @@ import time
 import pytest
 
 from agents.production_hardening import (
-    FeatureFlags,
-    RateLimiter,
-    RateCheckResult,
-    ArchiveManager,
-    ApprovalGate,
-    RestartRecovery,
-    GracefulDegradation,
-    DegradationResult,
-    audit_policy_denial,
-    run_production_hardening,
     ARCHIVE_AFTER_S,
+    HIGH_RISK_TOOLS,
+    MAX_AGENT_SPAWNS_PER_HOUR,
     MAX_ARCHIVE_KEEP,
     MAX_WORKFLOWS_PER_HOUR,
-    MAX_AGENT_SPAWNS_PER_HOUR,
-    APPROVAL_TIMEOUT_S,
-    HIGH_RISK_TOOLS,
+    ApprovalGate,
+    ArchiveManager,
+    FeatureFlags,
+    GracefulDegradation,
+    RateLimiter,
+    RestartRecovery,
+    audit_policy_denial,
+    run_production_hardening,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -439,7 +435,7 @@ class TestPolicyDenialAudit:
                             "tool not allowed", base=tmp_path)
         audit_path = tmp_path / "STATE" / "policy_denials.jsonl"
         assert audit_path.exists()
-        records = [json.loads(l) for l in audit_path.read_text().strip().split("\n")]
+        records = [json.loads(lease) for lease in audit_path.read_text().strip().split("\n")]
         assert len(records) == 1
         assert records[0]["agent_id"] == "agent_x"
         assert records[0]["tool_name"] == "shell.run"
@@ -449,7 +445,7 @@ class TestPolicyDenialAudit:
         audit_policy_denial("a1", "t1", "r1", base=tmp_path)
         audit_policy_denial("a2", "t2", "r2", base=tmp_path)
         audit_path = tmp_path / "STATE" / "policy_denials.jsonl"
-        records = [json.loads(l) for l in audit_path.read_text().strip().split("\n")]
+        records = [json.loads(lease) for lease in audit_path.read_text().strip().split("\n")]
         assert len(records) == 2
         assert records[0]["agent_id"] == "a1"
         assert records[1]["agent_id"] == "a2"
@@ -573,7 +569,7 @@ class TestRestartRecovery:
         wf_path.write_text(json.dumps(wf))
 
         rr = RestartRecovery(tmp_path)
-        result = rr.reconcile()
+        rr.reconcile()
 
         data = json.loads(wf_path.read_text())
         assert data["node_states"]["n1"]["status"] == "failed"

@@ -7,7 +7,7 @@ import pytest
 from planner.plan_builder import PlanBuilder
 from planner.schemas import SkillScore, TaskIntent
 from planner.skill_history import SkillHistoryStore
-from planner.skill_scorer import SkillScorer, DEFAULT_SKILLS_CATALOG
+from planner.skill_scorer import DEFAULT_SKILLS_CATALOG, SkillScorer
 
 
 @pytest.fixture

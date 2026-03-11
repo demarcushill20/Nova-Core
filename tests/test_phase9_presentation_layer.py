@@ -13,7 +13,6 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 # Load local telegram modules via importlib (same pattern as telegram_bot.py)
 _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

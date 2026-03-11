@@ -317,7 +317,7 @@ def _build_pattern_payload(
     )
 
     body_parts.append("\n## Trace\n")
-    body_parts.append(f"- **Promotion**: auto-promoted by Phase 6.5\n")
+    body_parts.append("- **Promotion**: auto-promoted by Phase 6.5\n")
     body_parts.append(f"- **Date**: {date_str}\n")
     body_parts.append(
         f"- **Evidence count**: {len(evidence_paths)} workflow learnings\n"

@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tools.runner import enforce_shell_safety, enforce_git_safety, redact_secrets
+from tools.runner import enforce_git_safety, enforce_shell_safety, redact_secrets
 
 passed = 0
 failed = 0
@@ -22,7 +22,7 @@ def check(label: str, fn, expect_blocked: bool):
         got_blocked = False
     except ValueError as e:
         got_blocked = True
-        err_msg = str(e)
+        str(e)
 
     if got_blocked == expect_blocked:
         status = "PASS"

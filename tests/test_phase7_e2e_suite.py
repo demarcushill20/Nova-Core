@@ -13,42 +13,53 @@ Every assertion is deterministic.
 import json
 import os
 import time
-from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
 from agents.blackboard import (
-    Blackboard, AgentRuntimeState, ChildContract, Delegation, WorkflowState,
+    AgentRuntimeState,
+    Blackboard,
+    ChildContract,
+    Delegation,
+    WorkflowState,
 )
 from agents.coordination import (
-    CoordinationLayer, NodeState, Lease, LeaseConflict,
+    CoordinationLayer,
+    Lease,
+    NodeState,
 )
-from agents.critic import CriticEngine
 from agents.memory_engine import (
-    capture_workflow_memory, retrieve_related_patterns,
+    capture_workflow_memory,
+    retrieve_related_patterns,
 )
 from agents.observability import (
-    collect_metrics, detect_health_issues, generate_health_report,
-    render_report_markdown, run_multiagent_heartbeat, Severity,
+    Severity,
+    collect_metrics,
+    detect_health_issues,
+    generate_health_report,
+    render_report_markdown,
+    run_multiagent_heartbeat,
 )
 from agents.policy_engine import PolicyEngine, PolicyViolation
 from agents.production_hardening import (
-    FeatureFlags, GracefulDegradation, DegradationResult,
-    RateLimiter, ArchiveManager, RestartRecovery, ApprovalGate,
-    audit_policy_denial, run_production_hardening,
+    ArchiveManager,
+    FeatureFlags,
+    GracefulDegradation,
+    RateLimiter,
+    RestartRecovery,
+    audit_policy_denial,
+    run_production_hardening,
 )
 from agents.verifier import VerifierEngine
 from agents.workflow_engine import (
-    WorkflowEngine, WorkflowHalt, WorkflowLimits,
-    HALT_BUDGET_EXHAUSTED, HALT_VERIFIER_REJECTED, HALT_POLICY_VIOLATION,
-    HALT_DEPENDENCY_LOOP,
+    WorkflowEngine,
+    WorkflowHalt,
 )
 from agents.workflow_gate import (
-    WorkflowGate, RerouteDecision, validate_contract_fields,
+    WorkflowGate,
 )
 from agents.workflow_graph import WorkflowGraphBuilder, render_markdown
-
 
 # ===========================================================================
 # Shared fixtures
@@ -326,7 +337,7 @@ class TestE2E_CriticReplanPath:
     def test_critic_replan_then_retry(self, tmp_path):
         bb = _bb(tmp_path)
         engine = WorkflowEngine(blackboard=bb)
-        coord = CoordinationLayer(blackboard=bb)
+        CoordinationLayer(blackboard=bb)
         gate = WorkflowGate(blackboard=bb)
 
         engine.create_workflow("wf_replan", "task_rp")
@@ -358,7 +369,7 @@ class TestE2E_CriticReplanPath:
         assert decisions[0].action in ("retry", "reassign", "halt")
 
         # Verify contract validation blocks (bad contract lacks fields)
-        contracts = bb.list_child_contracts("wf_replan")
+        bb.list_child_contracts("wf_replan")
         # The bad contract has files_changed but the governed path needs
         # all contracts to pass validation.
 
@@ -1310,7 +1321,7 @@ class TestObservability_IntegratedReport:
             status="executing",
         ))
 
-        report = run_multiagent_heartbeat(base=tmp_path)
+        run_multiagent_heartbeat(base=tmp_path)
 
         md_path = tmp_path / "HEARTBEAT_MULTIAGENT.md"
         json_path = tmp_path / "STATE" / "heartbeat_multiagent.json"
@@ -1517,9 +1528,9 @@ class TestCombined_FailureRecoveryObservability:
 # ===========================================================================
 
 if __name__ == "__main__":
+    import inspect
     import sys
     import tempfile
-    import inspect
 
     test_classes = [
         # Part 1: E2E Integration

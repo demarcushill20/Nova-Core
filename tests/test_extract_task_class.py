@@ -4,7 +4,6 @@ import pytest
 
 from utils.extract_task_class import KNOWN_TASK_CLASSES, extract_task_class
 
-
 # --- Happy path ---
 
 @pytest.mark.parametrize("cls", sorted(KNOWN_TASK_CLASSES))

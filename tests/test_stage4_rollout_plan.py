@@ -16,25 +16,23 @@ Tests cover:
 import json
 import re
 import time
+
 import pytest
-from pathlib import Path
 
 from agents.rollout_gate import (
-    Stage4RolloutPlan,
-    build_stage4_rollout_plan,
-    render_stage4_plan_markdown,
-    write_stage4_rollout_plan,
+    STAGE4_ABORT_CONDITIONS,
+    STAGE4_ACTIVATION_PREREQUISITES,
     STAGE4_ALLOWED_OPERATIONS,
-    STAGE4_BLOCKED_OPERATIONS,
     STAGE4_ALLOWED_SKILLS,
+    STAGE4_BLOCKED_OPERATIONS,
     STAGE4_BLOCKED_SKILLS,
     STAGE4_INSPECT_SIGNALS,
     STAGE4_MUTATE_SIGNALS,
-    STAGE4_ACTIVATION_PREREQUISITES,
     STAGE4_SUCCESS_CRITERIA,
-    STAGE4_ABORT_CONDITIONS,
+    build_stage4_rollout_plan,
+    render_stage4_plan_markdown,
+    write_stage4_rollout_plan,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

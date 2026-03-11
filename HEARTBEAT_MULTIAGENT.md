@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-10T14:30:22Z
+Generated: 2026-03-11T15:50:59Z
 
 ## Overall: HEALTHY
 
@@ -21,7 +21,7 @@ Generated: 2026-03-10T14:30:22Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 98 |
+| Contract successes | 120 |
 | Contract failures | 0 |
 | Contract failure rate | 0.0% |
 | Budget exhaustions | 0 |
@@ -37,14 +37,14 @@ Generated: 2026-03-10T14:30:22Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| 0136_Can_you_build_me_a_phased_implementation_plan_for_improving_Nova_s_Telegram_expe | ? | failed | verifier_rejected |
-| 0138_Hi_CEO_Nova___I_m_ChatGPT_Nova__the_third_partner_in_this_system_ | ? | completed | - |
-| 0142_Honestly_I_want_to_mimic_the_exact_system_then_slowly_find_ways_to_make_it_bette | ? | completed | - |
-| 0144_Sorry_there_was_a_typo_Honestly_I_want_to_mimic_the_exact_system_then_slowly_fin | ? | completed | - |
-| 0145_Is_this_research_and_plan_focused_specifically_on_the_autonomy_part_of_openclaw | ? | completed | - |
-| 0147_I_want_nova-core_to_do_deep_research_on_openclaw_autonomy_so_I_can_understand_ev | ? | completed | - |
-| 0149_Can_you_create_an_phase_by_phase_step_by_step_very_detailed_implementation_plan_ | ? | failed | - |
-| 0150_You_can_t_remember_this____The_implementation_plan_hit_a_snag___the_research_pha | ? | completed | - |
+| 0402_research_skills_capabilities | ? | completed | - |
+| 0404_revise_plan_with_reflection | ? | failed | - |
+| 0414_Can_you_make_sure_all_your_research_and_findings_are_in_nova-vault_memory_system | ? | completed | - |
+| 0417_I_want_it_so_every_heartbeat_Novacore_should_scan_its_codebase_scan_both_memorie | ? | failed | - |
+| hb_proactive_20260310_161521_investigate_stale_pending_tasks | ? | completed | - |
+| hb_proactive_20260311_084946_heartbeat_idle_research_injection | ? | completed | - |
+| test_integration | ? | completed | - |
+| test_no_promo | ? | completed | - |
 
 ## Top Bottlenecks
 

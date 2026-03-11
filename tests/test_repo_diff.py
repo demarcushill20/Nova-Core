@@ -17,8 +17,6 @@ import json
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from tools.adapters.repo_diff import repo_diff
 
 
@@ -234,8 +232,8 @@ def test_rejects_empty_against(tmp_path):
 
 def test_runner_dispatch(tmp_path):
     """repo.diff is callable through run_tool."""
-    from tools.runner import run_tool
     from tools.registry import load_registry
+    from tools.runner import run_tool
 
     repo = _init_git_repo(tmp_path)
     f = repo / "runner_test.txt"

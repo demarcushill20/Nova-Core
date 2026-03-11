@@ -13,7 +13,6 @@ Verdicts:
   - needs_revision: non-blocking issues that should be fixed before finalization
 """
 
-import json
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path

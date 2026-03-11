@@ -32,14 +32,11 @@ Validates:
 """
 
 import json
-import os
-from pathlib import Path
 from unittest import mock
 
 import pytest
 
 from tools.adapters.repo_files import repo_patch, repo_read, repo_write
-
 
 # --- Read success -----------------------------------------------------------
 
@@ -212,8 +209,8 @@ def test_empty_path_raises():
 
 def test_runner_dispatch(tmp_path):
     """repo.files.read is callable through run_tool."""
-    from tools.runner import run_tool
     from tools.registry import load_registry
+    from tools.runner import run_tool
 
     f = tmp_path / "runner_test.txt"
     f.write_text("via runner", encoding="utf-8")
@@ -276,7 +273,7 @@ def test_write_create_new_file(tmp_path):
     assert result["created"] is True
     assert result["overwritten"] is False
     assert result["verified"] is True
-    assert result["bytes_written"] == len("hello world".encode("utf-8"))
+    assert result["bytes_written"] == len(b"hello world")
     assert result["message"] == "created"
     assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hello world"
 
@@ -413,8 +410,8 @@ def test_write_temp_cleanup_on_failure(tmp_path):
 
 def test_write_runner_dispatch(tmp_path):
     """repo.files.write is callable through run_tool."""
-    from tools.runner import run_tool
     from tools.registry import load_registry
+    from tools.runner import run_tool
 
     registry = load_registry()
     registry["sandbox_root"] = str(tmp_path)
@@ -647,8 +644,8 @@ def test_patch_rejects_absolute_outside(tmp_path):
 
 def test_patch_runner_dispatch(tmp_path):
     """repo.files.patch is callable through run_tool."""
-    from tools.runner import run_tool
     from tools.registry import load_registry
+    from tools.runner import run_tool
 
     f = tmp_path / "runner_patch.txt"
     f.write_text("old value", encoding="utf-8")

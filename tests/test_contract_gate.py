@@ -4,7 +4,6 @@ Validates that verify_artifacts() enforces ## CONTRACT presence
 before allowing a task to transition to .done.
 """
 
-import time
 from pathlib import Path
 from unittest.mock import patch
 

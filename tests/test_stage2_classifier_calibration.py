@@ -10,19 +10,15 @@ Tests cover:
   7. Confidence formula produces predictable values
 """
 
-import json
 import pytest
-from pathlib import Path
 
 from tools.task_classifier import (
-    classify_task,
     classify_and_route,
-    has_mutation_signals,
+    classify_task,
     has_high_risk_signals,
+    has_mutation_signals,
     is_stageC_eligible,
-    TASK_CLASSES,
 )
-
 
 # ---------------------------------------------------------------------------
 # Feature flag helpers

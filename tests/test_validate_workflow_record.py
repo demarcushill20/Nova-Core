@@ -2,8 +2,7 @@
 
 import pytest
 
-from utils.validate_workflow_record import validate_workflow_record, VALID_STATUSES
-
+from utils.validate_workflow_record import VALID_STATUSES, validate_workflow_record
 
 # ── happy path ──────────────────────────────────────────────────────────
 

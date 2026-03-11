@@ -15,8 +15,7 @@ Covers:
 
 import json
 
-from tools.adapters.contracts_validate import contracts_validate, REQUIRED_FIELDS
-
+from tools.adapters.contracts_validate import REQUIRED_FIELDS, contracts_validate
 
 # --- Sample texts ------------------------------------------------------------
 
@@ -246,8 +245,8 @@ def test_empty_values_deterministic():
 
 def test_runner_dispatch_integration():
     """Verify runner can dispatch contracts.validate and wraps result."""
-    from tools.runner import run_tool
     from tools.registry import load_registry
+    from tools.runner import run_tool
 
     registry = load_registry()
     envelope = run_tool("contracts.validate", {"text": VALID_CONTRACT}, registry)
@@ -262,8 +261,8 @@ def test_runner_dispatch_integration():
 
 def test_runner_dispatch_missing_contract():
     """Runner dispatch with text lacking a contract."""
-    from tools.runner import run_tool
     from tools.registry import load_registry
+    from tools.runner import run_tool
 
     registry = load_registry()
     envelope = run_tool("contracts.validate", {"text": "no contract here"}, registry)

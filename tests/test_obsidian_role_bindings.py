@@ -7,6 +7,7 @@ and all other roles are denied vault access entirely.
 
 import json
 from pathlib import Path
+
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -236,7 +237,10 @@ class TestOperatorAuditBinding:
     def test_audit_skill_is_read_only(self):
         skill_path = ROOT / ".claude" / "skills" / "auditing-obsidian-memory-safety" / "SKILL.md"
         content = skill_path.read_text()
-        assert "vault_write" not in content.split("allowed-tools")[0].split("---")[1] if "allowed-tools" in content else True
+        if "allowed-tools" in content:
+            assert "vault_write" not in content.split(
+                "allowed-tools"
+            )[0].split("---")[1]
         # Check the skill explicitly says it never writes
         assert "No vault_write" in content or "never writes" in content
 

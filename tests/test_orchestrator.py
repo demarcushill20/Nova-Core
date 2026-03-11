@@ -10,13 +10,10 @@ from planner.orchestrator import Orchestrator
 from planner.schemas import (
     ExecutionPlan,
     HealthFinding,
-    ImprovementPlan,
     PlanStep,
     StepResult,
-    SupervisorDecision,
 )
 from planner.skill_history import SkillHistoryStore
-from planner.supervisor import Supervisor
 
 
 @pytest.fixture

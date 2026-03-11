@@ -10,8 +10,9 @@ import json
 import logging
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from planner.evaluator import Evaluator
 from planner.improvement_planner import ImprovementPlanner
@@ -19,6 +20,7 @@ from planner.schemas import (
     ExecutionEvaluation,
     ExecutionPlan,
     ImprovementResult,
+    PlanEvaluation,
     PlanStep,
     StepResult,
     SupervisorDecision,
@@ -200,7 +202,7 @@ class Orchestrator:
 
     def _run_improvement_cycle(
         self,
-        plan_eval: "PlanEvaluation",
+        plan_eval: PlanEvaluation,
         recent_plan_states: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         """Run a single bounded self-improvement cycle.

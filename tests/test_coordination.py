@@ -17,7 +17,6 @@ Specific tests:
 
 import json
 import os
-import tempfile
 import time
 
 import pytest
@@ -127,7 +126,7 @@ class TestLeaseAcquisition:
 
         leases = coord.list_leases("wf-001")
         assert len(leases) == 2
-        holders = {l.holder for l in leases}
+        holders = {lease.holder for lease in leases}
         assert holders == {"agent-1", "agent-2"}
 
     def test_list_leases_filters_by_workflow(self, tmp_path):
@@ -604,7 +603,7 @@ class TestCoordinatedClaiming:
         assert coord.get_lease("wf-001", "n1") is None
 
     def test_double_claim_rejected(self, tmp_path):
-        from agents.coordination import NodeState, LeaseConflict
+        from agents.coordination import LeaseConflict, NodeState
 
         create_test_workflow(tmp_path)
         coord = make_coord(tmp_path)
@@ -767,7 +766,7 @@ class TestWorkflowGraphVisibility:
     def test_graph_builder_shows_coordination_node_states(self, tmp_path):
         """WorkflowGraphBuilder surfaces node_states from CoordinationLayer."""
         from agents.coordination import NodeState
-        from agents.workflow_graph import WorkflowGraphBuilder, render_markdown
+        from agents.workflow_graph import WorkflowGraphBuilder
 
         bb = create_test_workflow(tmp_path)
         coord = make_coord(tmp_path)

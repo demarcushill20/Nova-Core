@@ -4,15 +4,13 @@ from __future__ import annotations
 import os
 import platform
 import re
-import threading
 import time
-from pathlib import Path
 from datetime import datetime
-
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+from pathlib import Path
 
 import httpx
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 ROOT = Path("/home/nova/nova-core")
 OUTPUT = ROOT / "OUTPUT"

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,11 +17,23 @@ GOALS_FILE = Path("/home/nova/nova-core/STATE/goals.json")
 
 
 def _load() -> dict:
-    """Load goals from disk."""
+    """Load goals from disk.
+
+    Handles legacy format where the file is a bare JSON array instead of
+    the expected {"goals": [...], "next_id": N} dict.
+    """
     try:
-        return json.loads(GOALS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(GOALS_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {"goals": [], "next_id": 1}
+
+    # Auto-heal bare-array format written by earlier buggy code
+    if isinstance(data, list):
+        _log.warning("goals.json contains bare array — auto-wrapping")
+        next_id = max((g.get("id", 0) for g in data), default=0) + 1
+        data = {"goals": data, "next_id": next_id}
+        _save(data)  # persist the fix
+    return data
 
 
 def _save(data: dict) -> None:
@@ -96,34 +107,42 @@ def clear_completed() -> int:
 
 def format_goals_for_context() -> str:
     """Format active goals as a brief context string for conversation injection."""
-    active = list_goals(include_completed=False)
-    if not active:
+    try:
+        active = list_goals(include_completed=False)
+        if not active:
+            return ""
+        lines = ["ACTIVE GOALS (reference when relevant, don't list unless asked):"]
+        for g in active:
+            priority_tag = f" [{g['priority']}]" if g["priority"] != "normal" else ""
+            lines.append(f"- {g['text']}{priority_tag}")
+        return "\n".join(lines)
+    except Exception as exc:
+        _log.error("format_goals_for_context failed: %s", exc)
         return ""
-    lines = ["ACTIVE GOALS (reference when relevant, don't list unless asked):"]
-    for g in active:
-        priority_tag = f" [{g['priority']}]" if g["priority"] != "normal" else ""
-        lines.append(f"- {g['text']}{priority_tag}")
-    return "\n".join(lines)
 
 
 def format_goals_for_display() -> str:
     """Format goals for the /goals command display."""
-    active = list_goals(include_completed=False)
-    completed = [g for g in _load()["goals"] if g["status"] == "completed"]
+    try:
+        active = list_goals(include_completed=False)
+        completed = [g for g in _load()["goals"] if g["status"] == "completed"]
 
-    if not active and not completed:
-        return "No goals set. Use /goals add <goal> to set one."
+        if not active and not completed:
+            return "No goals set. Use /goals add <goal> to set one."
 
-    parts = []
-    if active:
-        parts.append("Active Goals:")
-        for g in active:
-            priority_tag = f" [{g['priority']}]" if g["priority"] != "normal" else ""
-            parts.append(f"  #{g['id']} {g['text']}{priority_tag}")
-    if completed:
-        parts.append("\nCompleted:")
-        for g in completed[-3:]:  # Show last 3 completed
-            parts.append(f"  #{g['id']} {g['text']} (done)")
+        parts = []
+        if active:
+            parts.append("Active Goals:")
+            for g in active:
+                priority_tag = f" [{g['priority']}]" if g["priority"] != "normal" else ""
+                parts.append(f"  #{g['id']} {g['text']}{priority_tag}")
+        if completed:
+            parts.append("\nCompleted:")
+            for g in completed[-3:]:  # Show last 3 completed
+                parts.append(f"  #{g['id']} {g['text']} (done)")
 
-    parts.append("\nCommands: /goals add <text> | /goals done <id> | /goals remove <id> | /goals clear")
-    return "\n".join(parts)
+        parts.append("\nCommands: /goals add <text> | /goals done <id> | /goals remove <id> | /goals clear")
+        return "\n".join(parts)
+    except Exception as exc:
+        _log.error("format_goals_for_display failed: %s", exc)
+        return "Error loading goals. Use /goals add <text> to set a new goal."

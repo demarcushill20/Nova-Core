@@ -1,21 +1,19 @@
 """Tests for planner/pattern_retriever.py — Phase 7 agent-pattern retrieval."""
 
 from unittest.mock import patch
-import pytest
 
 from planner.pattern_retriever import (
-    is_eligible_for_pattern_retrieval,
-    extract_pattern_keywords,
-    search_agent_patterns,
-    read_pattern_guidance,
-    format_pattern_guidance,
-    retrieve_pattern_guidance,
-    _extract_title,
-    _extract_sections,
-    MAX_PATTERNS,
-    MAX_PATTERN_CONTEXT_SIZE,
-    _PATTERN_FOLDER,
     _GUIDANCE_SECTIONS,
+    _PATTERN_FOLDER,
+    MAX_PATTERN_CONTEXT_SIZE,
+    _extract_sections,
+    _extract_title,
+    extract_pattern_keywords,
+    format_pattern_guidance,
+    is_eligible_for_pattern_retrieval,
+    read_pattern_guidance,
+    retrieve_pattern_guidance,
+    search_agent_patterns,
 )
 
 # All vault tool patches target the source module
@@ -445,22 +443,23 @@ class TestRetrievePatternGuidance:
 class TestOrchestratorIntegration:
     def test_pattern_retriever_imported(self):
         """orchestrator_adapter imports retrieve_pattern_guidance."""
-        import tools.orchestrator_adapter as oa
         from planner.pattern_retriever import retrieve_pattern_guidance
         assert callable(retrieve_pattern_guidance)
 
     def test_pattern_guidance_in_build_plan(self):
         """build_plan_from_task includes pattern retrieval call."""
-        import tools.orchestrator_adapter as oa
         import inspect
+
+        import tools.orchestrator_adapter as oa
         source = inspect.getsource(oa.build_plan_from_task)
         assert "retrieve_pattern_guidance" in source
         assert "pattern_guidance" in source
 
     def test_step_executor_includes_pattern_section(self):
         """Step executor prompt includes pattern guidance."""
-        import tools.orchestrator_adapter as oa
         import inspect
+
+        import tools.orchestrator_adapter as oa
         source = inspect.getsource(oa._claude_step_executor)
         assert "pattern_guidance" in source
         assert "pattern_section" in source

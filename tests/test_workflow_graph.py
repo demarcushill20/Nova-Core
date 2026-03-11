@@ -1,25 +1,32 @@
 """Tests for agents.workflow_graph — graph build + render."""
 
 import json
-import tempfile
+
+# Allow running from repo root
+import sys
 import time
 from pathlib import Path
 
 import pytest
 
-# Allow running from repo root
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.blackboard import (
-    Blackboard, Delegation, WorkflowState,
-    AgentRuntimeState, ChildContract,
+    AgentRuntimeState,
+    Blackboard,
+    ChildContract,
+    Delegation,
+    WorkflowState,
 )
 from agents.workflow_graph import (
-    WorkflowGraphBuilder, WorkflowGraph, GraphNode,
-    render_markdown, render_json, render_ascii_tree,
-    workflow_graph_markdown, workflow_graph_json,
+    WorkflowGraph,
+    WorkflowGraphBuilder,
     all_workflows_summary,
+    render_ascii_tree,
+    render_json,
+    render_markdown,
+    workflow_graph_json,
+    workflow_graph_markdown,
 )
 
 
@@ -171,7 +178,7 @@ class TestGraphBuild:
 
     def test_build_failed_delegation(self, bb):
         _make_workflow(bb)
-        d = _make_delegation(bb, status="failed")
+        _make_delegation(bb, status="failed")
         bb.update_delegation("wf_001", "sub_1", {"error": "timeout"})
         builder = WorkflowGraphBuilder(bb)
         graph = builder.build("wf_001")
