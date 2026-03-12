@@ -6,6 +6,7 @@ Covers:
 - Memory retrieval injection into task prompts
 - Round-trip: capture → retrieve cycle
 """
+
 import json
 import sys
 import tempfile
@@ -35,6 +36,7 @@ class TestDirectTaskMemoryCapture(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_captures_successful_task(self):
@@ -162,35 +164,34 @@ class TestKeywordExtraction(unittest.TestCase):
         import importlib
 
         import watcher
+
         importlib.reload(watcher)
 
-        keywords = watcher._extract_keywords(
-            "Implement user authentication with JWT tokens and OAuth2 flow"
-        )
+        keywords = watcher._extract_keywords("Implement user authentication with JWT tokens and OAuth2 flow")
         self.assertIn("implement", keywords)
         self.assertIn("authentication", keywords)
         self.assertIn("tokens", keywords)
 
     def test_filters_stopwords(self):
         import watcher
-        keywords = watcher._extract_keywords(
-            "Create a new function for the user authentication"
-        )
+
+        keywords = watcher._extract_keywords("Create a new function for the user authentication")
         self.assertNotIn("the", keywords)
         self.assertNotIn("for", keywords)
         self.assertNotIn("create", keywords)
 
     def test_caps_at_max(self):
         import watcher
+
         keywords = watcher._extract_keywords(
-            "word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 "
-            "word11 word12 word13 word14 word15",
+            "word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13 word14 word15",
             max_keywords=5,
         )
         self.assertEqual(len(keywords), 5)
 
     def test_empty_text(self):
         import watcher
+
         keywords = watcher._extract_keywords("")
         self.assertEqual(keywords, [])
 
@@ -206,6 +207,7 @@ class TestRoundTripLearningLoop(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_captured_artifact_is_retrievable(self):
@@ -233,10 +235,12 @@ class TestRoundTripLearningLoop(unittest.TestCase):
 
     def test_retrieval_ranked_by_relevance(self):
         # Create two artifacts with different relevance
-        for i, (stem, summary, cls) in enumerate([
-            ("0301_auth", "Set up OAuth2 authentication", "code_impl"),
-            ("0302_docs", "Wrote API documentation", "research"),
-        ]):
+        for _i, (stem, summary, cls) in enumerate(
+            [
+                ("0301_auth", "Set up OAuth2 authentication", "code_impl"),
+                ("0302_docs", "Wrote API documentation", "research"),
+            ]
+        ):
             contract = {
                 "summary": summary,
                 "files_changed": "none",
@@ -244,8 +248,11 @@ class TestRoundTripLearningLoop(unittest.TestCase):
                 "confidence": "medium",
             }
             capture_direct_task_memory(
-                task_stem=stem, task_class=cls,
-                contract=contract, success=True, base=self._base,
+                task_stem=stem,
+                task_class=cls,
+                contract=contract,
+                success=True,
+                base=self._base,
             )
             time.sleep(0.01)  # ensure unique timestamps
 

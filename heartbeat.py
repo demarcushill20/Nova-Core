@@ -1507,6 +1507,31 @@ def main() -> int:
     checks.append(check_state_bloat())
     checks.append(check_pip_audit())
 
+    # --- Drift detection (observability Phase 3) ---
+    try:
+        from utils.drift_detector import detect_drift
+
+        drift = detect_drift(window_hours=24.0)
+        if drift.drift_detected:
+            signals_str = "; ".join(s.message for s in drift.signals[:3])
+            checks.append(
+                {
+                    "name": "drift_detection",
+                    "ok": False,
+                    "detail": f"{len(drift.signals)} signal(s): {signals_str}",
+                }
+            )
+        else:
+            checks.append(
+                {
+                    "name": "drift_detection",
+                    "ok": True,
+                    "detail": f"no drift ({drift.window_tasks} tasks in window)",
+                }
+            )
+    except Exception as e:
+        checks.append({"name": "drift_detection", "ok": True, "detail": f"check skipped: {e}"})
+
     write_heartbeat(checks)
 
     all_ok = all(c["ok"] for c in checks)

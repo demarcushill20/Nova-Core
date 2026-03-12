@@ -54,9 +54,7 @@ logger = logging.getLogger("nova-vault")
 # Configuration
 # ---------------------------------------------------------------------------
 
-VAULT_ROOT = Path(
-    os.environ.get("NOVA_VAULT_PATH", "/home/nova/nova-vault")
-).resolve()
+VAULT_ROOT = Path(os.environ.get("NOVA_VAULT_PATH", "/home/nova/nova-vault")).resolve()
 
 # Vault identity config file (read-only metadata about the vault)
 _VAULT_CONFIG_PATH = VAULT_ROOT / ".nova-vault-config.json"
@@ -107,7 +105,7 @@ MAX_WRITE_SIZE = 34 * 1024
 
 # Rate limit: max writes within a sliding window
 RATE_LIMIT_WINDOW_SECONDS = 300  # 5 minutes
-RATE_LIMIT_MAX_WRITES = 10       # max 10 writes per 5 min window
+RATE_LIMIT_MAX_WRITES = 10  # max 10 writes per 5 min window
 
 # Sensitive content patterns — fail-closed on match
 _SECRET_PATTERNS: list[re.Pattern] = [
@@ -119,21 +117,21 @@ _SECRET_PATTERNS: list[re.Pattern] = [
         r"(?:credential)\s*[:=]\s*\S{4,}",
         r"(?:aws_access_key_id|aws_secret_access_key)\s*[:=]",
         r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----",
-        r"ghp_[A-Za-z0-9_]{36,}",                        # GitHub PAT
-        r"sk-[A-Za-z0-9]{32,}",                           # OpenAI-style key
-        r"tvly-[A-Za-z0-9\-]{20,}",                       # Tavily key
-        r"BSA[a-zA-Z0-9]{20,}",                            # Brave key
+        r"ghp_[A-Za-z0-9_]{36,}",  # GitHub PAT
+        r"sk-[A-Za-z0-9]{32,}",  # OpenAI-style key
+        r"tvly-[A-Za-z0-9\-]{20,}",  # Tavily key
+        r"BSA[a-zA-Z0-9]{20,}",  # Brave key
     ]
 ]
 
 # Valid note types and their required tags
 _VALID_NOTE_TYPES = {
-    "agent-pattern":        "#type/pattern",
-    "workflow-learning":    "#type/learning",
-    "research-summary":     "#type/research",
-    "implementation-plan":  "#type/plan",
-    "debugging-guide":      "#type/debugging",
-    "inbox":                "#type/inbox",
+    "agent-pattern": "#type/pattern",
+    "workflow-learning": "#type/learning",
+    "research-summary": "#type/research",
+    "implementation-plan": "#type/plan",
+    "debugging-guide": "#type/debugging",
+    "inbox": "#type/inbox",
 }
 
 # Valid enum values used across schemas
@@ -146,27 +144,61 @@ _VALID_VERIFICATION_OUTCOMES = {"approved", "rejected", "partial", "not_verified
 # Per-type required frontmatter fields
 _REQUIRED_FIELDS: dict[str, list[str]] = {
     "agent-pattern": [
-        "type", "pattern_id", "title", "agent_role", "confidence",
-        "task_classes", "date_created", "source", "tags",
+        "type",
+        "pattern_id",
+        "title",
+        "agent_role",
+        "confidence",
+        "task_classes",
+        "date_created",
+        "source",
+        "tags",
     ],
     "workflow-learning": [
-        "type", "learning_id", "title", "workflow_id", "task_class",
-        "verification_outcome", "confidence", "roles_involved",
-        "date", "source", "tags",
+        "type",
+        "learning_id",
+        "title",
+        "workflow_id",
+        "task_class",
+        "verification_outcome",
+        "confidence",
+        "roles_involved",
+        "date",
+        "source",
+        "tags",
     ],
     "research-summary": [
-        "type", "research_id", "title", "topic", "date_researched",
-        "sources_count", "confidence", "source", "tags",
+        "type",
+        "research_id",
+        "title",
+        "topic",
+        "date_researched",
+        "sources_count",
+        "confidence",
+        "source",
+        "tags",
     ],
     "implementation-plan": [
-        "type", "plan_id", "title", "date_created",
-        "confidence", "source", "tags",
+        "type",
+        "plan_id",
+        "title",
+        "date_created",
+        "confidence",
+        "source",
+        "tags",
     ],
     "debugging-guide": [
-        "type", "title", "date_created", "source", "tags",
+        "type",
+        "title",
+        "date_created",
+        "source",
+        "tags",
     ],
     "inbox": [
-        "type", "title", "source", "tags",
+        "type",
+        "title",
+        "source",
+        "tags",
     ],
 }
 
@@ -354,10 +386,7 @@ def validate_frontmatter(fm: dict, note_type: str | None = None) -> tuple[bool, 
         return False, errors
 
     if actual_type not in _VALID_NOTE_TYPES:
-        errors.append(
-            f"invalid type: {actual_type!r} "
-            f"(allowed: {sorted(_VALID_NOTE_TYPES)})"
-        )
+        errors.append(f"invalid type: {actual_type!r} (allowed: {sorted(_VALID_NOTE_TYPES)})")
         return False, errors
 
     if note_type and actual_type != note_type:
@@ -400,9 +429,7 @@ def validate_frontmatter(fm: dict, note_type: str | None = None) -> tuple[bool, 
     # 6. confidence field (if present for types that use it)
     confidence = fm.get("confidence")
     if confidence is not None and confidence not in _VALID_CONFIDENCES:
-        errors.append(
-            f"invalid confidence: {confidence!r} (allowed: {sorted(_VALID_CONFIDENCES)})"
-        )
+        errors.append(f"invalid confidence: {confidence!r} (allowed: {sorted(_VALID_CONFIDENCES)})")
 
     # 7. Type-specific validations
     if actual_type == "agent-pattern":
@@ -474,10 +501,7 @@ def _check_rate_limit(config: dict) -> tuple[bool, str]:
     _write_timestamps[:] = [t for t in _write_timestamps if t > cutoff]
 
     if len(_write_timestamps) >= max_writes:
-        return False, (
-            f"rate_limit_exceeded: {len(_write_timestamps)} writes "
-            f"in last {window}s (max {max_writes})"
-        )
+        return False, (f"rate_limit_exceeded: {len(_write_timestamps)} writes in last {window}s (max {max_writes})")
     return True, "ok"
 
 
@@ -529,7 +553,10 @@ def _is_writable_folder(folder: str, config: dict) -> bool:
 def _assemble_note(frontmatter: dict, body: str) -> str:
     """Assemble a complete markdown note from frontmatter dict and body."""
     fm_yaml = yaml.dump(
-        frontmatter, default_flow_style=False, allow_unicode=True, sort_keys=False,
+        frontmatter,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
     )
     return f"---\n{fm_yaml}---\n\n{body}"
 
@@ -649,9 +676,7 @@ def vault_read(path: str) -> dict:
     try:
         size = resolved.stat().st_size
         if size > MAX_READ_SIZE:
-            return {
-                "error": f"File too large: {size} bytes (max {MAX_READ_SIZE})"
-            }
+            return {"error": f"File too large: {size} bytes (max {MAX_READ_SIZE})"}
         content = resolved.read_text(encoding="utf-8")
     except (PermissionError, OSError) as e:
         return {"error": f"Cannot read file: {e}"}
@@ -665,10 +690,32 @@ def vault_read(path: str) -> dict:
 
 # Stopwords — very common English words that add noise to token matching.
 # Kept minimal to avoid over-filtering.
-_STOPWORDS = frozenset({
-    "a", "an", "the", "is", "in", "on", "of", "to", "and", "or", "for",
-    "it", "by", "at", "be", "as", "do", "if", "no", "so", "up", "we",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "in",
+        "on",
+        "of",
+        "to",
+        "and",
+        "or",
+        "for",
+        "it",
+        "by",
+        "at",
+        "be",
+        "as",
+        "do",
+        "if",
+        "no",
+        "so",
+        "up",
+        "we",
+    }
+)
 
 # Regex for splitting text into tokens: splits on non-alphanumeric characters
 _TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
@@ -758,9 +805,8 @@ def _extract_snippet(content: str, content_lower: str, tokens: list[str], query:
         idx = -1
         for t in tokens:
             pos = content_lower.find(t)
-            if pos >= 0:
-                if idx < 0 or pos < idx:
-                    idx = pos
+            if pos >= 0 and (idx < 0 or pos < idx):
+                idx = pos
         if idx < 0:
             return ""
         start = max(0, idx - 50)
@@ -839,12 +885,17 @@ def vault_search(query: str, folder: str = "") -> dict:
 
         snippet = _extract_snippet(content, content_lower, tokens, query_stripped)
 
-        scored_results.append((score, {
-            "path": rel_str,
-            "name_match": name_match,
-            "content_match": content_match,
-            "snippet": snippet,
-        }))
+        scored_results.append(
+            (
+                score,
+                {
+                    "path": rel_str,
+                    "name_match": name_match,
+                    "content_match": content_match,
+                    "snippet": snippet,
+                },
+            )
+        )
 
     # Sort by score descending, then path ascending for stability
     scored_results.sort(key=lambda x: (-x[0], x[1]["path"]))
@@ -930,9 +981,7 @@ def vault_info() -> dict:
         "valid": valid,
         "issues": issues,
         "folder_note_counts": folder_stats,
-        "nova_core_managed_folders": config.get(
-            "nova_core_managed_folders", list(WRITABLE_FOLDERS)
-        ),
+        "nova_core_managed_folders": config.get("nova_core_managed_folders", list(WRITABLE_FOLDERS)),
         "human_managed_folders": config.get("human_managed_folders", []),
     }
 
@@ -964,10 +1013,7 @@ def vault_validate(frontmatter: dict, body: str = "") -> dict:
     # Size check
     assembled = _assemble_note(frontmatter, body)
     if len(assembled.encode("utf-8")) > MAX_WRITE_SIZE:
-        errors_all.append(
-            f"note too large: {len(assembled.encode('utf-8'))} bytes "
-            f"(max {MAX_WRITE_SIZE})"
-        )
+        errors_all.append(f"note too large: {len(assembled.encode('utf-8'))} bytes (max {MAX_WRITE_SIZE})")
 
     # Sensitive content check on full assembled note
     has_sensitive, sensitive_matches = detect_sensitive_content(assembled)
@@ -1024,8 +1070,7 @@ def vault_write(path: str, frontmatter: dict, body: str) -> dict:
         _audit_log("WRITE", path, "rejected", f"folder_not_writable:{folder}")
         return {
             "error": (
-                f"writes not allowed to folder: {folder!r} "
-                f"(allowed: {sorted(config.get('allowed_folders', []))})"
+                f"writes not allowed to folder: {folder!r} (allowed: {sorted(config.get('allowed_folders', []))})"
             )
         }
 
@@ -1138,8 +1183,7 @@ def vault_update(path: str, section_heading: str, section_body: str) -> dict:
         _audit_log("UPDATE", path, "rejected", f"folder_not_writable:{folder}")
         return {
             "error": (
-                f"updates not allowed to folder: {folder!r} "
-                f"(allowed: {sorted(config.get('allowed_folders', []))})"
+                f"updates not allowed to folder: {folder!r} (allowed: {sorted(config.get('allowed_folders', []))})"
             )
         }
 
@@ -1202,12 +1246,7 @@ def vault_update(path: str, section_heading: str, section_body: str) -> dict:
     max_size = config.get("max_note_size_bytes", MAX_WRITE_SIZE)
     if updated_bytes > max_size:
         _audit_log("UPDATE", path, "rejected", f"oversized_after_append:{updated_bytes}")
-        return {
-            "error": (
-                f"note would be too large after update: {updated_bytes} bytes "
-                f"(max {max_size})"
-            )
-        }
+        return {"error": (f"note would be too large after update: {updated_bytes} bytes (max {max_size})")}
 
     # 7. Rate limit check
     allowed, reason = _check_rate_limit(config)

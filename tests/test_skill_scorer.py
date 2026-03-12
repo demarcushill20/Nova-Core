@@ -25,6 +25,7 @@ def _intent(text: str, task_id: str = "t001") -> TaskIntent:
 
 # -- semantic match ranking ---------------------------------------------------
 
+
 def test_semantic_match_log_triage(scorer: SkillScorer, tmp_store: SkillHistoryStore):
     scores = scorer.rank_skills(
         _intent("diagnose the crash from logs and traceback"),
@@ -69,6 +70,7 @@ def test_semantic_match_multiple_skills(scorer: SkillScorer, tmp_store: SkillHis
 
 # -- activation rule bonus ----------------------------------------------------
 
+
 def test_activation_keywords_boost(scorer: SkillScorer, tmp_store: SkillHistoryStore):
     scores = scorer.rank_skills(
         _intent("restart the systemctl daemon"),
@@ -83,9 +85,10 @@ def test_activation_keywords_boost(scorer: SkillScorer, tmp_store: SkillHistoryS
 
 # -- success-rate weighting ---------------------------------------------------
 
+
 def test_success_rate_boosts_score(tmp_path: Path):
     store = SkillHistoryStore(path=tmp_path / "h.json")
-    for i in range(10):
+    for _i in range(10):
         store.record_run("log_triage", success=True, duration_ms=100, retries=0)
 
     scorer = SkillScorer()
@@ -101,7 +104,7 @@ def test_success_rate_boosts_score(tmp_path: Path):
 
 def test_poor_success_rate_penalizes(tmp_path: Path):
     store_bad = SkillHistoryStore(path=tmp_path / "bad.json")
-    for i in range(10):
+    for _i in range(10):
         store_bad.record_run("code_improve", success=False, duration_ms=100, retries=0)
 
     store_neutral = SkillHistoryStore(path=tmp_path / "neutral.json")
@@ -119,6 +122,7 @@ def test_poor_success_rate_penalizes(tmp_path: Path):
 
 # -- recency weighting --------------------------------------------------------
 
+
 def test_recency_weighting(tmp_path: Path):
     store = SkillHistoryStore(path=tmp_path / "h.json")
     store.record_run("log_triage", success=True, duration_ms=100, retries=0)
@@ -135,6 +139,7 @@ def test_recency_weighting(tmp_path: Path):
 
 
 # -- stable sort behavior ----------------------------------------------------
+
 
 def test_stable_sort_deterministic(scorer: SkillScorer, tmp_store: SkillHistoryStore):
     intent = _intent("diagnose the crash from logs and traceback")
@@ -156,6 +161,7 @@ def test_descending_score_order(scorer: SkillScorer, tmp_store: SkillHistoryStor
 
 # -- unknown skill history fallback -------------------------------------------
 
+
 def test_unknown_history_uses_neutral_scores(scorer: SkillScorer, tmp_store: SkillHistoryStore):
     scores = scorer.rank_skills(
         _intent("fix the bug"),
@@ -169,6 +175,7 @@ def test_unknown_history_uses_neutral_scores(scorer: SkillScorer, tmp_store: Ski
 
 
 # -- score_skill returns exact SkillScore shape --------------------------------
+
 
 def test_score_skill_has_all_components(scorer: SkillScorer, tmp_store: SkillHistoryStore):
     intent = _intent("diagnose the error in logs")
@@ -188,12 +195,7 @@ def test_score_skill_total_equals_sum(scorer: SkillScorer, tmp_store: SkillHisto
     intent = _intent("diagnose the error in logs")
     meta = DEFAULT_SKILLS_CATALOG[0]
     score = scorer.score_skill(intent, meta, tmp_store)
-    expected = (
-        score.semantic_match
-        + score.activation_rules
-        + score.recency
-        + score.success_rate
-    )
+    expected = score.semantic_match + score.activation_rules + score.recency + score.success_rate
     assert score.total_score == pytest.approx(expected, abs=0.001)
 
 
@@ -205,6 +207,7 @@ def test_score_skill_reasons_is_list(scorer: SkillScorer, tmp_store: SkillHistor
 
 
 # -- component ranges --------------------------------------------------------
+
 
 def test_semantic_match_capped_at_04(scorer: SkillScorer, tmp_store: SkillHistoryStore):
     intent = _intent("diagnose triage errors log files tracebacks crash exception debug investigate")
@@ -233,7 +236,7 @@ def test_recency_capped_at_02(tmp_path: Path):
 
 def test_success_rate_capped_at_02(tmp_path: Path):
     store = SkillHistoryStore(path=tmp_path / "h.json")
-    for i in range(100):
+    for _i in range(100):
         store.record_run("log_triage", success=True, duration_ms=100, retries=0)
     scorer = SkillScorer()
     meta = DEFAULT_SKILLS_CATALOG[0]

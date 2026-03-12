@@ -288,13 +288,15 @@ REPORT_STABILITY_HEARTBEAT_REQUIRED = "healthy"
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RolloutCriterion:
     """Result of evaluating a single rollout criterion."""
+
     name: str
     passed: bool
-    value: object       # actual measured value
-    threshold: object   # threshold used
+    value: object  # actual measured value
+    threshold: object  # threshold used
     detail: str
     severity: str = ""  # "hard" = blocks expansion, "soft" = advisory
 
@@ -305,8 +307,9 @@ class RolloutCriterion:
 @dataclass
 class RolloutEvaluation:
     """Complete rollout evaluation result."""
-    decision: str          # "ready_to_expand" | "hold" | "rollback_recommended"
-    rollout_stage: str     # e.g., "stage2_research_and_code_review"
+
+    decision: str  # "ready_to_expand" | "hold" | "rollback_recommended"
+    rollout_stage: str  # e.g., "stage2_research_and_code_review"
     classes_evaluated: list[str] = field(default_factory=list)
     criteria: list[RolloutCriterion] = field(default_factory=list)
     evidence_summary: dict = field(default_factory=dict)
@@ -315,9 +318,7 @@ class RolloutEvaluation:
 
     def __post_init__(self):
         if not self.generated_at:
-            self.generated_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -346,14 +347,14 @@ def normalize_decision(raw: str) -> str:
     if cleaned in VALID_DECISIONS:
         return cleaned
     raise ValueError(
-        f"Unknown rollout decision: {raw!r} "
-        f"(normalised to {cleaned!r}, expected one of {sorted(VALID_DECISIONS)})"
+        f"Unknown rollout decision: {raw!r} (normalised to {cleaned!r}, expected one of {sorted(VALID_DECISIONS)})"
     )
 
 
 # ---------------------------------------------------------------------------
 # Evidence collection
 # ---------------------------------------------------------------------------
+
 
 def _read_json(path: Path) -> dict | None:
     if not path.exists():
@@ -412,8 +413,7 @@ def collect_evidence(base: Path | None = None) -> dict:
     if hb:
         findings = hb.get("findings", [])
         ev["unhealthy_finding_count"] = sum(
-            1 for f in findings
-            if isinstance(f, dict) and f.get("severity") == "unhealthy"
+            1 for f in findings if isinstance(f, dict) and f.get("severity") == "unhealthy"
         )
     else:
         ev["unhealthy_finding_count"] = 0
@@ -423,8 +423,7 @@ def collect_evidence(base: Path | None = None) -> dict:
     completed = [w for w in workflows if w.get("status") == "completed"]
     failed = [w for w in workflows if w.get("status") == "failed"]
     halted = [w for w in workflows if w.get("status") == "halted"]
-    active = [w for w in workflows
-              if w.get("status") in ("created", "planning", "executing")]
+    active = [w for w in workflows if w.get("status") in ("created", "planning", "executing")]
 
     ev["total_workflows"] = len(workflows)
     ev["completed_workflows"] = len(completed)
@@ -433,10 +432,7 @@ def collect_evidence(base: Path | None = None) -> dict:
     ev["active_workflows"] = len(active)
 
     total_terminal = len(completed) + len(failed) + len(halted)
-    ev["failure_rate"] = (
-        round((len(failed) + len(halted)) / total_terminal, 3)
-        if total_terminal > 0 else None
-    )
+    ev["failure_rate"] = round((len(failed) + len(halted)) / total_terminal, 3) if total_terminal > 0 else None
 
     # --- Verifier reports ---
     verifications = _list_json_files(state / "verifications")
@@ -446,10 +442,7 @@ def collect_evidence(base: Path | None = None) -> dict:
 
     ev["verifier_rejections"] = rejections
     ev["verifier_approvals"] = approvals
-    ev["verifier_rejection_rate"] = (
-        round(rejections / total_verifications, 3)
-        if total_verifications > 0 else None
-    )
+    ev["verifier_rejection_rate"] = round(rejections / total_verifications, 3) if total_verifications > 0 else None
 
     # --- Contract metrics ---
     metrics_data = _read_json(state / "metrics.json")
@@ -461,9 +454,7 @@ def collect_evidence(base: Path | None = None) -> dict:
         total_contracts = cf_count + cs_count
         ev["contract_failures"] = cf_count
         ev["contract_successes"] = cs_count
-        ev["contract_failure_rate"] = (
-            round(cf_count / total_contracts, 3) if total_contracts > 0 else None
-        )
+        ev["contract_failure_rate"] = round(cf_count / total_contracts, 3) if total_contracts > 0 else None
     else:
         ev["contract_failures"] = 0
         ev["contract_successes"] = 0
@@ -474,10 +465,7 @@ def collect_evidence(base: Path | None = None) -> dict:
     ev["policy_violations"] = len(denials)
 
     # --- Budget exhaustions ---
-    ev["budget_exhaustions"] = sum(
-        1 for w in halted
-        if "budget" in w.get("halt_reason", "").lower()
-    )
+    ev["budget_exhaustions"] = sum(1 for w in halted if "budget" in w.get("halt_reason", "").lower())
 
     # --- Orphaned agents ---
     now = time.time()
@@ -492,8 +480,7 @@ def collect_evidence(base: Path | None = None) -> dict:
 
     # --- Stale leases ---
     leases = _list_json_files(state / "leases")
-    stale = sum(1 for lease in leases
-                if lease.get("expires_at", 0) and lease["expires_at"] < now)
+    stale = sum(1 for lease in leases if lease.get("expires_at", 0) and lease["expires_at"] < now)
     ev["stale_leases"] = stale
 
     # --- Recovery events ---
@@ -525,6 +512,7 @@ def collect_evidence(base: Path | None = None) -> dict:
 # Criterion evaluation
 # ---------------------------------------------------------------------------
 
+
 def evaluate_criteria(evidence: dict) -> list[RolloutCriterion]:
     """Evaluate all rollout criteria against collected evidence.
 
@@ -534,154 +522,160 @@ def evaluate_criteria(evidence: dict) -> list[RolloutCriterion]:
 
     # 1. Heartbeat healthy
     hb = evidence.get("heartbeat_overall", "")
-    criteria.append(RolloutCriterion(
-        name="heartbeat_healthy",
-        passed=hb != "unhealthy",
-        value=hb or "(no data)",
-        threshold="not unhealthy",
-        detail=(
-            f"Current heartbeat: {hb or '(no data)'}"
-            if hb != "unhealthy"
-            else "Heartbeat is UNHEALTHY — rollout unsafe"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="heartbeat_healthy",
+            passed=hb != "unhealthy",
+            value=hb or "(no data)",
+            threshold="not unhealthy",
+            detail=(
+                f"Current heartbeat: {hb or '(no data)'}"
+                if hb != "unhealthy"
+                else "Heartbeat is UNHEALTHY — rollout unsafe"
+            ),
+            severity="hard",
+        )
+    )
 
     # 2. Minimum completed workflows
     completed = evidence.get("completed_workflows", 0)
-    criteria.append(RolloutCriterion(
-        name="minimum_completed_runs",
-        passed=completed >= MIN_COMPLETED_WORKFLOWS,
-        value=completed,
-        threshold=MIN_COMPLETED_WORKFLOWS,
-        detail=(
-            f"{completed} completed workflows (need >= {MIN_COMPLETED_WORKFLOWS})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="minimum_completed_runs",
+            passed=completed >= MIN_COMPLETED_WORKFLOWS,
+            value=completed,
+            threshold=MIN_COMPLETED_WORKFLOWS,
+            detail=(f"{completed} completed workflows (need >= {MIN_COMPLETED_WORKFLOWS})"),
+            severity="soft",
+        )
+    )
 
     # 3. Failure rate
     failure_rate = evidence.get("failure_rate")
     if failure_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="acceptable_failure_rate",
-            passed=failure_rate <= MAX_FAILURE_RATE,
-            value=failure_rate,
-            threshold=MAX_FAILURE_RATE,
-            detail=f"Failure rate {failure_rate:.1%} (max {MAX_FAILURE_RATE:.0%})",
-            severity="hard",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="acceptable_failure_rate",
+                passed=failure_rate <= MAX_FAILURE_RATE,
+                value=failure_rate,
+                threshold=MAX_FAILURE_RATE,
+                detail=f"Failure rate {failure_rate:.1%} (max {MAX_FAILURE_RATE:.0%})",
+                severity="hard",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="acceptable_failure_rate",
-            passed=True,  # no evidence = no failures
-            value=None,
-            threshold=MAX_FAILURE_RATE,
-            detail="No terminal workflows yet — no failure rate to evaluate",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="acceptable_failure_rate",
+                passed=True,  # no evidence = no failures
+                value=None,
+                threshold=MAX_FAILURE_RATE,
+                detail="No terminal workflows yet — no failure rate to evaluate",
+                severity="soft",
+            )
+        )
 
     # 4. Verifier rejection rate
     vr_rate = evidence.get("verifier_rejection_rate")
     if vr_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="acceptable_verifier_rejection_rate",
-            passed=vr_rate <= MAX_VERIFIER_REJECTION_RATE,
-            value=vr_rate,
-            threshold=MAX_VERIFIER_REJECTION_RATE,
-            detail=f"Verifier rejection rate {vr_rate:.1%} (max {MAX_VERIFIER_REJECTION_RATE:.0%})",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="acceptable_verifier_rejection_rate",
+                passed=vr_rate <= MAX_VERIFIER_REJECTION_RATE,
+                value=vr_rate,
+                threshold=MAX_VERIFIER_REJECTION_RATE,
+                detail=f"Verifier rejection rate {vr_rate:.1%} (max {MAX_VERIFIER_REJECTION_RATE:.0%})",
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="acceptable_verifier_rejection_rate",
-            passed=True,
-            value=None,
-            threshold=MAX_VERIFIER_REJECTION_RATE,
-            detail="No verifier reports yet — N/A",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="acceptable_verifier_rejection_rate",
+                passed=True,
+                value=None,
+                threshold=MAX_VERIFIER_REJECTION_RATE,
+                detail="No verifier reports yet — N/A",
+                severity="soft",
+            )
+        )
 
     # 5. Contract failure rate
     cf_rate = evidence.get("contract_failure_rate")
     if cf_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="acceptable_contract_failure_rate",
-            passed=cf_rate <= MAX_CONTRACT_FAILURE_RATE,
-            value=cf_rate,
-            threshold=MAX_CONTRACT_FAILURE_RATE,
-            detail=f"Contract failure rate {cf_rate:.1%} (max {MAX_CONTRACT_FAILURE_RATE:.0%})",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="acceptable_contract_failure_rate",
+                passed=cf_rate <= MAX_CONTRACT_FAILURE_RATE,
+                value=cf_rate,
+                threshold=MAX_CONTRACT_FAILURE_RATE,
+                detail=f"Contract failure rate {cf_rate:.1%} (max {MAX_CONTRACT_FAILURE_RATE:.0%})",
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="acceptable_contract_failure_rate",
-            passed=True,
-            value=None,
-            threshold=MAX_CONTRACT_FAILURE_RATE,
-            detail="No contract metrics yet — N/A",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="acceptable_contract_failure_rate",
+                passed=True,
+                value=None,
+                threshold=MAX_CONTRACT_FAILURE_RATE,
+                detail="No contract metrics yet — N/A",
+                severity="soft",
+            )
+        )
 
     # 6. No policy violations
     violations = evidence.get("policy_violations", 0)
-    criteria.append(RolloutCriterion(
-        name="no_policy_violations",
-        passed=violations <= MAX_POLICY_VIOLATIONS,
-        value=violations,
-        threshold=MAX_POLICY_VIOLATIONS,
-        detail=(
-            "No policy violations"
-            if violations == 0
-            else f"{violations} policy violation(s) detected"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_policy_violations",
+            passed=violations <= MAX_POLICY_VIOLATIONS,
+            value=violations,
+            threshold=MAX_POLICY_VIOLATIONS,
+            detail=("No policy violations" if violations == 0 else f"{violations} policy violation(s) detected"),
+            severity="hard",
+        )
+    )
 
     # 7. No budget exhaustions
     budget = evidence.get("budget_exhaustions", 0)
-    criteria.append(RolloutCriterion(
-        name="no_budget_exhaustions",
-        passed=budget <= MAX_BUDGET_EXHAUSTIONS,
-        value=budget,
-        threshold=MAX_BUDGET_EXHAUSTIONS,
-        detail=(
-            "No budget exhaustions"
-            if budget == 0
-            else f"{budget} budget exhaustion(s)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_budget_exhaustions",
+            passed=budget <= MAX_BUDGET_EXHAUSTIONS,
+            value=budget,
+            threshold=MAX_BUDGET_EXHAUSTIONS,
+            detail=("No budget exhaustions" if budget == 0 else f"{budget} budget exhaustion(s)"),
+            severity="hard",
+        )
+    )
 
     # 8. No orphaned agents
     orphaned = evidence.get("orphaned_agents", 0)
-    criteria.append(RolloutCriterion(
-        name="no_orphaned_agents",
-        passed=orphaned == 0,
-        value=orphaned,
-        threshold=0,
-        detail=(
-            "No orphaned agents"
-            if orphaned == 0
-            else f"{orphaned} orphaned agent(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_orphaned_agents",
+            passed=orphaned == 0,
+            value=orphaned,
+            threshold=0,
+            detail=("No orphaned agents" if orphaned == 0 else f"{orphaned} orphaned agent(s)"),
+            severity="soft",
+        )
+    )
 
     # 9. No stale leases
     stale = evidence.get("stale_leases", 0)
-    criteria.append(RolloutCriterion(
-        name="no_stale_leases",
-        passed=stale == 0,
-        value=stale,
-        threshold=0,
-        detail=(
-            "No stale leases"
-            if stale == 0
-            else f"{stale} stale lease(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_stale_leases",
+            passed=stale == 0,
+            value=stale,
+            threshold=0,
+            detail=("No stale leases" if stale == 0 else f"{stale} stale lease(s)"),
+            severity="soft",
+        )
+    )
 
     return criteria
 
@@ -690,8 +684,8 @@ def evaluate_criteria(evidence: dict) -> list[RolloutCriterion]:
 # Decision logic
 # ---------------------------------------------------------------------------
 
-def decide(criteria: list[RolloutCriterion],
-           evidence: dict) -> tuple[str, str]:
+
+def decide(criteria: list[RolloutCriterion], evidence: dict) -> tuple[str, str]:
     """Determine rollout decision from evaluated criteria.
 
     Returns (decision, next_action) where decision is one of:
@@ -699,10 +693,8 @@ def decide(criteria: list[RolloutCriterion],
       - "hold"
       - "rollback_recommended"
     """
-    hard_failures = [c for c in criteria
-                     if c.severity == "hard" and not c.passed]
-    soft_failures = [c for c in criteria
-                     if c.severity == "soft" and not c.passed]
+    hard_failures = [c for c in criteria if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria if c.severity == "soft" and not c.passed]
 
     # Any hard failure → rollback recommended
     if hard_failures:
@@ -714,9 +706,7 @@ def decide(criteria: list[RolloutCriterion],
         )
 
     # Insufficient evidence → hold
-    min_runs = next(
-        (c for c in criteria if c.name == "minimum_completed_runs"), None
-    )
+    min_runs = next((c for c in criteria if c.name == "minimum_completed_runs"), None)
     if min_runs and not min_runs.passed:
         return (
             "hold",
@@ -729,21 +719,20 @@ def decide(criteria: list[RolloutCriterion],
         reasons = ", ".join(c.name for c in soft_failures)
         return (
             "hold",
-            f"Soft concerns detected: {reasons}. "
-            f"Continue monitoring before expansion.",
+            f"Soft concerns detected: {reasons}. Continue monitoring before expansion.",
         )
 
     # All clear → ready to expand
     return (
         "ready_to_expand",
-        "Stage 2 rollout is stable. Safe to add code_impl to "
-        "supported_classes for Stage 3 rollout.",
+        "Stage 2 rollout is stable. Safe to add code_impl to supported_classes for Stage 3 rollout.",
     )
 
 
 # ---------------------------------------------------------------------------
 # Main evaluation entry point
 # ---------------------------------------------------------------------------
+
 
 def evaluate_rollout(base: Path | None = None) -> RolloutEvaluation:
     """Run the full rollout evaluation gate.
@@ -782,6 +771,7 @@ def evaluate_rollout(base: Path | None = None) -> RolloutEvaluation:
 # Report rendering
 # ---------------------------------------------------------------------------
 
+
 def render_evaluation_markdown(evaluation: RolloutEvaluation) -> str:
     """Render evaluation result as a markdown report."""
     icon = {
@@ -810,10 +800,7 @@ def render_evaluation_markdown(evaluation: RolloutEvaluation) -> str:
     for i, c in enumerate(evaluation.criteria, 1):
         status = "PASS" if c.passed else "FAIL"
         val = c.value if c.value is not None else "N/A"
-        lines.append(
-            f"| {i} | {c.name} | {status} | {val} | {c.threshold} "
-            f"| {c.severity} | {c.detail} |"
-        )
+        lines.append(f"| {i} | {c.name} | {status} | {val} | {c.threshold} | {c.severity} | {c.detail} |")
 
     lines.append("")
 
@@ -839,6 +826,7 @@ def render_evaluation_json(evaluation: RolloutEvaluation) -> str:
 # ---------------------------------------------------------------------------
 # Write to disk
 # ---------------------------------------------------------------------------
+
 
 def write_evaluation_report(
     evaluation: RolloutEvaluation,
@@ -875,8 +863,9 @@ STAGE3_ALLOWED_ROLES = ["research", "coding"]
 @dataclass
 class ExpansionResult:
     """Outcome of an evaluation-gated Stage 3 expansion attempt."""
+
     expanded: bool
-    decision: str          # "ready_to_expand" | "hold" | "rollback_recommended"
+    decision: str  # "ready_to_expand" | "hold" | "rollback_recommended"
     reason: str
     evaluation: RolloutEvaluation | None = None
     config_path: Path | None = None
@@ -941,9 +930,7 @@ def expand_to_stage3(base: Path | None = None) -> ExpansionResult:
     )
     flags_data["phase7_orchestrator"] = orch
     flags_data["version"] = flags_data.get("version", 0) + 1
-    flags_data["updated_at"] = datetime.now(timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    flags_data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Atomic write
     flags_path.parent.mkdir(parents=True, exist_ok=True)
@@ -964,22 +951,22 @@ def expand_to_stage3(base: Path | None = None) -> ExpansionResult:
 # Stage 3 readiness check — operator-facing progress report
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ReadinessReport:
     """Operator-facing report of Stage 3 readiness progress."""
+
     permitted: bool
     decision: str
     blocking_criteria: list[str]
-    progress: dict          # criterion_name -> {value, threshold, met, detail}
+    progress: dict  # criterion_name -> {value, threshold, met, detail}
     evidence_summary: dict
     rollout_stage: str
     generated_at: str = ""
 
     def __post_init__(self):
         if not self.generated_at:
-            self.generated_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def to_dict(self) -> dict:
         return {
@@ -1059,9 +1046,7 @@ def render_readiness_markdown(report: ReadinessReport) -> str:
     for name, p in report.progress.items():
         icon = "PASS" if p["met"] else "FAIL"
         val = p["value"] if p["value"] is not None else "N/A"
-        lines.append(
-            f"| {name} | {icon} | {val} | {p['threshold']} | {p['severity']} |"
-        )
+        lines.append(f"| {name} | {icon} | {val} | {p['threshold']} | {p['severity']} |")
 
     lines.append("")
     lines.append("### Evidence Summary")
@@ -1069,8 +1054,7 @@ def render_readiness_markdown(report: ReadinessReport) -> str:
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
     for k, v in report.evidence_summary.items():
-        display = (f"{v:.1%}" if isinstance(v, float)
-                   else str(v) if v is not None else "N/A")
+        display = f"{v:.1%}" if isinstance(v, float) else str(v) if v is not None else "N/A"
         lines.append(f"| {k} | {display} |")
     lines.append("")
 
@@ -1099,15 +1083,17 @@ def render_readiness_markdown(report: ReadinessReport) -> str:
 # Stage 3 activation procedure — auditable, fail-closed
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ActivationRecord:
     """Audit record of a Stage 3 activation attempt."""
+
     attempted_at: str
-    outcome: str           # "activated" | "blocked" | "error"
-    decision: str          # gate decision at time of activation
+    outcome: str  # "activated" | "blocked" | "error"
+    decision: str  # gate decision at time of activation
     reason: str
-    pre_config: dict       # config snapshot before attempt
-    post_config: dict      # config snapshot after attempt (same if blocked)
+    pre_config: dict  # config snapshot before attempt
+    post_config: dict  # config snapshot after attempt (same if blocked)
     blocking_criteria: list[str]
 
     def to_dict(self) -> dict:
@@ -1162,9 +1148,7 @@ def activate_stage3(base: Path | None = None) -> ActivationRecord:
     # 3. Build activation record
     blocking = []
     if expansion.evaluation:
-        blocking = [
-            c.name for c in expansion.evaluation.criteria if not c.passed
-        ]
+        blocking = [c.name for c in expansion.evaluation.criteria if not c.passed]
 
     if expansion.expanded:
         # Read post-activation config
@@ -1210,10 +1194,12 @@ def _append_activation_log(log_path: Path, record: ActivationRecord) -> None:
 # Phase 7.13 — Post-Stage-3 Stability Review
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StabilityReview:
     """Deterministic stability review for live Stage 3 rollout."""
-    decision: str          # "stable_continue" | "hold_stage3" | "rollback_code_impl_recommended"
+
+    decision: str  # "stable_continue" | "hold_stage3" | "rollback_code_impl_recommended"
     rollout_stage: str
     enabled_classes: list[str]
     criteria: list[RolloutCriterion] = field(default_factory=list)
@@ -1225,9 +1211,7 @@ class StabilityReview:
 
     def __post_init__(self):
         if not self.generated_at:
-            self.generated_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def to_dict(self) -> dict:
         return {
@@ -1247,23 +1231,13 @@ def _collect_code_impl_metrics(
     workflows: list[dict],
 ) -> dict:
     """Extract code_impl-specific metrics from workflow records."""
-    impl_workflows = [
-        w for w in workflows if w.get("task_class") == "code_impl"
-    ]
+    impl_workflows = [w for w in workflows if w.get("task_class") == "code_impl"]
     impl_completed = [w for w in impl_workflows if w.get("status") == "completed"]
-    impl_failed = [
-        w for w in impl_workflows
-        if w.get("status") in ("failed", "halted")
-    ]
-    impl_rejected = [
-        w for w in impl_workflows
-        if w.get("halt_reason") == "verifier_rejected"
-    ]
+    impl_failed = [w for w in impl_workflows if w.get("status") in ("failed", "halted")]
+    impl_rejected = [w for w in impl_workflows if w.get("halt_reason") == "verifier_rejected"]
 
     total = len(impl_completed) + len(impl_failed)
-    failure_rate = (
-        round(len(impl_failed) / total, 3) if total > 0 else None
-    )
+    failure_rate = round(len(impl_failed) / total, 3) if total > 0 else None
 
     return {
         "total_runs": len(impl_workflows),
@@ -1286,7 +1260,8 @@ def _get_latest_activation(base: Path) -> dict:
 
 
 def _count_post_activation_recoveries(
-    base: Path, activation_ts: str,
+    base: Path,
+    activation_ts: str,
 ) -> int:
     """Count recovery events that occurred after the activation timestamp."""
     recovery_log = base / "LOGS" / "recovery.log"
@@ -1303,14 +1278,15 @@ def _count_post_activation_recoveries(
             # Extract ISO timestamp from "--- Recovery at 2026-03-08T..."
             parts = line.split("--- Recovery at ", 1)
             if len(parts) == 2:
-                ts = parts[1].strip().rstrip(" ---")
+                ts = parts[1].strip().removesuffix(" ---")
                 if ts >= activation_ts:
                     count += 1
     return count
 
 
 def _classify_post_activation_recoveries(
-    base: Path, activation_ts: str,
+    base: Path,
+    activation_ts: str,
 ) -> dict:
     """Classify post-activation recovery events as resolved or unresolved.
 
@@ -1344,7 +1320,7 @@ def _classify_post_activation_recoveries(
         if "--- Recovery at" in line:
             parts = line.split("--- Recovery at ", 1)
             if len(parts) == 2:
-                current_ts = parts[1].strip().rstrip(" ---")
+                current_ts = parts[1].strip().removesuffix(" ---")
         elif "[task_requeued]" in line and current_ts:
             if current_ts >= activation_ts:
                 task_match = line.split("[task_requeued] ", 1)
@@ -1382,18 +1358,24 @@ def _classify_post_activation_recoveries(
                 pass
         if is_resolved:
             resolved += 1
-            details.append({
-                "task": task, "ts": event["ts"],
-                "outcome": "resolved",
-                "reason": "task completed successfully after requeue",
-            })
+            details.append(
+                {
+                    "task": task,
+                    "ts": event["ts"],
+                    "outcome": "resolved",
+                    "reason": "task completed successfully after requeue",
+                }
+            )
         else:
             unresolved += 1
-            details.append({
-                "task": task, "ts": event["ts"],
-                "outcome": "unresolved",
-                "reason": "task did not complete after requeue",
-            })
+            details.append(
+                {
+                    "task": task,
+                    "ts": event["ts"],
+                    "outcome": "unresolved",
+                    "reason": "task did not complete after requeue",
+                }
+            )
 
     return {
         "total": len(events),
@@ -1417,194 +1399,201 @@ def evaluate_stage3_stability(
 
     # 1. Heartbeat healthy (inherited, hard)
     hb = evidence.get("heartbeat_overall", "")
-    criteria.append(RolloutCriterion(
-        name="heartbeat_healthy",
-        passed=hb != "unhealthy",
-        value=hb or "(no data)",
-        threshold="not unhealthy",
-        detail=(
-            f"Current heartbeat: {hb or '(no data)'}"
-            if hb != "unhealthy"
-            else "Heartbeat is UNHEALTHY — Stage 3 unsafe"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="heartbeat_healthy",
+            passed=hb != "unhealthy",
+            value=hb or "(no data)",
+            threshold="not unhealthy",
+            detail=(
+                f"Current heartbeat: {hb or '(no data)'}"
+                if hb != "unhealthy"
+                else "Heartbeat is UNHEALTHY — Stage 3 unsafe"
+            ),
+            severity="hard",
+        )
+    )
 
     # 2. Overall failure rate (hard — tighter threshold for live mutation)
     failure_rate = evidence.get("failure_rate")
     if failure_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="overall_failure_rate",
-            passed=failure_rate <= STAGE3_MAX_FAILURE_RATE,
-            value=failure_rate,
-            threshold=STAGE3_MAX_FAILURE_RATE,
-            detail=f"Overall failure rate {failure_rate:.1%} (max {STAGE3_MAX_FAILURE_RATE:.0%})",
-            severity="hard",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="overall_failure_rate",
+                passed=failure_rate <= STAGE3_MAX_FAILURE_RATE,
+                value=failure_rate,
+                threshold=STAGE3_MAX_FAILURE_RATE,
+                detail=f"Overall failure rate {failure_rate:.1%} (max {STAGE3_MAX_FAILURE_RATE:.0%})",
+                severity="hard",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="overall_failure_rate",
-            passed=True,
-            value=None,
-            threshold=STAGE3_MAX_FAILURE_RATE,
-            detail="No terminal workflows yet",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="overall_failure_rate",
+                passed=True,
+                value=None,
+                threshold=STAGE3_MAX_FAILURE_RATE,
+                detail="No terminal workflows yet",
+                severity="soft",
+            )
+        )
 
     # 3. No policy violations (hard — zero tolerance)
     violations = evidence.get("policy_violations", 0)
-    criteria.append(RolloutCriterion(
-        name="no_policy_violations",
-        passed=violations <= MAX_POLICY_VIOLATIONS,
-        value=violations,
-        threshold=MAX_POLICY_VIOLATIONS,
-        detail=(
-            "No policy violations"
-            if violations == 0
-            else f"{violations} policy violation(s) — review immediately"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_policy_violations",
+            passed=violations <= MAX_POLICY_VIOLATIONS,
+            value=violations,
+            threshold=MAX_POLICY_VIOLATIONS,
+            detail=(
+                "No policy violations" if violations == 0 else f"{violations} policy violation(s) — review immediately"
+            ),
+            severity="hard",
+        )
+    )
 
     # 4. No budget exhaustions (hard — zero tolerance)
     budget = evidence.get("budget_exhaustions", 0)
-    criteria.append(RolloutCriterion(
-        name="no_budget_exhaustions",
-        passed=budget <= MAX_BUDGET_EXHAUSTIONS,
-        value=budget,
-        threshold=MAX_BUDGET_EXHAUSTIONS,
-        detail=(
-            "No budget exhaustions"
-            if budget == 0
-            else f"{budget} budget exhaustion(s)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_budget_exhaustions",
+            passed=budget <= MAX_BUDGET_EXHAUSTIONS,
+            value=budget,
+            threshold=MAX_BUDGET_EXHAUSTIONS,
+            detail=("No budget exhaustions" if budget == 0 else f"{budget} budget exhaustion(s)"),
+            severity="hard",
+        )
+    )
 
     # 5. code_impl minimum observation (soft — insufficient evidence = hold)
     impl_total = code_impl_metrics.get("total_runs", 0)
-    criteria.append(RolloutCriterion(
-        name="code_impl_minimum_runs",
-        passed=impl_total >= STAGE3_MIN_CODE_IMPL_RUNS,
-        value=impl_total,
-        threshold=STAGE3_MIN_CODE_IMPL_RUNS,
-        detail=(
-            f"{impl_total} code_impl runs (need >= {STAGE3_MIN_CODE_IMPL_RUNS})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="code_impl_minimum_runs",
+            passed=impl_total >= STAGE3_MIN_CODE_IMPL_RUNS,
+            value=impl_total,
+            threshold=STAGE3_MIN_CODE_IMPL_RUNS,
+            detail=(f"{impl_total} code_impl runs (need >= {STAGE3_MIN_CODE_IMPL_RUNS})"),
+            severity="soft",
+        )
+    )
 
     # 6. code_impl failure rate (soft — mutation-capable class needs monitoring)
     impl_fr = code_impl_metrics.get("failure_rate")
     if impl_fr is not None:
-        criteria.append(RolloutCriterion(
-            name="code_impl_failure_rate",
-            passed=impl_fr <= STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
-            value=impl_fr,
-            threshold=STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
-            detail=(
-                f"code_impl failure rate {impl_fr:.1%} "
-                f"(max {STAGE3_MAX_CODE_IMPL_FAILURE_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="code_impl_failure_rate",
+                passed=impl_fr <= STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
+                value=impl_fr,
+                threshold=STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
+                detail=(f"code_impl failure rate {impl_fr:.1%} (max {STAGE3_MAX_CODE_IMPL_FAILURE_RATE:.0%})"),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="code_impl_failure_rate",
-            passed=True,
-            value=None,
-            threshold=STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
-            detail="No code_impl terminal workflows yet",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="code_impl_failure_rate",
+                passed=True,
+                value=None,
+                threshold=STAGE3_MAX_CODE_IMPL_FAILURE_RATE,
+                detail="No code_impl terminal workflows yet",
+                severity="soft",
+            )
+        )
 
     # 7. Verifier rejection rate (soft — critical for mutation-capable class)
     vr_rate = evidence.get("verifier_rejection_rate")
     if vr_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="verifier_rejection_rate",
-            passed=vr_rate <= STAGE3_MAX_VERIFIER_REJECTION_RATE,
-            value=vr_rate,
-            threshold=STAGE3_MAX_VERIFIER_REJECTION_RATE,
-            detail=(
-                f"Verifier rejection rate {vr_rate:.1%} "
-                f"(max {STAGE3_MAX_VERIFIER_REJECTION_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="verifier_rejection_rate",
+                passed=vr_rate <= STAGE3_MAX_VERIFIER_REJECTION_RATE,
+                value=vr_rate,
+                threshold=STAGE3_MAX_VERIFIER_REJECTION_RATE,
+                detail=(f"Verifier rejection rate {vr_rate:.1%} (max {STAGE3_MAX_VERIFIER_REJECTION_RATE:.0%})"),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="verifier_rejection_rate",
-            passed=True,
-            value=None,
-            threshold=STAGE3_MAX_VERIFIER_REJECTION_RATE,
-            detail="No verifier reports yet — N/A",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="verifier_rejection_rate",
+                passed=True,
+                value=None,
+                threshold=STAGE3_MAX_VERIFIER_REJECTION_RATE,
+                detail="No verifier reports yet — N/A",
+                severity="soft",
+            )
+        )
 
     # 8. Contract failure rate (soft)
     cf_rate = evidence.get("contract_failure_rate")
     if cf_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="contract_failure_rate",
-            passed=cf_rate <= MAX_CONTRACT_FAILURE_RATE,
-            value=cf_rate,
-            threshold=MAX_CONTRACT_FAILURE_RATE,
-            detail=f"Contract failure rate {cf_rate:.1%} (max {MAX_CONTRACT_FAILURE_RATE:.0%})",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="contract_failure_rate",
+                passed=cf_rate <= MAX_CONTRACT_FAILURE_RATE,
+                value=cf_rate,
+                threshold=MAX_CONTRACT_FAILURE_RATE,
+                detail=f"Contract failure rate {cf_rate:.1%} (max {MAX_CONTRACT_FAILURE_RATE:.0%})",
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="contract_failure_rate",
-            passed=True,
-            value=None,
-            threshold=MAX_CONTRACT_FAILURE_RATE,
-            detail="No contract metrics yet — N/A",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="contract_failure_rate",
+                passed=True,
+                value=None,
+                threshold=MAX_CONTRACT_FAILURE_RATE,
+                detail="No contract metrics yet — N/A",
+                severity="soft",
+            )
+        )
 
     # 9. Recovery anomalies (soft — requeues/orphans since activation)
-    criteria.append(RolloutCriterion(
-        name="recovery_anomalies",
-        passed=post_activation_recoveries <= STAGE3_MAX_RECOVERY_ANOMALIES,
-        value=post_activation_recoveries,
-        threshold=STAGE3_MAX_RECOVERY_ANOMALIES,
-        detail=(
-            f"{post_activation_recoveries} recovery events since activation "
-            f"(max {STAGE3_MAX_RECOVERY_ANOMALIES})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="recovery_anomalies",
+            passed=post_activation_recoveries <= STAGE3_MAX_RECOVERY_ANOMALIES,
+            value=post_activation_recoveries,
+            threshold=STAGE3_MAX_RECOVERY_ANOMALIES,
+            detail=(
+                f"{post_activation_recoveries} recovery events since activation (max {STAGE3_MAX_RECOVERY_ANOMALIES})"
+            ),
+            severity="soft",
+        )
+    )
 
     # 10. No orphaned agents (soft)
     orphaned = evidence.get("orphaned_agents", 0)
-    criteria.append(RolloutCriterion(
-        name="no_orphaned_agents",
-        passed=orphaned == 0,
-        value=orphaned,
-        threshold=0,
-        detail=(
-            "No orphaned agents"
-            if orphaned == 0
-            else f"{orphaned} orphaned agent(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_orphaned_agents",
+            passed=orphaned == 0,
+            value=orphaned,
+            threshold=0,
+            detail=("No orphaned agents" if orphaned == 0 else f"{orphaned} orphaned agent(s)"),
+            severity="soft",
+        )
+    )
 
     # 11. No stale leases (soft)
     stale = evidence.get("stale_leases", 0)
-    criteria.append(RolloutCriterion(
-        name="no_stale_leases",
-        passed=stale == 0,
-        value=stale,
-        threshold=0,
-        detail=(
-            "No stale leases"
-            if stale == 0
-            else f"{stale} stale lease(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_stale_leases",
+            passed=stale == 0,
+            value=stale,
+            threshold=0,
+            detail=("No stale leases" if stale == 0 else f"{stale} stale lease(s)"),
+            severity="soft",
+        )
+    )
 
     return criteria
 
@@ -1619,10 +1608,8 @@ def decide_stage3_stability(
       - "hold_stage3"
       - "rollback_code_impl_recommended"
     """
-    hard_failures = [c for c in criteria
-                     if c.severity == "hard" and not c.passed]
-    soft_failures = [c for c in criteria
-                     if c.severity == "soft" and not c.passed]
+    hard_failures = [c for c in criteria if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria if c.severity == "soft" and not c.passed]
 
     # Any hard failure → rollback code_impl
     if hard_failures:
@@ -1635,9 +1622,7 @@ def decide_stage3_stability(
         )
 
     # Insufficient code_impl evidence → hold
-    impl_runs = next(
-        (c for c in criteria if c.name == "code_impl_minimum_runs"), None
-    )
+    impl_runs = next((c for c in criteria if c.name == "code_impl_minimum_runs"), None)
     if impl_runs and not impl_runs.passed:
         return (
             "hold_stage3",
@@ -1651,8 +1636,7 @@ def decide_stage3_stability(
         reasons = ", ".join(c.name for c in soft_failures)
         return (
             "hold_stage3",
-            f"Soft concerns: {reasons}. "
-            f"Continue monitoring Stage 3. Do not expand to Stage 4.",
+            f"Soft concerns: {reasons}. Continue monitoring Stage 3. Do not expand to Stage 4.",
         )
 
     # All clear → stable
@@ -1696,7 +1680,9 @@ def review_stage3_stability(
 
     # Evaluate Stage 3 stability criteria
     criteria = evaluate_stage3_stability(
-        evidence, code_impl_metrics, post_recoveries,
+        evidence,
+        code_impl_metrics,
+        post_recoveries,
     )
     decision, next_action = decide_stage3_stability(criteria)
 
@@ -1780,10 +1766,7 @@ def render_stability_review_markdown(review: StabilityReview) -> str:
     for i, c in enumerate(review.criteria, 1):
         status = "PASS" if c.passed else "FAIL"
         val = c.value if c.value is not None else "N/A"
-        lines.append(
-            f"| {i} | {c.name} | {status} | {val} | {c.threshold} "
-            f"| {c.severity} | {c.detail} |"
-        )
+        lines.append(f"| {i} | {c.name} | {status} | {val} | {c.threshold} | {c.severity} | {c.detail} |")
     lines.append("")
 
     # Evidence summary
@@ -1793,11 +1776,7 @@ def render_stability_review_markdown(review: StabilityReview) -> str:
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
     for k, v in ev.items():
-        display = (
-            f"{v:.1%}" if isinstance(v, float)
-            else str(v) if v is not None
-            else "N/A"
-        )
+        display = f"{v:.1%}" if isinstance(v, float) else str(v) if v is not None else "N/A"
         lines.append(f"| {k} | {display} |")
     lines.append("")
 
@@ -1838,9 +1817,7 @@ def write_stability_review(
     md_path.write_text(render_stability_review_markdown(review))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(review.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(review.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path
 
@@ -1849,11 +1826,13 @@ def write_stability_review(
 # Phase 7.14 — Stage 4 Evaluation Gate (system class readiness)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Stage4Evaluation:
     """Deterministic evaluation of whether Stage 4 (system class) should be
     considered for rollout planning."""
-    decision: str          # "ready_for_stage4_planning" | "hold_stage4" | "block_stage4"
+
+    decision: str  # "ready_for_stage4_planning" | "hold_stage4" | "block_stage4"
     rollout_stage: str
     enabled_classes: list[str]
     criteria: list[RolloutCriterion] = field(default_factory=list)
@@ -1866,9 +1845,7 @@ class Stage4Evaluation:
 
     def __post_init__(self):
         if not self.generated_at:
-            self.generated_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def to_dict(self) -> dict:
         return {
@@ -1899,257 +1876,267 @@ def evaluate_stage4_criteria(
     criteria: list[RolloutCriterion] = []
 
     # 1. Stage 3 stability must be stable_continue (hard — prerequisite)
-    criteria.append(RolloutCriterion(
-        name="stage3_stable",
-        passed=stage3_decision == "stable_continue",
-        value=stage3_decision,
-        threshold="stable_continue",
-        detail=(
-            "Stage 3 stability confirmed"
-            if stage3_decision == "stable_continue"
-            else f"Stage 3 stability is '{stage3_decision}' — must be stable_continue"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="stage3_stable",
+            passed=stage3_decision == "stable_continue",
+            value=stage3_decision,
+            threshold="stable_continue",
+            detail=(
+                "Stage 3 stability confirmed"
+                if stage3_decision == "stable_continue"
+                else f"Stage 3 stability is '{stage3_decision}' — must be stable_continue"
+            ),
+            severity="hard",
+        )
+    )
 
     # 2. Heartbeat healthy (hard)
     hb = evidence.get("heartbeat_overall", "")
-    criteria.append(RolloutCriterion(
-        name="heartbeat_healthy",
-        passed=hb != "unhealthy",
-        value=hb or "(no data)",
-        threshold="not unhealthy",
-        detail=(
-            f"Current heartbeat: {hb or '(no data)'}"
-            if hb != "unhealthy"
-            else "Heartbeat is UNHEALTHY — Stage 4 blocked"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="heartbeat_healthy",
+            passed=hb != "unhealthy",
+            value=hb or "(no data)",
+            threshold="not unhealthy",
+            detail=(
+                f"Current heartbeat: {hb or '(no data)'}"
+                if hb != "unhealthy"
+                else "Heartbeat is UNHEALTHY — Stage 4 blocked"
+            ),
+            severity="hard",
+        )
+    )
 
     # 3. Overall failure rate (hard — tighter for Stage 4)
     failure_rate = evidence.get("failure_rate")
     if failure_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="overall_failure_rate",
-            passed=failure_rate <= STAGE4_MAX_FAILURE_RATE,
-            value=failure_rate,
-            threshold=STAGE4_MAX_FAILURE_RATE,
-            detail=f"Overall failure rate {failure_rate:.1%} (max {STAGE4_MAX_FAILURE_RATE:.0%})",
-            severity="hard",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="overall_failure_rate",
+                passed=failure_rate <= STAGE4_MAX_FAILURE_RATE,
+                value=failure_rate,
+                threshold=STAGE4_MAX_FAILURE_RATE,
+                detail=f"Overall failure rate {failure_rate:.1%} (max {STAGE4_MAX_FAILURE_RATE:.0%})",
+                severity="hard",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="overall_failure_rate",
-            passed=True,
-            value=None,
-            threshold=STAGE4_MAX_FAILURE_RATE,
-            detail="No terminal workflows yet",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="overall_failure_rate",
+                passed=True,
+                value=None,
+                threshold=STAGE4_MAX_FAILURE_RATE,
+                detail="No terminal workflows yet",
+                severity="soft",
+            )
+        )
 
     # 4. No policy violations (hard — zero tolerance)
     violations = evidence.get("policy_violations", 0)
-    criteria.append(RolloutCriterion(
-        name="no_policy_violations",
-        passed=violations <= MAX_POLICY_VIOLATIONS,
-        value=violations,
-        threshold=MAX_POLICY_VIOLATIONS,
-        detail=(
-            "No policy violations"
-            if violations == 0
-            else f"{violations} policy violation(s) — Stage 4 blocked"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_policy_violations",
+            passed=violations <= MAX_POLICY_VIOLATIONS,
+            value=violations,
+            threshold=MAX_POLICY_VIOLATIONS,
+            detail=(
+                "No policy violations" if violations == 0 else f"{violations} policy violation(s) — Stage 4 blocked"
+            ),
+            severity="hard",
+        )
+    )
 
     # 5. No budget exhaustions (hard — zero tolerance)
     budget = evidence.get("budget_exhaustions", 0)
-    criteria.append(RolloutCriterion(
-        name="no_budget_exhaustions",
-        passed=budget <= MAX_BUDGET_EXHAUSTIONS,
-        value=budget,
-        threshold=MAX_BUDGET_EXHAUSTIONS,
-        detail=(
-            "No budget exhaustions"
-            if budget == 0
-            else f"{budget} budget exhaustion(s)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_budget_exhaustions",
+            passed=budget <= MAX_BUDGET_EXHAUSTIONS,
+            value=budget,
+            threshold=MAX_BUDGET_EXHAUSTIONS,
+            detail=("No budget exhaustions" if budget == 0 else f"{budget} budget exhaustion(s)"),
+            severity="hard",
+        )
+    )
 
     # 6. System class currently blocked (hard — sanity check)
     supported = evidence.get("supported_classes", [])
     system_blocked = "system" not in supported
-    criteria.append(RolloutCriterion(
-        name="system_class_blocked",
-        passed=system_blocked,
-        value="blocked" if system_blocked else "enabled",
-        threshold="blocked",
-        detail=(
-            "system class correctly blocked"
-            if system_blocked
-            else "system class already enabled — evaluation invalid"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="system_class_blocked",
+            passed=system_blocked,
+            value="blocked" if system_blocked else "enabled",
+            threshold="blocked",
+            detail=(
+                "system class correctly blocked"
+                if system_blocked
+                else "system class already enabled — evaluation invalid"
+            ),
+            severity="hard",
+        )
+    )
 
     # 7. Minimum total completed workflows (soft — systemic confidence)
     completed = evidence.get("completed_workflows", 0)
-    criteria.append(RolloutCriterion(
-        name="minimum_total_completed",
-        passed=completed >= STAGE4_MIN_TOTAL_COMPLETED,
-        value=completed,
-        threshold=STAGE4_MIN_TOTAL_COMPLETED,
-        detail=f"{completed} total completed (need >= {STAGE4_MIN_TOTAL_COMPLETED})",
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="minimum_total_completed",
+            passed=completed >= STAGE4_MIN_TOTAL_COMPLETED,
+            value=completed,
+            threshold=STAGE4_MIN_TOTAL_COMPLETED,
+            detail=f"{completed} total completed (need >= {STAGE4_MIN_TOTAL_COMPLETED})",
+            severity="soft",
+        )
+    )
 
     # 8. code_impl minimum observation (soft — needs sustained evidence)
     impl_total = code_impl_metrics.get("total_runs", 0)
-    criteria.append(RolloutCriterion(
-        name="code_impl_minimum_runs",
-        passed=impl_total >= STAGE4_MIN_CODE_IMPL_RUNS,
-        value=impl_total,
-        threshold=STAGE4_MIN_CODE_IMPL_RUNS,
-        detail=f"{impl_total} code_impl runs (need >= {STAGE4_MIN_CODE_IMPL_RUNS})",
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="code_impl_minimum_runs",
+            passed=impl_total >= STAGE4_MIN_CODE_IMPL_RUNS,
+            value=impl_total,
+            threshold=STAGE4_MIN_CODE_IMPL_RUNS,
+            detail=f"{impl_total} code_impl runs (need >= {STAGE4_MIN_CODE_IMPL_RUNS})",
+            severity="soft",
+        )
+    )
 
     # 9. code_impl failure rate (soft — tighter than Stage 3)
     impl_fr = code_impl_metrics.get("failure_rate")
     if impl_fr is not None:
-        criteria.append(RolloutCriterion(
-            name="code_impl_failure_rate",
-            passed=impl_fr <= STAGE4_MAX_CODE_IMPL_FAILURE_RATE,
-            value=impl_fr,
-            threshold=STAGE4_MAX_CODE_IMPL_FAILURE_RATE,
-            detail=(
-                f"code_impl failure rate {impl_fr:.1%} "
-                f"(max {STAGE4_MAX_CODE_IMPL_FAILURE_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="code_impl_failure_rate",
+                passed=impl_fr <= STAGE4_MAX_CODE_IMPL_FAILURE_RATE,
+                value=impl_fr,
+                threshold=STAGE4_MAX_CODE_IMPL_FAILURE_RATE,
+                detail=(f"code_impl failure rate {impl_fr:.1%} (max {STAGE4_MAX_CODE_IMPL_FAILURE_RATE:.0%})"),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="code_impl_failure_rate",
-            passed=True,
-            value=None,
-            threshold=STAGE4_MAX_CODE_IMPL_FAILURE_RATE,
-            detail="No code_impl terminal workflows yet",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="code_impl_failure_rate",
+                passed=True,
+                value=None,
+                threshold=STAGE4_MAX_CODE_IMPL_FAILURE_RATE,
+                detail="No code_impl terminal workflows yet",
+                severity="soft",
+            )
+        )
 
     # 10. Verifier rejection rate (soft — tighter)
     vr_rate = evidence.get("verifier_rejection_rate")
     if vr_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="verifier_rejection_rate",
-            passed=vr_rate <= STAGE4_MAX_VERIFIER_REJECTION_RATE,
-            value=vr_rate,
-            threshold=STAGE4_MAX_VERIFIER_REJECTION_RATE,
-            detail=(
-                f"Verifier rejection rate {vr_rate:.1%} "
-                f"(max {STAGE4_MAX_VERIFIER_REJECTION_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="verifier_rejection_rate",
+                passed=vr_rate <= STAGE4_MAX_VERIFIER_REJECTION_RATE,
+                value=vr_rate,
+                threshold=STAGE4_MAX_VERIFIER_REJECTION_RATE,
+                detail=(f"Verifier rejection rate {vr_rate:.1%} (max {STAGE4_MAX_VERIFIER_REJECTION_RATE:.0%})"),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="verifier_rejection_rate",
-            passed=True,
-            value=None,
-            threshold=STAGE4_MAX_VERIFIER_REJECTION_RATE,
-            detail="No verifier reports yet — N/A",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="verifier_rejection_rate",
+                passed=True,
+                value=None,
+                threshold=STAGE4_MAX_VERIFIER_REJECTION_RATE,
+                detail="No verifier reports yet — N/A",
+                severity="soft",
+            )
+        )
 
     # 11. Contract failure rate (soft — tighter)
     cf_rate = evidence.get("contract_failure_rate")
     if cf_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="contract_failure_rate",
-            passed=cf_rate <= STAGE4_MAX_CONTRACT_FAILURE_RATE,
-            value=cf_rate,
-            threshold=STAGE4_MAX_CONTRACT_FAILURE_RATE,
-            detail=(
-                f"Contract failure rate {cf_rate:.1%} "
-                f"(max {STAGE4_MAX_CONTRACT_FAILURE_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="contract_failure_rate",
+                passed=cf_rate <= STAGE4_MAX_CONTRACT_FAILURE_RATE,
+                value=cf_rate,
+                threshold=STAGE4_MAX_CONTRACT_FAILURE_RATE,
+                detail=(f"Contract failure rate {cf_rate:.1%} (max {STAGE4_MAX_CONTRACT_FAILURE_RATE:.0%})"),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="contract_failure_rate",
-            passed=True,
-            value=None,
-            threshold=STAGE4_MAX_CONTRACT_FAILURE_RATE,
-            detail="No contract metrics yet — N/A",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="contract_failure_rate",
+                passed=True,
+                value=None,
+                threshold=STAGE4_MAX_CONTRACT_FAILURE_RATE,
+                detail="No contract metrics yet — N/A",
+                severity="soft",
+            )
+        )
 
     # 12. Recovery anomalies (soft — tighter)
-    criteria.append(RolloutCriterion(
-        name="recovery_anomalies",
-        passed=post_activation_recoveries <= STAGE4_MAX_RECOVERY_ANOMALIES,
-        value=post_activation_recoveries,
-        threshold=STAGE4_MAX_RECOVERY_ANOMALIES,
-        detail=(
-            f"{post_activation_recoveries} recovery events since activation "
-            f"(max {STAGE4_MAX_RECOVERY_ANOMALIES})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="recovery_anomalies",
+            passed=post_activation_recoveries <= STAGE4_MAX_RECOVERY_ANOMALIES,
+            value=post_activation_recoveries,
+            threshold=STAGE4_MAX_RECOVERY_ANOMALIES,
+            detail=(
+                f"{post_activation_recoveries} recovery events since activation (max {STAGE4_MAX_RECOVERY_ANOMALIES})"
+            ),
+            severity="soft",
+        )
+    )
 
     # 13. No orphaned agents (soft)
     orphaned = evidence.get("orphaned_agents", 0)
-    criteria.append(RolloutCriterion(
-        name="no_orphaned_agents",
-        passed=orphaned == 0,
-        value=orphaned,
-        threshold=0,
-        detail=(
-            "No orphaned agents"
-            if orphaned == 0
-            else f"{orphaned} orphaned agent(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_orphaned_agents",
+            passed=orphaned == 0,
+            value=orphaned,
+            threshold=0,
+            detail=("No orphaned agents" if orphaned == 0 else f"{orphaned} orphaned agent(s)"),
+            severity="soft",
+        )
+    )
 
     # 14. No stale leases (soft)
     stale = evidence.get("stale_leases", 0)
-    criteria.append(RolloutCriterion(
-        name="no_stale_leases",
-        passed=stale == 0,
-        value=stale,
-        threshold=0,
-        detail=(
-            "No stale leases"
-            if stale == 0
-            else f"{stale} stale lease(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_stale_leases",
+            passed=stale == 0,
+            value=stale,
+            threshold=0,
+            detail=("No stale leases" if stale == 0 else f"{stale} stale lease(s)"),
+            severity="soft",
+        )
+    )
 
     # 15. No rollback events in activation history (soft — no instability)
-    activation_log = _read_jsonl(
-        (evidence.get("_base_path") or BASE) / "STATE" / "activation_log.jsonl"
+    activation_log = _read_jsonl((evidence.get("_base_path") or BASE) / "STATE" / "activation_log.jsonl")
+    rollback_events = sum(1 for r in activation_log if r.get("outcome") == "rollback")
+    criteria.append(
+        RolloutCriterion(
+            name="no_rollback_history",
+            passed=rollback_events == 0,
+            value=rollback_events,
+            threshold=0,
+            detail=(
+                "No rollback events in activation history"
+                if rollback_events == 0
+                else f"{rollback_events} rollback event(s) — indicates instability"
+            ),
+            severity="soft",
+        )
     )
-    rollback_events = sum(
-        1 for r in activation_log if r.get("outcome") == "rollback"
-    )
-    criteria.append(RolloutCriterion(
-        name="no_rollback_history",
-        passed=rollback_events == 0,
-        value=rollback_events,
-        threshold=0,
-        detail=(
-            "No rollback events in activation history"
-            if rollback_events == 0
-            else f"{rollback_events} rollback event(s) — indicates instability"
-        ),
-        severity="soft",
-    ))
 
     return criteria
 
@@ -2164,10 +2151,8 @@ def decide_stage4_readiness(
       - "hold_stage4"
       - "block_stage4"
     """
-    hard_failures = [c for c in criteria
-                     if c.severity == "hard" and not c.passed]
-    soft_failures = [c for c in criteria
-                     if c.severity == "soft" and not c.passed]
+    hard_failures = [c for c in criteria if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria if c.severity == "soft" and not c.passed]
 
     # Any hard failure → block
     if hard_failures:
@@ -2181,9 +2166,7 @@ def decide_stage4_readiness(
 
     # Insufficient evidence → hold
     evidence_criteria = {"code_impl_minimum_runs", "minimum_total_completed"}
-    insufficient = [
-        c for c in soft_failures if c.name in evidence_criteria
-    ]
+    insufficient = [c for c in soft_failures if c.name in evidence_criteria]
     if insufficient:
         names = ", ".join(c.name for c in insufficient)
         return (
@@ -2198,8 +2181,7 @@ def decide_stage4_readiness(
         reasons = ", ".join(c.name for c in soft_failures)
         return (
             "hold_stage4",
-            f"Soft concerns: {reasons}. "
-            f"Continue monitoring Stage 3. system remains blocked.",
+            f"Soft concerns: {reasons}. Continue monitoring Stage 3. system remains blocked.",
         )
 
     # All clear → ready for planning
@@ -2252,7 +2234,10 @@ def evaluate_stage4(
 
     # Evaluate Stage 4 criteria
     criteria = evaluate_stage4_criteria(
-        evidence, code_impl_metrics, post_recoveries, stage3_decision,
+        evidence,
+        code_impl_metrics,
+        post_recoveries,
+        stage3_decision,
     )
     decision, next_action = decide_stage4_readiness(criteria)
 
@@ -2335,10 +2320,7 @@ def render_stage4_evaluation_markdown(evaluation: Stage4Evaluation) -> str:
     for i, c in enumerate(evaluation.criteria, 1):
         status = "PASS" if c.passed else "FAIL"
         val = c.value if c.value is not None else "N/A"
-        lines.append(
-            f"| {i} | {c.name} | {status} | {val} | {c.threshold} "
-            f"| {c.severity} | {c.detail} |"
-        )
+        lines.append(f"| {i} | {c.name} | {status} | {val} | {c.threshold} | {c.severity} | {c.detail} |")
     lines.append("")
 
     # Remaining requirements
@@ -2356,11 +2338,7 @@ def render_stage4_evaluation_markdown(evaluation: Stage4Evaluation) -> str:
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
     for k, v in ev.items():
-        display = (
-            f"{v:.1%}" if isinstance(v, float)
-            else str(v) if v is not None
-            else "N/A"
-        )
+        display = f"{v:.1%}" if isinstance(v, float) else str(v) if v is not None else "N/A"
         lines.append(f"| {k} | {display} |")
     lines.append("")
 
@@ -2411,9 +2389,7 @@ def write_stage4_evaluation(
     md_path.write_text(render_stage4_evaluation_markdown(evaluation))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(evaluation.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(evaluation.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path
 
@@ -2426,69 +2402,107 @@ def write_stage4_evaluation(
 # The "system" task class covers a wide range of operations.
 # Stage 4 initial rollout restricts to inspection/read-only operations only.
 
-STAGE4_ALLOWED_OPERATIONS = frozenset({
-    # Read-only system inspection
-    "status_check",        # check service status, systemctl status
-    "log_inspection",      # read/tail log files
-    "config_review",       # read config files, inspect settings
-    "health_audit",        # run health checks, heartbeat review
-    "resource_monitoring",  # disk, memory, process listing
-    "architecture_review",  # review codebase structure, patterns
-    "dependency_audit",    # check dependencies, versions
-    "security_scan",       # read-only security review
-})
+STAGE4_ALLOWED_OPERATIONS = frozenset(
+    {
+        # Read-only system inspection
+        "status_check",  # check service status, systemctl status
+        "log_inspection",  # read/tail log files
+        "config_review",  # read config files, inspect settings
+        "health_audit",  # run health checks, heartbeat review
+        "resource_monitoring",  # disk, memory, process listing
+        "architecture_review",  # review codebase structure, patterns
+        "dependency_audit",  # check dependencies, versions
+        "security_scan",  # read-only security review
+    }
+)
 
-STAGE4_BLOCKED_OPERATIONS = frozenset({
-    # Mutation-capable — blocked in initial Stage 4
-    "service_modification",  # systemctl start/stop/restart/enable/disable
-    "config_modification",   # edit config files, feature flags
-    "deployment",            # deploy, release, promote
-    "package_management",    # pip install, apt install
-    "cron_modification",     # add/edit/remove cron jobs
-    "file_system_mutation",  # create/delete/move files outside sandbox
-    "permission_changes",    # chmod, chown, access control
-    "process_management",    # kill, signal, spawn services
-    "network_changes",       # firewall, ports, DNS
-    "self_modification",     # modify own code, bootstrap, self-improve
-    "git_operations",        # push, force-push, branch operations
-    "user_management",       # add/remove users, sudo operations
-})
+STAGE4_BLOCKED_OPERATIONS = frozenset(
+    {
+        # Mutation-capable — blocked in initial Stage 4
+        "service_modification",  # systemctl start/stop/restart/enable/disable
+        "config_modification",  # edit config files, feature flags
+        "deployment",  # deploy, release, promote
+        "package_management",  # pip install, apt install
+        "cron_modification",  # add/edit/remove cron jobs
+        "file_system_mutation",  # create/delete/move files outside sandbox
+        "permission_changes",  # chmod, chown, access control
+        "process_management",  # kill, signal, spawn services
+        "network_changes",  # firewall, ports, DNS
+        "self_modification",  # modify own code, bootstrap, self-improve
+        "git_operations",  # push, force-push, branch operations
+        "user_management",  # add/remove users, sudo operations
+    }
+)
 
 # --- Stage 4 allowed skills (narrower than Stage C) ---
-STAGE4_ALLOWED_SKILLS = frozenset({
-    "web-research",
-    "file-ops",           # read-only use for inspection
-    "self-verification",
-    "http-fetch",
-    "reading-obsidian-memory",
-})
+STAGE4_ALLOWED_SKILLS = frozenset(
+    {
+        "web-research",
+        "file-ops",  # read-only use for inspection
+        "self-verification",
+        "http-fetch",
+        "reading-obsidian-memory",
+    }
+)
 
-STAGE4_BLOCKED_SKILLS = frozenset({
-    "shell-ops",          # blocked — mutation-capable
-    "git-ops",            # blocked — mutation-capable
-    "task-execution",     # blocked — unconstrained execution
-})
+STAGE4_BLOCKED_SKILLS = frozenset(
+    {
+        "shell-ops",  # blocked — mutation-capable
+        "git-ops",  # blocked — mutation-capable
+        "task-execution",  # blocked — unconstrained execution
+    }
+)
 
 # --- Stage 4 signal patterns for scope filtering ---
 # Tasks matching these patterns are system-inspect (allowed in initial Stage 4)
 STAGE4_INSPECT_SIGNALS = [
-    r"\bstatus\b", r"\bcheck\b", r"\binspect\b", r"\breview\b",
-    r"\baudit\b", r"\blist\b", r"\bshow\b", r"\blog[s]?\b",
-    r"\bhealth\b", r"\bmonitor\b", r"\bdiagnos\w+\b",
-    r"\bdependenc\w+\b", r"\bversion\b", r"\bscan\b",
-    r"\bread\b", r"\bexamine\b", r"\banalyze\b", r"\banalyse\b",
+    r"\bstatus\b",
+    r"\bcheck\b",
+    r"\binspect\b",
+    r"\breview\b",
+    r"\baudit\b",
+    r"\blist\b",
+    r"\bshow\b",
+    r"\blog[s]?\b",
+    r"\bhealth\b",
+    r"\bmonitor\b",
+    r"\bdiagnos\w+\b",
+    r"\bdependenc\w+\b",
+    r"\bversion\b",
+    r"\bscan\b",
+    r"\bread\b",
+    r"\bexamine\b",
+    r"\banalyze\b",
+    r"\banalyse\b",
 ]
 
 # Tasks matching these patterns are system-mutate (blocked in initial Stage 4)
 STAGE4_MUTATE_SIGNALS = [
-    r"\bdeploy\b", r"\bconfigure\b", r"\binstall\b", r"\bmodify\b",
-    r"\bstart\b", r"\bstop\b", r"\brestart\b", r"\benable\b", r"\bdisable\b",
-    r"\bcreate\b", r"\bdelete\b", r"\bremove\b", r"\bkill\b",
-    r"\bchmod\b", r"\bchown\b", r"\bsudo\b",
-    r"\bpip\s+install\b", r"\bapt\b",
+    r"\bdeploy\b",
+    r"\bconfigure\b",
+    r"\binstall\b",
+    r"\bmodify\b",
+    r"\bstart\b",
+    r"\bstop\b",
+    r"\brestart\b",
+    r"\benable\b",
+    r"\bdisable\b",
+    r"\bcreate\b",
+    r"\bdelete\b",
+    r"\bremove\b",
+    r"\bkill\b",
+    r"\bchmod\b",
+    r"\bchown\b",
+    r"\bsudo\b",
+    r"\bpip\s+install\b",
+    r"\bapt\b",
     r"\bsystemctl\s+(?:start|stop|restart|enable|disable)\b",
-    r"\bcron\b", r"\bbootstrap\b", r"\bself[\s-]*improv\w+\b",
-    r"\bpromote\b", r"\brollout\b", r"\bpush\b",
+    r"\bcron\b",
+    r"\bbootstrap\b",
+    r"\bself[\s-]*improv\w+\b",
+    r"\bpromote\b",
+    r"\brollout\b",
+    r"\bpush\b",
 ]
 
 # --- Stage 4 activation prerequisites ---
@@ -2503,14 +2517,14 @@ STAGE4_ACTIVATION_PREREQUISITES = {
 
 # --- Stage 4 success criteria for future activation monitoring ---
 STAGE4_SUCCESS_CRITERIA = {
-    "min_system_inspect_runs": 3,        # minimum clean inspection runs
-    "max_system_failure_rate": 0.20,     # maximum 20% failure rate
+    "min_system_inspect_runs": 3,  # minimum clean inspection runs
+    "max_system_failure_rate": 0.20,  # maximum 20% failure rate
     "max_verifier_rejection_rate": 0.20,  # tighter than Stage 3
-    "max_contract_failure_rate": 0.10,   # very tight
-    "max_policy_violations": 0,           # zero tolerance
-    "max_budget_exhaustions": 0,          # zero tolerance
-    "max_recovery_anomalies": 0,          # zero tolerance for system tasks
-    "heartbeat_required": "healthy",     # must be healthy, not just "not unhealthy"
+    "max_contract_failure_rate": 0.10,  # very tight
+    "max_policy_violations": 0,  # zero tolerance
+    "max_budget_exhaustions": 0,  # zero tolerance
+    "max_recovery_anomalies": 0,  # zero tolerance for system tasks
+    "heartbeat_required": "healthy",  # must be healthy, not just "not unhealthy"
 }
 
 # --- Stage 4 abort conditions ---
@@ -2528,25 +2542,24 @@ STAGE4_ABORT_CONDITIONS = [
 @dataclass
 class Stage4RolloutPlan:
     """Repository-native rollout plan for Stage 4 (system class)."""
-    plan_status: str                   # "approved" | "draft" | "superseded"
-    initial_scope: str                 # description of initial rollout slice
+
+    plan_status: str  # "approved" | "draft" | "superseded"
+    initial_scope: str  # description of initial rollout slice
     allowed_operations: list[str]
     blocked_operations: list[str]
     allowed_skills: list[str]
     blocked_skills: list[str]
-    activation_prerequisites: dict     # name -> description
-    success_criteria: dict             # name -> threshold
+    activation_prerequisites: dict  # name -> description
+    success_criteria: dict  # name -> threshold
     abort_conditions: list[str]
     rollback_procedure: list[str]
-    system_class_status: str           # "blocked" | "inspect_only" | "full"
-    stage4_evaluation_decision: str    # from evaluate_stage4()
+    system_class_status: str  # "blocked" | "inspect_only" | "full"
+    stage4_evaluation_decision: str  # from evaluate_stage4()
     generated_at: str = ""
 
     def __post_init__(self):
         if not self.generated_at:
-            self.generated_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def to_dict(self) -> dict:
         return {
@@ -2808,9 +2821,7 @@ def write_stage4_rollout_plan(
     md_path.write_text(render_stage4_plan_markdown(plan))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(plan.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(plan.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path
 
@@ -2820,28 +2831,32 @@ def write_stage4_rollout_plan(
 # ---------------------------------------------------------------------------
 
 # Required fields in a valid Stage 4 rollout plan
-_PLAN_REQUIRED_FIELDS = frozenset({
-    "plan_status",
-    "allowed_operations",
-    "blocked_operations",
-    "allowed_skills",
-    "blocked_skills",
-    "activation_prerequisites",
-    "success_criteria",
-    "abort_conditions",
-    "rollback_procedure",
-    "system_class_status",
-})
+_PLAN_REQUIRED_FIELDS = frozenset(
+    {
+        "plan_status",
+        "allowed_operations",
+        "blocked_operations",
+        "allowed_skills",
+        "blocked_skills",
+        "activation_prerequisites",
+        "success_criteria",
+        "abort_conditions",
+        "rollback_procedure",
+        "system_class_status",
+    }
+)
 
 # Required sections that must be non-empty lists/dicts
-_PLAN_REQUIRED_NONEMPTY = frozenset({
-    "allowed_operations",
-    "blocked_operations",
-    "activation_prerequisites",
-    "success_criteria",
-    "abort_conditions",
-    "rollback_procedure",
-})
+_PLAN_REQUIRED_NONEMPTY = frozenset(
+    {
+        "allowed_operations",
+        "blocked_operations",
+        "activation_prerequisites",
+        "success_criteria",
+        "abort_conditions",
+        "rollback_procedure",
+    }
+)
 
 
 def validate_stage4_plan(base: Path | None = None) -> tuple[bool, list[str]]:
@@ -2908,7 +2923,8 @@ def validate_stage4_plan(base: Path | None = None) -> tuple[bool, list[str]]:
 @dataclass
 class Stage4ActivationGate:
     """Result of the Stage 4 activation gate evaluation."""
-    decision: str          # "ready_to_activate_stage4" | "hold_stage4_activation" | "block_stage4_activation"
+
+    decision: str  # "ready_to_activate_stage4" | "hold_stage4_activation" | "block_stage4_activation"
     criteria: list[RolloutCriterion] = field(default_factory=list)
     plan_validation: dict = field(default_factory=dict)  # {"valid": bool, "errors": [...]}
     evidence_summary: dict = field(default_factory=dict)
@@ -2920,9 +2936,7 @@ class Stage4ActivationGate:
 
     def __post_init__(self):
         if not self.generated_at:
-            self.generated_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def to_dict(self) -> dict:
         return {
@@ -2953,157 +2967,159 @@ def evaluate_activation_gate_criteria(
     criteria: list[RolloutCriterion] = []
 
     # 1. Stage 3 stability must be stable_continue (hard)
-    criteria.append(RolloutCriterion(
-        name="stage3_stable",
-        passed=stage3_decision == "stable_continue",
-        value=stage3_decision,
-        threshold="stable_continue",
-        detail=(
-            "Stage 3 stability confirmed"
-            if stage3_decision == "stable_continue"
-            else f"Stage 3 stability is '{stage3_decision}' — must be stable_continue"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="stage3_stable",
+            passed=stage3_decision == "stable_continue",
+            value=stage3_decision,
+            threshold="stable_continue",
+            detail=(
+                "Stage 3 stability confirmed"
+                if stage3_decision == "stable_continue"
+                else f"Stage 3 stability is '{stage3_decision}' — must be stable_continue"
+            ),
+            severity="hard",
+        )
+    )
 
     # 2. Stage 4 evaluation must be ready_for_stage4_planning (hard)
-    criteria.append(RolloutCriterion(
-        name="stage4_evaluation_ready",
-        passed=stage4_eval_decision == "ready_for_stage4_planning",
-        value=stage4_eval_decision,
-        threshold="ready_for_stage4_planning",
-        detail=(
-            "Stage 4 evaluation gate passed"
-            if stage4_eval_decision == "ready_for_stage4_planning"
-            else f"Stage 4 evaluation is '{stage4_eval_decision}' — must be ready_for_stage4_planning"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="stage4_evaluation_ready",
+            passed=stage4_eval_decision == "ready_for_stage4_planning",
+            value=stage4_eval_decision,
+            threshold="ready_for_stage4_planning",
+            detail=(
+                "Stage 4 evaluation gate passed"
+                if stage4_eval_decision == "ready_for_stage4_planning"
+                else f"Stage 4 evaluation is '{stage4_eval_decision}' — must be ready_for_stage4_planning"
+            ),
+            severity="hard",
+        )
+    )
 
     # 3. Heartbeat must be healthy (hard — stricter than "not unhealthy")
     hb = evidence.get("heartbeat_overall", "")
-    criteria.append(RolloutCriterion(
-        name="heartbeat_healthy",
-        passed=hb == "healthy",
-        value=hb or "(no data)",
-        threshold="healthy",
-        detail=(
-            "Heartbeat is healthy"
-            if hb == "healthy"
-            else f"Heartbeat is '{hb or '(no data)'}' — must be 'healthy' for system activation"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="heartbeat_healthy",
+            passed=hb == "healthy",
+            value=hb or "(no data)",
+            threshold="healthy",
+            detail=(
+                "Heartbeat is healthy"
+                if hb == "healthy"
+                else f"Heartbeat is '{hb or '(no data)'}' — must be 'healthy' for system activation"
+            ),
+            severity="hard",
+        )
+    )
 
     # 4. No policy violations (hard — zero tolerance)
     violations = evidence.get("policy_violations", 0)
-    criteria.append(RolloutCriterion(
-        name="no_policy_violations",
-        passed=violations == 0,
-        value=violations,
-        threshold=0,
-        detail=(
-            "No policy violations"
-            if violations == 0
-            else f"{violations} policy violation(s) — activation blocked"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_policy_violations",
+            passed=violations == 0,
+            value=violations,
+            threshold=0,
+            detail=(
+                "No policy violations" if violations == 0 else f"{violations} policy violation(s) — activation blocked"
+            ),
+            severity="hard",
+        )
+    )
 
     # 5. No budget exhaustions (hard — zero tolerance)
     budget = evidence.get("budget_exhaustions", 0)
-    criteria.append(RolloutCriterion(
-        name="no_budget_exhaustions",
-        passed=budget == 0,
-        value=budget,
-        threshold=0,
-        detail=(
-            "No budget exhaustions"
-            if budget == 0
-            else f"{budget} budget exhaustion(s) — activation blocked"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_budget_exhaustions",
+            passed=budget == 0,
+            value=budget,
+            threshold=0,
+            detail=("No budget exhaustions" if budget == 0 else f"{budget} budget exhaustion(s) — activation blocked"),
+            severity="hard",
+        )
+    )
 
     # 6. System class currently blocked (hard — must not already be active)
     supported = evidence.get("supported_classes", [])
     system_blocked = "system" not in supported
-    criteria.append(RolloutCriterion(
-        name="system_class_blocked",
-        passed=system_blocked,
-        value="blocked" if system_blocked else "enabled",
-        threshold="blocked",
-        detail=(
-            "system class correctly blocked — ready for activation"
-            if system_blocked
-            else "system class already enabled — activation invalid"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="system_class_blocked",
+            passed=system_blocked,
+            value="blocked" if system_blocked else "enabled",
+            threshold="blocked",
+            detail=(
+                "system class correctly blocked — ready for activation"
+                if system_blocked
+                else "system class already enabled — activation invalid"
+            ),
+            severity="hard",
+        )
+    )
 
     # 7. Stage 4 rollout plan is structurally valid (hard)
-    criteria.append(RolloutCriterion(
-        name="plan_valid",
-        passed=plan_valid,
-        value="valid" if plan_valid else f"invalid ({len(plan_errors)} error(s))",
-        threshold="valid",
-        detail=(
-            "Stage 4 rollout plan is structurally valid"
-            if plan_valid
-            else f"Plan validation errors: {'; '.join(plan_errors)}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="plan_valid",
+            passed=plan_valid,
+            value="valid" if plan_valid else f"invalid ({len(plan_errors)} error(s))",
+            threshold="valid",
+            detail=(
+                "Stage 4 rollout plan is structurally valid"
+                if plan_valid
+                else f"Plan validation errors: {'; '.join(plan_errors)}"
+            ),
+            severity="hard",
+        )
+    )
 
     # 8. No rollback events in activation history (soft — indicates instability)
-    activation_log = _read_jsonl(
-        (evidence.get("_base_path") or BASE) / "STATE" / "activation_log.jsonl"
+    activation_log = _read_jsonl((evidence.get("_base_path") or BASE) / "STATE" / "activation_log.jsonl")
+    rollback_events = sum(1 for r in activation_log if r.get("outcome") == "rollback")
+    criteria.append(
+        RolloutCriterion(
+            name="no_rollback_history",
+            passed=rollback_events == 0,
+            value=rollback_events,
+            threshold=0,
+            detail=(
+                "No rollback events in activation history"
+                if rollback_events == 0
+                else f"{rollback_events} rollback event(s) — indicates instability"
+            ),
+            severity="soft",
+        )
     )
-    rollback_events = sum(
-        1 for r in activation_log if r.get("outcome") == "rollback"
-    )
-    criteria.append(RolloutCriterion(
-        name="no_rollback_history",
-        passed=rollback_events == 0,
-        value=rollback_events,
-        threshold=0,
-        detail=(
-            "No rollback events in activation history"
-            if rollback_events == 0
-            else f"{rollback_events} rollback event(s) — indicates instability"
-        ),
-        severity="soft",
-    ))
 
     # 9. No orphaned agents (soft)
     orphaned = evidence.get("orphaned_agents", 0)
-    criteria.append(RolloutCriterion(
-        name="no_orphaned_agents",
-        passed=orphaned == 0,
-        value=orphaned,
-        threshold=0,
-        detail=(
-            "No orphaned agents"
-            if orphaned == 0
-            else f"{orphaned} orphaned agent(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_orphaned_agents",
+            passed=orphaned == 0,
+            value=orphaned,
+            threshold=0,
+            detail=("No orphaned agents" if orphaned == 0 else f"{orphaned} orphaned agent(s)"),
+            severity="soft",
+        )
+    )
 
     # 10. No stale leases (soft)
     stale = evidence.get("stale_leases", 0)
-    criteria.append(RolloutCriterion(
-        name="no_stale_leases",
-        passed=stale == 0,
-        value=stale,
-        threshold=0,
-        detail=(
-            "No stale leases"
-            if stale == 0
-            else f"{stale} stale lease(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_stale_leases",
+            passed=stale == 0,
+            value=stale,
+            threshold=0,
+            detail=("No stale leases" if stale == 0 else f"{stale} stale lease(s)"),
+            severity="soft",
+        )
+    )
 
     return criteria
 
@@ -3118,10 +3134,8 @@ def decide_activation_gate(
       - "hold_stage4_activation"
       - "block_stage4_activation"
     """
-    hard_failures = [c for c in criteria
-                     if c.severity == "hard" and not c.passed]
-    soft_failures = [c for c in criteria
-                     if c.severity == "soft" and not c.passed]
+    hard_failures = [c for c in criteria if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria if c.severity == "soft" and not c.passed]
 
     # Any hard failure → block activation
     if hard_failures:
@@ -3138,8 +3152,7 @@ def decide_activation_gate(
         reasons = ", ".join(c.name for c in soft_failures)
         return (
             "hold_stage4_activation",
-            f"Soft concerns: {reasons}. "
-            f"Continue monitoring. Re-evaluate after concerns resolve.",
+            f"Soft concerns: {reasons}. Continue monitoring. Re-evaluate after concerns resolve.",
         )
 
     # All clear → ready to activate
@@ -3260,10 +3273,7 @@ def render_activation_gate_markdown(gate: Stage4ActivationGate) -> str:
     for i, c in enumerate(gate.criteria, 1):
         status = "PASS" if c.passed else "FAIL"
         val = c.value if c.value is not None else "N/A"
-        lines.append(
-            f"| {i} | {c.name} | {status} | {val} | {c.threshold} "
-            f"| {c.severity} | {c.detail} |"
-        )
+        lines.append(f"| {i} | {c.name} | {status} | {val} | {c.threshold} | {c.severity} | {c.detail} |")
     lines.append("")
 
     # Blocking criteria
@@ -3348,9 +3358,7 @@ def write_activation_gate(
     md_path.write_text(render_activation_gate_markdown(gate))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(gate.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(gate.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path
 
@@ -3368,14 +3376,15 @@ STAGE4_ALLOWED_ROLES = ["research", "coding", "system_inspect"]
 @dataclass
 class Stage4ActivationRecord:
     """Audit record of a Stage 4 activation attempt."""
+
     attempted_at: str
-    outcome: str           # "activated" | "blocked" | "error"
-    gate_decision: str     # activation gate decision at time of activation
+    outcome: str  # "activated" | "blocked" | "error"
+    gate_decision: str  # activation gate decision at time of activation
     reason: str
-    pre_config: dict       # config snapshot before attempt
-    post_config: dict      # config snapshot after attempt (same if blocked)
+    pre_config: dict  # config snapshot before attempt
+    post_config: dict  # config snapshot after attempt (same if blocked)
     blocking_criteria: list[str]
-    activated_scope: str   # "system_inspect" or ""
+    activated_scope: str  # "system_inspect" or ""
     plan_validation: dict  # plan validation result at activation time
 
     def to_dict(self) -> dict:
@@ -3623,8 +3632,8 @@ def render_stage4_activation_markdown(record: Stage4ActivationRecord) -> str:
         lines.append("")
         pre = record.pre_config
         post = record.post_config
-        pre_cls = pre.get('supported_classes', [])
-        post_cls = post.get('supported_classes', [])
+        pre_cls = pre.get("supported_classes", [])
+        post_cls = post.get("supported_classes", [])
         lines.append(f"- **supported_classes**: {pre_cls} → {post_cls}")
         lines.append(f"- **stage**: {pre.get('stage', '?')} → {post.get('stage', '?')}")
         lines.append(f"- **rollout_stage**: {pre.get('rollout_stage', '?')} → {post.get('rollout_stage', '?')}")
@@ -3669,9 +3678,7 @@ def write_stage4_activation_result(
     md_path.write_text(render_stage4_activation_markdown(record))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(record.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(record.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path
 
@@ -3680,6 +3687,7 @@ def write_stage4_activation_result(
 # Phase 7.18 — Stage D Monitoring and Stability Review
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StageDStabilityReview:
     """Deterministic stability review for live Stage D rollout.
@@ -3687,7 +3695,8 @@ class StageDStabilityReview:
     Evaluates whether the system_inspect read-only slice is operating
     safely under real conditions.
     """
-    decision: str          # "stable_continue_stageD" | "hold_stageD" | "rollback_system_inspect_recommended"
+
+    decision: str  # "stable_continue_stageD" | "hold_stageD" | "rollback_system_inspect_recommended"
     rollout_stage: str
     enabled_classes: list[str] = field(default_factory=list)
     criteria: list[RolloutCriterion] = field(default_factory=list)
@@ -3701,9 +3710,7 @@ class StageDStabilityReview:
 
     def __post_init__(self):
         if not self.generated_at:
-            self.generated_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def to_dict(self) -> dict:
         return {
@@ -3725,23 +3732,13 @@ def _collect_system_inspect_metrics(
     workflows: list[dict],
 ) -> dict:
     """Extract system_inspect-specific metrics from workflow records."""
-    sys_workflows = [
-        w for w in workflows if w.get("task_class") == "system"
-    ]
+    sys_workflows = [w for w in workflows if w.get("task_class") == "system"]
     sys_completed = [w for w in sys_workflows if w.get("status") == "completed"]
-    sys_failed = [
-        w for w in sys_workflows
-        if w.get("status") in ("failed", "halted")
-    ]
-    sys_rejected = [
-        w for w in sys_workflows
-        if w.get("halt_reason") == "verifier_rejected"
-    ]
+    sys_failed = [w for w in sys_workflows if w.get("status") in ("failed", "halted")]
+    sys_rejected = [w for w in sys_workflows if w.get("halt_reason") == "verifier_rejected"]
 
     total_terminal = len(sys_completed) + len(sys_failed)
-    failure_rate = (
-        round(len(sys_failed) / total_terminal, 3) if total_terminal > 0 else None
-    )
+    failure_rate = round(len(sys_failed) / total_terminal, 3) if total_terminal > 0 else None
 
     return {
         "total_runs": len(sys_workflows),
@@ -3836,152 +3833,156 @@ def evaluate_stageD_stability(
 
     # 1. Heartbeat healthy (hard — strict: must be exactly "healthy")
     hb = evidence.get("heartbeat_overall", "")
-    criteria.append(RolloutCriterion(
-        name="heartbeat_healthy",
-        passed=hb == STAGED_HEARTBEAT_REQUIRED,
-        value=hb or "(no data)",
-        threshold=STAGED_HEARTBEAT_REQUIRED,
-        detail=(
-            f"Current heartbeat: {hb or '(no data)'}"
-            if hb == STAGED_HEARTBEAT_REQUIRED
-            else f"Heartbeat is '{hb or '(no data)'}', required '{STAGED_HEARTBEAT_REQUIRED}'"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="heartbeat_healthy",
+            passed=hb == STAGED_HEARTBEAT_REQUIRED,
+            value=hb or "(no data)",
+            threshold=STAGED_HEARTBEAT_REQUIRED,
+            detail=(
+                f"Current heartbeat: {hb or '(no data)'}"
+                if hb == STAGED_HEARTBEAT_REQUIRED
+                else f"Heartbeat is '{hb or '(no data)'}', required '{STAGED_HEARTBEAT_REQUIRED}'"
+            ),
+            severity="hard",
+        )
+    )
 
     # 2. No policy violations (hard — zero tolerance)
     violations = evidence.get("policy_violations", 0)
-    criteria.append(RolloutCriterion(
-        name="no_policy_violations",
-        passed=violations <= STAGED_MAX_POLICY_VIOLATIONS,
-        value=violations,
-        threshold=STAGED_MAX_POLICY_VIOLATIONS,
-        detail=(
-            "No policy violations"
-            if violations == 0
-            else f"{violations} policy violation(s) — review immediately"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_policy_violations",
+            passed=violations <= STAGED_MAX_POLICY_VIOLATIONS,
+            value=violations,
+            threshold=STAGED_MAX_POLICY_VIOLATIONS,
+            detail=(
+                "No policy violations" if violations == 0 else f"{violations} policy violation(s) — review immediately"
+            ),
+            severity="hard",
+        )
+    )
 
     # 3. No budget exhaustions (hard — zero tolerance)
     budget = evidence.get("budget_exhaustions", 0)
-    criteria.append(RolloutCriterion(
-        name="no_budget_exhaustions",
-        passed=budget <= STAGED_MAX_BUDGET_EXHAUSTIONS,
-        value=budget,
-        threshold=STAGED_MAX_BUDGET_EXHAUSTIONS,
-        detail=(
-            "No budget exhaustions"
-            if budget == 0
-            else f"{budget} budget exhaustion(s)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_budget_exhaustions",
+            passed=budget <= STAGED_MAX_BUDGET_EXHAUSTIONS,
+            value=budget,
+            threshold=STAGED_MAX_BUDGET_EXHAUSTIONS,
+            detail=("No budget exhaustions" if budget == 0 else f"{budget} budget exhaustion(s)"),
+            severity="hard",
+        )
+    )
 
     # 4. Overall failure rate (hard)
     failure_rate = evidence.get("failure_rate")
     if failure_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="overall_failure_rate",
-            passed=failure_rate <= STAGED_MAX_FAILURE_RATE,
-            value=failure_rate,
-            threshold=STAGED_MAX_FAILURE_RATE,
-            detail=f"Overall failure rate {failure_rate:.1%} (max {STAGED_MAX_FAILURE_RATE:.0%})",
-            severity="hard",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="overall_failure_rate",
+                passed=failure_rate <= STAGED_MAX_FAILURE_RATE,
+                value=failure_rate,
+                threshold=STAGED_MAX_FAILURE_RATE,
+                detail=f"Overall failure rate {failure_rate:.1%} (max {STAGED_MAX_FAILURE_RATE:.0%})",
+                severity="hard",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="overall_failure_rate",
-            passed=True,
-            value=None,
-            threshold=STAGED_MAX_FAILURE_RATE,
-            detail="No terminal workflows yet",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="overall_failure_rate",
+                passed=True,
+                value=None,
+                threshold=STAGED_MAX_FAILURE_RATE,
+                detail="No terminal workflows yet",
+                severity="soft",
+            )
+        )
 
     # 5. Scope integrity (hard — system_inspect must remain read-only)
-    criteria.append(RolloutCriterion(
-        name="scope_integrity",
-        passed=scope_integrity.get("intact", False),
-        value=scope_integrity.get("reason", "unknown"),
-        threshold="intact",
-        detail=(
-            "Scope integrity verified: system_inspect remains read-only"
-            if scope_integrity.get("intact")
-            else f"Scope integrity violated: {scope_integrity.get('reason', 'unknown')}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="scope_integrity",
+            passed=scope_integrity.get("intact", False),
+            value=scope_integrity.get("reason", "unknown"),
+            threshold="intact",
+            detail=(
+                "Scope integrity verified: system_inspect remains read-only"
+                if scope_integrity.get("intact")
+                else f"Scope integrity violated: {scope_integrity.get('reason', 'unknown')}"
+            ),
+            severity="hard",
+        )
+    )
 
     # 6. Stage is D (hard — must still be in Stage D)
     stage = evidence.get("rollout_stage", "unknown")
     is_stage_d = "stage4" in stage or "system_inspect" in stage
-    criteria.append(RolloutCriterion(
-        name="stage_is_D",
-        passed=is_stage_d,
-        value=stage,
-        threshold="stage4_*",
-        detail=(
-            f"Rollout stage confirmed: {stage}"
-            if is_stage_d
-            else f"Unexpected rollout stage: {stage}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="stage_is_D",
+            passed=is_stage_d,
+            value=stage,
+            threshold="stage4_*",
+            detail=(f"Rollout stage confirmed: {stage}" if is_stage_d else f"Unexpected rollout stage: {stage}"),
+            severity="hard",
+        )
+    )
 
     # 7. system class in supported_classes (hard)
     classes = evidence.get("supported_classes", [])
-    criteria.append(RolloutCriterion(
-        name="system_class_active",
-        passed="system" in classes,
-        value=classes,
-        threshold="system in supported_classes",
-        detail=(
-            f"system class active in: {classes}"
-            if "system" in classes
-            else f"system class not found in: {classes}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="system_class_active",
+            passed="system" in classes,
+            value=classes,
+            threshold="system in supported_classes",
+            detail=(
+                f"system class active in: {classes}" if "system" in classes else f"system class not found in: {classes}"
+            ),
+            severity="hard",
+        )
+    )
 
     # 8. system_inspect minimum observation (soft — insufficient evidence = hold)
     sys_total = system_inspect_metrics.get("total_runs", 0)
-    criteria.append(RolloutCriterion(
-        name="system_inspect_minimum_runs",
-        passed=sys_total >= STAGED_MIN_SYSTEM_INSPECT_RUNS,
-        value=sys_total,
-        threshold=STAGED_MIN_SYSTEM_INSPECT_RUNS,
-        detail=(
-            f"{sys_total} system_inspect runs "
-            f"(need >= {STAGED_MIN_SYSTEM_INSPECT_RUNS})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="system_inspect_minimum_runs",
+            passed=sys_total >= STAGED_MIN_SYSTEM_INSPECT_RUNS,
+            value=sys_total,
+            threshold=STAGED_MIN_SYSTEM_INSPECT_RUNS,
+            detail=(f"{sys_total} system_inspect runs (need >= {STAGED_MIN_SYSTEM_INSPECT_RUNS})"),
+            severity="soft",
+        )
+    )
 
     # 9. system_inspect failure rate (soft)
     sys_fr = system_inspect_metrics.get("failure_rate")
     if sys_fr is not None:
-        criteria.append(RolloutCriterion(
-            name="system_inspect_failure_rate",
-            passed=sys_fr <= STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
-            value=sys_fr,
-            threshold=STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
-            detail=(
-                f"system_inspect failure rate {sys_fr:.1%} "
-                f"(max {STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="system_inspect_failure_rate",
+                passed=sys_fr <= STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+                value=sys_fr,
+                threshold=STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+                detail=(f"system_inspect failure rate {sys_fr:.1%} (max {STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%})"),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="system_inspect_failure_rate",
-            passed=True,
-            value=None,
-            threshold=STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
-            detail="No system_inspect terminal workflows yet",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="system_inspect_failure_rate",
+                passed=True,
+                value=None,
+                threshold=STAGED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+                detail="No system_inspect terminal workflows yet",
+                severity="soft",
+            )
+        )
 
     # 10. Verifier rejection rate for system tasks (soft)
     sys_rejected = system_inspect_metrics.get("verifier_rejected", 0)
@@ -3989,69 +3990,78 @@ def evaluate_stageD_stability(
     sys_total_for_vr = sys_rejected + sys_completed
     if sys_total_for_vr > 0:
         vr_rate = round(sys_rejected / sys_total_for_vr, 3)
-        criteria.append(RolloutCriterion(
-            name="system_verifier_rejection_rate",
-            passed=vr_rate <= STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-            value=vr_rate,
-            threshold=STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-            detail=(
-                f"system_inspect verifier rejection rate {vr_rate:.1%} "
-                f"(max {STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="system_verifier_rejection_rate",
+                passed=vr_rate <= STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+                value=vr_rate,
+                threshold=STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+                detail=(
+                    f"system_inspect verifier rejection rate {vr_rate:.1%} "
+                    f"(max {STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%})"
+                ),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="system_verifier_rejection_rate",
-            passed=True,
-            value=None,
-            threshold=STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-            detail="No system verifier reports yet — N/A",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="system_verifier_rejection_rate",
+                passed=True,
+                value=None,
+                threshold=STAGED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+                detail="No system verifier reports yet — N/A",
+                severity="soft",
+            )
+        )
 
     # 11. Recovery anomalies (soft — zero tolerance for system scope)
-    criteria.append(RolloutCriterion(
-        name="recovery_anomalies",
-        passed=post_activation_recoveries <= STAGED_MAX_RECOVERY_ANOMALIES,
-        value=post_activation_recoveries,
-        threshold=STAGED_MAX_RECOVERY_ANOMALIES,
-        detail=(
-            f"{post_activation_recoveries} recovery events since Stage D activation "
-            f"(max {STAGED_MAX_RECOVERY_ANOMALIES})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="recovery_anomalies",
+            passed=post_activation_recoveries <= STAGED_MAX_RECOVERY_ANOMALIES,
+            value=post_activation_recoveries,
+            threshold=STAGED_MAX_RECOVERY_ANOMALIES,
+            detail=(
+                f"{post_activation_recoveries} recovery events since Stage D activation "
+                f"(max {STAGED_MAX_RECOVERY_ANOMALIES})"
+            ),
+            severity="soft",
+        )
+    )
 
     # 12. Blocked mutation attempts within bounds (soft)
-    criteria.append(RolloutCriterion(
-        name="blocked_mutation_attempts",
-        passed=blocked_mutation_attempts <= STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS,
-        value=blocked_mutation_attempts,
-        threshold=STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS,
-        detail=(
-            f"{blocked_mutation_attempts} blocked mutation attempt(s) "
-            f"(max {STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="blocked_mutation_attempts",
+            passed=blocked_mutation_attempts <= STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS,
+            value=blocked_mutation_attempts,
+            threshold=STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS,
+            detail=(
+                f"{blocked_mutation_attempts} blocked mutation attempt(s) (max {STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS})"
+            ),
+            severity="soft",
+        )
+    )
 
     # 13. No orphaned agents or stale leases (soft)
     orphaned = evidence.get("orphaned_agents", 0)
     stale = evidence.get("stale_leases", 0)
     anomaly_count = orphaned + stale
-    criteria.append(RolloutCriterion(
-        name="no_workflow_anomalies",
-        passed=anomaly_count == 0,
-        value=anomaly_count,
-        threshold=0,
-        detail=(
-            "No orphaned agents or stale leases"
-            if anomaly_count == 0
-            else f"{orphaned} orphaned agent(s), {stale} stale lease(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_workflow_anomalies",
+            passed=anomaly_count == 0,
+            value=anomaly_count,
+            threshold=0,
+            detail=(
+                "No orphaned agents or stale leases"
+                if anomaly_count == 0
+                else f"{orphaned} orphaned agent(s), {stale} stale lease(s)"
+            ),
+            severity="soft",
+        )
+    )
 
     return criteria
 
@@ -4066,10 +4076,8 @@ def decide_stageD_stability(
       - "hold_stageD"
       - "rollback_system_inspect_recommended"
     """
-    hard_failures = [c for c in criteria
-                     if c.severity == "hard" and not c.passed]
-    soft_failures = [c for c in criteria
-                     if c.severity == "soft" and not c.passed]
+    hard_failures = [c for c in criteria if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria if c.severity == "soft" and not c.passed]
 
     # Any hard failure -> rollback system_inspect
     if hard_failures:
@@ -4082,9 +4090,7 @@ def decide_stageD_stability(
         )
 
     # Insufficient system_inspect evidence -> hold
-    sys_runs = next(
-        (c for c in criteria if c.name == "system_inspect_minimum_runs"), None
-    )
+    sys_runs = next((c for c in criteria if c.name == "system_inspect_minimum_runs"), None)
     if sys_runs and not sys_runs.passed:
         return (
             "hold_stageD",
@@ -4098,8 +4104,7 @@ def decide_stageD_stability(
         reasons = ", ".join(c.name for c in soft_failures)
         return (
             "hold_stageD",
-            f"Soft concerns: {reasons}. "
-            f"Continue monitoring Stage D. Do not expand system scope.",
+            f"Soft concerns: {reasons}. Continue monitoring Stage D. Do not expand system scope.",
         )
 
     # All clear -> stable
@@ -4139,9 +4144,7 @@ def review_stageD_stability(
     # Get Stage D activation record for observation window
     activation_log = _read_jsonl(state / "activation_log.jsonl")
     stage4_activations = [
-        r for r in activation_log
-        if r.get("activated_scope") == "system_inspect"
-        and r.get("outcome") == "activated"
+        r for r in activation_log if r.get("activated_scope") == "system_inspect" and r.get("outcome") == "activated"
     ]
     activation = stage4_activations[-1] if stage4_activations else {}
     activation_ts = activation.get("attempted_at", "")
@@ -4267,10 +4270,7 @@ def render_stageD_stability_markdown(review: StageDStabilityReview) -> str:
     for i, c in enumerate(review.criteria, 1):
         status = "PASS" if c.passed else "FAIL"
         val = c.value if c.value is not None else "N/A"
-        lines.append(
-            f"| {i} | {c.name} | {status} | {val} | {c.threshold} "
-            f"| {c.severity} | {c.detail} |"
-        )
+        lines.append(f"| {i} | {c.name} | {status} | {val} | {c.threshold} | {c.severity} | {c.detail} |")
     lines.append("")
 
     # Evidence summary
@@ -4280,11 +4280,7 @@ def render_stageD_stability_markdown(review: StageDStabilityReview) -> str:
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
     for k, v in ev.items():
-        display = (
-            f"{v:.1%}" if isinstance(v, float)
-            else str(v) if v is not None
-            else "N/A"
-        )
+        display = f"{v:.1%}" if isinstance(v, float) else str(v) if v is not None else "N/A"
         lines.append(f"| {k} | {display} |")
     lines.append("")
 
@@ -4363,9 +4359,7 @@ def write_stageD_stability_review(
     md_path.write_text(render_stageD_stability_markdown(review))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(review.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(review.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path
 
@@ -4383,6 +4377,7 @@ class StageDExtendedMonitoring:
     observation window with tighter thresholds than the initial Phase 7.18
     stability review.
     """
+
     # "stageD_sustained_stable" | "stageD_continue_monitoring"
     # | "rollback_system_inspect_recommended"
     decision: str
@@ -4400,9 +4395,7 @@ class StageDExtendedMonitoring:
 
     def __post_init__(self):
         if not self.generated_at:
-            self.generated_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def to_dict(self) -> dict:
         return {
@@ -4430,9 +4423,7 @@ def _compute_elapsed_seconds(activation_ts: str, now_ts: str) -> float:
         return 0.0
     try:
         fmt = "%Y-%m-%dT%H:%M:%SZ"
-        t_start = datetime.strptime(activation_ts, fmt).replace(
-            tzinfo=timezone.utc
-        )
+        t_start = datetime.strptime(activation_ts, fmt).replace(tzinfo=timezone.utc)
         t_end = datetime.strptime(now_ts, fmt).replace(tzinfo=timezone.utc)
         delta = (t_end - t_start).total_seconds()
         return max(0.0, delta)
@@ -4445,9 +4436,7 @@ def _compute_contract_failure_rate(workflows: list[dict]) -> float | None:
 
     Returns None if no system workflows have contract data.
     """
-    sys_workflows = [
-        w for w in workflows if w.get("task_class") == "system"
-    ]
+    sys_workflows = [w for w in workflows if w.get("task_class") == "system"]
     if not sys_workflows:
         return None
     total_with_contract = 0
@@ -4494,114 +4483,118 @@ def evaluate_stageD_extended(
 
     # 1. Heartbeat healthy (hard — strict)
     hb = evidence.get("heartbeat_overall", "")
-    criteria.append(RolloutCriterion(
-        name="heartbeat_healthy",
-        passed=hb == EXTENDED_HEARTBEAT_REQUIRED,
-        value=hb or "(no data)",
-        threshold=EXTENDED_HEARTBEAT_REQUIRED,
-        detail=(
-            f"Current heartbeat: {hb or '(no data)'}"
-            if hb == EXTENDED_HEARTBEAT_REQUIRED
-            else f"Heartbeat is '{hb or '(no data)'}', required '{EXTENDED_HEARTBEAT_REQUIRED}'"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="heartbeat_healthy",
+            passed=hb == EXTENDED_HEARTBEAT_REQUIRED,
+            value=hb or "(no data)",
+            threshold=EXTENDED_HEARTBEAT_REQUIRED,
+            detail=(
+                f"Current heartbeat: {hb or '(no data)'}"
+                if hb == EXTENDED_HEARTBEAT_REQUIRED
+                else f"Heartbeat is '{hb or '(no data)'}', required '{EXTENDED_HEARTBEAT_REQUIRED}'"
+            ),
+            severity="hard",
+        )
+    )
 
     # 2. No policy violations (hard — zero tolerance)
     violations = evidence.get("policy_violations", 0)
-    criteria.append(RolloutCriterion(
-        name="no_policy_violations",
-        passed=violations <= EXTENDED_MAX_POLICY_VIOLATIONS,
-        value=violations,
-        threshold=EXTENDED_MAX_POLICY_VIOLATIONS,
-        detail=(
-            "No policy violations"
-            if violations == 0
-            else f"{violations} policy violation(s) — review immediately"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_policy_violations",
+            passed=violations <= EXTENDED_MAX_POLICY_VIOLATIONS,
+            value=violations,
+            threshold=EXTENDED_MAX_POLICY_VIOLATIONS,
+            detail=(
+                "No policy violations" if violations == 0 else f"{violations} policy violation(s) — review immediately"
+            ),
+            severity="hard",
+        )
+    )
 
     # 3. No budget exhaustions (hard — zero tolerance)
     budget = evidence.get("budget_exhaustions", 0)
-    criteria.append(RolloutCriterion(
-        name="no_budget_exhaustions",
-        passed=budget <= EXTENDED_MAX_BUDGET_EXHAUSTIONS,
-        value=budget,
-        threshold=EXTENDED_MAX_BUDGET_EXHAUSTIONS,
-        detail=(
-            "No budget exhaustions"
-            if budget == 0
-            else f"{budget} budget exhaustion(s)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_budget_exhaustions",
+            passed=budget <= EXTENDED_MAX_BUDGET_EXHAUSTIONS,
+            value=budget,
+            threshold=EXTENDED_MAX_BUDGET_EXHAUSTIONS,
+            detail=("No budget exhaustions" if budget == 0 else f"{budget} budget exhaustion(s)"),
+            severity="hard",
+        )
+    )
 
     # 4. Overall failure rate (hard — tighter than initial)
     failure_rate = evidence.get("failure_rate")
     if failure_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="overall_failure_rate",
-            passed=failure_rate <= EXTENDED_MAX_FAILURE_RATE,
-            value=failure_rate,
-            threshold=EXTENDED_MAX_FAILURE_RATE,
-            detail=f"Overall failure rate {failure_rate:.1%} (max {EXTENDED_MAX_FAILURE_RATE:.0%})",
-            severity="hard",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="overall_failure_rate",
+                passed=failure_rate <= EXTENDED_MAX_FAILURE_RATE,
+                value=failure_rate,
+                threshold=EXTENDED_MAX_FAILURE_RATE,
+                detail=f"Overall failure rate {failure_rate:.1%} (max {EXTENDED_MAX_FAILURE_RATE:.0%})",
+                severity="hard",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="overall_failure_rate",
-            passed=True,
-            value=None,
-            threshold=EXTENDED_MAX_FAILURE_RATE,
-            detail="No terminal workflows yet",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="overall_failure_rate",
+                passed=True,
+                value=None,
+                threshold=EXTENDED_MAX_FAILURE_RATE,
+                detail="No terminal workflows yet",
+                severity="soft",
+            )
+        )
 
     # 5. Scope integrity (hard — system_inspect must remain read-only)
-    criteria.append(RolloutCriterion(
-        name="scope_integrity",
-        passed=scope_integrity.get("intact", False),
-        value=scope_integrity.get("reason", "unknown"),
-        threshold="intact",
-        detail=(
-            "Scope integrity verified: system_inspect remains read-only"
-            if scope_integrity.get("intact")
-            else f"Scope integrity violated: {scope_integrity.get('reason', 'unknown')}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="scope_integrity",
+            passed=scope_integrity.get("intact", False),
+            value=scope_integrity.get("reason", "unknown"),
+            threshold="intact",
+            detail=(
+                "Scope integrity verified: system_inspect remains read-only"
+                if scope_integrity.get("intact")
+                else f"Scope integrity violated: {scope_integrity.get('reason', 'unknown')}"
+            ),
+            severity="hard",
+        )
+    )
 
     # 6. Stage is D (hard)
     stage = evidence.get("rollout_stage", "unknown")
     is_stage_d = "stage4" in stage or "system_inspect" in stage
-    criteria.append(RolloutCriterion(
-        name="stage_is_D",
-        passed=is_stage_d,
-        value=stage,
-        threshold="stage4_*",
-        detail=(
-            f"Rollout stage confirmed: {stage}"
-            if is_stage_d
-            else f"Unexpected rollout stage: {stage}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="stage_is_D",
+            passed=is_stage_d,
+            value=stage,
+            threshold="stage4_*",
+            detail=(f"Rollout stage confirmed: {stage}" if is_stage_d else f"Unexpected rollout stage: {stage}"),
+            severity="hard",
+        )
+    )
 
     # 7. system class in supported_classes (hard)
     classes = evidence.get("supported_classes", [])
-    criteria.append(RolloutCriterion(
-        name="system_class_active",
-        passed="system" in classes,
-        value=classes,
-        threshold="system in supported_classes",
-        detail=(
-            f"system class active in: {classes}"
-            if "system" in classes
-            else f"system class not found in: {classes}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="system_class_active",
+            passed="system" in classes,
+            value=classes,
+            threshold="system in supported_classes",
+            detail=(
+                f"system class active in: {classes}" if "system" in classes else f"system class not found in: {classes}"
+            ),
+            severity="hard",
+        )
+    )
 
     # 8. No unresolved recovery anomalies during observation window
     #    (hard — promoted from soft).
@@ -4627,74 +4620,76 @@ def evaluate_stageD_extended(
     elif unresolved == 0:
         rec_detail = "0 recovery events since activation"
     else:
-        rec_detail = (
-            f"{unresolved} unresolved recovery event(s) since activation — investigate"
-            + (f" ({resolved} resolved)" if resolved > 0 else "")
+        rec_detail = f"{unresolved} unresolved recovery event(s) since activation — investigate" + (
+            f" ({resolved} resolved)" if resolved > 0 else ""
         )
 
-    criteria.append(RolloutCriterion(
-        name="no_recovery_anomalies",
-        passed=unresolved <= EXTENDED_MAX_RECOVERY_ANOMALIES,
-        value=unresolved,
-        threshold=EXTENDED_MAX_RECOVERY_ANOMALIES,
-        detail=rec_detail,
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_recovery_anomalies",
+            passed=unresolved <= EXTENDED_MAX_RECOVERY_ANOMALIES,
+            value=unresolved,
+            threshold=EXTENDED_MAX_RECOVERY_ANOMALIES,
+            detail=rec_detail,
+            severity="hard",
+        )
+    )
 
     # --- SOFT CRITERIA (7) — any failure triggers continue_monitoring ---
 
     # 9. Minimum elapsed time since activation (soft — insufficient time = continue)
     elapsed_hours = elapsed_seconds / 3600.0
     min_hours = EXTENDED_MIN_ELAPSED_SECONDS / 3600.0
-    criteria.append(RolloutCriterion(
-        name="minimum_elapsed_time",
-        passed=elapsed_seconds >= EXTENDED_MIN_ELAPSED_SECONDS,
-        value=round(elapsed_hours, 2),
-        threshold=min_hours,
-        detail=(
-            f"Elapsed {elapsed_hours:.1f}h since activation "
-            f"(need >= {min_hours:.0f}h)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="minimum_elapsed_time",
+            passed=elapsed_seconds >= EXTENDED_MIN_ELAPSED_SECONDS,
+            value=round(elapsed_hours, 2),
+            threshold=min_hours,
+            detail=(f"Elapsed {elapsed_hours:.1f}h since activation (need >= {min_hours:.0f}h)"),
+            severity="soft",
+        )
+    )
 
     # 10. Minimum system_inspect runs (soft — higher bar than initial)
     sys_total = system_inspect_metrics.get("total_runs", 0)
-    criteria.append(RolloutCriterion(
-        name="extended_minimum_runs",
-        passed=sys_total >= EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
-        value=sys_total,
-        threshold=EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
-        detail=(
-            f"{sys_total} system_inspect runs "
-            f"(need >= {EXTENDED_MIN_SYSTEM_INSPECT_RUNS})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="extended_minimum_runs",
+            passed=sys_total >= EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
+            value=sys_total,
+            threshold=EXTENDED_MIN_SYSTEM_INSPECT_RUNS,
+            detail=(f"{sys_total} system_inspect runs (need >= {EXTENDED_MIN_SYSTEM_INSPECT_RUNS})"),
+            severity="soft",
+        )
+    )
 
     # 11. system_inspect failure rate (soft — tighter)
     sys_fr = system_inspect_metrics.get("failure_rate")
     if sys_fr is not None:
-        criteria.append(RolloutCriterion(
-            name="system_inspect_failure_rate",
-            passed=sys_fr <= EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
-            value=sys_fr,
-            threshold=EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
-            detail=(
-                f"system_inspect failure rate {sys_fr:.1%} "
-                f"(max {EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="system_inspect_failure_rate",
+                passed=sys_fr <= EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+                value=sys_fr,
+                threshold=EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+                detail=(
+                    f"system_inspect failure rate {sys_fr:.1%} (max {EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%})"
+                ),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="system_inspect_failure_rate",
-            passed=True,
-            value=None,
-            threshold=EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
-            detail="No system_inspect terminal workflows yet",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="system_inspect_failure_rate",
+                passed=True,
+                value=None,
+                threshold=EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE,
+                detail="No system_inspect terminal workflows yet",
+                severity="soft",
+            )
+        )
 
     # 12. Verifier rejection rate (soft — tighter)
     sys_rejected = system_inspect_metrics.get("verifier_rejected", 0)
@@ -4702,79 +4697,91 @@ def evaluate_stageD_extended(
     sys_total_for_vr = sys_rejected + sys_completed
     if sys_total_for_vr > 0:
         vr_rate = round(sys_rejected / sys_total_for_vr, 3)
-        criteria.append(RolloutCriterion(
-            name="system_verifier_rejection_rate",
-            passed=vr_rate <= EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-            value=vr_rate,
-            threshold=EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-            detail=(
-                f"system_inspect verifier rejection rate {vr_rate:.1%} "
-                f"(max {EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="system_verifier_rejection_rate",
+                passed=vr_rate <= EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+                value=vr_rate,
+                threshold=EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+                detail=(
+                    f"system_inspect verifier rejection rate {vr_rate:.1%} "
+                    f"(max {EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE:.0%})"
+                ),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="system_verifier_rejection_rate",
-            passed=True,
-            value=None,
-            threshold=EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
-            detail="No system verifier reports yet — N/A",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="system_verifier_rejection_rate",
+                passed=True,
+                value=None,
+                threshold=EXTENDED_MAX_SYSTEM_VERIFIER_REJECTION_RATE,
+                detail="No system verifier reports yet — N/A",
+                severity="soft",
+            )
+        )
 
     # 13. Blocked mutation attempts within tighter bounds (soft)
-    criteria.append(RolloutCriterion(
-        name="blocked_mutation_attempts",
-        passed=blocked_mutation_attempts <= EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS,
-        value=blocked_mutation_attempts,
-        threshold=EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS,
-        detail=(
-            f"{blocked_mutation_attempts} blocked mutation attempt(s) "
-            f"(max {EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="blocked_mutation_attempts",
+            passed=blocked_mutation_attempts <= EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS,
+            value=blocked_mutation_attempts,
+            threshold=EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS,
+            detail=(
+                f"{blocked_mutation_attempts} blocked mutation attempt(s) "
+                f"(max {EXTENDED_MAX_BLOCKED_MUTATION_ATTEMPTS})"
+            ),
+            severity="soft",
+        )
+    )
 
     # 14. Contract failure rate for system_inspect (soft)
     if contract_failure_rate is not None:
-        criteria.append(RolloutCriterion(
-            name="contract_failure_rate",
-            passed=contract_failure_rate <= EXTENDED_MAX_CONTRACT_FAILURE_RATE,
-            value=contract_failure_rate,
-            threshold=EXTENDED_MAX_CONTRACT_FAILURE_RATE,
-            detail=(
-                f"system_inspect contract failure rate {contract_failure_rate:.1%} "
-                f"(max {EXTENDED_MAX_CONTRACT_FAILURE_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="contract_failure_rate",
+                passed=contract_failure_rate <= EXTENDED_MAX_CONTRACT_FAILURE_RATE,
+                value=contract_failure_rate,
+                threshold=EXTENDED_MAX_CONTRACT_FAILURE_RATE,
+                detail=(
+                    f"system_inspect contract failure rate {contract_failure_rate:.1%} "
+                    f"(max {EXTENDED_MAX_CONTRACT_FAILURE_RATE:.0%})"
+                ),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="contract_failure_rate",
-            passed=True,
-            value=None,
-            threshold=EXTENDED_MAX_CONTRACT_FAILURE_RATE,
-            detail="No system_inspect contract data yet — N/A",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="contract_failure_rate",
+                passed=True,
+                value=None,
+                threshold=EXTENDED_MAX_CONTRACT_FAILURE_RATE,
+                detail="No system_inspect contract data yet — N/A",
+                severity="soft",
+            )
+        )
 
     # 15. No orphaned agents or stale leases (soft)
     orphaned = evidence.get("orphaned_agents", 0)
     stale = evidence.get("stale_leases", 0)
     anomaly_count = orphaned + stale
-    criteria.append(RolloutCriterion(
-        name="no_workflow_anomalies",
-        passed=anomaly_count == 0,
-        value=anomaly_count,
-        threshold=0,
-        detail=(
-            "No orphaned agents or stale leases"
-            if anomaly_count == 0
-            else f"{orphaned} orphaned agent(s), {stale} stale lease(s)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_workflow_anomalies",
+            passed=anomaly_count == 0,
+            value=anomaly_count,
+            threshold=0,
+            detail=(
+                "No orphaned agents or stale leases"
+                if anomaly_count == 0
+                else f"{orphaned} orphaned agent(s), {stale} stale lease(s)"
+            ),
+            severity="soft",
+        )
+    )
 
     return criteria
 
@@ -4789,10 +4796,8 @@ def decide_stageD_extended(
       - "stageD_continue_monitoring"
       - "rollback_system_inspect_recommended"
     """
-    hard_failures = [c for c in criteria
-                     if c.severity == "hard" and not c.passed]
-    soft_failures = [c for c in criteria
-                     if c.severity == "soft" and not c.passed]
+    hard_failures = [c for c in criteria if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria if c.severity == "soft" and not c.passed]
 
     # Any hard failure -> rollback
     if hard_failures:
@@ -4805,9 +4810,7 @@ def decide_stageD_extended(
         )
 
     # Insufficient elapsed time -> continue monitoring (priority)
-    elapsed = next(
-        (c for c in criteria if c.name == "minimum_elapsed_time"), None
-    )
+    elapsed = next((c for c in criteria if c.name == "minimum_elapsed_time"), None)
     if elapsed and not elapsed.passed:
         return (
             "stageD_continue_monitoring",
@@ -4817,9 +4820,7 @@ def decide_stageD_extended(
         )
 
     # Insufficient runs -> continue monitoring
-    runs = next(
-        (c for c in criteria if c.name == "extended_minimum_runs"), None
-    )
+    runs = next((c for c in criteria if c.name == "extended_minimum_runs"), None)
     if runs and not runs.passed:
         return (
             "stageD_continue_monitoring",
@@ -4833,8 +4834,7 @@ def decide_stageD_extended(
         reasons = ", ".join(c.name for c in soft_failures)
         return (
             "stageD_continue_monitoring",
-            f"Soft concerns: {reasons}. "
-            f"Continue monitoring Stage D. Do not expand system scope.",
+            f"Soft concerns: {reasons}. Continue monitoring Stage D. Do not expand system scope.",
         )
 
     # All clear -> sustained stable
@@ -4880,17 +4880,13 @@ def review_stageD_extended(
     # Get Stage D activation record
     activation_log = _read_jsonl(state / "activation_log.jsonl")
     stage4_activations = [
-        r for r in activation_log
-        if r.get("activated_scope") == "system_inspect"
-        and r.get("outcome") == "activated"
+        r for r in activation_log if r.get("activated_scope") == "system_inspect" and r.get("outcome") == "activated"
     ]
     activation = stage4_activations[-1] if stage4_activations else {}
     activation_ts = activation.get("attempted_at", "")
 
     # Current time
-    now_iso = now_override or datetime.now(timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    now_iso = now_override or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Compute elapsed time
     elapsed_seconds = _compute_elapsed_seconds(activation_ts, now_iso)
@@ -4910,7 +4906,8 @@ def review_stageD_extended(
     # genuine unresolved anomalies.  Only unresolved count toward the
     # hard threshold — fail-closed when classification is unavailable.
     recovery_classification = _classify_post_activation_recoveries(
-        root, activation_ts,
+        root,
+        activation_ts,
     )
     post_recoveries_unresolved = recovery_classification["unresolved"]
 
@@ -4943,26 +4940,16 @@ def review_stageD_extended(
     monitoring_progress = {
         "runs_completed": sys_total,
         "runs_required": min_runs,
-        "runs_progress_pct": round(
-            min(100.0, (sys_total / min_runs) * 100), 1
-        ) if min_runs > 0 else 100.0,
+        "runs_progress_pct": round(min(100.0, (sys_total / min_runs) * 100), 1) if min_runs > 0 else 100.0,
         "elapsed_hours": round(elapsed_hours, 2),
         "elapsed_required_hours": round(min_elapsed / 3600.0, 1),
-        "elapsed_progress_pct": round(
-            min(100.0, (elapsed_seconds / min_elapsed) * 100), 1
-        ) if min_elapsed > 0 else 100.0,
-        "hard_criteria_passed": sum(
-            1 for c in criteria if c.severity == "hard" and c.passed
-        ),
-        "hard_criteria_total": sum(
-            1 for c in criteria if c.severity == "hard"
-        ),
-        "soft_criteria_passed": sum(
-            1 for c in criteria if c.severity == "soft" and c.passed
-        ),
-        "soft_criteria_total": sum(
-            1 for c in criteria if c.severity == "soft"
-        ),
+        "elapsed_progress_pct": round(min(100.0, (elapsed_seconds / min_elapsed) * 100), 1)
+        if min_elapsed > 0
+        else 100.0,
+        "hard_criteria_passed": sum(1 for c in criteria if c.severity == "hard" and c.passed),
+        "hard_criteria_total": sum(1 for c in criteria if c.severity == "hard"),
+        "soft_criteria_passed": sum(1 for c in criteria if c.severity == "soft" and c.passed),
+        "soft_criteria_total": sum(1 for c in criteria if c.severity == "soft"),
     }
 
     return StageDExtendedMonitoring(
@@ -5039,14 +5026,22 @@ def render_stageD_extended_markdown(review: StageDExtendedMonitoring) -> str:
     lines.append(
         f"| Hard criteria | {mp.get('hard_criteria_passed', 0)}"
         f"/{mp.get('hard_criteria_total', 0)} PASS | all | "
-        + ("100%" if mp.get('hard_criteria_passed', 0) == mp.get('hard_criteria_total', 0) else
-           f"{mp.get('hard_criteria_passed', 0)}/{mp.get('hard_criteria_total', 0)}") + " |"
+        + (
+            "100%"
+            if mp.get("hard_criteria_passed", 0) == mp.get("hard_criteria_total", 0)
+            else f"{mp.get('hard_criteria_passed', 0)}/{mp.get('hard_criteria_total', 0)}"
+        )
+        + " |"
     )
     lines.append(
         f"| Soft criteria | {mp.get('soft_criteria_passed', 0)}"
         f"/{mp.get('soft_criteria_total', 0)} PASS | all | "
-        + ("100%" if mp.get('soft_criteria_passed', 0) == mp.get('soft_criteria_total', 0) else
-           f"{mp.get('soft_criteria_passed', 0)}/{mp.get('soft_criteria_total', 0)}") + " |"
+        + (
+            "100%"
+            if mp.get("soft_criteria_passed", 0) == mp.get("soft_criteria_total", 0)
+            else f"{mp.get('soft_criteria_passed', 0)}/{mp.get('soft_criteria_total', 0)}"
+        )
+        + " |"
     )
     lines.append("")
 
@@ -5095,10 +5090,7 @@ def render_stageD_extended_markdown(review: StageDExtendedMonitoring) -> str:
     for i, c in enumerate(review.criteria, 1):
         status = "PASS" if c.passed else "FAIL"
         val = c.value if c.value is not None else "N/A"
-        lines.append(
-            f"| {i} | {c.name} | {status} | {val} | {c.threshold} "
-            f"| {c.severity} | {c.detail} |"
-        )
+        lines.append(f"| {i} | {c.name} | {status} | {val} | {c.threshold} | {c.severity} | {c.detail} |")
     lines.append("")
 
     # Evidence summary
@@ -5108,11 +5100,7 @@ def render_stageD_extended_markdown(review: StageDExtendedMonitoring) -> str:
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
     for k, v in ev.items():
-        display = (
-            f"{v:.1%}" if isinstance(v, float)
-            else str(v) if v is not None
-            else "N/A"
-        )
+        display = f"{v:.1%}" if isinstance(v, float) else str(v) if v is not None else "N/A"
         lines.append(f"| {k} | {display} |")
     lines.append("")
 
@@ -5213,9 +5201,7 @@ def write_stageD_extended_monitoring(
     md_path.write_text(render_stageD_extended_markdown(review))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(review.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(review.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path
 
@@ -5239,6 +5225,7 @@ class BroaderSystemScopeEvaluation:
     governed to justify planning for a broader bounded system scope.
     Evaluation only — does not activate anything.
     """
+
     # "ready_for_broader_system_scope_planning"
     # | "hold_broader_system_scope" | "block_broader_system_scope"
     decision: str
@@ -5256,9 +5243,7 @@ class BroaderSystemScopeEvaluation:
 
     def __post_init__(self):
         if not self.generated_at:
-            self.generated_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def to_dict(self) -> dict:
         return {
@@ -5302,111 +5287,114 @@ def evaluate_broader_system_scope(
     # --- HARD CRITERIA (9) — any failure triggers block ---
 
     # 1. Extended monitoring must be stageD_sustained_stable (prerequisite)
-    criteria.append(RolloutCriterion(
-        name="extended_monitoring_sustained_stable",
-        passed=extended_decision == BROADER_REQUIRED_EXTENDED_DECISION,
-        value=extended_decision,
-        threshold=BROADER_REQUIRED_EXTENDED_DECISION,
-        detail=(
-            "Extended Stage D monitoring confirmed sustained-stable"
-            if extended_decision == BROADER_REQUIRED_EXTENDED_DECISION
-            else f"Extended monitoring is '{extended_decision}', "
-                 f"required '{BROADER_REQUIRED_EXTENDED_DECISION}'"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="extended_monitoring_sustained_stable",
+            passed=extended_decision == BROADER_REQUIRED_EXTENDED_DECISION,
+            value=extended_decision,
+            threshold=BROADER_REQUIRED_EXTENDED_DECISION,
+            detail=(
+                "Extended Stage D monitoring confirmed sustained-stable"
+                if extended_decision == BROADER_REQUIRED_EXTENDED_DECISION
+                else f"Extended monitoring is '{extended_decision}', required '{BROADER_REQUIRED_EXTENDED_DECISION}'"
+            ),
+            severity="hard",
+        )
+    )
 
     # 2. Heartbeat healthy (hard — strict)
     hb = evidence.get("heartbeat_overall", "")
-    criteria.append(RolloutCriterion(
-        name="heartbeat_healthy",
-        passed=hb == BROADER_HEARTBEAT_REQUIRED,
-        value=hb or "(no data)",
-        threshold=BROADER_HEARTBEAT_REQUIRED,
-        detail=(
-            f"Current heartbeat: {hb or '(no data)'}"
-            if hb == BROADER_HEARTBEAT_REQUIRED
-            else f"Heartbeat is '{hb or '(no data)'}', "
-                 f"required '{BROADER_HEARTBEAT_REQUIRED}'"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="heartbeat_healthy",
+            passed=hb == BROADER_HEARTBEAT_REQUIRED,
+            value=hb or "(no data)",
+            threshold=BROADER_HEARTBEAT_REQUIRED,
+            detail=(
+                f"Current heartbeat: {hb or '(no data)'}"
+                if hb == BROADER_HEARTBEAT_REQUIRED
+                else f"Heartbeat is '{hb or '(no data)'}', required '{BROADER_HEARTBEAT_REQUIRED}'"
+            ),
+            severity="hard",
+        )
+    )
 
     # 3. No policy violations (hard — zero tolerance)
     violations = evidence.get("policy_violations", 0)
-    criteria.append(RolloutCriterion(
-        name="no_policy_violations",
-        passed=violations <= BROADER_MAX_POLICY_VIOLATIONS,
-        value=violations,
-        threshold=BROADER_MAX_POLICY_VIOLATIONS,
-        detail=(
-            "No policy violations"
-            if violations == 0
-            else f"{violations} policy violation(s) — broader scope blocked"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_policy_violations",
+            passed=violations <= BROADER_MAX_POLICY_VIOLATIONS,
+            value=violations,
+            threshold=BROADER_MAX_POLICY_VIOLATIONS,
+            detail=(
+                "No policy violations"
+                if violations == 0
+                else f"{violations} policy violation(s) — broader scope blocked"
+            ),
+            severity="hard",
+        )
+    )
 
     # 4. No budget exhaustions (hard — zero tolerance)
     budget = evidence.get("budget_exhaustions", 0)
-    criteria.append(RolloutCriterion(
-        name="no_budget_exhaustions",
-        passed=budget <= BROADER_MAX_BUDGET_EXHAUSTIONS,
-        value=budget,
-        threshold=BROADER_MAX_BUDGET_EXHAUSTIONS,
-        detail=(
-            "No budget exhaustions"
-            if budget == 0
-            else f"{budget} budget exhaustion(s) — broader scope blocked"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_budget_exhaustions",
+            passed=budget <= BROADER_MAX_BUDGET_EXHAUSTIONS,
+            value=budget,
+            threshold=BROADER_MAX_BUDGET_EXHAUSTIONS,
+            detail=(
+                "No budget exhaustions" if budget == 0 else f"{budget} budget exhaustion(s) — broader scope blocked"
+            ),
+            severity="hard",
+        )
+    )
 
     # 5. Scope integrity (hard — system_inspect must still be inspect_only)
-    criteria.append(RolloutCriterion(
-        name="scope_integrity",
-        passed=scope_integrity.get("intact", False),
-        value=scope_integrity.get("reason", "unknown"),
-        threshold="intact",
-        detail=(
-            "Scope integrity verified: system_inspect remains read-only"
-            if scope_integrity.get("intact")
-            else f"Scope integrity violated: "
-                 f"{scope_integrity.get('reason', 'unknown')}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="scope_integrity",
+            passed=scope_integrity.get("intact", False),
+            value=scope_integrity.get("reason", "unknown"),
+            threshold="intact",
+            detail=(
+                "Scope integrity verified: system_inspect remains read-only"
+                if scope_integrity.get("intact")
+                else f"Scope integrity violated: {scope_integrity.get('reason', 'unknown')}"
+            ),
+            severity="hard",
+        )
+    )
 
     # 6. Stage is D (hard)
     stage = evidence.get("rollout_stage", "unknown")
     is_stage_d = "stage4" in stage or "system_inspect" in stage
-    criteria.append(RolloutCriterion(
-        name="stage_is_D",
-        passed=is_stage_d,
-        value=stage,
-        threshold="stage4_*",
-        detail=(
-            f"Rollout stage confirmed: {stage}"
-            if is_stage_d
-            else f"Unexpected rollout stage: {stage}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="stage_is_D",
+            passed=is_stage_d,
+            value=stage,
+            threshold="stage4_*",
+            detail=(f"Rollout stage confirmed: {stage}" if is_stage_d else f"Unexpected rollout stage: {stage}"),
+            severity="hard",
+        )
+    )
 
     # 7. System class active (hard)
     classes = evidence.get("supported_classes", [])
-    criteria.append(RolloutCriterion(
-        name="system_class_active",
-        passed="system" in classes,
-        value=classes,
-        threshold="system in supported_classes",
-        detail=(
-            f"system class active in: {classes}"
-            if "system" in classes
-            else f"system class not found in: {classes}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="system_class_active",
+            passed="system" in classes,
+            value=classes,
+            threshold="system in supported_classes",
+            detail=(
+                f"system class active in: {classes}" if "system" in classes else f"system class not found in: {classes}"
+            ),
+            severity="hard",
+        )
+    )
 
     # 8. No unresolved recovery anomalies (hard)
     if recovery_classification is not None:
@@ -5415,79 +5403,80 @@ def evaluate_broader_system_scope(
     else:
         unresolved = 0
         resolved = 0
-    criteria.append(RolloutCriterion(
-        name="no_recovery_anomalies",
-        passed=unresolved <= BROADER_MAX_RECOVERY_ANOMALIES,
-        value=unresolved,
-        threshold=BROADER_MAX_RECOVERY_ANOMALIES,
-        detail=(
-            "0 unresolved recovery events"
-            + (f" ({resolved} benign resolved)" if resolved > 0 else "")
-            if unresolved == 0
-            else f"{unresolved} unresolved recovery event(s) — "
-                 f"broader scope blocked"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_recovery_anomalies",
+            passed=unresolved <= BROADER_MAX_RECOVERY_ANOMALIES,
+            value=unresolved,
+            threshold=BROADER_MAX_RECOVERY_ANOMALIES,
+            detail=(
+                "0 unresolved recovery events" + (f" ({resolved} benign resolved)" if resolved > 0 else "")
+                if unresolved == 0
+                else f"{unresolved} unresolved recovery event(s) — broader scope blocked"
+            ),
+            severity="hard",
+        )
+    )
 
     # 9. No Stage D rollback history (hard — never rolled back)
-    criteria.append(RolloutCriterion(
-        name="no_stageD_rollback_history",
-        passed=stageD_rollback_count == 0,
-        value=stageD_rollback_count,
-        threshold=0,
-        detail=(
-            "No Stage D rollback history"
-            if stageD_rollback_count == 0
-            else f"{stageD_rollback_count} prior Stage D rollback(s) — "
-                 f"broader scope blocked until root cause confirmed resolved"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_stageD_rollback_history",
+            passed=stageD_rollback_count == 0,
+            value=stageD_rollback_count,
+            threshold=0,
+            detail=(
+                "No Stage D rollback history"
+                if stageD_rollback_count == 0
+                else f"{stageD_rollback_count} prior Stage D rollback(s) — "
+                f"broader scope blocked until root cause confirmed resolved"
+            ),
+            severity="hard",
+        )
+    )
 
     # --- SOFT CRITERIA (3) — any failure triggers hold ---
 
     # 10. Minimum system_inspect runs (soft — higher bar)
     sys_total = system_inspect_metrics.get("total_runs", 0)
-    criteria.append(RolloutCriterion(
-        name="minimum_system_inspect_runs",
-        passed=sys_total >= BROADER_MIN_SYSTEM_INSPECT_RUNS,
-        value=sys_total,
-        threshold=BROADER_MIN_SYSTEM_INSPECT_RUNS,
-        detail=(
-            f"{sys_total} system_inspect runs "
-            f"(need >= {BROADER_MIN_SYSTEM_INSPECT_RUNS})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="minimum_system_inspect_runs",
+            passed=sys_total >= BROADER_MIN_SYSTEM_INSPECT_RUNS,
+            value=sys_total,
+            threshold=BROADER_MIN_SYSTEM_INSPECT_RUNS,
+            detail=(f"{sys_total} system_inspect runs (need >= {BROADER_MIN_SYSTEM_INSPECT_RUNS})"),
+            severity="soft",
+        )
+    )
 
     # 11. Minimum elapsed time in Stage D (soft — longer window)
     elapsed_hours = elapsed_seconds / 3600.0
     min_hours = BROADER_MIN_ELAPSED_SECONDS / 3600.0
-    criteria.append(RolloutCriterion(
-        name="minimum_elapsed_time",
-        passed=elapsed_seconds >= BROADER_MIN_ELAPSED_SECONDS,
-        value=round(elapsed_hours, 2),
-        threshold=min_hours,
-        detail=(
-            f"Elapsed {elapsed_hours:.1f}h in Stage D "
-            f"(need >= {min_hours:.0f}h)"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="minimum_elapsed_time",
+            passed=elapsed_seconds >= BROADER_MIN_ELAPSED_SECONDS,
+            value=round(elapsed_hours, 2),
+            threshold=min_hours,
+            detail=(f"Elapsed {elapsed_hours:.1f}h in Stage D (need >= {min_hours:.0f}h)"),
+            severity="soft",
+        )
+    )
 
     # 12. Blocked mutation attempts within tighter bounds (soft)
-    criteria.append(RolloutCriterion(
-        name="blocked_mutation_attempts",
-        passed=blocked_mutation_attempts <= BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS,
-        value=blocked_mutation_attempts,
-        threshold=BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS,
-        detail=(
-            f"{blocked_mutation_attempts} blocked mutation attempt(s) "
-            f"(max {BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS})"
-        ),
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="blocked_mutation_attempts",
+            passed=blocked_mutation_attempts <= BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS,
+            value=blocked_mutation_attempts,
+            threshold=BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS,
+            detail=(
+                f"{blocked_mutation_attempts} blocked mutation attempt(s) (max {BROADER_MAX_BLOCKED_MUTATION_ATTEMPTS})"
+            ),
+            severity="soft",
+        )
+    )
 
     return criteria
 
@@ -5502,10 +5491,8 @@ def decide_broader_system_scope(
       - "hold_broader_system_scope"
       - "block_broader_system_scope"
     """
-    hard_failures = [c for c in criteria
-                     if c.severity == "hard" and not c.passed]
-    soft_failures = [c for c in criteria
-                     if c.severity == "soft" and not c.passed]
+    hard_failures = [c for c in criteria if c.severity == "hard" and not c.passed]
+    soft_failures = [c for c in criteria if c.severity == "soft" and not c.passed]
 
     # Any hard failure -> block
     if hard_failures:
@@ -5583,24 +5570,18 @@ def review_broader_system_scope(
 
     # Get extended monitoring decision
     ext_json = _read_json(state / "stageD_extended_monitoring.json")
-    extended_decision = (
-        ext_json.get("decision", "") if ext_json else ""
-    )
+    extended_decision = ext_json.get("decision", "") if ext_json else ""
 
     # Get Stage D activation record for elapsed time
     activation_log = _read_jsonl(state / "activation_log.jsonl")
     stage4_activations = [
-        r for r in activation_log
-        if r.get("activated_scope") == "system_inspect"
-        and r.get("outcome") == "activated"
+        r for r in activation_log if r.get("activated_scope") == "system_inspect" and r.get("outcome") == "activated"
     ]
     activation = stage4_activations[-1] if stage4_activations else {}
     activation_ts = activation.get("attempted_at", "")
 
     # Current time
-    now_iso = now_override or datetime.now(timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    now_iso = now_override or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Compute elapsed time since Stage D activation
     elapsed_seconds = _compute_elapsed_seconds(activation_ts, now_iso)
@@ -5616,7 +5597,8 @@ def review_broader_system_scope(
 
     # Classify post-activation recovery anomalies
     recovery_classification = _classify_post_activation_recoveries(
-        root, activation_ts,
+        root,
+        activation_ts,
     )
 
     # Count blocked mutation attempts
@@ -5715,8 +5697,7 @@ def render_broader_system_scope_markdown(
         "",
         f"- **Stage D activation at**: {ow.get('activation_at', 'N/A')}",
         f"- **Review at**: {ow.get('review_at', 'N/A')}",
-        f"- **Elapsed in Stage D**: {ow.get('elapsed_hours', 0)}h "
-        f"({ow.get('elapsed_seconds', 0)}s)",
+        f"- **Elapsed in Stage D**: {ow.get('elapsed_hours', 0)}h ({ow.get('elapsed_seconds', 0)}s)",
         f"- **Scope under review**: {ow.get('scope', 'N/A')}",
         "",
     ]
@@ -5757,10 +5738,7 @@ def render_broader_system_scope_markdown(
     for i, c in enumerate(review.criteria, 1):
         status = "PASS" if c.passed else "FAIL"
         val = c.value if c.value is not None else "N/A"
-        lines.append(
-            f"| {i} | {c.name} | {status} | {val} | "
-            f"{c.threshold} | {c.severity} | {c.detail} |"
-        )
+        lines.append(f"| {i} | {c.name} | {status} | {val} | {c.threshold} | {c.severity} | {c.detail} |")
     lines.append("")
 
     # Evidence summary
@@ -5792,14 +5770,9 @@ def render_broader_system_scope_markdown(
         "",
         "| Threshold | Extended (7.19) | Broader (7.20) |",
         "|-----------|-----------------|----------------|",
-        f"| Min system_inspect runs | {EXTENDED_MIN_SYSTEM_INSPECT_RUNS}"
-        f" | {BROADER_MIN_SYSTEM_INSPECT_RUNS} |",
-        f"| Min elapsed time | "
-        f"{EXTENDED_MIN_ELAPSED_SECONDS // 3600}h"
-        f" | {BROADER_MIN_ELAPSED_SECONDS // 3600}h |",
-        f"| Max failure rate | "
-        f"{EXTENDED_MAX_FAILURE_RATE:.0%}"
-        f" | {BROADER_MAX_FAILURE_RATE:.0%} |",
+        f"| Min system_inspect runs | {EXTENDED_MIN_SYSTEM_INSPECT_RUNS} | {BROADER_MIN_SYSTEM_INSPECT_RUNS} |",
+        f"| Min elapsed time | {EXTENDED_MIN_ELAPSED_SECONDS // 3600}h | {BROADER_MIN_ELAPSED_SECONDS // 3600}h |",
+        f"| Max failure rate | {EXTENDED_MAX_FAILURE_RATE:.0%} | {BROADER_MAX_FAILURE_RATE:.0%} |",
         f"| Max system_inspect failure rate | "
         f"{EXTENDED_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%}"
         f" | {BROADER_MAX_SYSTEM_INSPECT_FAILURE_RATE:.0%} |",
@@ -5813,8 +5786,7 @@ def render_broader_system_scope_markdown(
         f"{EXTENDED_MAX_CONTRACT_FAILURE_RATE:.0%}"
         f" | {BROADER_MAX_CONTRACT_FAILURE_RATE:.0%} |",
         "| Stage D rollback history | N/A | must be 0 |",
-        "| Extended monitoring prerequisite | N/A"
-        " | stageD_sustained_stable |",
+        "| Extended monitoring prerequisite | N/A | stageD_sustained_stable |",
         "",
     ]
 
@@ -5824,10 +5796,8 @@ def render_broader_system_scope_markdown(
             "## Operator Action",
             "",
             "- Broader system scope planning is justified.",
-            "- system remains inspect_only until a rollout plan is "
-            "prepared, reviewed, and separately activated.",
-            "- Next step: Phase 7.21 — Broader System Scope "
-            "Rollout Plan.",
+            "- system remains inspect_only until a rollout plan is prepared, reviewed, and separately activated.",
+            "- Next step: Phase 7.21 — Broader System Scope Rollout Plan.",
             "- No scope expansion is performed by this evaluation.",
             "",
         ]
@@ -5837,8 +5807,7 @@ def render_broader_system_scope_markdown(
             "",
             "- Broader system scope is held pending more evidence.",
             "- system remains inspect_only.",
-            "- Continue operating Stage D and re-run this evaluation "
-            "after thresholds are met.",
+            "- Continue operating Stage D and re-run this evaluation after thresholds are met.",
             "",
         ]
     else:
@@ -5872,9 +5841,7 @@ def write_broader_system_scope_evaluation(
     md_path.write_text(render_broader_system_scope_markdown(review))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(review.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(review.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path
 
@@ -5892,6 +5859,7 @@ def write_broader_system_scope_evaluation(
 @dataclass
 class SystemReportActivationGate:
     """Result of system_report activation readiness evaluation."""
+
     decision: str  # "ready_to_activate_system_report" | "block_system_report_activation"
     criteria: list[RolloutCriterion]
     evidence_summary: dict
@@ -5926,122 +5894,130 @@ def evaluate_system_report_activation(
     criteria = []
 
     # 1. Broader scope evaluation must be ready
-    criteria.append(RolloutCriterion(
-        name="broader_scope_ready",
-        passed=broader_scope_decision == REPORT_REQUIRED_BROADER_DECISION,
-        value=broader_scope_decision,
-        threshold=REPORT_REQUIRED_BROADER_DECISION,
-        detail=(
-            "Broader scope evaluation confirmed ready"
-            if broader_scope_decision == REPORT_REQUIRED_BROADER_DECISION
-            else f"Broader scope decision is '{broader_scope_decision}', need '{REPORT_REQUIRED_BROADER_DECISION}'"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="broader_scope_ready",
+            passed=broader_scope_decision == REPORT_REQUIRED_BROADER_DECISION,
+            value=broader_scope_decision,
+            threshold=REPORT_REQUIRED_BROADER_DECISION,
+            detail=(
+                "Broader scope evaluation confirmed ready"
+                if broader_scope_decision == REPORT_REQUIRED_BROADER_DECISION
+                else f"Broader scope decision is '{broader_scope_decision}', need '{REPORT_REQUIRED_BROADER_DECISION}'"
+            ),
+            severity="hard",
+        )
+    )
 
     # 2. Heartbeat healthy
-    criteria.append(RolloutCriterion(
-        name="heartbeat_healthy",
-        passed=heartbeat_overall == REPORT_HEARTBEAT_REQUIRED,
-        value=heartbeat_overall,
-        threshold=REPORT_HEARTBEAT_REQUIRED,
-        detail=f"Current heartbeat: {heartbeat_overall}",
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="heartbeat_healthy",
+            passed=heartbeat_overall == REPORT_HEARTBEAT_REQUIRED,
+            value=heartbeat_overall,
+            threshold=REPORT_HEARTBEAT_REQUIRED,
+            detail=f"Current heartbeat: {heartbeat_overall}",
+            severity="hard",
+        )
+    )
 
     # 3. No policy violations
-    criteria.append(RolloutCriterion(
-        name="no_policy_violations",
-        passed=policy_violations <= REPORT_MAX_POLICY_VIOLATIONS,
-        value=policy_violations,
-        threshold=REPORT_MAX_POLICY_VIOLATIONS,
-        detail=(
-            "No policy violations"
-            if policy_violations == 0
-            else f"{policy_violations} policy violation(s)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_policy_violations",
+            passed=policy_violations <= REPORT_MAX_POLICY_VIOLATIONS,
+            value=policy_violations,
+            threshold=REPORT_MAX_POLICY_VIOLATIONS,
+            detail=("No policy violations" if policy_violations == 0 else f"{policy_violations} policy violation(s)"),
+            severity="hard",
+        )
+    )
 
     # 4. No budget exhaustions
-    criteria.append(RolloutCriterion(
-        name="no_budget_exhaustions",
-        passed=budget_exhaustions <= REPORT_MAX_BUDGET_EXHAUSTIONS,
-        value=budget_exhaustions,
-        threshold=REPORT_MAX_BUDGET_EXHAUSTIONS,
-        detail=(
-            "No budget exhaustions"
-            if budget_exhaustions == 0
-            else f"{budget_exhaustions} budget exhaustion(s)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_budget_exhaustions",
+            passed=budget_exhaustions <= REPORT_MAX_BUDGET_EXHAUSTIONS,
+            value=budget_exhaustions,
+            threshold=REPORT_MAX_BUDGET_EXHAUSTIONS,
+            detail=(
+                "No budget exhaustions" if budget_exhaustions == 0 else f"{budget_exhaustions} budget exhaustion(s)"
+            ),
+            severity="hard",
+        )
+    )
 
     # 5. No unresolved recovery anomalies
-    criteria.append(RolloutCriterion(
-        name="no_recovery_anomalies",
-        passed=unresolved_recovery_anomalies <= REPORT_MAX_RECOVERY_ANOMALIES,
-        value=unresolved_recovery_anomalies,
-        threshold=REPORT_MAX_RECOVERY_ANOMALIES,
-        detail=(
-            "No unresolved recovery anomalies"
-            if unresolved_recovery_anomalies == 0
-            else f"{unresolved_recovery_anomalies} unresolved recovery anomaly(ies)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_recovery_anomalies",
+            passed=unresolved_recovery_anomalies <= REPORT_MAX_RECOVERY_ANOMALIES,
+            value=unresolved_recovery_anomalies,
+            threshold=REPORT_MAX_RECOVERY_ANOMALIES,
+            detail=(
+                "No unresolved recovery anomalies"
+                if unresolved_recovery_anomalies == 0
+                else f"{unresolved_recovery_anomalies} unresolved recovery anomaly(ies)"
+            ),
+            severity="hard",
+        )
+    )
 
     # 6. Shell allowlist enforcement verified
-    criteria.append(RolloutCriterion(
-        name="shell_enforcement_verified",
-        passed=shell_enforcement_verified,
-        value=shell_enforcement_verified,
-        threshold=True,
-        detail=(
-            "Shell allowlist enforcement tests verified"
-            if shell_enforcement_verified
-            else "Shell allowlist enforcement NOT verified"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="shell_enforcement_verified",
+            passed=shell_enforcement_verified,
+            value=shell_enforcement_verified,
+            threshold=True,
+            detail=(
+                "Shell allowlist enforcement tests verified"
+                if shell_enforcement_verified
+                else "Shell allowlist enforcement NOT verified"
+            ),
+            severity="hard",
+        )
+    )
 
     # 7. No Stage D rollback history
-    criteria.append(RolloutCriterion(
-        name="no_stageD_rollback_history",
-        passed=stageD_rollback_count == 0,
-        value=stageD_rollback_count,
-        threshold=0,
-        detail=(
-            "No Stage D rollback history"
-            if stageD_rollback_count == 0
-            else f"{stageD_rollback_count} Stage D rollback(s) detected"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_stageD_rollback_history",
+            passed=stageD_rollback_count == 0,
+            value=stageD_rollback_count,
+            threshold=0,
+            detail=(
+                "No Stage D rollback history"
+                if stageD_rollback_count == 0
+                else f"{stageD_rollback_count} Stage D rollback(s) detected"
+            ),
+            severity="hard",
+        )
+    )
 
     # 8. Stage is D
-    criteria.append(RolloutCriterion(
-        name="stage_is_D",
-        passed=stage.startswith("stage4_") or stage == "D",
-        value=stage,
-        threshold="stage4_*",
-        detail=f"Rollout stage confirmed: {stage}",
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="stage_is_D",
+            passed=stage.startswith("stage4_") or stage == "D",
+            value=stage,
+            threshold="stage4_*",
+            detail=f"Rollout stage confirmed: {stage}",
+            severity="hard",
+        )
+    )
 
     # 9. System class active
-    criteria.append(RolloutCriterion(
-        name="system_class_active",
-        passed=system_in_classes,
-        value=system_in_classes,
-        threshold=True,
-        detail=(
-            "system class active"
-            if system_in_classes
-            else "system class not in supported_classes"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="system_class_active",
+            passed=system_in_classes,
+            value=system_in_classes,
+            threshold=True,
+            detail=("system class active" if system_in_classes else "system class not in supported_classes"),
+            severity="hard",
+        )
+    )
 
     return criteria
 
@@ -6104,15 +6080,11 @@ def review_system_report_activation(
     # Recovery anomalies (unresolved)
     activation_log = _read_jsonl(root / "STATE" / "activation_log.jsonl")
     stage4_activations = [
-        r for r in activation_log
-        if r.get("activated_scope") == "system_inspect"
-        and r.get("outcome") == "activated"
+        r for r in activation_log if r.get("activated_scope") == "system_inspect" and r.get("outcome") == "activated"
     ]
     activation = stage4_activations[-1] if stage4_activations else {}
     activation_ts = activation.get("attempted_at", "")
-    recovery_classification = _classify_post_activation_recoveries(
-        root, activation_ts
-    )
+    recovery_classification = _classify_post_activation_recoveries(root, activation_ts)
     unresolved = recovery_classification.get("unresolved", 0)
 
     # Shell enforcement: verify the allowlist function works
@@ -6184,7 +6156,10 @@ def _verify_shell_enforcement() -> bool:
 
         # Must allow
         for cmd in [
-            "ps aux", "df -h", "free -h", "uptime",
+            "ps aux",
+            "df -h",
+            "free -h",
+            "uptime",
             "systemctl status novacore-watcher",
             "journalctl --no-pager -n 50",
         ]:
@@ -6194,9 +6169,11 @@ def _verify_shell_enforcement() -> bool:
 
         # Must deny
         for cmd in [
-            "rm -rf /", "sudo apt update",
+            "rm -rf /",
+            "sudo apt update",
             "systemctl restart novacore-watcher",
-            "kill -9 1234", "pip install malware",
+            "kill -9 1234",
+            "pip install malware",
         ]:
             ok, _ = validate_system_shell_command(cmd)
             if ok:
@@ -6406,57 +6383,61 @@ def write_system_report_activation_gate(
 
     for i, c in enumerate(gate.criteria, 1):
         status = "PASS" if c.passed else "FAIL"
-        lines.append(
-            f"| {i} | {c.name} | {status} | {c.value} | {c.threshold} | {c.detail} |"
-        )
+        lines.append(f"| {i} | {c.name} | {status} | {c.value} | {c.threshold} | {c.detail} |")
 
-    lines.extend([
-        "",
-        "## Evidence Summary",
-        "",
-        "| Metric | Value |",
-        "|--------|-------|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Evidence Summary",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
+        ]
+    )
     for k, v in gate.evidence_summary.items():
         lines.append(f"| {k} | {v} |")
 
-    lines.extend([
-        "",
-        "## Scope Change (on activation)",
-        "",
-        "| Property | Before | After |",
-        "|----------|--------|-------|",
-        "| system_scope | inspect_only | report |",
-        "| shell-ops | blocked | allowed (bounded by allowlist) |",
-        "| rollout_stage | stage4_..._system_inspect | stage4_..._system_report |",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Scope Change (on activation)",
+            "",
+            "| Property | Before | After |",
+            "|----------|--------|-------|",
+            "| system_scope | inspect_only | report |",
+            "| shell-ops | blocked | allowed (bounded by allowlist) |",
+            "| rollout_stage | stage4_..._system_inspect | stage4_..._system_report |",
+            "",
+        ]
+    )
 
     if "ready" in gate.decision:
-        lines.extend([
-            "## Operator Action",
-            "",
-            "- Run `activate_system_report_scope()` to proceed.",
-            "- Shell commands will be bounded by the system_shell_allowlist.",
-            "- Monitor via post-activation stability review (Phase 7.23).",
-            "",
-        ])
+        lines.extend(
+            [
+                "## Operator Action",
+                "",
+                "- Run `activate_system_report_scope()` to proceed.",
+                "- Shell commands will be bounded by the system_shell_allowlist.",
+                "- Monitor via post-activation stability review (Phase 7.23).",
+                "",
+            ]
+        )
     else:
-        lines.extend([
-            "## Operator Action",
-            "",
-            "- Activation blocked. Resolve failing criteria before attempting.",
-            "- Do NOT manually change system_scope.",
-            "",
-        ])
+        lines.extend(
+            [
+                "## Operator Action",
+                "",
+                "- Activation blocked. Resolve failing criteria before attempting.",
+                "- Do NOT manually change system_scope.",
+                "",
+            ]
+        )
 
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text("\n".join(lines))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(gate.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(gate.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path
 
@@ -6473,6 +6454,7 @@ def write_system_report_activation_gate(
 @dataclass
 class SystemReportStabilityReview:
     """Result of post-activation system_report stability monitoring."""
+
     decision: str
     rollout_stage: str
     system_scope: str
@@ -6510,18 +6492,12 @@ def _collect_post_activation_system_workflows(
         return []
     try:
         fmt = "%Y-%m-%dT%H:%M:%SZ"
-        act_dt = datetime.strptime(activation_ts, fmt).replace(
-            tzinfo=timezone.utc
-        )
+        act_dt = datetime.strptime(activation_ts, fmt).replace(tzinfo=timezone.utc)
         act_epoch = act_dt.timestamp()
     except (ValueError, TypeError):
         return []
 
-    return [
-        w for w in workflows
-        if w.get("task_class") == "system"
-        and w.get("created_at", 0) >= act_epoch
-    ]
+    return [w for w in workflows if w.get("task_class") == "system" and w.get("created_at", 0) >= act_epoch]
 
 
 def _collect_system_report_metrics(
@@ -6529,17 +6505,9 @@ def _collect_system_report_metrics(
 ) -> dict:
     """Extract system_report-specific metrics from post-activation workflows."""
     total = len(post_activation_workflows)
-    completed = sum(
-        1 for w in post_activation_workflows if w.get("status") == "completed"
-    )
-    failed = sum(
-        1 for w in post_activation_workflows
-        if w.get("status") in ("failed", "halted")
-    )
-    rejected = sum(
-        1 for w in post_activation_workflows
-        if w.get("halt_reason") == "verifier_rejected"
-    )
+    completed = sum(1 for w in post_activation_workflows if w.get("status") == "completed")
+    failed = sum(1 for w in post_activation_workflows if w.get("status") in ("failed", "halted"))
+    rejected = sum(1 for w in post_activation_workflows if w.get("halt_reason") == "verifier_rejected")
 
     failure_rate = failed / total if total > 0 else 0.0
     rejection_rate = rejected / total if total > 0 else 0.0
@@ -6565,10 +6533,7 @@ def _count_shell_audit_violations(root: Path) -> int:
         return 0
     try:
         text = audit_path.read_text(encoding="utf-8")
-        violations = sum(
-            1 for line in text.splitlines()
-            if "[VIOLATION]" in line or "[DENIED]" in line
-        )
+        violations = sum(1 for line in text.splitlines() if "[VIOLATION]" in line or "[DENIED]" in line)
         return violations
     except OSError:
         return 0
@@ -6638,151 +6603,173 @@ def evaluate_system_report_stability(
     # --- Hard criteria (any failure -> rollback) ---
 
     # 1. Heartbeat healthy
-    criteria.append(RolloutCriterion(
-        name="heartbeat_healthy",
-        passed=heartbeat_overall == REPORT_STABILITY_HEARTBEAT_REQUIRED,
-        value=heartbeat_overall,
-        threshold=REPORT_STABILITY_HEARTBEAT_REQUIRED,
-        detail=f"Current heartbeat: {heartbeat_overall}",
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="heartbeat_healthy",
+            passed=heartbeat_overall == REPORT_STABILITY_HEARTBEAT_REQUIRED,
+            value=heartbeat_overall,
+            threshold=REPORT_STABILITY_HEARTBEAT_REQUIRED,
+            detail=f"Current heartbeat: {heartbeat_overall}",
+            severity="hard",
+        )
+    )
 
     # 2. No policy violations
-    criteria.append(RolloutCriterion(
-        name="no_policy_violations",
-        passed=policy_violations <= REPORT_STABILITY_MAX_POLICY_VIOLATIONS,
-        value=policy_violations,
-        threshold=REPORT_STABILITY_MAX_POLICY_VIOLATIONS,
-        detail=(
-            "No policy violations since system_report activation"
-            if policy_violations == 0
-            else f"{policy_violations} policy violation(s) detected"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_policy_violations",
+            passed=policy_violations <= REPORT_STABILITY_MAX_POLICY_VIOLATIONS,
+            value=policy_violations,
+            threshold=REPORT_STABILITY_MAX_POLICY_VIOLATIONS,
+            detail=(
+                "No policy violations since system_report activation"
+                if policy_violations == 0
+                else f"{policy_violations} policy violation(s) detected"
+            ),
+            severity="hard",
+        )
+    )
 
     # 3. No budget exhaustions
-    criteria.append(RolloutCriterion(
-        name="no_budget_exhaustions",
-        passed=budget_exhaustions <= REPORT_STABILITY_MAX_BUDGET_EXHAUSTIONS,
-        value=budget_exhaustions,
-        threshold=REPORT_STABILITY_MAX_BUDGET_EXHAUSTIONS,
-        detail=(
-            "No budget exhaustions"
-            if budget_exhaustions == 0
-            else f"{budget_exhaustions} budget exhaustion(s)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_budget_exhaustions",
+            passed=budget_exhaustions <= REPORT_STABILITY_MAX_BUDGET_EXHAUSTIONS,
+            value=budget_exhaustions,
+            threshold=REPORT_STABILITY_MAX_BUDGET_EXHAUSTIONS,
+            detail=(
+                "No budget exhaustions" if budget_exhaustions == 0 else f"{budget_exhaustions} budget exhaustion(s)"
+            ),
+            severity="hard",
+        )
+    )
 
     # 4. No unresolved recovery anomalies
-    criteria.append(RolloutCriterion(
-        name="no_recovery_anomalies",
-        passed=unresolved_recovery_anomalies <= REPORT_STABILITY_MAX_RECOVERY_ANOMALIES,
-        value=unresolved_recovery_anomalies,
-        threshold=REPORT_STABILITY_MAX_RECOVERY_ANOMALIES,
-        detail=(
-            "No unresolved recovery anomalies"
-            if unresolved_recovery_anomalies == 0
-            else f"{unresolved_recovery_anomalies} unresolved recovery anomaly(ies)"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_recovery_anomalies",
+            passed=unresolved_recovery_anomalies <= REPORT_STABILITY_MAX_RECOVERY_ANOMALIES,
+            value=unresolved_recovery_anomalies,
+            threshold=REPORT_STABILITY_MAX_RECOVERY_ANOMALIES,
+            detail=(
+                "No unresolved recovery anomalies"
+                if unresolved_recovery_anomalies == 0
+                else f"{unresolved_recovery_anomalies} unresolved recovery anomaly(ies)"
+            ),
+            severity="hard",
+        )
+    )
 
     # 5. Zero shell allowlist violations (critical for system_report safety)
-    criteria.append(RolloutCriterion(
-        name="no_shell_violations",
-        passed=shell_audit_violations <= REPORT_STABILITY_MAX_SHELL_VIOLATIONS,
-        value=shell_audit_violations,
-        threshold=REPORT_STABILITY_MAX_SHELL_VIOLATIONS,
-        detail=(
-            "No shell allowlist violations"
-            if shell_audit_violations == 0
-            else f"{shell_audit_violations} shell allowlist violation(s) — CRITICAL"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="no_shell_violations",
+            passed=shell_audit_violations <= REPORT_STABILITY_MAX_SHELL_VIOLATIONS,
+            value=shell_audit_violations,
+            threshold=REPORT_STABILITY_MAX_SHELL_VIOLATIONS,
+            detail=(
+                "No shell allowlist violations"
+                if shell_audit_violations == 0
+                else f"{shell_audit_violations} shell allowlist violation(s) — CRITICAL"
+            ),
+            severity="hard",
+        )
+    )
 
     # 6. Scope integrity
-    criteria.append(RolloutCriterion(
-        name="scope_integrity",
-        passed=scope_integrity.get("intact", False),
-        value=scope_integrity.get("reason", "unknown"),
-        threshold="intact",
-        detail=(
-            "Scope integrity verified: system_report properly configured"
-            if scope_integrity.get("intact")
-            else f"Scope integrity issue: {scope_integrity.get('reason', 'unknown')}"
-        ),
-        severity="hard",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="scope_integrity",
+            passed=scope_integrity.get("intact", False),
+            value=scope_integrity.get("reason", "unknown"),
+            threshold="intact",
+            detail=(
+                "Scope integrity verified: system_report properly configured"
+                if scope_integrity.get("intact")
+                else f"Scope integrity issue: {scope_integrity.get('reason', 'unknown')}"
+            ),
+            severity="hard",
+        )
+    )
 
     # 7. Failure rate within threshold (hard if any runs exist)
     if total_runs > 0:
-        criteria.append(RolloutCriterion(
-            name="failure_rate_acceptable",
-            passed=failure_rate <= REPORT_STABILITY_MAX_FAILURE_RATE,
-            value=round(failure_rate, 4),
-            threshold=REPORT_STABILITY_MAX_FAILURE_RATE,
-            detail=f"Failure rate {failure_rate:.1%} (max {REPORT_STABILITY_MAX_FAILURE_RATE:.0%})",
-            severity="hard",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="failure_rate_acceptable",
+                passed=failure_rate <= REPORT_STABILITY_MAX_FAILURE_RATE,
+                value=round(failure_rate, 4),
+                threshold=REPORT_STABILITY_MAX_FAILURE_RATE,
+                detail=f"Failure rate {failure_rate:.1%} (max {REPORT_STABILITY_MAX_FAILURE_RATE:.0%})",
+                severity="hard",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="failure_rate_acceptable",
-            passed=True,
-            value=0.0,
-            threshold=REPORT_STABILITY_MAX_FAILURE_RATE,
-            detail="No runs yet — failure rate check deferred",
-            severity="hard",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="failure_rate_acceptable",
+                passed=True,
+                value=0.0,
+                threshold=REPORT_STABILITY_MAX_FAILURE_RATE,
+                detail="No runs yet — failure rate check deferred",
+                severity="hard",
+            )
+        )
 
     # --- Soft criteria (failure -> hold) ---
 
     # 8. Minimum completed runs
-    criteria.append(RolloutCriterion(
-        name="minimum_system_report_runs",
-        passed=total_runs >= REPORT_STABILITY_MIN_RUNS,
-        value=total_runs,
-        threshold=REPORT_STABILITY_MIN_RUNS,
-        detail=f"{total_runs} system_report run(s) (need >= {REPORT_STABILITY_MIN_RUNS})",
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="minimum_system_report_runs",
+            passed=total_runs >= REPORT_STABILITY_MIN_RUNS,
+            value=total_runs,
+            threshold=REPORT_STABILITY_MIN_RUNS,
+            detail=f"{total_runs} system_report run(s) (need >= {REPORT_STABILITY_MIN_RUNS})",
+            severity="soft",
+        )
+    )
 
     # 9. Minimum elapsed time
     elapsed_hours = round(elapsed_seconds / 3600, 1)
     required_hours = REPORT_STABILITY_MIN_ELAPSED_SECONDS / 3600
-    criteria.append(RolloutCriterion(
-        name="minimum_elapsed_time",
-        passed=elapsed_seconds >= REPORT_STABILITY_MIN_ELAPSED_SECONDS,
-        value=elapsed_hours,
-        threshold=required_hours,
-        detail=f"Elapsed {elapsed_hours}h since system_report activation (need >= {required_hours}h)",
-        severity="soft",
-    ))
+    criteria.append(
+        RolloutCriterion(
+            name="minimum_elapsed_time",
+            passed=elapsed_seconds >= REPORT_STABILITY_MIN_ELAPSED_SECONDS,
+            value=elapsed_hours,
+            threshold=required_hours,
+            detail=f"Elapsed {elapsed_hours}h since system_report activation (need >= {required_hours}h)",
+            severity="soft",
+        )
+    )
 
     # 10. Verifier rejection rate
     if total_runs > 0:
-        criteria.append(RolloutCriterion(
-            name="verifier_rejection_rate",
-            passed=rejection_rate <= REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
-            value=round(rejection_rate, 4),
-            threshold=REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
-            detail=(
-                f"Verifier rejection rate {rejection_rate:.1%}"
-                f" (max {REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE:.0%})"
-            ),
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="verifier_rejection_rate",
+                passed=rejection_rate <= REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
+                value=round(rejection_rate, 4),
+                threshold=REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
+                detail=(
+                    f"Verifier rejection rate {rejection_rate:.1%}"
+                    f" (max {REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE:.0%})"
+                ),
+                severity="soft",
+            )
+        )
     else:
-        criteria.append(RolloutCriterion(
-            name="verifier_rejection_rate",
-            passed=True,
-            value=0.0,
-            threshold=REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
-            detail="No runs yet — verifier rejection check deferred",
-            severity="soft",
-        ))
+        criteria.append(
+            RolloutCriterion(
+                name="verifier_rejection_rate",
+                passed=True,
+                value=0.0,
+                threshold=REPORT_STABILITY_MAX_VERIFIER_REJECTION_RATE,
+                detail="No runs yet — verifier rejection check deferred",
+                severity="soft",
+            )
+        )
 
     return criteria
 
@@ -6813,8 +6800,7 @@ def decide_system_report_stability(
         names = ", ".join(c.name for c in soft_failed)
         return (
             "hold_system_report",
-            f"system_report held: {names}. Continue operating to accumulate evidence. "
-            "system_scope remains 'report'.",
+            f"system_report held: {names}. Continue operating to accumulate evidence. system_scope remains 'report'.",
         )
 
     return (
@@ -6838,26 +6824,19 @@ def review_system_report_stability(
 
     # Find system_report activation timestamp
     activation_log = _read_jsonl(state / "activation_log.jsonl")
-    report_activations = [
-        r for r in activation_log
-        if r.get("event") == "system_report_activation"
-    ]
+    report_activations = [r for r in activation_log if r.get("event") == "system_report_activation"]
     activation = report_activations[-1] if report_activations else {}
     activation_ts = activation.get("timestamp", "")
 
     # Current time
-    now_iso = now_override or datetime.now(timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    now_iso = now_override or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Elapsed time
     elapsed_seconds = _compute_elapsed_seconds(activation_ts, now_iso)
 
     # Collect post-activation system workflows
     workflows = _list_json_files(state / "workflows")
-    post_act_workflows = _collect_post_activation_system_workflows(
-        workflows, activation_ts
-    )
+    post_act_workflows = _collect_post_activation_system_workflows(workflows, activation_ts)
     report_metrics = _collect_system_report_metrics(post_act_workflows)
 
     # Heartbeat
@@ -6873,9 +6852,7 @@ def review_system_report_stability(
     budget_exhaustions = hb_metrics.get("budget_exhaustion_count", 0)
 
     # Recovery anomalies
-    recovery_classification = _classify_post_activation_recoveries(
-        root, activation_ts
-    )
+    recovery_classification = _classify_post_activation_recoveries(root, activation_ts)
     unresolved = recovery_classification.get("unresolved", 0)
 
     # Shell audit violations
@@ -6892,9 +6869,7 @@ def review_system_report_stability(
     contract_success = hb_metrics.get("contract_success_count", 0)
     contract_failure = hb_metrics.get("contract_failure_count", 0)
     contract_total = contract_success + contract_failure
-    contract_failure_rate = (
-        contract_failure / contract_total if contract_total > 0 else None
-    )
+    contract_failure_rate = contract_failure / contract_total if contract_total > 0 else None
 
     # Evaluate criteria
     criteria = evaluate_system_report_stability(
@@ -6923,7 +6898,8 @@ def review_system_report_stability(
         "elapsed_target_hours": elapsed_target,
         "elapsed_pct": (
             min(100, round(100 * elapsed_seconds / REPORT_STABILITY_MIN_ELAPSED_SECONDS))
-            if REPORT_STABILITY_MIN_ELAPSED_SECONDS else 100
+            if REPORT_STABILITY_MIN_ELAPSED_SECONDS
+            else 100
         ),
     }
 
@@ -7032,17 +7008,17 @@ def render_system_report_stability_markdown(
 
     for i, c in enumerate(review.criteria, 1):
         status = "PASS" if c.passed else "FAIL"
-        lines.append(
-            f"| {i} | {c.name} | {status} | {c.value} | {c.threshold} | {c.severity} | {c.detail} |"
-        )
+        lines.append(f"| {i} | {c.name} | {status} | {c.value} | {c.threshold} | {c.severity} | {c.detail} |")
 
-    lines.extend([
-        "",
-        "## Evidence Summary",
-        "",
-        "| Metric | Value |",
-        "|--------|-------|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Evidence Summary",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
+        ]
+    )
     for k, v in review.evidence_summary.items():
         display = "N/A" if v is None else v
         lines.append(f"| {k} | {display} |")
@@ -7050,23 +7026,29 @@ def render_system_report_stability_markdown(
     lines.extend(["", "## Operator Action", ""])
 
     if review.decision == "stable_continue_system_report":
-        lines.extend([
-            "- system_report is stable. No action required.",
-            "- system_scope remains 'report'.",
-            "- Tier 2 (system_diagnose) may be evaluated in a future phase.",
-        ])
+        lines.extend(
+            [
+                "- system_report is stable. No action required.",
+                "- system_scope remains 'report'.",
+                "- Tier 2 (system_diagnose) may be evaluated in a future phase.",
+            ]
+        )
     elif review.decision == "hold_system_report":
-        lines.extend([
-            "- system_report is held pending more evidence.",
-            "- system_scope remains 'report'.",
-            "- Re-run this review after more system_report tasks complete.",
-        ])
+        lines.extend(
+            [
+                "- system_report is held pending more evidence.",
+                "- system_scope remains 'report'.",
+                "- Re-run this review after more system_report tasks complete.",
+            ]
+        )
     else:
-        lines.extend([
-            "- **ROLLBACK RECOMMENDED**.",
-            "- Run `deactivate_system_report_scope()` to roll back to inspect_only.",
-            "- Investigate the failing criteria before re-attempting activation.",
-        ])
+        lines.extend(
+            [
+                "- **ROLLBACK RECOMMENDED**.",
+                "- Run `deactivate_system_report_scope()` to roll back to inspect_only.",
+                "- Investigate the failing criteria before re-attempting activation.",
+            ]
+        )
 
     lines.append("")
     return "\n".join(lines)
@@ -7089,8 +7071,6 @@ def write_system_report_stability_review(
     md_path.write_text(render_system_report_stability_markdown(review))
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
-        json.dumps(review.to_dict(), indent=2, default=str) + "\n"
-    )
+    json_path.write_text(json.dumps(review.to_dict(), indent=2, default=str) + "\n")
 
     return md_path, json_path

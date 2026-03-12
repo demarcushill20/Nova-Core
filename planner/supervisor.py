@@ -74,10 +74,7 @@ class Supervisor:
 
         Non-retryable: permission denied, sandbox violation, blocked, timeout.
         """
-        for err in result.validation_errors:
-            if any(marker in err.lower() for marker in _ANOMALY_MARKERS):
-                return False
-        return True
+        return all(not any(marker in err.lower() for marker in _ANOMALY_MARKERS) for err in result.validation_errors)
 
     def build_retry_reason(self, result: StepResult) -> str:
         """Build a human-readable retry reason."""
@@ -133,10 +130,7 @@ class Supervisor:
 
         if plan_eval.grade in ("D", "F"):
             return {
-                "title": (
-                    f"Improve plan {plan_eval.plan_id}: "
-                    f"grade {plan_eval.grade}"
-                ),
+                "title": (f"Improve plan {plan_eval.plan_id}: grade {plan_eval.grade}"),
                 "description": (
                     f"Plan {plan_eval.plan_id} scored "
                     f"{plan_eval.aggregate_score:.2f} "
@@ -149,10 +143,7 @@ class Supervisor:
 
         if plan_eval.grade in ("B", "C") and plan_eval.followup_recommended:
             return {
-                "title": (
-                    f"Review plan {plan_eval.plan_id}: "
-                    f"grade {plan_eval.grade}"
-                ),
+                "title": (f"Review plan {plan_eval.plan_id}: grade {plan_eval.grade}"),
                 "description": (
                     f"Plan {plan_eval.plan_id} scored "
                     f"{plan_eval.aggregate_score:.2f} "
@@ -165,9 +156,7 @@ class Supervisor:
 
         return None
 
-    def review_improvement_plan(
-        self, plan: ImprovementPlan
-    ) -> SupervisorDecision:
+    def review_improvement_plan(self, plan: ImprovementPlan) -> SupervisorDecision:
         """Review an improvement plan and return a supervisor decision.
 
         Rules (deterministic):
@@ -226,9 +215,7 @@ class Supervisor:
             return False
         if plan.max_files_changed > 5:
             return False
-        if not plan.findings:
-            return False
-        return True
+        return plan.findings
 
     def _escalation_reason(self, result: StepResult) -> str:
         """Build an escalation reason from the result."""

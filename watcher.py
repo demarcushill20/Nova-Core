@@ -28,6 +28,7 @@ from tools.skills import load_skills, render_append_prompt, select_skills
 from tools.task_classifier import classify_and_route
 from utils.audit_log import get_audit_logger
 from utils.dlp_gate import dlp
+from utils.langfuse_tracing import trace_llm_call
 from utils.structured_log import slog
 from utils.task_validator import audit_task_execution, validate_task_content
 from utils.trace_context import TraceContext
@@ -981,6 +982,15 @@ def dispatch(task_path: Path):
             logger.info("Claude exited with code %d for %s", exit_code, stem)
             logger.info("Worker log: %s (%d bytes)", worker_log, worker_log.stat().st_size)
 
+            # --- Langfuse LLM call tracing for per-task cost tracking ---
+            trace_llm_call(
+                name=f"task:{stem}",
+                input_text=prompt[:4000],  # truncate to avoid huge payloads
+                output_text=(stdout or "")[:4000],
+                model="claude-opus-4-6",
+                metadata={"task": stem, "exit_code": exit_code, "trace_id": trace_ctx.trace_id},
+            )
+
     except Exception as exc:
         end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         logger.exception("EXECUTION ERROR: %s", stem)
@@ -994,10 +1004,72 @@ def dispatch(task_path: Path):
         pid_file.unlink(missing_ok=True)
         logger.info("PID file removed: %s", pid_file)
 
-    # --- Verify artifacts ---
+    # --- Verify artifacts (with reflexion retry) ---
     passed, messages = verify_artifacts(stem)
     for msg in messages:
         logger.info("VERIFY: %s", msg)
+
+    # --- Reflexion loop: if contract failed, reflect and retry (bounded) ---
+    if not passed and not _is_retry_task(stem) and MAX_SUPERVISOR_ATTEMPTS > 1:
+        contract_ok, contract_errors = _quick_contract_check(stem)
+        if not contract_ok and contract_errors:
+            logger.info("REFLEXION: %s failed contract — attempting in-process retry", stem)
+            slog.event("task.reflexion_start", trace_ctx, stem=stem, errors=contract_errors[:5])
+
+            # Build a reflection prompt that includes what went wrong
+            error_list = "\n".join(f"- {e}" for e in contract_errors[:10])
+            output_file = _find_recent_output(stem)
+            output_snippet = ""
+            if output_file:
+                raw = output_file.read_text(encoding="utf-8")
+                output_snippet = raw[-2000:] if len(raw) > 2000 else raw
+
+            reflection_prompt = (
+                f"REFLEXION RETRY for task: {stem}\n\n"
+                f"Your previous attempt produced output but FAILED contract validation.\n\n"
+                f"CONTRACT ERRORS:\n{error_list}\n\n"
+                f"PREVIOUS OUTPUT (tail):\n{output_snippet}\n\n"
+                f"INSTRUCTIONS:\n"
+                f"1. Analyze WHY the contract validation failed\n"
+                f"2. Re-read the original task file if needed\n"
+                f"3. Produce a corrected output with a valid ## CONTRACT block containing:\n"
+                f"   - summary, verification, confidence (high/medium/low)\n"
+                f"   - At least one action field (files_modified, tools_used, etc.)\n"
+                f"4. Write the corrected output to OUTPUT/\n"
+            )
+
+            retry_cmd = [
+                CLAUDE_BIN,
+                "-p",
+                "--verbose",
+                "--dangerously-skip-permissions",
+                "--model",
+                "claude-opus-4-6",
+                reflection_prompt,
+            ]
+            retry_exit = _execute_worker(
+                stem=stem,
+                cmd=retry_cmd,
+                worker_log=worker_log,
+                selected_names=selected_names,
+                skill_flag_note=skill_flag_note,
+                attempt=2,
+                max_attempts=MAX_SUPERVISOR_ATTEMPTS,
+            )
+
+            # Re-verify after reflexion retry
+            passed, messages = verify_artifacts(stem)
+            for msg in messages:
+                logger.info("VERIFY (post-reflexion): %s", msg)
+
+            slog.event(
+                "task.reflexion_complete",
+                trace_ctx,
+                stem=stem,
+                retry_exit_code=retry_exit,
+                passed=passed,
+                duration_ms=trace_ctx.elapsed_ms(),
+            )
 
     # --- Test gate: run pytest after contract validation ---
     if passed:

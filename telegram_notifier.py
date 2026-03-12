@@ -20,7 +20,7 @@ INTENTS_DIR = STATE / "intents"
 STATE.mkdir(parents=True, exist_ok=True)
 
 SENT_LOG = STATE / "tg_sent_outputs.txt"  # legacy; kept for backward compat reads
-NOTIFIED_DIR = STATE / "notified"         # durable marker dir (one file per output)
+NOTIFIED_DIR = STATE / "notified"  # durable marker dir (one file per output)
 CEO_DELEGATED_DIR = STATE / "ceo_delegated"  # Phase 9: CEO Nova delegation markers
 MODE_FILE = STATE / "notifier_mode.txt"
 MARKER_MAX_AGE_DAYS = 7
@@ -31,8 +31,10 @@ CHAT_ID = os.environ.get("ALLOWED_CHAT_ID", "").strip()
 
 TELEGRAM_MAX = 3500  # safe chunk size
 
+
 def log(msg: str) -> None:
     print(f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} [notifier] {msg}", flush=True)
+
 
 def get_mode() -> str:
     try:
@@ -40,6 +42,7 @@ def get_mode() -> str:
         return m if m in {"compact", "normal", "verbose"} else "normal"
     except Exception:
         return "normal"
+
 
 def send_text(text: str) -> None:
     if not BOT_TOKEN or not CHAT_ID:
@@ -49,6 +52,7 @@ def send_text(text: str) -> None:
     with httpx.Client(timeout=25) as client:
         r = client.post(url, json=payload)
         r.raise_for_status()
+
 
 def send_message_chunked(text: str) -> None:
     # Telegram messages have length limits; chunk safely.
@@ -63,9 +67,10 @@ def send_message_chunked(text: str) -> None:
     if s:
         chunks.append(s)
 
-    for i, c in enumerate(chunks, start=1):
+    for _i, c in enumerate(chunks, start=1):
         send_text(c)
         time.sleep(0.25)
+
 
 def _migrate_legacy_sent_log() -> None:
     """One-time: convert legacy tg_sent_outputs.txt entries into marker files."""
@@ -78,8 +83,7 @@ def _migrate_legacy_sent_log() -> None:
             if not marker.exists():
                 try:
                     fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-                    os.write(fd, datetime.utcnow().strftime(
-                        "%Y-%m-%d %H:%M:%S UTC (migrated)\n").encode())
+                    os.write(fd, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC (migrated)\n").encode())
                     os.close(fd)
                 except FileExistsError:
                     pass
@@ -118,10 +122,7 @@ def claim_send(name: str) -> bool:
     marker = NOTIFIED_DIR / f"{name}.notified"
     try:
         fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        content = (
-            f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
-            f"pid={os.getpid()} host={platform.node()}\n"
-        )
+        content = f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\npid={os.getpid()} host={platform.node()}\n"
         os.write(fd, content.encode())
         os.close(fd)
         return True
@@ -136,6 +137,7 @@ def unclaim_send(name: str) -> None:
         marker.unlink()
     except OSError:
         pass
+
 
 SUMMARY_MAX_CHARS = 300
 
@@ -202,7 +204,8 @@ def _extract_summary(md_text: str) -> str:
     # Matches "# Task Report:", "# Output Report:", "# Output for:", "# Output:", "# Task 0004"
     m = re.search(
         r"^#\s+(?:Task|Output)[^\n]*\n(.*?)(?:\n^##?\s+|\Z)",
-        md_text, flags=re.MULTILINE | re.DOTALL,
+        md_text,
+        flags=re.MULTILINE | re.DOTALL,
     )
     if m:
         # Skip metadata lines like **Completed:**, **Task:**, - Processed:, blank lines
@@ -221,7 +224,8 @@ def _extract_summary(md_text: str) -> str:
     # Catches legacy reports whose sections don't match any known heading
     m = re.search(
         r"^##\s+\w[^\n]*\n(.*?)(?:\n^##?\s+|\Z)",
-        md_text, flags=re.MULTILINE | re.DOTALL,
+        md_text,
+        flags=re.MULTILINE | re.DOTALL,
     )
     if m:
         body = m.group(1).strip()
@@ -253,6 +257,7 @@ def parse_task_report(md_text: str, output_name: str = "") -> dict:
       2) **Timestamp:** ...
       3) Inferred from output filename suffix __YYYYMMDD-HHMMSS
     """
+
     def find_one(pat: str) -> str | None:
         m = re.search(pat, md_text, flags=re.IGNORECASE | re.MULTILINE)
         return m.group(1).strip() if m else None
@@ -312,6 +317,7 @@ def parse_task_report(md_text: str, output_name: str = "") -> dict:
         "files": files,
     }
 
+
 def compute_metrics(output_path: Path) -> dict:
     # Latency metrics from filename timestamps: tg_YYYYMMDD-HHMMSS...__YYYYMMDD-HHMMSS.md
     name = output_path.name
@@ -338,6 +344,7 @@ def compute_metrics(output_path: Path) -> dict:
         "latency_sec": latency_sec,
         "size_bytes": size_bytes,
     }
+
 
 def worker_log_for_output(output_path: Path, task_id: str | None = None) -> Path | None:
     """Find the worker log for a given output file.
@@ -375,6 +382,7 @@ def worker_log_for_output(output_path: Path, task_id: str | None = None) -> Path
 
     return None
 
+
 def _load_intent(output_path: Path) -> str:
     """Load the intent (chat/task) for an output file. Default: task."""
     # Output filenames: {stem}__YYYYMMDD-HHMMSS.md
@@ -393,8 +401,8 @@ def _build_chat_message(output_path: Path) -> str:
     """Build a clean, stripped chat-mode message — answer content only."""
     # Import here to avoid circular imports at module level
     import importlib.util as _ilu
-    _spec = _ilu.spec_from_file_location(
-        "telegram.format", str(ROOT / "telegram" / "format.py"))
+
+    _spec = _ilu.spec_from_file_location("telegram.format", str(ROOT / "telegram" / "format.py"))
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
 
@@ -470,6 +478,7 @@ def build_message(output_path: Path) -> str:
     verbose_full = verbose_top + "\n📄 Full Report\n" + txt.strip()
     return verbose_full
 
+
 def _is_ceo_delegated(output_path: Path) -> bool:
     """Check if this task was delegated through CEO Nova."""
     name = output_path.stem  # e.g. "0010_foo__20260305-160249"
@@ -512,10 +521,7 @@ def maybe_notify(path: Path) -> None:
         else:
             msg = build_message(path)
             # Append source identity footer only in task/report mode
-            footer = (
-                f"\n---\nnotifier_pid={os.getpid()}"
-                f" host={platform.node()}"
-            )
+            footer = f"\n---\nnotifier_pid={os.getpid()} host={platform.node()}"
             msg += footer
         send_message_chunked(msg)
         log(f"Sent notification for {path.name} (intent={intent}, mode={get_mode()}, pid={os.getpid()})")
@@ -524,6 +530,7 @@ def maybe_notify(path: Path) -> None:
         unclaim_send(path.name)
         log(f"Send FAILED for {path.name}, marker removed for retry: {e}")
         raise
+
 
 def catch_up_latest() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -535,6 +542,7 @@ def catch_up_latest() -> None:
             break
     else:
         log("Catch-up: nothing new to send")
+
 
 class Handler(FileSystemEventHandler):
     def on_created(self, event):
@@ -557,6 +565,7 @@ class Handler(FileSystemEventHandler):
             maybe_notify(p)
         except Exception as e:
             log(f"ERROR on_moved {p.name}: {e}")
+
 
 def main() -> None:
     if not BOT_TOKEN or not CHAT_ID:
@@ -595,6 +604,7 @@ def main() -> None:
     finally:
         obs.stop()
         obs.join()
+
 
 if __name__ == "__main__":
     main()

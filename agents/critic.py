@@ -24,14 +24,16 @@ from agents.blackboard import Blackboard
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CriticIssue:
     """A single issue found during review."""
-    issue: str                         # description of the problem
-    severity: str                      # low | medium | high | critical
-    reason_code: str                   # machine-readable category
-    location: str = ""                 # file:line or section reference
-    suggested_fix: str = ""            # actionable remediation hint
+
+    issue: str  # description of the problem
+    severity: str  # low | medium | high | critical
+    reason_code: str  # machine-readable category
+    location: str = ""  # file:line or section reference
+    suggested_fix: str = ""  # actionable remediation hint
 
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v}
@@ -40,20 +42,21 @@ class CriticIssue:
 @dataclass
 class CriticReview:
     """Structured review artifact emitted by the Critic."""
+
     review_id: str
     workflow_id: str
-    target_node_id: str                # the node/subtask under review
-    verdict: str                       # pass | objection | needs_revision
+    target_node_id: str  # the node/subtask under review
+    verdict: str  # pass | objection | needs_revision
     issues: list[CriticIssue] = field(default_factory=list)
     contract_compliance: dict = field(default_factory=dict)
-    confidence: str = "medium"         # high | medium | low
+    confidence: str = "medium"  # high | medium | low
     reviewed_at: float = field(default_factory=time.time)
     reviewer: str = "critic_001"
 
     # Objection-specific fields (populated when verdict == "objection")
     blocking: bool = False
-    affected_node: str = ""            # which workflow node is affected
-    remediation_hint: str = ""         # actionable guidance for re-plan
+    affected_node: str = ""  # which workflow node is affected
+    remediation_hint: str = ""  # actionable guidance for re-plan
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -72,21 +75,23 @@ class CriticReview:
 # Re-plan signal (orchestrator-consumable)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ReplanSignal:
     """Deterministic signal emitted when a critic objection requires re-planning.
 
     The orchestrator reads this from STATE/replans/ to decide how to proceed.
     """
+
     signal_id: str
     workflow_id: str
-    source_review_id: str              # which review triggered this
-    objecting_node: str                # which node raised the objection
-    affected_node: str                 # which node must be re-planned
-    reason_code: str                   # machine-readable reason
-    remediation_hint: str              # guidance for the planner
+    source_review_id: str  # which review triggered this
+    objecting_node: str  # which node raised the objection
+    affected_node: str  # which node must be re-planned
+    reason_code: str  # machine-readable reason
+    remediation_hint: str  # guidance for the planner
     created_at: float = field(default_factory=time.time)
-    status: str = "pending"            # pending | acknowledged | resolved
+    status: str = "pending"  # pending | acknowledged | resolved
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -176,56 +181,66 @@ class CriticEngine:
             compliance = self.check_contract_compliance(contract)
             for field_name, result in compliance.items():
                 if result == "fail":
-                    issues.append(CriticIssue(
-                        issue=f"Contract field '{field_name}' is missing or empty",
-                        severity="high",
-                        reason_code="contract_field_missing",
-                        location=f"contract.{field_name}",
-                        suggested_fix=f"Populate the '{field_name}' field in the output contract",
-                    ))
+                    issues.append(
+                        CriticIssue(
+                            issue=f"Contract field '{field_name}' is missing or empty",
+                            severity="high",
+                            reason_code="contract_field_missing",
+                            location=f"contract.{field_name}",
+                            suggested_fix=f"Populate the '{field_name}' field in the output contract",
+                        )
+                    )
 
         # 2. Deliverables existence check
         if not deliverables:
-            issues.append(CriticIssue(
-                issue="No deliverables provided for review",
-                severity="critical",
-                reason_code="no_deliverables",
-                suggested_fix="Ensure the producing agent emits at least one deliverable",
-            ))
+            issues.append(
+                CriticIssue(
+                    issue="No deliverables provided for review",
+                    severity="critical",
+                    reason_code="no_deliverables",
+                    suggested_fix="Ensure the producing agent emits at least one deliverable",
+                )
+            )
 
         for name, content in deliverables.items():
             if content is None or (isinstance(content, str) and not content.strip()):
-                issues.append(CriticIssue(
-                    issue=f"Deliverable '{name}' is empty or missing",
-                    severity="high",
-                    reason_code="empty_deliverable",
-                    location=name,
-                    suggested_fix=f"Ensure '{name}' contains valid content",
-                ))
+                issues.append(
+                    CriticIssue(
+                        issue=f"Deliverable '{name}' is empty or missing",
+                        severity="high",
+                        reason_code="empty_deliverable",
+                        location=name,
+                        suggested_fix=f"Ensure '{name}' contains valid content",
+                    )
+                )
 
             # Check file existence for path-like deliverables
             if isinstance(content, str) and content.startswith("/"):
                 path = Path(content)
                 if not path.exists():
-                    issues.append(CriticIssue(
-                        issue=f"Deliverable file '{content}' does not exist",
-                        severity="critical",
-                        reason_code="file_not_found",
-                        location=content,
-                        suggested_fix=f"Create the expected file at '{content}'",
-                    ))
+                    issues.append(
+                        CriticIssue(
+                            issue=f"Deliverable file '{content}' does not exist",
+                            severity="critical",
+                            reason_code="file_not_found",
+                            location=content,
+                            suggested_fix=f"Create the expected file at '{content}'",
+                        )
+                    )
                 elif path.stat().st_size == 0:
-                    issues.append(CriticIssue(
-                        issue=f"Deliverable file '{content}' is empty (0 bytes)",
-                        severity="high",
-                        reason_code="empty_file",
-                        location=content,
-                        suggested_fix=f"Ensure '{content}' has valid content",
-                    ))
+                    issues.append(
+                        CriticIssue(
+                            issue=f"Deliverable file '{content}' is empty (0 bytes)",
+                            severity="high",
+                            reason_code="empty_file",
+                            location=content,
+                            suggested_fix=f"Ensure '{content}' has valid content",
+                        )
+                    )
 
         # 3. Acceptance criteria checks
         if acceptance_criteria:
-            for criterion in acceptance_criteria:
+            for _criterion in acceptance_criteria:
                 # The critic can only note that criteria exist —
                 # actual semantic evaluation is done at the orchestrator level
                 # or via test execution. Here we check for structural compliance.
@@ -275,13 +290,18 @@ class CriticEngine:
             self._emit_replan_signal(review)
 
         # 9. Post to blackboard message log
-        self.bb.post_message(workflow_id, reviewer, "critic_review", {
-            "review_id": review_id,
-            "target_node_id": target_node_id,
-            "verdict": verdict,
-            "issue_count": len(issues),
-            "blocking": review.blocking,
-        })
+        self.bb.post_message(
+            workflow_id,
+            reviewer,
+            "critic_review",
+            {
+                "review_id": review_id,
+                "target_node_id": target_node_id,
+                "verdict": verdict,
+                "issue_count": len(issues),
+                "blocking": review.blocking,
+            },
+        )
 
         return review
 
@@ -320,9 +340,9 @@ class CriticEngine:
         # Use the primary reason code from the first critical issue
         primary_issue = next(
             (i for i in review.issues if i.severity == "critical"),
-            review.issues[0] if review.issues else CriticIssue(
-                issue="unspecified", severity="critical", reason_code="unknown"
-            ),
+            review.issues[0]
+            if review.issues
+            else CriticIssue(issue="unspecified", severity="critical", reason_code="unknown"),
         )
 
         signal = ReplanSignal(
@@ -339,12 +359,17 @@ class CriticEngine:
         self.bb._write_json(path, signal.to_dict())
 
         # Also post to blackboard
-        self.bb.post_message(review.workflow_id, review.reviewer, "replan_signal", {
-            "signal_id": signal.signal_id,
-            "affected_node": signal.affected_node,
-            "reason_code": signal.reason_code,
-            "remediation_hint": signal.remediation_hint,
-        })
+        self.bb.post_message(
+            review.workflow_id,
+            review.reviewer,
+            "replan_signal",
+            {
+                "signal_id": signal.signal_id,
+                "affected_node": signal.affected_node,
+                "reason_code": signal.reason_code,
+                "remediation_hint": signal.remediation_hint,
+            },
+        )
 
         return signal
 

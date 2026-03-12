@@ -7,17 +7,14 @@ No file I/O. No side effects. Pure parsing only.
 Input sanitization integrated (Phase 1.1).
 """
 
-import re as _re
-
 import importlib.util as _imputil
 import pathlib as _pathlib
+import re as _re
 import sys as _sys
 
 # Import from local telegram/input_security.py (not python-telegram-bot)
 _input_sec_path = _pathlib.Path(__file__).parent / "input_security.py"
-_input_sec_spec = _imputil.spec_from_file_location(
-    "nova_input_security", _input_sec_path
-)
+_input_sec_spec = _imputil.spec_from_file_location("nova_input_security", _input_sec_path)
 _input_sec_mod = _imputil.module_from_spec(_input_sec_spec)
 _sys.modules["nova_input_security"] = _input_sec_mod
 _input_sec_spec.loader.exec_module(_input_sec_mod)
@@ -30,9 +27,26 @@ _TAIL_MAX = 200
 _VALID_MODES = ("compact", "normal", "verbose")
 
 _KNOWN_COMMANDS = frozenset(
-    ("run", "status", "last", "get", "tail", "cancel", "mode", "help",
-     "chat", "report", "goals", "briefing",
-     "kill", "pause", "resume", "readonly", "security", "budget")
+    (
+        "run",
+        "status",
+        "last",
+        "get",
+        "tail",
+        "cancel",
+        "mode",
+        "help",
+        "chat",
+        "report",
+        "goals",
+        "briefing",
+        "kill",
+        "pause",
+        "resume",
+        "readonly",
+        "security",
+        "budget",
+    )
 )
 
 
@@ -151,10 +165,7 @@ def _parse_tail(rest: str, chat_id: str, ts: float) -> dict:
 def _parse_cancel(rest: str, chat_id: str, ts: float) -> dict:
     parts = rest.split()
     if not parts:
-        return _err(
-            'Error: /cancel requires a task_id or "last". '
-            "Usage: /cancel <task_id|last>"
-        )
+        return _err('Error: /cancel requires a task_id or "last". Usage: /cancel <task_id|last>')
     raw_id = parts[0]
     task_id = raw_id if raw_id.lower() == "last" else normalize_task_id(raw_id)
     action = _base("cancel_task", chat_id, ts)
@@ -169,9 +180,7 @@ def _parse_mode(rest: str, chat_id: str, ts: float) -> dict:
         return _ok(_base("get_mode", chat_id, ts))
     mode = parts[0].lower()
     if mode not in _VALID_MODES:
-        return _err(
-            f'Error: unknown mode "{parts[0]}". Choose: compact, normal, verbose'
-        )
+        return _err(f'Error: unknown mode "{parts[0]}". Choose: compact, normal, verbose')
     action = _base("set_mode", chat_id, ts)
     action["mode"] = mode
     return _ok(action)
@@ -239,8 +248,7 @@ def _parse_goals(rest: str, chat_id: str, ts: float) -> dict:
     elif sub == "clear":
         action["subcommand"] = "clear"
     else:
-        return _err(f'Error: unknown /goals subcommand "{sub}". '
-                    "Use: add, done, remove, clear")
+        return _err(f'Error: unknown /goals subcommand "{sub}". Use: add, done, remove, clear')
 
     return _ok(action)
 
@@ -252,20 +260,26 @@ def _parse_briefing(chat_id: str, ts: float) -> dict:
 
 # --- Security commands (Phase 1.2) ---
 
+
 def _parse_kill(chat_id: str, ts: float) -> dict:
     return _ok(_base("kill_switch", chat_id, ts) | {"ks_action": "stop"})
+
 
 def _parse_pause(chat_id: str, ts: float) -> dict:
     return _ok(_base("kill_switch", chat_id, ts) | {"ks_action": "pause"})
 
+
 def _parse_resume(chat_id: str, ts: float) -> dict:
     return _ok(_base("kill_switch", chat_id, ts) | {"ks_action": "resume"})
+
 
 def _parse_readonly(chat_id: str, ts: float) -> dict:
     return _ok(_base("kill_switch", chat_id, ts) | {"ks_action": "readonly"})
 
+
 def _parse_security(chat_id: str, ts: float) -> dict:
     return _ok(_base("security_status", chat_id, ts))
+
 
 def _parse_budget(chat_id: str, ts: float) -> dict:
     return _ok(_base("budget_status", chat_id, ts))

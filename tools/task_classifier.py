@@ -37,39 +37,64 @@ from pathlib import Path
 # Task class definitions with keyword patterns (case-insensitive)
 TASK_CLASSES: dict[str, list[str]] = {
     "research": [
-        r"\bresearch\b", r"\binvestigat\w+\b", r"\banalyz\w+\b",
-        r"\bexplor\w+\b", r"\bsurvey\b", r"\bcompare\b",
-        r"\bsummariz\w+\b", r"\breview\s+(?:paper|article|doc)",
-        r"\bfind\s+(?:out|information)\b", r"\bliterature\b",
-        r"\bweb\s*search\b", r"\blook\s*up\b",
-        r"\bexplain\b",   # "explain how X works"
+        r"\bresearch\b",
+        r"\binvestigat\w+\b",
+        r"\banalyz\w+\b",
+        r"\bexplor\w+\b",
+        r"\bsurvey\b",
+        r"\bcompare\b",
+        r"\bsummariz\w+\b",
+        r"\breview\s+(?:paper|article|doc)",
+        r"\bfind\s+(?:out|information)\b",
+        r"\bliterature\b",
+        r"\bweb\s*search\b",
+        r"\blook\s*up\b",
+        r"\bexplain\b",  # "explain how X works"
         r"\bdescribe\b",  # "describe the architecture"
     ],
     "code_impl": [
-        r"\bimplement(?:s|ing|ed)?\b", r"\bcreate\s+(?:a\s+)?(?:function|class|module|script|file)\b",
-        r"\bbuild\b", r"\badd\s+(?:a\s+)?(?:feature|endpoint|handler|method)\b",
+        r"\bimplement(?:s|ing|ed)?\b",
+        r"\bcreate\s+(?:a\s+)?(?:function|class|module|script|file)\b",
+        r"\bbuild\b",
+        r"\badd\s+(?:a\s+)?(?:feature|endpoint|handler|method)\b",
         r"\bfix\s+(?:the\s+)?(?:bug|error|issue|crash)\b",
-        r"\brefactor\b", r"\brewrite\b", r"\boptimize\b",
-        r"\bmigrat\w+\b", r"\bupgrade\b", r"\bport\b",
-        r"\bcoding\b", r"\bdevelop\b",
+        r"\brefactor\b",
+        r"\brewrite\b",
+        r"\boptimize\b",
+        r"\bmigrat\w+\b",
+        r"\bupgrade\b",
+        r"\bport\b",
+        r"\bcoding\b",
+        r"\bdevelop\b",
     ],
     "code_review": [
         r"\breview\s+(?:code|pr|pull|changes|diff)\b",
         r"\breview\s+\S*[/\\.]\S+",  # review a file path: "review agents/rollout_gate.py"
-        r"\baudit\b", r"\bcode\s+quality\b",
-        r"\blint\b", r"\bstatic\s+analysis\b",
+        r"\baudit\b",
+        r"\bcode\s+quality\b",
+        r"\blint\b",
+        r"\bstatic\s+analysis\b",
         r"\bsecurity\s+(?:review|scan|check)\b",
         r"\bmaker[\s-]*checker\b",
         r"\binspect\b",  # "inspect the watcher for issues"
         r"\bcheck\s+(?:for\s+)?(?:bugs?|issues?|problems?|errors?|edge[\s-]*cases?|quality|safety)\b",
     ],
     "system": [
-        r"\bdeploy\b", r"\bconfigure\b", r"\binfrastructure\b",
-        r"\bsystemd\b", r"\bservice\b", r"\bcron\b",
-        r"\bself[\s-]*improv\w+\b", r"\bbootstrap\b",
-        r"\bphase\s+\d+\b", r"\barchitect\b",
-        r"\bpipeline\b", r"\bci[/\s]*cd\b",
-        r"\bpromote\b", r"\brollout\b", r"\bfeature[\s-]*flag\b",
+        r"\bdeploy\b",
+        r"\bconfigure\b",
+        r"\binfrastructure\b",
+        r"\bsystemd\b",
+        r"\bservice\b",
+        r"\bcron\b",
+        r"\bself[\s-]*improv\w+\b",
+        r"\bbootstrap\b",
+        r"\bphase\s+\d+\b",
+        r"\barchitect\b",
+        r"\bpipeline\b",
+        r"\bci[/\s]*cd\b",
+        r"\bpromote\b",
+        r"\brollout\b",
+        r"\bfeature[\s-]*flag\b",
         # Stage D system_inspect signals — read-only inspection of system state
         r"\bsystem[\s_-]*inspect\b",
         r"\bheartbeat\b",
@@ -81,18 +106,21 @@ TASK_CLASSES: dict[str, list[str]] = {
         r"\bstage[\s_-]*[dD]\b",
     ],
     "simple": [
-        r"\bformat\b", r"\brename\b", r"\btypo\b",
+        r"\bformat\b",
+        r"\brename\b",
+        r"\btypo\b",
         r"\bupdate\s+(?:readme|docs?|comment)\b",
         r"\blist\s+(?:files|tasks|outputs)\b",
-        r"\bstatus\b", r"\bcheck\b",
-        r"\bquick\b", r"\btrivial\b",
+        r"\bstatus\b",
+        r"\bcheck\b",
+        r"\bquick\b",
+        r"\btrivial\b",
     ],
 }
 
 # Compiled patterns (built once)
 _COMPILED: dict[str, list[re.Pattern]] = {
-    cls: [re.compile(p, re.IGNORECASE) for p in patterns]
-    for cls, patterns in TASK_CLASSES.items()
+    cls: [re.compile(p, re.IGNORECASE) for p in patterns] for cls, patterns in TASK_CLASSES.items()
 }
 
 # Classes that benefit from orchestrator coordination
@@ -108,21 +136,36 @@ DIRECT_CLASSES = {"simple", "unknown"}
 # must NOT enter the read-only research multi-agent path — even if the
 # keyword classifier scored it as "research".
 _MUTATION_SIGNALS: list[str] = [
-    r"\bimplement(?:s|ing|ed)?\b", r"\bcreate\s+(?:a\s+)?(?:function|class|module|script|file)\b",
-    r"\bwrite\s+(?:code|file|script)\b", r"\bmodify\b", r"\bchange\b",
-    r"\bpatch\b", r"\bcommit\b", r"\bgit\s+push\b",
-    r"\brefactor\b", r"\brewrite\b", r"\bfix\s+(?:the\s+)?(?:bug|error|issue|crash)\b",
-    r"\bdeploy\b", r"\binstall\b", r"\bpip\s+install\b",
-    r"\brm\s", r"\bdelete\b", r"\bremove\b",
-    r"\bexecute\b", r"\brun\s+(?:command|script|shell)\b",
-    r"\bshell\b", r"\bbash\b",
-    r"\bsystemd\b", r"\bservice\b", r"\bcron\b",
-    r"\bsudo\b", r"\bchmod\b", r"\bchown\b",
+    r"\bimplement(?:s|ing|ed)?\b",
+    r"\bcreate\s+(?:a\s+)?(?:function|class|module|script|file)\b",
+    r"\bwrite\s+(?:code|file|script)\b",
+    r"\bmodify\b",
+    r"\bchange\b",
+    r"\bpatch\b",
+    r"\bcommit\b",
+    r"\bgit\s+push\b",
+    r"\brefactor\b",
+    r"\brewrite\b",
+    r"\bfix\s+(?:the\s+)?(?:bug|error|issue|crash)\b",
+    r"\bdeploy\b",
+    r"\binstall\b",
+    r"\bpip\s+install\b",
+    r"\brm\s",
+    r"\bdelete\b",
+    r"\bremove\b",
+    r"\bexecute\b",
+    r"\brun\s+(?:command|script|shell)\b",
+    r"\bshell\b",
+    r"\bbash\b",
+    r"\bsystemd\b",
+    r"\bservice\b",
+    r"\bcron\b",
+    r"\bsudo\b",
+    r"\bchmod\b",
+    r"\bchown\b",
 ]
 
-_MUTATION_COMPILED: list[re.Pattern] = [
-    re.compile(p, re.IGNORECASE) for p in _MUTATION_SIGNALS
-]
+_MUTATION_COMPILED: list[re.Pattern] = [re.compile(p, re.IGNORECASE) for p in _MUTATION_SIGNALS]
 
 # Stage B: allowed classes for multi-agent orchestrator path
 STAGE_B_CLASSES = frozenset({"research"})
@@ -136,32 +179,44 @@ STAGE_C_CLASSES = frozenset({"code_impl", "code_review"})
 
 _HIGH_RISK_SIGNALS: list[str] = [
     # Deployment & infrastructure mutation
-    r"\bdeploy\b", r"\bproduction\b", r"\bstaging\b",
-    r"\binfrastructure\b", r"\bsystemd\b", r"\bcron\b",
+    r"\bdeploy\b",
+    r"\bproduction\b",
+    r"\bstaging\b",
+    r"\binfrastructure\b",
+    r"\bsystemd\b",
+    r"\bcron\b",
     # Secrets & credentials
-    r"\bsecret[s]?\b", r"\bcredential[s]?\b", r"\bpassword[s]?\b",
-    r"\bapi[\s_-]?key[s]?\b", r"\b\.env\s+file\b",
+    r"\bsecret[s]?\b",
+    r"\bcredential[s]?\b",
+    r"\bpassword[s]?\b",
+    r"\bapi[\s_-]?key[s]?\b",
+    r"\b\.env\s+file\b",
     # Destructive operations
-    r"\bsudo\b", r"\brm\s+-rf\b",
-    r"\bgit\s+push\s+--force\b", r"\bgit\s+reset\s+--hard\b",
-    r"\bdrop\s+(?:table|database|collection)\b", r"\bdestructive\b",
+    r"\bsudo\b",
+    r"\brm\s+-rf\b",
+    r"\bgit\s+push\s+--force\b",
+    r"\bgit\s+reset\s+--hard\b",
+    r"\bdrop\s+(?:table|database|collection)\b",
+    r"\bdestructive\b",
     # Overly broad scope
-    r"\brewrite\s+(?:everything|all|entire)\b", r"\bcross[\s-]?repo\b",
+    r"\brewrite\s+(?:everything|all|entire)\b",
+    r"\bcross[\s-]?repo\b",
     r"\bmigrat(?:e|ion)\b",
     # Shell / external execution
     r"\brun\s+(?:command|script|shell)\b",
     r"\bexecute\s+(?:command|script|shell)\b",
-    r"\bshell\b", r"\bbash\b",
+    r"\bshell\b",
+    r"\bbash\b",
     # Policy / agent config changes
     r"\bpolicy\s+(?:engine|config)\b",
     r"\bagent\s+(?:config|profile|registry)\b",
     # Package management
-    r"\bpip\s+install\b", r"\bnpm\s+install\b", r"\bapt[\s-]get\s+install\b",
+    r"\bpip\s+install\b",
+    r"\bnpm\s+install\b",
+    r"\bapt[\s-]get\s+install\b",
 ]
 
-_HIGH_RISK_COMPILED: list[re.Pattern] = [
-    re.compile(p, re.IGNORECASE) for p in _HIGH_RISK_SIGNALS
-]
+_HIGH_RISK_COMPILED: list[re.Pattern] = [re.compile(p, re.IGNORECASE) for p in _HIGH_RISK_SIGNALS]
 
 
 # ---------------------------------------------------------------------------
@@ -175,19 +230,34 @@ STAGE_D_CLASSES = frozenset({"system"})
 # System-mutate signals — tasks matching any of these are rejected in Stage D.
 # These are the mutation-capable operations that remain blocked.
 _SYSTEM_MUTATE_SIGNALS: list[str] = [
-    r"\bdeploy\b", r"\bconfigure\b", r"\binstall\b", r"\bmodify\b",
-    r"\bstart\b", r"\bstop\b", r"\brestart\b", r"\benable\b", r"\bdisable\b",
-    r"\bcreate\b", r"\bdelete\b", r"\bremove\b", r"\bkill\b",
-    r"\bchmod\b", r"\bchown\b", r"\bsudo\b",
-    r"\bpip\s+install\b", r"\bapt\b",
+    r"\bdeploy\b",
+    r"\bconfigure\b",
+    r"\binstall\b",
+    r"\bmodify\b",
+    r"\bstart\b",
+    r"\bstop\b",
+    r"\brestart\b",
+    r"\benable\b",
+    r"\bdisable\b",
+    r"\bcreate\b",
+    r"\bdelete\b",
+    r"\bremove\b",
+    r"\bkill\b",
+    r"\bchmod\b",
+    r"\bchown\b",
+    r"\bsudo\b",
+    r"\bpip\s+install\b",
+    r"\bapt\b",
     r"\bsystemctl\s+(?:start|stop|restart|enable|disable)\b",
-    r"\bcron\b", r"\bbootstrap\b", r"\bself[\s-]*improv\w+\b",
-    r"\bpromote\b", r"\brollout\b", r"\bpush\b",
+    r"\bcron\b",
+    r"\bbootstrap\b",
+    r"\bself[\s-]*improv\w+\b",
+    r"\bpromote\b",
+    r"\brollout\b",
+    r"\bpush\b",
 ]
 
-_SYSTEM_MUTATE_COMPILED: list[re.Pattern] = [
-    re.compile(p, re.IGNORECASE) for p in _SYSTEM_MUTATE_SIGNALS
-]
+_SYSTEM_MUTATE_COMPILED: list[re.Pattern] = [re.compile(p, re.IGNORECASE) for p in _SYSTEM_MUTATE_SIGNALS]
 
 
 _NEGATION_PREFIX = re.compile(
@@ -197,10 +267,23 @@ _NEGATION_PREFIX = re.compile(
 
 # Mutate signals that commonly appear in negated contexts ("Do not modify").
 # These are checked for preceding negation; if negated, the match is discarded.
-_NEGATION_SENSITIVE_SIGNALS = frozenset({
-    "modify", "deploy", "configure", "install", "create", "delete",
-    "remove", "start", "stop", "restart", "enable", "disable", "push",
-})
+_NEGATION_SENSITIVE_SIGNALS = frozenset(
+    {
+        "modify",
+        "deploy",
+        "configure",
+        "install",
+        "create",
+        "delete",
+        "remove",
+        "start",
+        "stop",
+        "restart",
+        "enable",
+        "disable",
+        "push",
+    }
+)
 
 # Mutate signals that commonly appear in read-only audit context.
 # Only treated as mutate when they appear as action verbs, not as nouns
@@ -232,13 +315,13 @@ def has_system_mutate_signals(task_text: str) -> tuple[bool, list[str]]:
 
         # Check for negation prefix (e.g., "Do not modify")
         if word in _NEGATION_SENSITIVE_SIGNALS:
-            prefix = task_text[:m.start()]
+            prefix = task_text[: m.start()]
             if _NEGATION_PREFIX.search(prefix):
                 continue
 
         # Check for audit-context suffix (e.g., "rollout auditability")
         if word in _AUDIT_CONTEXT_SIGNALS:
-            suffix = task_text[m.end():]
+            suffix = task_text[m.end() :]
             if _AUDIT_CONTEXT_SUFFIX.match(suffix):
                 continue
 
@@ -517,10 +600,7 @@ def should_use_orchestrator(
 
     # Confidence threshold
     min_confidence = flags.get("min_confidence", 0.3)
-    if confidence < min_confidence:
-        return False
-
-    return True
+    return not confidence < min_confidence
 
 
 def load_feature_flags() -> dict:
@@ -565,9 +645,7 @@ def classify_and_route(task_text: str) -> dict:
 
     # Stage D: superset of Stage C (research + coding + system_inspect)
     if stage == "D":
-        eligible, reason = is_stageD_eligible(
-            task_class, confidence, task_text, flags
-        )
+        eligible, reason = is_stageD_eligible(task_class, confidence, task_text, flags)
         is_system = task_class == "system"
         is_coding = task_class in STAGE_C_CLASSES
         system_scope = flags.get("system_scope", "inspect_only") if is_system else None
@@ -585,9 +663,7 @@ def classify_and_route(task_text: str) -> dict:
 
     # Stage C: superset of Stage B (research + low-risk coding)
     if stage == "C":
-        eligible, reason = is_stageC_eligible(
-            task_class, confidence, task_text, flags
-        )
+        eligible, reason = is_stageC_eligible(task_class, confidence, task_text, flags)
         is_coding = task_class in STAGE_C_CLASSES
         return {
             "task_class": task_class,
@@ -602,9 +678,7 @@ def classify_and_route(task_text: str) -> dict:
 
     # Stage B: research-only
     if stage == "B":
-        eligible, reason = is_stageB_eligible(
-            task_class, confidence, task_text, flags
-        )
+        eligible, reason = is_stageB_eligible(task_class, confidence, task_text, flags)
         return {
             "task_class": task_class,
             "confidence": confidence,
@@ -622,9 +696,7 @@ def classify_and_route(task_text: str) -> dict:
         "task_class": task_class,
         "confidence": confidence,
         "use_orchestrator": use_orchestrator,
-        "fallback_reason": None if use_orchestrator else _fallback_reason(
-            task_class, confidence, flags
-        ),
+        "fallback_reason": None if use_orchestrator else _fallback_reason(task_class, confidence, flags),
         "feature_flags": flags,
     }
 
@@ -649,49 +721,102 @@ def _fallback_reason(task_class: str, confidence: float, flags: dict) -> str:
 
 SYSTEM_SHELL_ALLOWLIST: list[str] = [
     # Process monitoring (read-only)
-    "ps ", "ps\n", "top -bn1", "pgrep ",
+    "ps ",
+    "ps\n",
+    "top -bn1",
+    "pgrep ",
     # Disk / memory / load (read-only)
-    "df ", "df\n", "free ", "free\n", "uptime", "du -sh",
+    "df ",
+    "df\n",
+    "free ",
+    "free\n",
+    "uptime",
+    "du -sh",
     # Network status (read-only)
-    "ss -tlnp", "ss -tlnp\n",
+    "ss -tlnp",
+    "ss -tlnp\n",
     # Journal / log inspection (read-only)
     "journalctl --no-pager",
     # Service status (read-only — no start/stop/restart)
     "systemctl status",
     # System info (read-only)
-    "cat /proc/loadavg", "cat /proc/meminfo", "cat /proc/uptime",
-    "wc -l ", "wc -l\n", "ls -la ", "ls -la\n", "ls ",
-    "stat ", "file ", "which ", "hostname", "uname",
+    "cat /proc/loadavg",
+    "cat /proc/meminfo",
+    "cat /proc/uptime",
+    "wc -l ",
+    "wc -l\n",
+    "ls -la ",
+    "ls -la\n",
+    "ls ",
+    "stat ",
+    "file ",
+    "which ",
+    "hostname",
+    "uname",
     # Health check (read-only)
     "curl -sf http://localhost",
 ]
 
 SYSTEM_SHELL_DENYLIST: list[str] = [
     # File mutation
-    "rm ", "rm\n", "mv ", "cp ", "mkdir ", "chmod ", "chown ", "chgrp ",
-    "truncate ", "shred ", "dd ",
+    "rm ",
+    "rm\n",
+    "mv ",
+    "cp ",
+    "mkdir ",
+    "chmod ",
+    "chown ",
+    "chgrp ",
+    "truncate ",
+    "shred ",
+    "dd ",
     # Package management
-    "apt ", "apt-get ", "pip ", "pip3 ", "npm ", "yarn ",
+    "apt ",
+    "apt-get ",
+    "pip ",
+    "pip3 ",
+    "npm ",
+    "yarn ",
     # Service mutation
-    "systemctl start", "systemctl stop", "systemctl restart",
-    "systemctl enable", "systemctl disable",
-    "reboot", "shutdown", "halt", "poweroff",
+    "systemctl start",
+    "systemctl stop",
+    "systemctl restart",
+    "systemctl enable",
+    "systemctl disable",
+    "reboot",
+    "shutdown",
+    "halt",
+    "poweroff",
     # Cron / scheduling mutation
     "crontab ",
     # Filesystem mutation
-    "mkfs ", "mount ", "umount ",
+    "mkfs ",
+    "mount ",
+    "umount ",
     # Network mutation
-    "iptables ", "ip route ", "ip link ",
+    "iptables ",
+    "ip route ",
+    "ip link ",
     # User / permission mutation
-    "useradd ", "userdel ", "passwd ", "su ", "sudo ",
+    "useradd ",
+    "userdel ",
+    "passwd ",
+    "su ",
+    "sudo ",
     # Git push / destructive
-    "git push", "git reset", "git checkout",
+    "git push",
+    "git reset",
+    "git checkout",
     # Output redirection (shell mutation)
-    ">", ">>", "tee ",
+    ">",
+    ">>",
+    "tee ",
     # Inline edit
     "sed -i",
     # Kill signals
-    "kill ", "pkill ", "killall ",
+    "kill ",
+    "pkill ",
+    "killall ",
 ]
 
 

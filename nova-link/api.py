@@ -4,6 +4,7 @@ Provides REST endpoints for heartbeat status, task management, chat,
 research reports, memory queries, and service controls.
 WebSocket endpoint for real-time push updates.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +25,7 @@ from pydantic import BaseModel
 
 # Shared conversation system with Telegram
 from telegram.conversation import ConversationManager
-from telegram.llm import generate_response, format_history_for_prompt
+from telegram.llm import format_history_for_prompt, generate_response
 
 # --- Configuration -----------------------------------------------------------
 
@@ -193,8 +194,7 @@ async def get_dashboard(token: str | None = None):
     if TASKS_DIR.exists():
         for f in TASKS_DIR.iterdir():
             if f.name.endswith(".md") and not any(
-                f.name.endswith(s)
-                for s in (".done", ".failed", ".inprogress", ".cancelled")
+                f.name.endswith(s) for s in (".done", ".failed", ".inprogress", ".cancelled")
             ):
                 pending += 1
             elif f.name.endswith(".failed"):
@@ -226,7 +226,9 @@ async def get_dashboard(token: str | None = None):
         try:
             r = subprocess.run(
                 ["systemctl", "is-active", svc],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             services[svc] = r.stdout.strip()
         except Exception:
@@ -267,8 +269,7 @@ async def list_tasks(token: str | None = None):
 
     tasks = []
     if TASKS_DIR.exists():
-        for f in sorted(TASKS_DIR.iterdir(), key=lambda p: p.stat().st_mtime,
-                        reverse=True):
+        for f in sorted(TASKS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if not f.name.endswith(".gitkeep"):
                 status = "pending"
                 if f.name.endswith(".done"):
@@ -280,15 +281,18 @@ async def list_tasks(token: str | None = None):
                 elif f.name.endswith(".cancelled"):
                     status = "cancelled"
 
-                age_min = (datetime.now(timezone.utc) - datetime.fromtimestamp(
-                    f.stat().st_mtime, tz=timezone.utc)).total_seconds() / 60
+                age_min = (
+                    datetime.now(timezone.utc) - datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
+                ).total_seconds() / 60
 
-                tasks.append({
-                    "name": f.name,
-                    "status": status,
-                    "age_minutes": round(age_min),
-                    "size": f.stat().st_size,
-                })
+                tasks.append(
+                    {
+                        "name": f.name,
+                        "status": status,
+                        "age_minutes": round(age_min),
+                        "size": f.stat().st_size,
+                    }
+                )
 
     return {"count": len(tasks), "tasks": tasks[:50]}
 
@@ -301,6 +305,7 @@ async def create_task(req: TaskRequest):
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     # Sanitize title for filename
     import re
+
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", req.title.strip()).strip("_").lower()[:60]
     stem = f"nl_{ts}_{slug}"
     task_path = TASKS_DIR / f"{stem}.md"
@@ -322,17 +327,19 @@ async def list_outputs(limit: int = 20, token: str | None = None):
 
     outputs = []
     if OUTPUT_DIR.exists():
-        files = sorted(OUTPUT_DIR.glob("*.md"),
-                       key=lambda p: p.stat().st_mtime, reverse=True)
+        files = sorted(OUTPUT_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
         for f in files[:limit]:
-            age_hr = (datetime.now(timezone.utc) - datetime.fromtimestamp(
-                f.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
-            outputs.append({
-                "name": f.name,
-                "stem": f.stem,
-                "size": f.stat().st_size,
-                "age_hours": round(age_hr, 1),
-            })
+            age_hr = (
+                datetime.now(timezone.utc) - datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
+            ).total_seconds() / 3600
+            outputs.append(
+                {
+                    "name": f.name,
+                    "stem": f.stem,
+                    "size": f.stat().st_size,
+                    "age_hours": round(age_hr, 1),
+                }
+            )
 
     return {"count": len(outputs), "outputs": outputs}
 
@@ -367,8 +374,7 @@ def _prune_jobs() -> None:
     if len(_chat_jobs) <= _MAX_JOBS // 2:
         return
     now = time.time()
-    expired = [jid for jid, j in _chat_jobs.items()
-               if now - j["created_at"] > _JOB_TTL_S]
+    expired = [jid for jid, j in _chat_jobs.items() if now - j["created_at"] > _JOB_TTL_S]
     for jid in expired:
         _chat_jobs.pop(jid, None)
 
@@ -399,11 +405,14 @@ async def _run_chat_job(job_id: str, message: str) -> None:
         _chat_jobs[job_id]["response"] = response
         _chat_jobs[job_id]["completed_at"] = time.time()
 
-        await _broadcast("chat_response", {
-            "job_id": job_id,
-            "preview": response[:100],
-            "response": response,
-        })
+        await _broadcast(
+            "chat_response",
+            {
+                "job_id": job_id,
+                "preview": response[:100],
+                "response": response,
+            },
+        )
 
     except Exception as exc:
         LOG.error("Chat job %s failed: %s", job_id, exc, exc_info=True)
@@ -411,10 +420,13 @@ async def _run_chat_job(job_id: str, message: str) -> None:
         _chat_jobs[job_id]["error"] = str(exc)[:500]
         _chat_jobs[job_id]["completed_at"] = time.time()
 
-        await _broadcast("chat_response", {
-            "job_id": job_id,
-            "error": "Processing failed — please try again.",
-        })
+        await _broadcast(
+            "chat_response",
+            {
+                "job_id": job_id,
+                "error": "Processing failed — please try again.",
+            },
+        )
 
 
 @app.post("/api/chat")
@@ -515,26 +527,24 @@ async def list_services(token: str | None = None):
     _check_token(token)
 
     services = []
-    for svc in ["novacore-watcher", "novacore-telegram",
-                "novacore-telegram-notifier", "novacore-heartbeat.timer"]:
+    for svc in ["novacore-watcher", "novacore-telegram", "novacore-telegram-notifier", "novacore-heartbeat.timer"]:
         try:
             r = subprocess.run(
-                ["systemctl", "show", svc,
-                 "--property=ActiveState,SubState,MainPID,ActiveEnterTimestamp"],
-                capture_output=True, text=True, timeout=5,
+                ["systemctl", "show", svc, "--property=ActiveState,SubState,MainPID,ActiveEnterTimestamp"],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
-            props = dict(
-                line.split("=", 1)
-                for line in r.stdout.strip().splitlines()
-                if "=" in line
+            props = dict(line.split("=", 1) for line in r.stdout.strip().splitlines() if "=" in line)
+            services.append(
+                {
+                    "name": svc,
+                    "active": props.get("ActiveState", "unknown"),
+                    "sub_state": props.get("SubState", "unknown"),
+                    "pid": props.get("MainPID", "?"),
+                    "since": props.get("ActiveEnterTimestamp", "?"),
+                }
             )
-            services.append({
-                "name": svc,
-                "active": props.get("ActiveState", "unknown"),
-                "sub_state": props.get("SubState", "unknown"),
-                "pid": props.get("MainPID", "?"),
-                "since": props.get("ActiveEnterTimestamp", "?"),
-            })
         except Exception:
             services.append({"name": svc, "active": "unknown"})
 
@@ -548,7 +558,8 @@ async def trigger_heartbeat(req: TokenRequest):
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "python3", str(BASE / "heartbeat.py"),
+            "python3",
+            str(BASE / "heartbeat.py"),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(BASE),
@@ -556,7 +567,7 @@ async def trigger_heartbeat(req: TokenRequest):
         # Don't wait for completion — heartbeat can take 10+ minutes
         return {"status": "triggered", "pid": proc.pid}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # --- Static files (PWA) -----------------------------------------------------

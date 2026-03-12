@@ -3,12 +3,22 @@
 Spawns the same Claude binary as the Nova-Core watcher for fast
 conversational responses. Uses asyncio subprocess for non-blocking I/O.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
 from pathlib import Path
+
+try:
+    from utils.langfuse_tracing import trace_llm_call
+    from utils.structured_log import slog
+    from utils.trace_context import TraceContext
+except ImportError:
+    slog = None  # type: ignore[assignment]
+    TraceContext = None  # type: ignore[assignment,misc]
+    trace_llm_call = None  # type: ignore[assignment]
 
 _log = logging.getLogger("telegram_bot.llm")
 
@@ -44,6 +54,7 @@ async def generate_response(
     # Phase 1.1: Import delimiter defense
     try:
         from telegram.input_security import INSTRUCTION_HIERARCHY, wrap_user_input
+
         wrapped_prompt = wrap_user_input(prompt)
     except ImportError:
         wrapped_prompt = prompt
@@ -68,9 +79,7 @@ async def generate_response(
         # the user message + conversation context
         positional_parts: list[str] = []
         if conversation_context:
-            positional_parts.append(
-                f"RECENT CONVERSATION:\n{conversation_context}"
-            )
+            positional_parts.append(f"RECENT CONVERSATION:\n{conversation_context}")
         positional_parts.append(f"USER MESSAGE:\n{prompt}")
         cmd.append("\n\n".join(positional_parts))
     else:
@@ -83,6 +92,7 @@ async def generate_response(
     # Phase 2.2: Budget pre-flight check
     try:
         from agents.budget_enforcer import budget
+
         can_go, budget_msg = budget.can_proceed(estimated_tokens=len(prompt) // 4)
         if not can_go:
             _log.warning("BUDGET_EXCEEDED: %s", budget_msg)
@@ -92,6 +102,10 @@ async def generate_response(
 
     _log.info("LLM call: prompt_len=%d timeout=%ds", len(prompt), CONVERSATION_TIMEOUT)
 
+    llm_ctx = TraceContext.new("telegram.llm") if TraceContext is not None else None
+    if slog and llm_ctx:
+        slog.event("telegram.llm_call_start", llm_ctx, prompt_len=len(prompt), timeout=CONVERSATION_TIMEOUT)
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -100,9 +114,7 @@ async def generate_response(
             cwd="/home/nova/nova-core",
             env=child_env,
         )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=CONVERSATION_TIMEOUT
-        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=CONVERSATION_TIMEOUT)
         response = stdout.decode("utf-8", errors="replace").strip()
         if proc.returncode != 0:
             err = stderr.decode("utf-8", errors="replace").strip()
@@ -115,6 +127,7 @@ async def generate_response(
         # Phase 2.2: Record token usage (estimate from char counts)
         try:
             from agents.budget_enforcer import budget
+
             budget.record_usage(
                 input_tokens=len(prompt) // 4,
                 output_tokens=len(response) // 4,
@@ -126,6 +139,7 @@ async def generate_response(
         # Phase 2.4: Redact secrets from LLM response before sending
         try:
             from utils.secrets import redact_text
+
             response = redact_text(response)
         except ImportError:
             pass
@@ -133,6 +147,7 @@ async def generate_response(
         # Phase 3.2: DLP gate — scan outbound response
         try:
             from utils.dlp_gate import dlp
+
             response = dlp.scan_and_redact(response, context="telegram_llm")
         except ImportError:
             pass
@@ -140,6 +155,7 @@ async def generate_response(
         # Phase 3.3: LLM Guard output scan
         try:
             from telegram.llm_guard_middleware import scan_output
+
             out_result = scan_output(response)
             if out_result.action == "block":
                 _log.warning("LLM_GUARD_OUTPUT_BLOCKED: findings=%s", out_result.findings)
@@ -148,10 +164,30 @@ async def generate_response(
             pass
 
         _log.info("LLM response: len=%d", len(response))
+
+        # Langfuse LLM call tracing for cost tracking
+        if trace_llm_call is not None and llm_ctx:
+            trace_llm_call(
+                name="telegram:conversation",
+                input_text=prompt[:4000],
+                output_text=response[:4000],
+                model=MODEL,
+                metadata={"trace_id": llm_ctx.trace_id},
+            )
+        if slog and llm_ctx:
+            slog.event(
+                "telegram.llm_call_complete",
+                llm_ctx,
+                response_len=len(response),
+                duration_ms=llm_ctx.elapsed_ms(),
+            )
+
         return response
 
     except asyncio.TimeoutError:
         _log.error("Claude CLI timed out after %ds", CONVERSATION_TIMEOUT)
+        if slog and llm_ctx:
+            slog.event("telegram.llm_call_timeout", llm_ctx, level="error", timeout=CONVERSATION_TIMEOUT)
         try:
             proc.kill()  # type: ignore[possibly-undefined]
         except Exception:
@@ -160,6 +196,8 @@ async def generate_response(
 
     except Exception as exc:
         _log.error("Claude CLI exception: %s", exc, exc_info=True)
+        if slog and llm_ctx:
+            slog.event("telegram.llm_call_error", llm_ctx, level="error", error=str(exc))
         return "Something went wrong on my end. Give me a moment and try again."
 
 

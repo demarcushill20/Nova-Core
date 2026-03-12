@@ -18,10 +18,27 @@ ALWAYS_INCLUDE = {"task-execution", "self-verification"}
 
 # --- Built-in keyword rules (checked case-insensitively) ---
 _BUILTIN_RULES: dict[str, list[str]] = {
-    "git-ops":   ["git", "commit", "branch", "merge"],
-    "file-ops":  ["file", "read", "write", "edit", "diff", "patch", "path",
-                  ".py", ".md", ".json", ".yaml", ".yml", ".txt", ".csv",
-                  ".toml", ".cfg", ".ini", ".sh"],
+    "git-ops": ["git", "commit", "branch", "merge"],
+    "file-ops": [
+        "file",
+        "read",
+        "write",
+        "edit",
+        "diff",
+        "patch",
+        "path",
+        ".py",
+        ".md",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".txt",
+        ".csv",
+        ".toml",
+        ".cfg",
+        ".ini",
+        ".sh",
+    ],
 }
 
 # Regex for $-prefixed command lines (e.g. "$ ls -la")
@@ -52,21 +69,20 @@ def _has_shell_intent(text: str) -> bool:
         return True
     if _SHELL_CMDS_RE.search(text):
         return True
-    if _SHELL_INTENT_RE.search(text):
-        return True
-    return False
+    return bool(_SHELL_INTENT_RE.search(text))
 
 
 @dataclass
 class Skill:
     """Parsed skill from a SKILL.md file."""
+
     name: str
     description: str
     tags: list[str] = field(default_factory=list)
     version: str = ""
     keywords: list[str] = field(default_factory=list)
-    body: str = ""          # full SKILL.md content with frontmatter stripped
-    raw: str = ""           # full SKILL.md content including frontmatter
+    body: str = ""  # full SKILL.md content with frontmatter stripped
+    raw: str = ""  # full SKILL.md content including frontmatter
     path: Path = field(default_factory=Path)
 
 
@@ -84,7 +100,7 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
         return {}, text
 
     fm_block = text[3:end].strip()
-    body = text[end + 4:].lstrip("\n")
+    body = text[end + 4 :].lstrip("\n")
 
     meta: dict = {}
     current_key = ""
@@ -122,12 +138,11 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
 
             if val.startswith("[") and val.endswith("]"):
                 # Inline list: [a, b, c]
-                items = [v.strip().strip('"').strip("'")
-                         for v in val[1:-1].split(",") if v.strip()]
+                items = [v.strip().strip('"').strip("'") for v in val[1:-1].split(",") if v.strip()]
                 meta[key] = items
             else:
                 meta[key] = val
-            current_key = "" if not current_key else current_key
+            current_key = current_key if current_key else ""
             current_list = None
 
     return meta, body
@@ -152,17 +167,20 @@ def load_skills() -> list[Skill]:
         if isinstance(keywords_raw, str):
             keywords_raw = [k.strip() for k in keywords_raw.split(",") if k.strip()]
 
-        skills.append(Skill(
-            name=name,
-            description=meta.get("description", ""),
-            tags=[t.strip() for t in meta.get("tags", "").split(",") if t.strip()]
-                 if isinstance(meta.get("tags"), str) else meta.get("tags", []),
-            version=meta.get("version", ""),
-            keywords=keywords_raw,
-            body=body,
-            raw=raw,
-            path=skill_file,
-        ))
+        skills.append(
+            Skill(
+                name=name,
+                description=meta.get("description", ""),
+                tags=[t.strip() for t in meta.get("tags", "").split(",") if t.strip()]
+                if isinstance(meta.get("tags"), str)
+                else meta.get("tags", []),
+                version=meta.get("version", ""),
+                keywords=keywords_raw,
+                body=body,
+                raw=raw,
+                path=skill_file,
+            )
+        )
 
     return skills
 
@@ -228,11 +246,7 @@ def render_append_prompt(skills: list[Skill]) -> str:
     parts: list[str] = ["## ACTIVE SKILLS\n"]
 
     for skill in sorted(skills, key=lambda s: s.name):
-        block = (
-            f"--- {skill.name} ---\n"
-            f"{skill.body.strip()}\n"
-            f"--- end {skill.name} ---\n"
-        )
+        block = f"--- {skill.name} ---\n{skill.body.strip()}\n--- end {skill.name} ---\n"
         parts.append(block)
 
     result = "\n".join(parts)

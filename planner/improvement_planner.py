@@ -78,132 +78,107 @@ class ImprovementPlanner:
         # --- 1. Low grade execution ---
         if plan_evaluation.grade in _GRADE_SEVERITY:
             counter += 1
-            findings.append(HealthFinding(
-                finding_id=f"hf_{counter:03d}",
-                category=CAT_LOW_GRADE,
-                severity=_GRADE_SEVERITY[plan_evaluation.grade],
-                summary=(
-                    f"Plan {plan_evaluation.plan_id} received grade "
-                    f"{plan_evaluation.grade} "
-                    f"(score {plan_evaluation.aggregate_score:.2f})"
-                ),
-                evidence=[
-                    f"aggregate_score={plan_evaluation.aggregate_score:.2f}",
-                    f"grade={plan_evaluation.grade}",
-                    plan_evaluation.summary,
-                ],
-            ))
+            findings.append(
+                HealthFinding(
+                    finding_id=f"hf_{counter:03d}",
+                    category=CAT_LOW_GRADE,
+                    severity=_GRADE_SEVERITY[plan_evaluation.grade],
+                    summary=(
+                        f"Plan {plan_evaluation.plan_id} received grade "
+                        f"{plan_evaluation.grade} "
+                        f"(score {plan_evaluation.aggregate_score:.2f})"
+                    ),
+                    evidence=[
+                        f"aggregate_score={plan_evaluation.aggregate_score:.2f}",
+                        f"grade={plan_evaluation.grade}",
+                        plan_evaluation.summary,
+                    ],
+                )
+            )
 
         # --- 2. Contract failures in step evaluations ---
-        contract_failures = [
-            e for e in plan_evaluation.step_evaluations
-            if not e.contract_valid
-        ]
+        contract_failures = [e for e in plan_evaluation.step_evaluations if not e.contract_valid]
         if contract_failures:
             counter += 1
             step_ids = [e.step_id for e in contract_failures]
-            findings.append(HealthFinding(
-                finding_id=f"hf_{counter:03d}",
-                category=CAT_CONTRACT_FAILURE,
-                severity="high" if len(contract_failures) > 1 else "medium",
-                summary=(
-                    f"{len(contract_failures)} step(s) had invalid contracts: "
-                    f"{', '.join(step_ids)}"
-                ),
-                evidence=[
-                    f"step {e.step_id}: contract_valid=False"
-                    for e in contract_failures
-                ],
-            ))
+            findings.append(
+                HealthFinding(
+                    finding_id=f"hf_{counter:03d}",
+                    category=CAT_CONTRACT_FAILURE,
+                    severity="high" if len(contract_failures) > 1 else "medium",
+                    summary=(f"{len(contract_failures)} step(s) had invalid contracts: {', '.join(step_ids)}"),
+                    evidence=[f"step {e.step_id}: contract_valid=False" for e in contract_failures],
+                )
+            )
 
         # --- 3. Retry patterns ---
-        high_retry_steps = [
-            e for e in plan_evaluation.step_evaluations
-            if e.retry_penalty > 0
-        ]
+        high_retry_steps = [e for e in plan_evaluation.step_evaluations if e.retry_penalty > 0]
         if high_retry_steps:
             counter += 1
-            findings.append(HealthFinding(
-                finding_id=f"hf_{counter:03d}",
-                category=CAT_RETRY_PATTERN,
-                severity="medium",
-                summary=(
-                    f"{len(high_retry_steps)} step(s) required retries"
-                ),
-                evidence=[
-                    f"step {e.step_id}: retry_penalty={e.retry_penalty:.2f}"
-                    for e in high_retry_steps
-                ],
-            ))
+            findings.append(
+                HealthFinding(
+                    finding_id=f"hf_{counter:03d}",
+                    category=CAT_RETRY_PATTERN,
+                    severity="medium",
+                    summary=(f"{len(high_retry_steps)} step(s) required retries"),
+                    evidence=[f"step {e.step_id}: retry_penalty={e.retry_penalty:.2f}" for e in high_retry_steps],
+                )
+            )
 
         # --- 4. Slow execution ---
-        slow_steps = [
-            e for e in plan_evaluation.step_evaluations
-            if e.duration_score == 0.0 and e.execution_success
-        ]
+        slow_steps = [e for e in plan_evaluation.step_evaluations if e.duration_score == 0.0 and e.execution_success]
         if slow_steps:
             counter += 1
-            findings.append(HealthFinding(
-                finding_id=f"hf_{counter:03d}",
-                category=CAT_SLOW_EXECUTION,
-                severity="low",
-                summary=(
-                    f"{len(slow_steps)} step(s) had zero duration score "
-                    f"(execution >= {_SLOW_THRESHOLD_MS}ms)"
-                ),
-                evidence=[
-                    f"step {e.step_id}: duration_score=0.00"
-                    for e in slow_steps
-                ],
-            ))
+            findings.append(
+                HealthFinding(
+                    finding_id=f"hf_{counter:03d}",
+                    category=CAT_SLOW_EXECUTION,
+                    severity="low",
+                    summary=(
+                        f"{len(slow_steps)} step(s) had zero duration score (execution >= {_SLOW_THRESHOLD_MS}ms)"
+                    ),
+                    evidence=[f"step {e.step_id}: duration_score=0.00" for e in slow_steps],
+                )
+            )
 
         # --- 5. Verification weakness ---
         weak_verification = [
-            e for e in plan_evaluation.step_evaluations
-            if e.verification_score < 0.10 and e.execution_success
+            e for e in plan_evaluation.step_evaluations if e.verification_score < 0.10 and e.execution_success
         ]
         if weak_verification:
             counter += 1
-            findings.append(HealthFinding(
-                finding_id=f"hf_{counter:03d}",
-                category=CAT_VERIFICATION_WEAKNESS,
-                severity="medium",
-                summary=(
-                    f"{len(weak_verification)} step(s) had weak verification "
-                    f"(score < 0.10)"
-                ),
-                evidence=[
-                    f"step {e.step_id}: verification_score="
-                    f"{e.verification_score:.2f}"
-                    for e in weak_verification
-                ],
-            ))
+            findings.append(
+                HealthFinding(
+                    finding_id=f"hf_{counter:03d}",
+                    category=CAT_VERIFICATION_WEAKNESS,
+                    severity="medium",
+                    summary=(f"{len(weak_verification)} step(s) had weak verification (score < 0.10)"),
+                    evidence=[
+                        f"step {e.step_id}: verification_score={e.verification_score:.2f}" for e in weak_verification
+                    ],
+                )
+            )
 
         # --- 6. Cross-plan patterns from recent states ---
         if recent_plan_states:
             low_grade_count = sum(
-                1 for s in recent_plan_states
-                if s.get("evaluation", {})
-                and s["evaluation"].get("grade") in ("D", "F")
+                1 for s in recent_plan_states if s.get("evaluation", {}) and s["evaluation"].get("grade") in ("D", "F")
             )
             if low_grade_count >= 2:
                 counter += 1
-                findings.append(HealthFinding(
-                    finding_id=f"hf_{counter:03d}",
-                    category=CAT_LOW_GRADE,
-                    severity="critical",
-                    summary=(
-                        f"{low_grade_count} recent plans scored D or F — "
-                        f"systemic quality issue"
-                    ),
-                    evidence=[
-                        f"plan {s.get('plan', {}).get('plan_id', '?')}: "
-                        f"grade={s['evaluation']['grade']}"
-                        for s in recent_plan_states
-                        if s.get("evaluation", {})
-                        and s["evaluation"].get("grade") in ("D", "F")
-                    ],
-                ))
+                findings.append(
+                    HealthFinding(
+                        finding_id=f"hf_{counter:03d}",
+                        category=CAT_LOW_GRADE,
+                        severity="critical",
+                        summary=(f"{low_grade_count} recent plans scored D or F — systemic quality issue"),
+                        evidence=[
+                            f"plan {s.get('plan', {}).get('plan_id', '?')}: grade={s['evaluation']['grade']}"
+                            for s in recent_plan_states
+                            if s.get("evaluation", {}) and s["evaluation"].get("grade") in ("D", "F")
+                        ],
+                    )
+                )
 
         return findings
 
@@ -269,9 +244,7 @@ class ImprovementPlanner:
             return False
         if plan.requires_human_review:
             return False
-        if plan.max_steps == 0:
-            return False
-        return True
+        return plan.max_steps != 0
 
     def persist_improvement_run(
         self,
@@ -340,24 +313,14 @@ class ImprovementPlanner:
             categories_seen.add(f.category)
 
             if f.category == CAT_LOW_GRADE:
-                goals.append(
-                    "Improve execution quality to achieve grade B or higher"
-                )
+                goals.append("Improve execution quality to achieve grade B or higher")
             elif f.category == CAT_CONTRACT_FAILURE:
-                goals.append(
-                    "Fix contract emission in failing steps"
-                )
+                goals.append("Fix contract emission in failing steps")
             elif f.category == CAT_RETRY_PATTERN:
-                goals.append(
-                    "Reduce retry frequency by improving first-attempt success"
-                )
+                goals.append("Reduce retry frequency by improving first-attempt success")
             elif f.category == CAT_SLOW_EXECUTION:
-                goals.append(
-                    "Optimize slow execution steps to complete within 30s"
-                )
+                goals.append("Optimize slow execution steps to complete within 30s")
             elif f.category == CAT_VERIFICATION_WEAKNESS:
-                goals.append(
-                    "Strengthen verification coverage in affected steps"
-                )
+                goals.append("Strengthen verification coverage in affected steps")
 
         return goals

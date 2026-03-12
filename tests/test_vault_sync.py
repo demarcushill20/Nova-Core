@@ -15,6 +15,7 @@ from tools.vault_sync import (
 # Config loading
 # ---------------------------------------------------------------------------
 
+
 class TestSyncConfigLoading:
     def test_missing_config_returns_defaults(self):
         with patch("tools.vault_sync._SYNC_CONFIG_PATH", Path("/nonexistent/config.json")):
@@ -46,6 +47,7 @@ class TestSyncConfigLoading:
 # Skip conditions
 # ---------------------------------------------------------------------------
 
+
 class TestSyncSkipConditions:
     def test_skipped_when_write_failed(self):
         result = check_sync_after_write("30-workflow-learnings/test.md", "error")
@@ -71,16 +73,19 @@ class TestSyncSkipConditions:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(config_data, f)
             f.flush()
-            with patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)):
-                with patch("tools.vault_sync._check_ob_available", return_value=False):
-                    result = check_sync_after_write("test.md", "created")
-                    assert result["obsidian_sync_result"] == "unavailable"
-                    assert "not found" in result["obsidian_sync_error"]
+            with (
+                patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)),
+                patch("tools.vault_sync._check_ob_available", return_value=False),
+            ):
+                result = check_sync_after_write("test.md", "created")
+                assert result["obsidian_sync_result"] == "unavailable"
+                assert "not found" in result["obsidian_sync_error"]
 
 
 # ---------------------------------------------------------------------------
 # Continuous mode (daemon)
 # ---------------------------------------------------------------------------
+
 
 class TestContinuousDaemonMode:
     def _enabled_config(self):
@@ -90,49 +95,62 @@ class TestContinuousDaemonMode:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(self._enabled_config(), f)
             f.flush()
-            with patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)):
-                with patch("tools.vault_sync._check_ob_available", return_value=True):
-                    with patch("tools.vault_sync._is_daemon_running", return_value=True):
-                        result = check_sync_after_write("30-workflow-learnings/test.md", "created")
-                        assert result["obsidian_sync_attempted"] is True
-                        assert result["obsidian_sync_result"] == "daemon_active"
-                        assert result["obsidian_sync_mode"] == "continuous"
-                        assert result["obsidian_sync_error"] is None
+            with (
+                patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)),
+                patch("tools.vault_sync._check_ob_available", return_value=True),
+                patch("tools.vault_sync._is_daemon_running", return_value=True),
+            ):
+                result = check_sync_after_write("30-workflow-learnings/test.md", "created")
+                assert result["obsidian_sync_attempted"] is True
+                assert result["obsidian_sync_result"] == "daemon_active"
+                assert result["obsidian_sync_mode"] == "continuous"
+                assert result["obsidian_sync_error"] is None
 
     def test_daemon_inactive_fallback_to_oneshot(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(self._enabled_config(), f)
             f.flush()
-            with patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)):
-                with patch("tools.vault_sync._check_ob_available", return_value=True):
-                    with patch("tools.vault_sync._is_daemon_running", return_value=False):
-                        with patch("tools.vault_sync._trigger_oneshot_sync", return_value={
-                            "oneshot_triggered": True,
-                            "oneshot_result": "success",
-                        }):
-                            result = check_sync_after_write("test.md", "created")
-                            assert result["obsidian_sync_result"] == "oneshot_success"
+            with (
+                patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)),
+                patch("tools.vault_sync._check_ob_available", return_value=True),
+                patch("tools.vault_sync._is_daemon_running", return_value=False),
+                patch(
+                    "tools.vault_sync._trigger_oneshot_sync",
+                    return_value={
+                        "oneshot_triggered": True,
+                        "oneshot_result": "success",
+                    },
+                ),
+            ):
+                result = check_sync_after_write("test.md", "created")
+                assert result["obsidian_sync_result"] == "oneshot_success"
 
     def test_daemon_inactive_oneshot_fails(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(self._enabled_config(), f)
             f.flush()
-            with patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)):
-                with patch("tools.vault_sync._check_ob_available", return_value=True):
-                    with patch("tools.vault_sync._is_daemon_running", return_value=False):
-                        with patch("tools.vault_sync._trigger_oneshot_sync", return_value={
-                            "oneshot_triggered": True,
-                            "oneshot_result": "failed",
-                            "oneshot_error": "auth expired",
-                        }):
-                            result = check_sync_after_write("test.md", "created")
-                            assert result["obsidian_sync_result"] == "oneshot_failed"
-                            assert "auth expired" in result["obsidian_sync_error"]
+            with (
+                patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)),
+                patch("tools.vault_sync._check_ob_available", return_value=True),
+                patch("tools.vault_sync._is_daemon_running", return_value=False),
+                patch(
+                    "tools.vault_sync._trigger_oneshot_sync",
+                    return_value={
+                        "oneshot_triggered": True,
+                        "oneshot_result": "failed",
+                        "oneshot_error": "auth expired",
+                    },
+                ),
+            ):
+                result = check_sync_after_write("test.md", "created")
+                assert result["obsidian_sync_result"] == "oneshot_failed"
+                assert "auth expired" in result["obsidian_sync_error"]
 
 
 # ---------------------------------------------------------------------------
 # Oneshot mode
 # ---------------------------------------------------------------------------
+
 
 class TestOneshotMode:
     def _enabled_config(self):
@@ -142,60 +160,75 @@ class TestOneshotMode:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(self._enabled_config(), f)
             f.flush()
-            with patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)):
-                with patch("tools.vault_sync._check_ob_available", return_value=True):
-                    with patch("tools.vault_sync._trigger_oneshot_sync", return_value={
+            with (
+                patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)),
+                patch("tools.vault_sync._check_ob_available", return_value=True),
+                patch(
+                    "tools.vault_sync._trigger_oneshot_sync",
+                    return_value={
                         "oneshot_triggered": True,
                         "oneshot_result": "success",
-                    }):
-                        result = check_sync_after_write("test.md", "created")
-                        assert result["obsidian_sync_attempted"] is True
-                        assert result["obsidian_sync_result"] == "oneshot_success"
-                        assert result["obsidian_sync_mode"] == "oneshot"
+                    },
+                ),
+            ):
+                result = check_sync_after_write("test.md", "created")
+                assert result["obsidian_sync_attempted"] is True
+                assert result["obsidian_sync_result"] == "oneshot_success"
+                assert result["obsidian_sync_mode"] == "oneshot"
 
     def test_oneshot_failure(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(self._enabled_config(), f)
             f.flush()
-            with patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)):
-                with patch("tools.vault_sync._check_ob_available", return_value=True):
-                    with patch("tools.vault_sync._trigger_oneshot_sync", return_value={
+            with (
+                patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)),
+                patch("tools.vault_sync._check_ob_available", return_value=True),
+                patch(
+                    "tools.vault_sync._trigger_oneshot_sync",
+                    return_value={
                         "oneshot_triggered": True,
                         "oneshot_result": "timeout",
                         "oneshot_error": "sync timeout",
-                    }):
-                        result = check_sync_after_write("test.md", "created")
-                        assert result["obsidian_sync_result"] == "oneshot_failed"
+                    },
+                ),
+            ):
+                result = check_sync_after_write("test.md", "created")
+                assert result["obsidian_sync_result"] == "oneshot_failed"
 
 
 # ---------------------------------------------------------------------------
 # Fail-open behavior
 # ---------------------------------------------------------------------------
 
+
 class TestFailOpen:
     def test_exception_in_sync_returns_error_dict(self):
         """Sync exceptions are caught and returned, never raised."""
-        with patch("tools.vault_sync._load_sync_config", side_effect=RuntimeError("kaboom")):
-            # Force past the write_status check
-            with patch("tools.vault_sync._SYNC_CONFIG_PATH"):
-                result = check_sync_after_write("test.md", "created")
-                assert result["obsidian_sync_result"] == "error"
-                assert "kaboom" in result["obsidian_sync_error"]
+        with (
+            patch("tools.vault_sync._load_sync_config", side_effect=RuntimeError("kaboom")),
+            patch("tools.vault_sync._SYNC_CONFIG_PATH"),
+        ):
+            result = check_sync_after_write("test.md", "created")
+            assert result["obsidian_sync_result"] == "error"
+            assert "kaboom" in result["obsidian_sync_error"]
 
     def test_unknown_mode_handled(self):
         config = {"enabled": True, "mode": "weird_mode", "ob_binary": "ob"}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(config, f)
             f.flush()
-            with patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)):
-                with patch("tools.vault_sync._check_ob_available", return_value=True):
-                    result = check_sync_after_write("test.md", "created")
-                    assert result["obsidian_sync_result"] == "unknown_mode"
+            with (
+                patch("tools.vault_sync._SYNC_CONFIG_PATH", Path(f.name)),
+                patch("tools.vault_sync._check_ob_available", return_value=True),
+            ):
+                result = check_sync_after_write("test.md", "created")
+                assert result["obsidian_sync_result"] == "unknown_mode"
 
 
 # ---------------------------------------------------------------------------
 # Audit output contract
 # ---------------------------------------------------------------------------
+
 
 class TestAuditOutputContract:
     def test_all_required_fields_present(self):
@@ -224,15 +257,18 @@ class TestAuditOutputContract:
 # Orchestrator integration
 # ---------------------------------------------------------------------------
 
+
 class TestOrchestratorIntegration:
     def test_vault_sync_imported_in_orchestrator(self):
         from tools.vault_sync import check_sync_after_write
+
         assert callable(check_sync_after_write)
 
     def test_sync_in_orchestrator_source(self):
         import inspect
 
         import tools.orchestrator_adapter as oa
+
         source = inspect.getsource(oa.execute_via_orchestrator)
         assert "check_sync_after_write" in source
         assert "obsidian_sync" in source
@@ -241,6 +277,7 @@ class TestOrchestratorIntegration:
         import inspect
 
         import tools.orchestrator_adapter as oa
+
         source = inspect.getsource(oa.execute_via_orchestrator)
         assert '"obsidian_sync"' in source
 
@@ -249,15 +286,18 @@ class TestOrchestratorIntegration:
 # Safety boundaries
 # ---------------------------------------------------------------------------
 
+
 class TestSafetyBoundaries:
     def test_no_vault_write_imports(self):
         """vault_sync module does not import vault write functions."""
         import tools.vault_sync as vs
+
         # Check the module has no vault write/update function references
         assert not hasattr(vs, "vault_write")
         assert not hasattr(vs, "vault_update")
         # Check no import from mcp_vault_server
         import inspect
+
         source = inspect.getsource(vs)
         assert "from tools.mcp_vault_server import" not in source
         assert "import vault_write" not in source
@@ -267,6 +307,7 @@ class TestSafetyBoundaries:
         import inspect
 
         import tools.vault_sync as vs
+
         source = inspect.getsource(vs)
         assert "mcp_vault_server" not in source
 

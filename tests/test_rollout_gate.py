@@ -38,6 +38,7 @@ from agents.rollout_gate import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def setup_tmpdir(tmp_path):
     """Create standard STATE/ layout for isolated tests."""
@@ -53,8 +54,7 @@ def setup_tmpdir(tmp_path):
     del os.environ["NOVACORE_ROOT"]
 
 
-def _write_flags(tmp_path, supported_classes=None, enabled=True,
-                 rollout_stage="stage2_research_and_code_review"):
+def _write_flags(tmp_path, supported_classes=None, enabled=True, rollout_stage="stage2_research_and_code_review"):
     flags = {
         "phase7_orchestrator": {
             "enabled": enabled,
@@ -62,9 +62,7 @@ def _write_flags(tmp_path, supported_classes=None, enabled=True,
             "rollout_stage": rollout_stage,
         }
     }
-    (tmp_path / "STATE" / "config" / "feature_flags.json").write_text(
-        json.dumps(flags, indent=2)
-    )
+    (tmp_path / "STATE" / "config" / "feature_flags.json").write_text(json.dumps(flags, indent=2))
 
 
 def _write_heartbeat(tmp_path, overall, findings=None):
@@ -73,9 +71,7 @@ def _write_heartbeat(tmp_path, overall, findings=None):
         "findings": findings or [],
         "generated_at": "2026-03-08T14:00:00Z",
     }
-    (tmp_path / "STATE" / "heartbeat_multiagent.json").write_text(
-        json.dumps(hb, indent=2)
-    )
+    (tmp_path / "STATE" / "heartbeat_multiagent.json").write_text(json.dumps(hb, indent=2))
 
 
 def _write_workflow(tmp_path, wf_id, status, halt_reason=None):
@@ -86,16 +82,12 @@ def _write_workflow(tmp_path, wf_id, status, halt_reason=None):
     }
     if halt_reason:
         wf["halt_reason"] = halt_reason
-    (tmp_path / "STATE" / "workflows" / f"{wf_id}.json").write_text(
-        json.dumps(wf, indent=2)
-    )
+    (tmp_path / "STATE" / "workflows" / f"{wf_id}.json").write_text(json.dumps(wf, indent=2))
 
 
 def _write_verification(tmp_path, v_id, verdict, workflow_id="wf_1"):
     v = {"verification_id": v_id, "verdict": verdict, "workflow_id": workflow_id}
-    (tmp_path / "STATE" / "verifications" / f"{v_id}.json").write_text(
-        json.dumps(v, indent=2)
-    )
+    (tmp_path / "STATE" / "verifications" / f"{v_id}.json").write_text(json.dumps(v, indent=2))
 
 
 def _write_metrics(tmp_path, successes=0, failures=0):
@@ -110,10 +102,17 @@ def _write_policy_denial(tmp_path, count=1):
     path = tmp_path / "STATE" / "policy_denials.jsonl"
     lines = []
     for i in range(count):
-        lines.append(json.dumps({
-            "ts": time.time(), "agent_id": f"agent_{i}",
-            "tool_name": "shell.run", "allowed": False, "reason": "denied",
-        }))
+        lines.append(
+            json.dumps(
+                {
+                    "ts": time.time(),
+                    "agent_id": f"agent_{i}",
+                    "tool_name": "shell.run",
+                    "allowed": False,
+                    "reason": "denied",
+                }
+            )
+        )
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -132,6 +131,7 @@ def _setup_clean_stage2(tmp_path, completed=5, failed=0, halted=0):
 # ===================================================================
 # Part 1 — Ready to Expand (all criteria pass)
 # ===================================================================
+
 
 class TestEvaluation_ReadyToExpand:
     """Verify ready_to_expand when all criteria are clean."""
@@ -177,6 +177,7 @@ class TestEvaluation_ReadyToExpand:
 # Part 2 — Hold (insufficient evidence)
 # ===================================================================
 
+
 class TestEvaluation_Hold:
     """Verify hold when evidence is insufficient."""
 
@@ -199,12 +200,11 @@ class TestEvaluation_Hold:
         _setup_clean_stage2(tmp_path, completed=5)
         # Create an orphaned agent (executing > 600s)
         agent = {
-            "agent_id": "orphan_1", "status": "executing",
+            "agent_id": "orphan_1",
+            "status": "executing",
             "started_at": time.time() - 1200,
         }
-        (tmp_path / "STATE" / "agents" / "runtime" / "orphan_1.json").write_text(
-            json.dumps(agent)
-        )
+        (tmp_path / "STATE" / "agents" / "runtime" / "orphan_1.json").write_text(json.dumps(agent))
         result = evaluate_rollout(tmp_path)
         assert result.decision == "hold"
 
@@ -212,9 +212,7 @@ class TestEvaluation_Hold:
         """Stale leases (soft) → hold."""
         _setup_clean_stage2(tmp_path, completed=5)
         lease = {"holder": "agent_1", "expires_at": time.time() - 600}
-        (tmp_path / "STATE" / "leases" / "stale_1.json").write_text(
-            json.dumps(lease)
-        )
+        (tmp_path / "STATE" / "leases" / "stale_1.json").write_text(json.dumps(lease))
         result = evaluate_rollout(tmp_path)
         assert result.decision == "hold"
 
@@ -222,6 +220,7 @@ class TestEvaluation_Hold:
 # ===================================================================
 # Part 3 — Rollback Recommended (hard failures)
 # ===================================================================
+
 
 class TestEvaluation_RollbackRecommended:
     """Verify rollback_recommended when health signals are bad."""
@@ -245,8 +244,7 @@ class TestEvaluation_RollbackRecommended:
     def test_budget_exhaustion_triggers_rollback(self, tmp_path):
         """Budget exhaustion → rollback_recommended."""
         _setup_clean_stage2(tmp_path, completed=3)
-        _write_workflow(tmp_path, "wf_budget", "halted",
-                        halt_reason="budget_exhausted")
+        _write_workflow(tmp_path, "wf_budget", "halted", halt_reason="budget_exhausted")
         result = evaluate_rollout(tmp_path)
         assert result.decision == "rollback_recommended"
         assert "no_budget_exhaustions" in result.next_action
@@ -265,6 +263,7 @@ class TestEvaluation_RollbackRecommended:
 # ===================================================================
 # Part 4 — Verifier Pressure Affects code_review Evaluation
 # ===================================================================
+
 
 class TestEvaluation_VerifierPressure:
     """Verify verifier rejection rate impacts evaluation."""
@@ -303,8 +302,7 @@ class TestEvaluation_VerifierPressure:
         """No verifier data → passes (N/A for research-only)."""
         _setup_clean_stage2(tmp_path, completed=5)
         result = evaluate_rollout(tmp_path)
-        vr = next(c for c in result.criteria
-                  if c.name == "acceptable_verifier_rejection_rate")
+        vr = next(c for c in result.criteria if c.name == "acceptable_verifier_rejection_rate")
         assert vr.passed is True
         assert vr.value is None
 
@@ -321,6 +319,7 @@ class TestEvaluation_VerifierPressure:
 # ===================================================================
 # Part 5 — Evidence Collection
 # ===================================================================
+
 
 class TestEvidence_Collection:
     """Verify evidence is collected correctly from state."""
@@ -401,6 +400,7 @@ class TestEvidence_Collection:
 # Part 6 — Criterion Evaluation Details
 # ===================================================================
 
+
 class TestCriteria_Details:
     """Verify individual criterion evaluation."""
 
@@ -456,6 +456,7 @@ class TestCriteria_Details:
 # ===================================================================
 # Part 7 — Report Output
 # ===================================================================
+
 
 class TestReport_Output:
     """Verify report rendering and persistence."""
@@ -513,6 +514,7 @@ class TestReport_Output:
 # ===================================================================
 # Part 8 — Decision Logic Edge Cases
 # ===================================================================
+
 
 class TestDecision_EdgeCases:
     """Edge cases for the decision function."""
@@ -600,7 +602,7 @@ class TestReadinessCheck:
         _setup_clean_stage2(tmp_path, completed=5)
         report = check_stage3_readiness(tmp_path)
         assert len(report.progress) == 9
-        for name, info in report.progress.items():
+        for _name, info in report.progress.items():
             assert "value" in info
             assert "threshold" in info
             assert "met" in info
@@ -660,6 +662,7 @@ class TestReadinessMarkdown:
 # Part 10 — Stage 3 Activation Procedure
 # ===================================================================
 
+
 class TestActivation_Blocked:
     """Verify activation is blocked when gate is not ready."""
 
@@ -671,9 +674,7 @@ class TestActivation_Blocked:
         assert record.outcome == "blocked"
         assert record.decision == "hold"
         # Config unchanged
-        flags = json.loads(
-            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        flags = json.loads((tmp_path / "STATE" / "config" / "feature_flags.json").read_text())
         assert "code_impl" not in flags["phase7_orchestrator"]["supported_classes"]
 
     def test_activation_blocked_on_rollback(self, tmp_path):
@@ -703,13 +704,9 @@ class TestActivation_Blocked:
         """Blocked activation preserves original config exactly."""
         _write_flags(tmp_path)
         _write_heartbeat(tmp_path, "healthy")
-        before = json.loads(
-            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        before = json.loads((tmp_path / "STATE" / "config" / "feature_flags.json").read_text())
         activate_stage3(tmp_path)
-        after = json.loads(
-            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        after = json.loads((tmp_path / "STATE" / "config" / "feature_flags.json").read_text())
         assert before == after
 
 
@@ -723,9 +720,7 @@ class TestActivation_Permitted:
         assert record.outcome == "activated"
         assert record.decision == "ready_to_expand"
         # Config updated
-        flags = json.loads(
-            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        flags = json.loads((tmp_path / "STATE" / "config" / "feature_flags.json").read_text())
         assert "code_impl" in flags["phase7_orchestrator"]["supported_classes"]
 
     def test_activation_records_pre_and_post_config(self, tmp_path):
@@ -812,9 +807,7 @@ class TestActivation_FailClosed:
         assert record1.outcome == "blocked"
 
         # Config unchanged
-        flags = json.loads(
-            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        flags = json.loads((tmp_path / "STATE" / "config" / "feature_flags.json").read_text())
         assert "code_impl" not in flags["phase7_orchestrator"]["supported_classes"]
 
     def test_policy_violation_after_clean_runs_blocks(self, tmp_path):

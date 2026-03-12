@@ -34,9 +34,7 @@ sys.path = _path_backup  # restore
 
 # Register our local telegram/parse.py under "telegram.parse" in sys.modules
 # so the canonical import below works without colliding with the library.
-_spec = importlib.util.spec_from_file_location(
-    "telegram.parse", os.path.join(_here, "telegram", "parse.py")
-)
+_spec = importlib.util.spec_from_file_location("telegram.parse", os.path.join(_here, "telegram", "parse.py"))
 _tg_parse = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_tg_parse)
 sys.modules["telegram.parse"] = _tg_parse
@@ -45,8 +43,15 @@ from telegram.parse import is_memory_persist_request, parse_message  # noqa: E40
 
 # Register additional local telegram modules via the same shim pattern.
 for _mod_name in (  # noqa: E501
-    "conversation", "llm", "persona", "delegation", "goals",
-    "hardening", "working_memory", "recent_completions", "recap",
+    "conversation",
+    "llm",
+    "persona",
+    "delegation",
+    "goals",
+    "hardening",
+    "working_memory",
+    "recent_completions",
+    "recap",
     "input_security",
 ):
     _mod_spec = importlib.util.spec_from_file_location(
@@ -123,6 +128,14 @@ from nova_kill_switch import (  # noqa: E402
     format_status as ks_format_status,
 )
 
+# --- Structured logging (observability) ---
+try:
+    from utils.structured_log import slog
+    from utils.trace_context import TraceContext
+except ImportError:
+    slog = None  # type: ignore[assignment]
+    TraceContext = None  # type: ignore[assignment,misc]
+
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
 OUTPUT = ROOT / "OUTPUT"
@@ -175,8 +188,7 @@ _conversations = ConversationManager()
 _delegations = DelegationTracker()
 
 # --- Production hardening (Phase 7) ---
-_rate_limiter = RateLimiter(per_chat_limit=10, per_chat_window=60,
-                            global_limit=30, global_window=60)
+_rate_limiter = RateLimiter(per_chat_limit=10, per_chat_window=60, global_limit=30, global_window=60)
 _circuit_breaker = CircuitBreaker(failure_threshold=5, cooldown_seconds=120)
 _metrics = MetricsCollector()
 _response_cache = ResponseCache(max_size=50, ttl_seconds=300)
@@ -188,29 +200,30 @@ _STATUS_LIMITS = {"compact": 5, "normal": 10, "verbose": 20}
 
 # Unicode status indicators for /status display (no emoji — plain text safe)
 _STATUS_ICON = {
-    "queued":      "\u25cb",  # ○
-    "inprogress":  "\u25c9",  # ◉
-    "done":        "\u2713",  # ✓
-    "failed":      "\u2717",  # ✗
-    "skip":        "\u2014",  # —
+    "queued": "\u25cb",  # ○
+    "inprogress": "\u25c9",  # ◉
+    "done": "\u2713",  # ✓
+    "failed": "\u2717",  # ✗
+    "skip": "\u2014",  # —
 }
 
 # Extension-to-status mapping — ordered longest-first for matching
 _EXT_STATUS = [
     (".md.inprogress", "inprogress"),
-    (".md.cancelled",  "skip"),
-    (".md.failed",     "failed"),
-    (".md.done",       "done"),
-    (".md.skip",       "skip"),
-    (".skip",          "skip"),
-    (".inprogress",    "inprogress"),
-    (".failed",        "failed"),
-    (".done",          "done"),
-    (".md",            "queued"),
+    (".md.cancelled", "skip"),
+    (".md.failed", "failed"),
+    (".md.done", "done"),
+    (".md.skip", "skip"),
+    (".skip", "skip"),
+    (".inprogress", "inprogress"),
+    (".failed", "failed"),
+    (".done", "done"),
+    (".md", "queued"),
 ]
 
 
 # --- Helpers (preserved from original) ---
+
 
 def slugify(text: str, max_len: int = 50) -> str:
     s = re.sub(r"[^a-zA-Z0-9]+", "_", text.strip()).strip("_").lower()
@@ -304,7 +317,7 @@ def _task_id_from_path(path: Path) -> str:
 
 
 def _is_valid_task_id(task_id: str) -> bool:
-    return bool(re.match(r'^(tg_|\d{4}_)', task_id))
+    return bool(re.match(r"^(tg_|\d{4}_)", task_id))
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -362,6 +375,7 @@ def write_cancel_marker(task_id: str) -> Path:
 
 
 # --- Mode helpers ---
+
 
 def load_chat_mode(chat_id: str) -> str:
     """Read the mode for a chat_id from STATE/chat_modes.json. Default: normal."""
@@ -466,8 +480,7 @@ def load_intent(stem: str) -> str:
         return "task"
 
 
-def handle_run_task(chat_id: str, title: str, body: str = "",
-                    intent: str = "task") -> tuple[str, str]:
+def handle_run_task(chat_id: str, title: str, body: str = "", intent: str = "task") -> tuple[str, str]:
     """Create a task file from a run_task action.
 
     Returns (response_string, task_stem) so callers can track the task.
@@ -562,10 +575,7 @@ def _resolve_output_file(filename: str) -> Path | None:
             return exact_md
 
     # Prefix match — pick most recent by mtime
-    candidates = [
-        p for p in OUTPUT.iterdir()
-        if p.is_file() and p.name.startswith(filename)
-    ]
+    candidates = [p for p in OUTPUT.iterdir() if p.is_file() and p.name.startswith(filename)]
     if candidates:
         return max(candidates, key=lambda p: p.stat().st_mtime)
 
@@ -610,8 +620,7 @@ def _find_log_file(task_id: str) -> Path | None:
     for p in LOGS.iterdir():
         if not p.is_file():
             continue
-        if (p.name.startswith(f"worker_{task_id}") or
-                p.name.startswith(f"task_{task_id}")) and p.name.endswith(".log"):
+        if (p.name.startswith(f"worker_{task_id}") or p.name.startswith(f"task_{task_id}")) and p.name.endswith(".log"):
             candidates.append(p)
     if not candidates:
         return None
@@ -647,10 +656,7 @@ def _find_task_by_id(task_id: str) -> Path | None:
     """Find a task file matching task_id prefix in TASKS/."""
     if not TASKS.exists():
         return None
-    candidates = [
-        p for p in TASKS.iterdir()
-        if not p.name.startswith(".") and p.name.startswith(task_id)
-    ]
+    candidates = [p for p in TASKS.iterdir() if not p.name.startswith(".") and p.name.startswith(task_id)]
     if not candidates:
         return None
     # Prefer exact number match, then most recent
@@ -723,6 +729,7 @@ def handle_get_mode(chat_id: str) -> str:
 
 # --- Auth ---
 
+
 def _allowed(update: Update) -> bool:
     allowed = os.environ.get("ALLOWED_CHAT_ID", "").strip()
     if not allowed:
@@ -775,7 +782,9 @@ def _record_auth_failure(chat_id: str) -> bool:
         _auth_blocked[chat_id] = now + _AUTH_FAIL_BLOCK_DURATION
         _log.warning(
             "AUTH_BLOCKED chat_id=%s failures=%d blocked_for=%ds",
-            chat_id, len(timestamps), _AUTH_FAIL_BLOCK_DURATION,
+            chat_id,
+            len(timestamps),
+            _AUTH_FAIL_BLOCK_DURATION,
         )
         return True
     return False
@@ -799,11 +808,15 @@ def _guard(func):
             text_preview = (update.message.text or "")[:80] if update.message else ""
             _log.warning(
                 "AUTH_DENIED chat_id=%s user_id=%s username=%s text_preview=%r",
-                chat_id, user_id, username, text_preview,
+                chat_id,
+                user_id,
+                username,
+                text_preview,
             )
             # Phase 2.5: Structured audit log for auth failures
             try:
                 from utils.audit_log import get_audit_logger
+
                 _audit = get_audit_logger("telegram")
                 _audit.log_auth_failure(chat_id, user_id, username, text_preview)
             except ImportError:
@@ -815,10 +828,12 @@ def _guard(func):
             await update.message.reply_text("Not authorized.")
             return
         return await func(update, context)
+
     return wrapper
 
 
 # --- CEO Nova conversation handler ---
+
 
 async def handle_conversation(chat_id: str, text: str) -> str:
     """Handle a conversational message via Claude CLI (fast path).
@@ -883,19 +898,10 @@ async def handle_conversation(chat_id: str, text: str) -> str:
 
         if reconstruction_parts:
             reconstruction_block = "\n\n".join(reconstruction_parts)
-            effective_prompt = (
-                f"{SESSION_START_HINT}\n\n"
-                f"{reconstruction_block}\n\n"
-                f"USER MESSAGE:\n{text}"
-            )
+            effective_prompt = f"{SESSION_START_HINT}\n\n{reconstruction_block}\n\nUSER MESSAGE:\n{text}"
         else:
-            effective_prompt = (
-                f"{SESSION_START_HINT}\n\n"
-                f"No recent session context available.\n\n"
-                f"USER MESSAGE:\n{text}"
-            )
-        _log.info("SESSION_RESTART chat=%s — injected %d context sources",
-                   chat_id, len(reconstruction_parts))
+            effective_prompt = f"{SESSION_START_HINT}\n\nNo recent session context available.\n\nUSER MESSAGE:\n{text}"
+        _log.info("SESSION_RESTART chat=%s — injected %d context sources", chat_id, len(reconstruction_parts))
     else:
         # Normal (non-restart) context injection
         # Inject active goals as context (Phase 6)
@@ -964,8 +970,7 @@ async def handle_conversation(chat_id: str, text: str) -> str:
     return response
 
 
-async def handle_delegation_ack(chat_id: str, text: str, task_reply: str,
-                                ack_prompt: str = "") -> str:
+async def handle_delegation_ack(chat_id: str, text: str, task_reply: str, ack_prompt: str = "") -> str:
     """Generate a natural acknowledgment after delegating to Nova-Core."""
     # Record in conversation buffer
     _conversations.add_user_message(chat_id, text)
@@ -991,11 +996,7 @@ async def handle_delegation_ack(chat_id: str, text: str, task_reply: str,
         context_str = f"{task_context}\n{context_str}" if context_str else task_context
 
     effective_ack = ack_prompt or DELEGATION_ACK_PROMPT
-    prompt = (
-        f"{effective_ack}\n\n"
-        f"The user said: {text}\n"
-        f"The task has been queued successfully."
-    )
+    prompt = f"{effective_ack}\n\nThe user said: {text}\nThe task has been queued successfully."
     response = await generate_response(
         prompt=prompt,
         system_prompt=SYSTEM_PROMPT,
@@ -1014,6 +1015,7 @@ async def handle_delegation_ack(chat_id: str, text: str, task_reply: str,
 
 
 # --- Goal and briefing handlers (Phase 6) ---
+
 
 def _handle_goals(action: dict) -> str:
     """Handle /goals subcommands."""
@@ -1083,8 +1085,7 @@ async def _handle_briefing(chat_id: str) -> str:
             parts.append("SYSTEM HEALTH: unable to read HEARTBEAT.md")
 
     # Pending tasks
-    pending = [p.name for p in TASKS.iterdir()
-               if p.is_file() and p.suffix == ".md" and not p.name.startswith(".")]
+    pending = [p.name for p in TASKS.iterdir() if p.is_file() and p.suffix == ".md" and not p.name.startswith(".")]
     if pending:
         parts.append(f"PENDING TASKS IN QUEUE: {len(pending)}")
     else:
@@ -1115,6 +1116,7 @@ async def _handle_briefing(chat_id: str) -> str:
 
 
 # --- Proactive completion notifications (Phase 3) ---
+
 
 async def _check_completions(app) -> None:
     """Periodic loop: check if any delegated tasks have completed."""
@@ -1152,8 +1154,7 @@ async def _check_completions(app) -> None:
             if not chat_id:
                 continue
 
-            _log.info("COMPLETION detected: stem=%s output=%s chat=%s",
-                      stem, output_path.name, chat_id)
+            _log.info("COMPLETION detected: stem=%s output=%s chat=%s", stem, output_path.name, chat_id)
 
             # Read output and generate natural summary
             try:
@@ -1203,14 +1204,13 @@ async def _check_completions(app) -> None:
                 except Exception as rc_exc:
                     _log.warning("RC_RECORD failed for %s: %s", stem, rc_exc)
 
-                _log.info("COMPLETION notified: stem=%s chat=%s len=%d",
-                          stem, chat_id, len(summary))
+                _log.info("COMPLETION notified: stem=%s chat=%s len=%d", stem, chat_id, len(summary))
             except Exception as exc:
-                _log.error("COMPLETION notification failed for %s: %s",
-                           stem, exc, exc_info=True)
+                _log.error("COMPLETION notification failed for %s: %s", stem, exc, exc_info=True)
 
 
 # --- Unified message handler ---
+
 
 @_guard
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1223,17 +1223,18 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     _log.info("MSG chat=%s len=%d text=%r", chat_id, len(text), text[:80])
     _metrics.record_message()
 
+    # --- Structured trace for this message ---
+    msg_ctx = TraceContext.new("telegram", task=f"msg:{chat_id}") if TraceContext is not None else None
+    if slog and msg_ctx:
+        slog.event("telegram.message_received", msg_ctx, chat_id=chat_id, msg_len=len(text))
+
     # --- Phase 1.2: Kill switch check ---
     ks_mode = check_kill_switch()
     if ks_mode == MODE_STOPPED:
-        await update.message.reply_text(
-            "Nova-Core is currently stopped. Use /resume to restart."
-        )
+        await update.message.reply_text("Nova-Core is currently stopped. Use /resume to restart.")
         return
     if ks_mode == MODE_PAUSE:
-        await update.message.reply_text(
-            "Nova-Core is paused — not accepting new work. Use /resume to unpause."
-        )
+        await update.message.reply_text("Nova-Core is paused — not accepting new work. Use /resume to unpause.")
         return
 
     # --- Phase 1.1: Input sanitization ---
@@ -1241,11 +1242,13 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if san.blocked:
         _log.warning(
             "INPUT_BLOCKED chat=%s user=%s reason=%s risk=%d stages=%s",
-            chat_id, user_id, san.block_reason, san.risk_score, san.stages_triggered,
+            chat_id,
+            user_id,
+            san.block_reason,
+            san.risk_score,
+            san.stages_triggered,
         )
-        await update.message.reply_text(
-            "I couldn't process that message. Please try rephrasing."
-        )
+        await update.message.reply_text("I couldn't process that message. Please try rephrasing.")
         return
     # Use sanitized text from here on
     text = san.text
@@ -1288,7 +1291,8 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             # Delegate to task queue, then generate natural acknowledgment
             _metrics.record_delegation()
             task_reply, task_stem = handle_run_task(
-                chat_id, action["title"],
+                chat_id,
+                action["title"],
                 action.get("body", ""),
                 intent=action.get("intent", "task"),
             )
@@ -1303,24 +1307,25 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             original_msg = text  # raw user message before parsing
             context_snap = _conversations.get_history(chat_id)[-10:]  # last 10 msgs
             task_path = str(TASKS / f"{task_stem}.md")
-            _working_memory.add(ActiveTask(
-                task_stem=task_stem,
-                chat_id=chat_id,
-                original_message=original_msg,
-                intent_summary=action.get("title", original_msg)[:150],
-                created_at=time.time(),
-                status="pending",
-                context_snapshot=context_snap,
-                task_file=task_path,
-                message_id=update.message.message_id,
-            ))
+            _working_memory.add(
+                ActiveTask(
+                    task_stem=task_stem,
+                    chat_id=chat_id,
+                    original_message=original_msg,
+                    intent_summary=action.get("title", original_msg)[:150],
+                    created_at=time.time(),
+                    status="pending",
+                    context_snapshot=context_snap,
+                    task_file=task_path,
+                    message_id=update.message.message_id,
+                )
+            )
 
             # Phase 10: use memory-persist ack prompt for save/store requests
             _ack_prompt = ""
             if is_memory_persist_request(text):
                 _ack_prompt = MEMORY_PERSIST_ACK_PROMPT
-            reply = await handle_delegation_ack(chat_id, user_text, task_reply,
-                                                ack_prompt=_ack_prompt)
+            reply = await handle_delegation_ack(chat_id, user_text, task_reply, ack_prompt=_ack_prompt)
         elif action_type == "get_last":
             reply = handle_get_last(chat_id)
         elif action_type == "get_output":
@@ -1358,6 +1363,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             # Phase 2.5: Audit log kill switch state changes
             try:
                 from utils.audit_log import get_audit_logger
+
                 _audit = get_audit_logger("telegram")
                 _audit.log_kill_switch("unknown", ks_action, f"telegram_chat:{chat_id}")
             except ImportError:
@@ -1366,6 +1372,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             # Phase 4.3: Security dashboard
             try:
                 from utils.security_monitor import dashboard
+
                 dashboard.update()
                 reply = dashboard.get_summary_text()
             except ImportError:
@@ -1373,6 +1380,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         elif action_type == "budget_status":
             try:
                 from agents.budget_enforcer import budget
+
                 summary = budget.get_usage_summary()
                 cost = budget.get_cost_summary()
                 lines = [
@@ -1392,15 +1400,28 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         else:
             reply = f"Unknown action: {action_type}. Try /help"
     except Exception as exc:
-        _log.error("DISPATCH_ERROR chat=%s action=%s: %s",
-                   chat_id, action_type, exc, exc_info=True)
-        reply = ("I ran into an internal error processing your message. "
-                 "The issue has been logged and I'll try to recover. "
-                 "Please try again in a moment.")
+        _log.error("DISPATCH_ERROR chat=%s action=%s: %s", chat_id, action_type, exc, exc_info=True)
+        if slog and msg_ctx:
+            slog.event("telegram.dispatch_error", msg_ctx, level="error", action=action_type, error=str(exc))
+        reply = (
+            "I ran into an internal error processing your message. "
+            "The issue has been logged and I'll try to recover. "
+            "Please try again in a moment."
+        )
 
     # Send response, chunking if needed for Telegram's 4096 char limit
     for chunk in chunk_text(reply, chunk_size=4000):
         await update.message.reply_text(chunk)
+
+    if slog and msg_ctx:
+        slog.event(
+            "telegram.message_handled",
+            msg_ctx,
+            chat_id=chat_id,
+            action=action_type,
+            reply_len=len(reply),
+            duration_ms=msg_ctx.elapsed_ms(),
+        )
 
 
 # --- Single-instance lock ---
@@ -1433,6 +1454,7 @@ def _acquire_lock() -> bool:
 
 # --- Main ---
 
+
 def main() -> None:
     if not _acquire_lock():
         print("telegram_bot: another instance is already running — exiting.", flush=True)
@@ -1451,14 +1473,17 @@ def main() -> None:
     # Phase 3: start background completion checker after app initializes
     async def _post_init(application) -> None:
         asyncio.create_task(_check_completions(application))
+
     app.post_init = _post_init
 
     async def _on_error(update, context):
         from telegram.error import Conflict
+
         _log.error("Unhandled: %s", context.error, exc_info=context.error)
         if isinstance(context.error, Conflict):
             _log.error("Conflict detected — exiting for systemd restart")
             os._exit(1)
+
     app.add_error_handler(_on_error)
 
     app.run_polling(close_loop=False)
