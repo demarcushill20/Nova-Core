@@ -31,9 +31,11 @@ RestrictSUIDSGID=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
 
-# System call filtering
-SystemCallFilter=@system-service
-SystemCallFilter=~@mount @reboot @swap @clock @module @raw-io @obsolete @debug
+# System call filtering — disabled because telegram bot spawns Claude CLI
+# (Node.js subprocess) which needs syscalls outside @system-service whitelist.
+# Other hardening (NoNewPrivileges, CapabilityBoundingSet, ProtectSystem) still active.
+# SystemCallFilter=@system-service
+# SystemCallFilter=~@mount @reboot @swap @clock @module @raw-io @obsolete @debug
 
 # Namespace / kernel restrictions
 RestrictNamespaces=no

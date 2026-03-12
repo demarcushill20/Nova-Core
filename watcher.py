@@ -12,7 +12,7 @@ import os
 import signal
 import subprocess
 import sys
-import time
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -28,6 +28,7 @@ from tools.skills import load_skills, render_append_prompt, select_skills
 from tools.task_classifier import classify_and_route
 from utils.audit_log import get_audit_logger
 from utils.dlp_gate import dlp
+from utils.file_watcher import TaskFileWatcher
 from utils.langfuse_tracing import trace_llm_call
 from utils.structured_log import slog
 from utils.task_validator import audit_task_execution, validate_task_content
@@ -268,6 +269,7 @@ logger.addHandler(console_handler)
 
 # --- Shutdown handling ---
 _running = True
+_wake_event = threading.Event()  # Phase 4.1: watchdog trigger for immediate wakeup
 
 
 def _shutdown(signum, _frame):
@@ -275,6 +277,7 @@ def _shutdown(signum, _frame):
     sig_name = signal.Signals(signum).name
     logger.info("Received %s — shutting down gracefully.", sig_name)
     _running = False
+    _wake_event.set()  # unblock any wait immediately
 
 
 signal.signal(signal.SIGINT, _shutdown)
@@ -1225,19 +1228,36 @@ def scan_and_dispatch():
 
 
 def run():
-    """Main loop: poll TASKS/ every POLL_INTERVAL seconds."""
+    """Main loop: poll TASKS/ every POLL_INTERVAL seconds.
+
+    Phase 4.1: Uses watchdog to detect new files instantly.
+    Falls back to pure polling if watchdog is unavailable.
+    """
     logger.info("Dispatcher started. Monitoring %s every %ds.", TASKS_DIR, POLL_INTERVAL)
     logger.info("Claude binary: %s | Timeout: %ds | Artifact window: %ds", CLAUDE_BIN, TASK_TIMEOUT, ARTIFACT_WINDOW)
 
-    while _running:
-        try:
-            scan_and_dispatch()
-        except Exception:
-            logger.exception("Error during scan cycle.")
-        for _ in range(POLL_INTERVAL):
-            if not _running:
-                break
-            time.sleep(1)
+    # Phase 4.1 — start watchdog filesystem monitor
+    file_watcher = TaskFileWatcher(TASKS_DIR, _wake_event)
+    watchdog_ok = file_watcher.start()
+    if watchdog_ok:
+        logger.info("Phase 4.1: watchdog active — new tasks trigger immediate wakeup.")
+        slog.event("task.watchdog_started", mode="event-driven", poll_fallback_s=POLL_INTERVAL)
+    else:
+        logger.info("Phase 4.1: watchdog unavailable — polling every %ds.", POLL_INTERVAL)
+        slog.event("task.watchdog_fallback", mode="polling", poll_interval_s=POLL_INTERVAL)
+
+    try:
+        while _running:
+            try:
+                scan_and_dispatch()
+            except Exception:
+                logger.exception("Error during scan cycle.")
+
+            # Wait for watchdog trigger OR poll timeout — whichever comes first
+            _wake_event.wait(timeout=POLL_INTERVAL)
+            _wake_event.clear()
+    finally:
+        file_watcher.stop()
 
     logger.info("Dispatcher stopped.")
 

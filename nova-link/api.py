@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
@@ -49,6 +48,7 @@ SHARED_CHAT_ID = "530812511"
 _conversations = ConversationManager(persist=True)
 
 LOG = logging.getLogger("nova-link")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 
 # --- App setup ---------------------------------------------------------------
 
@@ -89,6 +89,12 @@ class TaskRequest(BaseModel):
 class TokenRequest(BaseModel):
     token: str | None = None
 
+
+# --- Background task tracking ------------------------------------------------
+# Python 3.10: asyncio.create_task() does NOT hold a strong reference.
+# Without this set, tasks get garbage-collected mid-execution, silently
+# killing LLM calls.  See: https://docs.python.org/3/library/asyncio-task.html
+_background_tasks: set[asyncio.Task] = set()
 
 # --- WebSocket connections ---------------------------------------------------
 
@@ -220,17 +226,19 @@ async def get_dashboard(token: str | None = None):
         except Exception:
             pass
 
-    # Services
+    # Services (async to avoid blocking the event loop)
     services = {}
     for svc in ["novacore-watcher", "novacore-telegram", "novacore-telegram-notifier"]:
         try:
-            r = subprocess.run(
-                ["systemctl", "is-active", svc],
-                capture_output=True,
-                text=True,
-                timeout=5,
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl",
+                "is-active",
+                svc,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            services[svc] = r.stdout.strip()
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            services[svc] = stdout.decode().strip()
         except Exception:
             services[svc] = "unknown"
 
@@ -365,7 +373,7 @@ async def read_output(filename: str, token: str | None = None):
 # In-memory job store for long-running chat requests.
 # Jobs expire after JOB_TTL_S to prevent unbounded growth.
 _chat_jobs: dict[str, dict] = {}
-_JOB_TTL_S = 900  # 15 minutes
+_JOB_TTL_S = 14400  # 4 hours — match CONVERSATION_TIMEOUT for long-running LLM calls
 _MAX_JOBS = 100
 
 
@@ -381,6 +389,7 @@ def _prune_jobs() -> None:
 
 async def _run_chat_job(job_id: str, message: str) -> None:
     """Background coroutine that runs the LLM call and stores the result."""
+    LOG.info("Chat job %s: starting LLM call (msg_len=%d)", job_id, len(message))
     try:
         system_prompt = ""
         persona_file = BASE / "telegram" / "persona.md"
@@ -404,6 +413,7 @@ async def _run_chat_job(job_id: str, message: str) -> None:
         _chat_jobs[job_id]["status"] = "completed"
         _chat_jobs[job_id]["response"] = response
         _chat_jobs[job_id]["completed_at"] = time.time()
+        LOG.info("Chat job %s: completed (response_len=%d)", job_id, len(response))
 
         await _broadcast(
             "chat_response",
@@ -456,9 +466,12 @@ async def chat(req: ChatRequest):
         "completed_at": None,
     }
 
-    # Fire-and-forget the LLM call as a background task
-    asyncio.create_task(_run_chat_job(job_id, req.message))
+    # Fire-and-forget — but MUST keep a strong reference (Python 3.10 GC issue)
+    task = asyncio.create_task(_run_chat_job(job_id, req.message))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
+    LOG.info("Chat job %s started (task=%s)", job_id, task.get_name())
     return {"job_id": job_id, "status": "processing"}
 
 
@@ -529,13 +542,16 @@ async def list_services(token: str | None = None):
     services = []
     for svc in ["novacore-watcher", "novacore-telegram", "novacore-telegram-notifier", "novacore-heartbeat.timer"]:
         try:
-            r = subprocess.run(
-                ["systemctl", "show", svc, "--property=ActiveState,SubState,MainPID,ActiveEnterTimestamp"],
-                capture_output=True,
-                text=True,
-                timeout=5,
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl",
+                "show",
+                svc,
+                "--property=ActiveState,SubState,MainPID,ActiveEnterTimestamp",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            props = dict(line.split("=", 1) for line in r.stdout.strip().splitlines() if "=" in line)
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            props = dict(line.split("=", 1) for line in stdout.decode().strip().splitlines() if "=" in line)
             services.append(
                 {
                     "name": svc,

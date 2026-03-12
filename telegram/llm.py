@@ -23,7 +23,7 @@ except ImportError:
 _log = logging.getLogger("telegram_bot.llm")
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
-CONVERSATION_TIMEOUT = 600  # seconds — Opus 4.6 + MCP tools need time for complex queries
+CONVERSATION_TIMEOUT = 14400  # seconds (4 hours) — long-running research/planning needs extended window
 MODEL = "claude-opus-4-6"
 
 # Load MCP API keys from .mcp.env (gitignored) into process environment
