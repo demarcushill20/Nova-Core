@@ -44,6 +44,21 @@
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
       "env": {}
+    },
+    "github": {
+      "command": "/usr/local/bin/github-mcp-server",
+      "args": ["stdio"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "__GITHUB_PAT_REQUIRED__"
+      }
+    },
+    "n8n": {
+      "command": "n8n-mcp-server",
+      "args": [],
+      "env": {
+        "N8N_API_URL": "http://localhost:5678/api/v1",
+        "N8N_API_KEY": "__N8N_API_KEY_REQUIRED__"
+      }
     }
   }
 }
