@@ -26,7 +26,12 @@ from nova_kill_switch import MODE_RUN, check_kill_switch
 from tools.contracts import validate_contract
 from tools.skills import load_skills, render_append_prompt, select_skills
 from tools.task_classifier import classify_and_route
+from utils.audit_log import get_audit_logger
+from utils.dlp_gate import dlp
 from utils.task_validator import audit_task_execution, validate_task_content
+
+# --- Audit logger for watcher lifecycle events ---
+_audit = get_audit_logger("watcher")
 
 # --- Configuration ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -599,6 +604,11 @@ def dispatch(task_path: Path):
     task_path.rename(inprogress_path)
     logger.info("TASK DETECTED: %s → renamed to %s", task_name, inprogress_path.name)
 
+    # --- Audit: task pickup ---
+    task_correlation_id = f"task_{stem}"
+    _audit.log("task.pickup", {"task_stem": stem, "task_file": task_name},
+               correlation_id=task_correlation_id)
+
     # --- Cancel check: before running Claude, see if cancel was requested ---
     cancel_marker = CANCEL_DIR / f"{stem}.cancel"
     if cancel_marker.exists():
@@ -638,6 +648,27 @@ def dispatch(task_path: Path):
         return
     audit_task_execution(stem, task_text, validation,
                         classification="pre_validation", execution_mode="worker")
+
+    # --- Phase 3.2: DLP scan on task input ---
+    dlp_result = dlp.scan(task_text, context="task_input")
+    if dlp_result.action == "block":
+        logger.warning("DLP_BLOCKED: %s — findings=%s",
+                       stem, [f.pattern_name for f in dlp_result.findings])
+        _audit.log("task.dlp_blocked",
+                   {"task_stem": stem,
+                    "findings": [f.pattern_name for f in dlp_result.findings]},
+                   correlation_id=task_correlation_id)
+        failed_path = inprogress_path.with_name(f"{stem}.md.failed")
+        inprogress_path.rename(failed_path)
+        return
+    if dlp_result.action == "redact":
+        logger.info("DLP_REDACT: %s — redacted %d finding(s)",
+                    stem, len(dlp_result.findings))
+        _audit.log("task.dlp_redacted",
+                   {"task_stem": stem,
+                    "findings": [f.pattern_name for f in dlp_result.findings]},
+                   correlation_id=task_correlation_id)
+        task_text = dlp_result.redacted_text
 
     # --- Task classification & routing ---
     routing = classify_and_route(task_text)
@@ -768,6 +799,12 @@ def dispatch(task_path: Path):
     prompt_header = "\n".join(prompt.splitlines()[:20])
     logger.info("PROMPT (first 20 lines):\n%s", prompt_header)
 
+    # --- Audit: task execution start ---
+    _audit.log("task.execution_start",
+               {"task_stem": stem, "skills": selected_names,
+                "routing": routing.get("task_class", "unknown")},
+               correlation_id=task_correlation_id)
+
     # --- Execute: always create worker log, even on failure ---
     logger.info("EXECUTION STARTED: %s", stem)
     start_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -868,10 +905,16 @@ def dispatch(task_path: Path):
             done_path = inprogress_path.with_name(f"{stem}.md.done")
             inprogress_path.rename(done_path)
             logger.info("TASK SUCCEEDED: %s → %s", stem, done_path.name)
+            _audit.log("task.completed",
+                       {"task_stem": stem, "exit_code": exit_code},
+                       correlation_id=task_correlation_id)
         else:
             failed_path = inprogress_path.with_name(f"{stem}.md.failed")
             inprogress_path.rename(failed_path)
             logger.warning("TASK FAILED: %s → %s (missing artifacts)", stem, failed_path.name)
+            _audit.log("task.failed",
+                       {"task_stem": stem, "exit_code": exit_code},
+                       correlation_id=task_correlation_id)
     except FileNotFoundError:
         logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
 
