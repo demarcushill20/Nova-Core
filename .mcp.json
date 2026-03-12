@@ -29,6 +29,21 @@
       "command": "npx",
       "args": ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--executable-path", "/home/nova/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome"],
       "env": {}
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "env": {}
+    },
+    "semgrep": {
+      "command": "/home/nova/.local/bin/uvx",
+      "args": ["semgrep-mcp"],
+      "env": {}
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "env": {}
     }
   }
 }
