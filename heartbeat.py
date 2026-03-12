@@ -49,20 +49,19 @@ def check_service(name: str) -> dict:
     try:
         result = subprocess.run(
             ["systemctl", "is-active", name],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         active = result.stdout.strip() == "active"
         if active:
             info = subprocess.run(
-                ["systemctl", "show", name,
-                 "--property=MainPID,ActiveEnterTimestamp"],
-                capture_output=True, text=True, timeout=10,
+                ["systemctl", "show", name, "--property=MainPID,ActiveEnterTimestamp"],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
-            props = dict(
-                line.split("=", 1)
-                for line in info.stdout.strip().splitlines()
-                if "=" in line
-            )
+            props = dict(line.split("=", 1) for line in info.stdout.strip().splitlines() if "=" in line)
             pid = props.get("MainPID", "?")
             since = props.get("ActiveEnterTimestamp", "?")
             detail = f"active (pid {pid}, since {since})"
@@ -70,8 +69,7 @@ def check_service(name: str) -> dict:
             detail = f"NOT ACTIVE ({result.stdout.strip()})"
         return {"name": f"service:{name}", "ok": active, "detail": detail}
     except Exception as e:
-        return {"name": f"service:{name}", "ok": False,
-                "detail": f"check failed: {e}"}
+        return {"name": f"service:{name}", "ok": False, "detail": f"check failed: {e}"}
 
 
 def check_disk() -> dict:
@@ -83,8 +81,7 @@ def check_disk() -> dict:
         used_pct = round((1 - free / total) * 100, 1)
         free_gb = round(free / (1024**3), 1)
         ok = used_pct < DISK_WARN_PERCENT
-        return {"name": "disk", "ok": ok,
-                "detail": f"{used_pct}% used ({free_gb}GB free)"}
+        return {"name": "disk", "ok": ok, "detail": f"{used_pct}% used ({free_gb}GB free)"}
     except Exception as e:
         return {"name": "disk", "ok": False, "detail": f"check failed: {e}"}
 
@@ -103,18 +100,13 @@ def check_task_queue() -> dict:
         return {"name": "task_queue", "ok": True, "detail": "no TASKS dir"}
 
     lifecycle_suffixes = (".inprogress", ".done", ".failed", ".cancelled")
-    pending = [
-        p for p in TASKS_DIR.glob("*.md")
-        if not any(p.name.endswith(s) for s in lifecycle_suffixes)
-    ]
+    pending = [p for p in TASKS_DIR.glob("*.md") if not any(p.name.endswith(s) for s in lifecycle_suffixes)]
 
     inprogress = list(TASKS_DIR.glob("*.inprogress"))
     now = datetime.now(timezone.utc)
     orphaned = []
     for ip in inprogress:
-        age_min = (
-            now - datetime.fromtimestamp(ip.stat().st_mtime, tz=timezone.utc)
-        ).total_seconds() / 60
+        age_min = (now - datetime.fromtimestamp(ip.stat().st_mtime, tz=timezone.utc)).total_seconds() / 60
         if age_min > ORPHAN_INPROGRESS_MINUTES:
             orphaned.append(ip.name)
 
@@ -132,15 +124,15 @@ def check_last_output() -> dict:
 
     outputs = sorted(
         OUTPUT_DIR.glob("*.md"),
-        key=lambda p: p.stat().st_mtime, reverse=True,
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
     )
     if not outputs:
         return {"name": "last_output", "ok": True, "detail": "no outputs yet"}
 
     latest = outputs[0]
     age_min = (
-        datetime.now(timezone.utc)
-        - datetime.fromtimestamp(latest.stat().st_mtime, tz=timezone.utc)
+        datetime.now(timezone.utc) - datetime.fromtimestamp(latest.stat().st_mtime, tz=timezone.utc)
     ).total_seconds() / 60
     detail = f"{latest.name} ({round(age_min)}min ago)"
     return {"name": "last_output", "ok": True, "detail": detail}
@@ -206,22 +198,18 @@ def check_metrics() -> dict:
         successes = cs.get("_total", 0) if isinstance(cs, dict) else cs
         total = failures + successes
         if total == 0:
-            return {"name": "metrics", "ok": True,
-                    "detail": "no executions recorded"}
+            return {"name": "metrics", "ok": True, "detail": "no executions recorded"}
         fail_rate = round(failures / total * 100, 1)
         ok = fail_rate < 50
-        return {"name": "metrics", "ok": ok,
-                "detail": f"{fail_rate}% failure rate ({failures}/{total})"}
+        return {"name": "metrics", "ok": ok, "detail": f"{fail_rate}% failure rate ({failures}/{total})"}
     except Exception as e:
-        return {"name": "metrics", "ok": False,
-                "detail": f"parse error: {e}"}
+        return {"name": "metrics", "ok": False, "detail": f"parse error: {e}"}
 
 
 def check_google_workspace() -> dict:
     """Check that the Google Workspace OAuth token is valid."""
     if not GW_TOKEN_FILE.exists():
-        return {"name": "google_workspace", "ok": True,
-                "detail": "not configured (no token)"}
+        return {"name": "google_workspace", "ok": True, "detail": "not configured (no token)"}
     try:
         data = json.loads(GW_TOKEN_FILE.read_text())
         has_refresh = bool(data.get("refresh_token"))
@@ -231,31 +219,27 @@ def check_google_workspace() -> dict:
             exp_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
             now = datetime.now(timezone.utc)
             if exp_dt < now and not has_refresh:
-                return {"name": "google_workspace", "ok": False,
-                        "detail": "token expired, no refresh token"}
+                return {"name": "google_workspace", "ok": False, "detail": "token expired, no refresh token"}
         detail = "token valid" if has_refresh else "token present (no refresh)"
-        return {"name": "google_workspace", "ok": has_refresh,
-                "detail": detail}
+        return {"name": "google_workspace", "ok": has_refresh, "detail": detail}
     except Exception as e:
-        return {"name": "google_workspace", "ok": False,
-                "detail": f"token check failed: {e}"}
+        return {"name": "google_workspace", "ok": False, "detail": f"token check failed: {e}"}
 
 
 def check_backup() -> dict:
     """Verify a recent backup exists in /home/nova/backups/."""
     if not BACKUP_DIR.exists():
-        return {"name": "backup", "ok": False,
-                "detail": f"backup dir missing: {BACKUP_DIR}"}
+        return {"name": "backup", "ok": False, "detail": f"backup dir missing: {BACKUP_DIR}"}
 
-    tarballs = sorted(BACKUP_DIR.glob("*.tar.gz"), key=lambda p: p.stat().st_mtime,
-                      reverse=True)
+    tarballs = sorted(BACKUP_DIR.glob("*.tar.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not tarballs:
         return {"name": "backup", "ok": False, "detail": "no backups found"}
 
     latest = tarballs[0]
-    age_hr = (datetime.now(timezone.utc) - datetime.fromtimestamp(
-        latest.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
-    size_mb = round(latest.stat().st_size / (1024 ** 2), 1)
+    age_hr = (
+        datetime.now(timezone.utc) - datetime.fromtimestamp(latest.stat().st_mtime, tz=timezone.utc)
+    ).total_seconds() / 3600
+    size_mb = round(latest.stat().st_size / (1024**2), 1)
     ok = age_hr < BACKUP_MAX_AGE_HOURS
     detail = f"{latest.name} ({round(age_hr, 1)}h ago, {size_mb}MB)"
     if not ok:
@@ -267,9 +251,10 @@ def check_ruff() -> dict:
     """Run ruff on staged/tracked Python files and report violation count."""
     try:
         result = subprocess.run(
-            ["ruff", "check", "--select", "E,F,W", "--statistics",
-             "--quiet", str(BASE)],
-            capture_output=True, text=True, timeout=30,
+            ["ruff", "check", "--select", "E,F,W", "--statistics", "--quiet", str(BASE)],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             return {"name": "ruff", "ok": True, "detail": "0 violations"}
@@ -317,7 +302,7 @@ def check_log_sizes() -> dict:
     if LOGS_DIR.exists():
         for log_file in LOGS_DIR.iterdir():
             if log_file.is_file():
-                size_mb = log_file.stat().st_size / (1024 ** 2)
+                size_mb = log_file.stat().st_size / (1024**2)
                 if size_mb > LOG_SIZE_WARN_MB:
                     large.append(f"{log_file.name} ({round(size_mb, 1)}MB)")
 
@@ -325,8 +310,7 @@ def check_log_sizes() -> dict:
     if ok:
         total_mb = 0
         if LOGS_DIR.exists():
-            total_mb = sum(f.stat().st_size for f in LOGS_DIR.iterdir()
-                          if f.is_file()) / (1024 ** 2)
+            total_mb = sum(f.stat().st_size for f in LOGS_DIR.iterdir() if f.is_file()) / (1024**2)
         detail = f"all under {LOG_SIZE_WARN_MB}MB (total: {round(total_mb, 1)}MB)"
     else:
         detail = f"{len(large)} oversized: {', '.join(large)}"
@@ -355,35 +339,30 @@ def check_pip_audit() -> dict:
     """Run pip-audit monthly. Only runs on the 1st and 15th of the month."""
     now = datetime.now(timezone.utc)
     if now.day not in (1, 15):
-        return {"name": "pip_audit", "ok": True,
-                "detail": f"skipped (runs on 1st/15th, today is {now.day}th)"}
+        return {"name": "pip_audit", "ok": True, "detail": f"skipped (runs on 1st/15th, today is {now.day}th)"}
     try:
         result = subprocess.run(
             ["pip-audit", "--format", "json", "--progress-spinner", "off"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode == 0:
             data = json.loads(result.stdout) if result.stdout.strip() else []
             if not data:
-                return {"name": "pip_audit", "ok": True,
-                        "detail": "0 vulnerabilities"}
+                return {"name": "pip_audit", "ok": True, "detail": "0 vulnerabilities"}
             vuln_count = len(data) if isinstance(data, list) else 0
-            return {"name": "pip_audit", "ok": vuln_count == 0,
-                    "detail": f"{vuln_count} vulnerable package(s)"}
+            return {"name": "pip_audit", "ok": vuln_count == 0, "detail": f"{vuln_count} vulnerable package(s)"}
         else:
             # pip-audit returns non-zero when vulnerabilities found
             detail = result.stdout[:200] if result.stdout else result.stderr[:200]
-            return {"name": "pip_audit", "ok": False,
-                    "detail": f"vulnerabilities found: {detail}"}
+            return {"name": "pip_audit", "ok": False, "detail": f"vulnerabilities found: {detail}"}
     except FileNotFoundError:
-        return {"name": "pip_audit", "ok": True,
-                "detail": "pip-audit not installed"}
+        return {"name": "pip_audit", "ok": True, "detail": "pip-audit not installed"}
     except subprocess.TimeoutExpired:
-        return {"name": "pip_audit", "ok": True,
-                "detail": "timed out (120s)"}
+        return {"name": "pip_audit", "ok": True, "detail": "timed out (120s)"}
     except Exception as e:
-        return {"name": "pip_audit", "ok": True,
-                "detail": f"check failed: {e}"}
+        return {"name": "pip_audit", "ok": True, "detail": f"check failed: {e}"}
 
 
 # --- Output ------------------------------------------------------------------
@@ -461,10 +440,7 @@ def send_telegram_heartbeat(checks: list) -> None:
 
 def inject_repair_task(checks: list) -> None:
     """For service failures, inject a self-repair task into TASKS/."""
-    failed_services = [
-        c for c in checks
-        if c["name"].startswith("service:") and not c["ok"]
-    ]
+    failed_services = [c for c in checks if c["name"].startswith("service:") and not c["ok"]]
     if not failed_services:
         return
 
@@ -479,9 +455,7 @@ def inject_repair_task(checks: list) -> None:
     stem = f"hb_{ts}_self_repair"
     task_path = TASKS_DIR / f"{stem}.md"
 
-    names = ", ".join(
-        c["name"].replace("service:", "") for c in failed_services
-    )
+    names = ", ".join(c["name"].replace("service:", "") for c in failed_services)
     content = (
         "# Heartbeat Self-Repair Task\n\n"
         "The following services were detected as unhealthy by the heartbeat:\n"
@@ -534,16 +508,15 @@ def _gather_extended_state(checks: list) -> str:
 
     # Pending tasks (with age)
     pending = [
-        p for p in TASKS_DIR.glob("*.md")
-        if not any(p.name.endswith(s)
-                   for s in (".inprogress", ".done", ".failed", ".cancelled"))
+        p
+        for p in TASKS_DIR.glob("*.md")
+        if not any(p.name.endswith(s) for s in (".inprogress", ".done", ".failed", ".cancelled"))
     ]
     if pending:
         parts.append(f"\n## Pending Tasks ({len(pending)})")
         now = datetime.now(timezone.utc)
         for p in sorted(pending, key=lambda x: x.stat().st_mtime):
-            age_min = (now - datetime.fromtimestamp(
-                p.stat().st_mtime, tz=timezone.utc)).total_seconds() / 60
+            age_min = (now - datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)).total_seconds() / 60
             parts.append(f"  - {p.stem} ({round(age_min)}min old)")
 
     # Recent failed tasks (last 2 hours)
@@ -551,8 +524,7 @@ def _gather_extended_state(checks: list) -> str:
     now = datetime.now(timezone.utc)
     recent_failed = []
     for f in failed:
-        age_hr = (now - datetime.fromtimestamp(
-            f.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
+        age_hr = (now - datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
         if age_hr < 2:
             recent_failed.append(f)
     if recent_failed:
@@ -563,12 +535,12 @@ def _gather_extended_state(checks: list) -> str:
     # Recent outputs (last 4 hours)
     outputs = sorted(
         OUTPUT_DIR.glob("*.md"),
-        key=lambda p: p.stat().st_mtime, reverse=True,
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
     )
     recent_outputs = []
     for o in outputs[:10]:
-        age_hr = (now - datetime.fromtimestamp(
-            o.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
+        age_hr = (now - datetime.fromtimestamp(o.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
         if age_hr < 4:
             recent_outputs.append((o, age_hr))
     if recent_outputs:
@@ -617,8 +589,7 @@ def _run_heartbeat_agent(checks: list) -> None:
     """
     current_hour = datetime.now(timezone.utc).hour
     if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
-        print(f"[heartbeat-agent] Outside active hours "
-              f"({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
+        print(f"[heartbeat-agent] Outside active hours ({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
         return
 
     if not CHECKLIST_FILE.exists():
@@ -642,16 +613,27 @@ def _run_heartbeat_agent(checks: list) -> None:
     claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
 
     try:
+        child_env = os.environ.copy()
+        child_env.pop("CLAUDECODE", None)
+        child_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+
         result = subprocess.run(
-            [claude_bin, "-p", "--model", HEARTBEAT_MODEL,
-             "--dangerously-skip-permissions", prompt],
-            capture_output=True, text=True, timeout=HEARTBEAT_TIMEOUT,
+            [claude_bin, "-p", "--model", HEARTBEAT_MODEL, "--dangerously-skip-permissions", prompt],
+            capture_output=True,
+            text=True,
+            timeout=HEARTBEAT_TIMEOUT,
             cwd=str(BASE),
+            env=child_env,
         )
         response = result.stdout.strip()
 
         if not response:
-            _log_agent("EMPTY_RESPONSE — agent returned nothing")
+            stderr_hint = result.stderr.strip()[:200] if result.stderr else ""
+            _log_agent(
+                f"EMPTY_RESPONSE — agent returned nothing"
+                f" (exit={result.returncode}"
+                f"{f', stderr={stderr_hint}' if stderr_hint else ''})"
+            )
             return
 
         if "HEARTBEAT_OK" in response:
@@ -699,8 +681,9 @@ def _handle_agent_actions(response: str) -> None:
 def _extract_json_actions(text: str) -> list | None:
     """Try to extract a JSON action array from the agent's response."""
     import re
+
     # Look for JSON array in the response (possibly in a code block)
-    json_match = re.search(r'\[[\s\S]*?\]', text)
+    json_match = re.search(r"\[[\s\S]*?\]", text)
     if json_match:
         try:
             data = json.loads(json_match.group())
@@ -715,15 +698,14 @@ def _inject_proactive_task(title: str, body: str) -> None:
     """Create a proactive task file for the watcher to pick up."""
     # Rate-limit: max 4 pending proactive tasks (allows research pipeline to build up)
     existing = list(TASKS_DIR.glob("hb_proactive_*.md"))
-    recent = [p for p in existing
-              if not any(p.name.endswith(s)
-                         for s in (".done", ".failed", ".cancelled"))]
+    recent = [p for p in existing if not any(p.name.endswith(s) for s in (".done", ".failed", ".cancelled"))]
     if len(recent) >= 4:
         print("[heartbeat-agent] Rate limit: 4 proactive tasks already pending")
         return
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     import re
+
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", title.strip()).strip("_").lower()[:50]
     stem = f"hb_proactive_{ts}_{slug}"
     task_path = TASKS_DIR / f"{stem}.md"
@@ -786,7 +768,10 @@ def _scan_codebase() -> str:
     try:
         result = subprocess.run(
             ["git", "log", "--oneline", "-15", "--no-decorate"],
-            capture_output=True, text=True, timeout=10, cwd=str(BASE),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(BASE),
         )
         if result.stdout.strip():
             parts.append("### Recent Commits (last 15)")
@@ -798,7 +783,10 @@ def _scan_codebase() -> str:
     try:
         result = subprocess.run(
             ["git", "ls-files"],
-            capture_output=True, text=True, timeout=10, cwd=str(BASE),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(BASE),
         )
         if result.stdout.strip():
             files = result.stdout.strip().splitlines()
@@ -840,8 +828,7 @@ def _scan_codebase() -> str:
         for py in BASE.rglob("*.py"):
             if ".venv" in str(py) or "__pycache__" in str(py):
                 continue
-            age_hr = (now - datetime.fromtimestamp(
-                py.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
+            age_hr = (now - datetime.fromtimestamp(py.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
             if age_hr < 24:
                 recently_modified.append((py.relative_to(BASE), round(age_hr, 1)))
         if recently_modified:
@@ -855,7 +842,10 @@ def _scan_codebase() -> str:
     try:
         result = subprocess.run(
             ["git", "status", "--porcelain"],
-            capture_output=True, text=True, timeout=10, cwd=str(BASE),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(BASE),
         )
         if result.stdout.strip():
             lines = result.stdout.strip().splitlines()
@@ -878,8 +868,7 @@ def _build_research_prompt() -> str:
     # Gather recent OUTPUT file names for topic deduplication
     recent_topics = []
     if OUTPUT_DIR.exists():
-        for f in sorted(OUTPUT_DIR.glob("*.md"),
-                        key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
+        for f in sorted(OUTPUT_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
             recent_topics.append(f.stem)
     recent_str = "\n".join(f"  - {t}" for t in recent_topics) or "  (none)"
 
@@ -892,10 +881,7 @@ def _build_research_prompt() -> str:
             goals_list = data.get("goals", []) if isinstance(data, dict) else data
             active = [g for g in goals_list if g.get("status") != "done"]
             if active:
-                goals_str = "\n".join(
-                    f"  - [{g.get('id', '?')}] {g.get('text', '?')}"
-                    for g in active
-                )
+                goals_str = "\n".join(f"  - [{g.get('id', '?')}] {g.get('text', '?')}" for g in active)
         except Exception:
             pass
 
@@ -1046,8 +1032,7 @@ def _run_research_cycle() -> None:
     """
     current_hour = datetime.now(timezone.utc).hour
     if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
-        print(f"[research-cycle] Outside active hours "
-              f"({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
+        print(f"[research-cycle] Outside active hours ({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
         return
 
     if not _research_cooldown_ok():
@@ -1062,20 +1047,25 @@ def _run_research_cycle() -> None:
     try:
         child_env = os.environ.copy()
         child_env.pop("CLAUDECODE", None)
+        child_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
         result = subprocess.run(
-            [claude_bin, "-p", "--model", HEARTBEAT_MODEL,
-             "--dangerously-skip-permissions", prompt],
-            capture_output=True, text=True, timeout=RESEARCH_TIMEOUT,
+            [claude_bin, "-p", "--model", HEARTBEAT_MODEL, "--dangerously-skip-permissions", prompt],
+            capture_output=True,
+            text=True,
+            timeout=RESEARCH_TIMEOUT,
             cwd=str(BASE),
             env=child_env,
         )
         response = result.stdout.strip()
 
         if not response:
-            _log_research("EMPTY_RESPONSE")
+            stderr_hint = result.stderr.strip()[:200] if result.stderr else ""
+            _log_research(
+                f"EMPTY_RESPONSE (exit={result.returncode}{f', stderr={stderr_hint}' if stderr_hint else ''})"
+            )
             _update_research_cooldown("unknown", success=False)
-            print("[research-cycle] Empty response from Claude")
+            print(f"[research-cycle] Empty response from Claude (exit={result.returncode})")
             return
 
         # Extract topic from response for logging
@@ -1087,14 +1077,16 @@ def _run_research_cycle() -> None:
 
         # Check vault write outcome from subprocess output
         response_lower = response.lower()
-        vault_ok = ("vault_write" in response_lower
-                    and ("success" in response_lower or "accepted" in response_lower
-                         or "written" in response_lower))
-        vault_failed = ("vault_write" in response_lower
-                        and ("error" in response_lower or "rejected" in response_lower
-                             or "failed" in response_lower or "invalid" in response_lower))
-        memory_ok = ("upsert_memory" in response_lower
-                     and ("success" in response_lower or "stored" in response_lower))
+        vault_ok = "vault_write" in response_lower and (
+            "success" in response_lower or "accepted" in response_lower or "written" in response_lower
+        )
+        vault_failed = "vault_write" in response_lower and (
+            "error" in response_lower
+            or "rejected" in response_lower
+            or "failed" in response_lower
+            or "invalid" in response_lower
+        )
+        memory_ok = "upsert_memory" in response_lower and ("success" in response_lower or "stored" in response_lower)
 
         # Log persistence outcomes independently
         if vault_ok:
@@ -1188,8 +1180,7 @@ def _build_planning_prompt() -> str:
     # Gather recent OUTPUT file names
     recent_outputs = []
     if OUTPUT_DIR.exists():
-        for f in sorted(OUTPUT_DIR.glob("*.md"),
-                        key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
+        for f in sorted(OUTPUT_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
             recent_outputs.append(f.stem)
     recent_str = "\n".join(f"  - {t}" for t in recent_outputs) or "  (none)"
 
@@ -1202,10 +1193,7 @@ def _build_planning_prompt() -> str:
             goals_list = data.get("goals", []) if isinstance(data, dict) else data
             active = [g for g in goals_list if g.get("status") != "done"]
             if active:
-                goals_str = "\n".join(
-                    f"  - [{g.get('id', '?')}] {g.get('text', '?')}"
-                    for g in active
-                )
+                goals_str = "\n".join(f"  - [{g.get('id', '?')}] {g.get('text', '?')}" for g in active)
         except Exception:
             pass
 
@@ -1369,8 +1357,7 @@ def _run_planning_cycle() -> None:
     """
     current_hour = datetime.now(timezone.utc).hour
     if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
-        print(f"[planning-cycle] Outside active hours "
-              f"({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
+        print(f"[planning-cycle] Outside active hours ({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
         return
 
     if not _planning_cooldown_ok():
@@ -1385,18 +1372,23 @@ def _run_planning_cycle() -> None:
     try:
         child_env = os.environ.copy()
         child_env.pop("CLAUDECODE", None)
+        child_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
         result = subprocess.run(
-            [claude_bin, "-p", "--model", HEARTBEAT_MODEL,
-             "--dangerously-skip-permissions", prompt],
-            capture_output=True, text=True, timeout=PLANNING_TIMEOUT,
+            [claude_bin, "-p", "--model", HEARTBEAT_MODEL, "--dangerously-skip-permissions", prompt],
+            capture_output=True,
+            text=True,
+            timeout=PLANNING_TIMEOUT,
             cwd=str(BASE),
             env=child_env,
         )
         response = result.stdout.strip()
 
         if not response:
-            _log_planning("EMPTY_RESPONSE")
+            stderr_hint = result.stderr.strip()[:200] if result.stderr else ""
+            _log_planning(
+                f"EMPTY_RESPONSE (exit={result.returncode}{f', stderr={stderr_hint}' if stderr_hint else ''})"
+            )
             _update_planning_cooldown("unknown", success=False)
             print("[planning-cycle] Empty response from Claude")
             return
@@ -1410,14 +1402,16 @@ def _run_planning_cycle() -> None:
 
         # Check vault write outcome from subprocess output
         response_lower = response.lower()
-        vault_ok = ("vault_write" in response_lower
-                    and ("success" in response_lower or "accepted" in response_lower
-                         or "written" in response_lower))
-        vault_failed = ("vault_write" in response_lower
-                        and ("error" in response_lower or "rejected" in response_lower
-                             or "failed" in response_lower or "invalid" in response_lower))
-        memory_ok = ("upsert_memory" in response_lower
-                     and ("success" in response_lower or "stored" in response_lower))
+        vault_ok = "vault_write" in response_lower and (
+            "success" in response_lower or "accepted" in response_lower or "written" in response_lower
+        )
+        vault_failed = "vault_write" in response_lower and (
+            "error" in response_lower
+            or "rejected" in response_lower
+            or "failed" in response_lower
+            or "invalid" in response_lower
+        )
+        memory_ok = "upsert_memory" in response_lower and ("success" in response_lower or "stored" in response_lower)
 
         # Log persistence outcomes independently
         if vault_ok:
@@ -1465,12 +1459,12 @@ def _run_planning_cycle() -> None:
 
 def main() -> int:
     """Run all health checks, write HEARTBEAT.md, alert if unhealthy."""
-    print(f"[heartbeat] Starting health check at "
-          f"{datetime.now(timezone.utc).isoformat()}")
+    print(f"[heartbeat] Starting health check at {datetime.now(timezone.utc).isoformat()}")
 
     # --- Phase 1.2: Kill switch + dead man's switch ---
     try:
         from nova_kill_switch import MODE_RUN, MODE_STOPPED, check_kill_switch, heartbeat_alive
+
         heartbeat_alive()  # Refresh dead man's switch TTL (45 min)
         ks_mode = check_kill_switch()
         if ks_mode == MODE_STOPPED:
@@ -1508,40 +1502,44 @@ def main() -> int:
     # --- Phase 7.6: multi-agent heartbeat ---
     try:
         from agents.observability import Severity, run_multiagent_heartbeat
+
         ma_report = run_multiagent_heartbeat()
         ma_ok = ma_report.overall == Severity.HEALTHY
-        checks.append({
-            "name": "multi_agent_health",
-            "ok": ma_ok,
-            "detail": (f"{ma_report.overall}: "
-                       f"{len(ma_report.findings)} finding(s), "
-                       f"{ma_report.metrics.active_workflows} active workflow(s)"),
-        })
+        checks.append(
+            {
+                "name": "multi_agent_health",
+                "ok": ma_ok,
+                "detail": (
+                    f"{ma_report.overall}: "
+                    f"{len(ma_report.findings)} finding(s), "
+                    f"{ma_report.metrics.active_workflows} active workflow(s)"
+                ),
+            }
+        )
         if not ma_ok:
             all_ok = False
-        print(f"[heartbeat] Multi-agent: {ma_report.overall} "
-              f"({len(ma_report.findings)} findings)")
+        print(f"[heartbeat] Multi-agent: {ma_report.overall} ({len(ma_report.findings)} findings)")
     except Exception as e:
         print(f"[heartbeat] Multi-agent check failed (non-fatal): {e}")
-        checks.append({
-            "name": "multi_agent_health",
-            "ok": True,
-            "detail": f"check skipped: {e}",
-        })
+        checks.append(
+            {
+                "name": "multi_agent_health",
+                "ok": True,
+                "detail": f"check skipped: {e}",
+            }
+        )
 
     # --- Phase 7.7: production hardening maintenance ---
     try:
         from agents.production_hardening import run_production_hardening
+
         ph_result = run_production_hardening()
         cleanup = ph_result.get("cleanup", {})
         if isinstance(cleanup, dict):
-            archived = (len(cleanup.get("archived_workflows", []))
-                        + len(cleanup.get("archived_agents", [])))
-            cleaned = (len(cleanup.get("cleaned_leases", []))
-                       + len(cleanup.get("cleaned_tmp", [])))
+            archived = len(cleanup.get("archived_workflows", [])) + len(cleanup.get("archived_agents", []))
+            cleaned = len(cleanup.get("cleaned_leases", [])) + len(cleanup.get("cleaned_tmp", []))
             if archived or cleaned:
-                print(f"[heartbeat] Hardening: archived={archived} "
-                      f"cleaned={cleaned}")
+                print(f"[heartbeat] Hardening: archived={archived} cleaned={cleaned}")
     except Exception as e:
         print(f"[heartbeat] Production hardening failed (non-fatal): {e}")
 
@@ -1576,9 +1574,7 @@ def main() -> int:
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     fail_count = len([c for c in checks if not c["ok"]])
     log_line = (
-        f"{datetime.now(timezone.utc).isoformat()} | "
-        f"{'HEALTHY' if all_ok else 'UNHEALTHY'} | "
-        f"{fail_count} failures\n"
+        f"{datetime.now(timezone.utc).isoformat()} | {'HEALTHY' if all_ok else 'UNHEALTHY'} | {fail_count} failures\n"
     )
     with open(LOGS_DIR / "heartbeat.log", "a") as f:
         f.write(log_line)
