@@ -143,6 +143,104 @@ async function loadChatHistory() {
   renderChat();
 }
 
+// --- Async chat job handling (polling + WebSocket) ---
+let _pendingJobId = null;
+let _pendingJobTimer = null;
+let _typingStartTime = null;
+let _pollFailures = 0;        // consecutive poll failures
+const _MAX_POLL_FAILURES = 5; // give up after 5 consecutive network errors
+const _MAX_POLL_DURATION_S = 720; // 12 minutes — longer than backend 10m timeout
+
+function _updateTypingIndicator() {
+  const typingMsg = chatMessages.find(m => m.role === 'typing');
+  if (!typingMsg || !_typingStartTime) return;
+  const elapsed = Math.floor((Date.now() - _typingStartTime) / 1000);
+
+  // Safety: give up after max poll duration
+  if (elapsed > _MAX_POLL_DURATION_S) {
+    _deliverChatResponse(null, 'Response timed out — Nova may still be working. Try again in a moment.');
+    return;
+  }
+
+  if (elapsed < 5) {
+    typingMsg.content = '';
+  } else if (elapsed < 30) {
+    typingMsg.content = `${elapsed}s — still thinking...`;
+  } else if (elapsed < 120) {
+    typingMsg.content = `${elapsed}s — working on a detailed response...`;
+  } else {
+    const mins = Math.floor(elapsed / 60);
+    typingMsg.content = `${mins}m ${elapsed % 60}s — deep processing, hang tight...`;
+  }
+  renderChat();
+}
+
+function _deliverChatResponse(response, error) {
+  // Stop polling and typing updates
+  _stopJobPolling();
+  _typingStartTime = null;
+
+  // Remove typing indicator
+  const idx = chatMessages.findIndex(m => m.role === 'typing');
+  if (idx !== -1) chatMessages.splice(idx, 1);
+
+  if (response) {
+    chatMessages.push({ role: 'assistant', content: response });
+    if (ttsEnabled) speak(response);
+  } else {
+    chatMessages.push({ role: 'assistant', content: error || 'No response received.' });
+  }
+  renderChat();
+}
+
+function _stopJobPolling() {
+  if (_pendingJobTimer) { clearInterval(_pendingJobTimer); _pendingJobTimer = null; }
+  _pendingJobId = null;
+  _pollFailures = 0;
+}
+
+function _startJobPolling(jobId) {
+  // Clear any existing polling first (prevents timer leaks)
+  if (_pendingJobTimer) { clearInterval(_pendingJobTimer); _pendingJobTimer = null; }
+  _pendingJobId = jobId;
+  _pollFailures = 0;
+  _pendingJobTimer = setInterval(() => {
+    _pollChatJob(jobId);
+    _updateTypingIndicator();
+  }, 3000);
+}
+
+async function _pollChatJob(jobId) {
+  try {
+    const data = await api(`/api/chat/jobs/${jobId}`);
+    if (!data || data.job_id !== jobId) {
+      // Network error or stale job — track consecutive failures
+      _pollFailures++;
+      if (_pollFailures >= _MAX_POLL_FAILURES) {
+        _deliverChatResponse(null, 'Lost connection to Nova — please try again.');
+      }
+      return;
+    }
+    if (_pendingJobId !== jobId) return; // superseded
+
+    _pollFailures = 0; // reset on successful poll
+
+    if (data.status === 'completed') {
+      // Deliver even if response is empty (edge case: treat as success with fallback)
+      _deliverChatResponse(data.response || '(empty response)', null);
+    } else if (data.status === 'failed') {
+      _deliverChatResponse(null, data.error || 'Processing failed.');
+    }
+    // status === 'processing' → keep polling
+  } catch (e) {
+    console.error('Poll error:', e);
+    _pollFailures++;
+    if (_pollFailures >= _MAX_POLL_FAILURES) {
+      _deliverChatResponse(null, 'Lost connection to Nova — please try again.');
+    }
+  }
+}
+
 async function sendChat() {
   const input = document.getElementById('chat-input');
   const msg = input.value.trim();
@@ -153,7 +251,8 @@ async function sendChat() {
   chatMessages.push({ role: 'user', content: msg });
   renderChat();
 
-  // Show typing indicator
+  // Show typing indicator with elapsed time
+  _typingStartTime = Date.now();
   chatMessages.push({ role: 'typing', content: '' });
   renderChat();
 
@@ -162,23 +261,20 @@ async function sendChat() {
     body: JSON.stringify({ message: msg }),
   });
 
-  // Remove typing indicator
-  chatMessages.pop();
-
-  if (data && data.response) {
-    chatMessages.push({ role: 'assistant', content: data.response });
-    if (ttsEnabled) speak(data.response);
+  if (data && data.job_id) {
+    _startJobPolling(data.job_id);
   } else {
-    chatMessages.push({ role: 'assistant', content: 'No response received.' });
+    // Submission itself failed (network error, 4xx, etc.)
+    _deliverChatResponse(null, 'Failed to send message.');
   }
-  renderChat();
 }
 
 function renderChat() {
   const el = document.getElementById('chat-messages');
   el.innerHTML = chatMessages.map(m => {
     if (m.role === 'typing') {
-      return '<div class="chat-bubble assistant"><span class="spinner"></span> Thinking...</div>';
+      const detail = m.content ? ` — ${escapeHtml(m.content)}` : '';
+      return `<div class="chat-bubble assistant"><span class="spinner"></span> Thinking${detail}</div>`;
     }
     return `<div class="chat-bubble ${m.role}">${escapeHtml(m.content)}</div>`;
   }).join('');
@@ -449,31 +545,35 @@ function stopListening() {
 }
 
 async function sendVoiceMessage(text) {
-  // Add to chat and send
+  // Add to chat and send — uses same async job pattern as sendChat
   chatMessages.push({ role: 'user', content: text });
   renderChat();
 
+  _typingStartTime = Date.now();
   chatMessages.push({ role: 'typing', content: '' });
   renderChat();
 
   document.getElementById('voice-status').textContent = 'Nova is thinking...';
   document.getElementById('voice-transcript').textContent = '';
 
+  // Override _deliverChatResponse for voice to also update voice status
+  const origDeliver = _deliverChatResponse;
+  _deliverChatResponse = function(response, error) {
+    origDeliver(response, error);
+    document.getElementById('voice-status').textContent = 'Tap to speak';
+    _deliverChatResponse = origDeliver; // restore
+  };
+
   const data = await api('/api/chat', {
     method: 'POST',
     body: JSON.stringify({ message: text }),
   });
 
-  chatMessages.pop();
-
-  if (data && data.response) {
-    chatMessages.push({ role: 'assistant', content: data.response });
-    if (ttsEnabled) speak(data.response);
+  if (data && data.job_id) {
+    _startJobPolling(data.job_id);
   } else {
-    chatMessages.push({ role: 'assistant', content: 'No response received.' });
+    _deliverChatResponse(null, 'Failed to send message.');
   }
-  renderChat();
-  document.getElementById('voice-status').textContent = 'Tap to speak';
 }
 
 // --- Reports ---
@@ -558,12 +658,26 @@ function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
 
-  ws.onopen = () => console.log('WS connected');
+  ws.onopen = () => {
+    console.log('WS connected');
+    // On reconnect, immediately poll for any pending job (catches missed broadcasts)
+    if (_pendingJobId) _pollChatJob(_pendingJobId);
+  };
   ws.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
       if (msg.event === 'task_created') toast(`New task: ${msg.data.title}`);
-      if (msg.event === 'chat_response') { /* handled by chat flow */ }
+      if (msg.event === 'chat_response' && msg.data) {
+        // WebSocket push delivery — faster than polling
+        const d = msg.data;
+        if (_pendingJobId && d.job_id === _pendingJobId) {
+          if (d.response) {
+            _deliverChatResponse(d.response, null);
+          } else if (d.error) {
+            _deliverChatResponse(null, d.error);
+          }
+        }
+      }
     } catch {}
   };
   ws.onclose = () => setTimeout(connectWS, 3000);

@@ -128,11 +128,12 @@ _SECRET_PATTERNS: list[re.Pattern] = [
 
 # Valid note types and their required tags
 _VALID_NOTE_TYPES = {
-    "agent-pattern":      "#type/pattern",
-    "workflow-learning":  "#type/learning",
-    "research-summary":   "#type/research",
-    "debugging-guide":    "#type/debugging",
-    "inbox":              "#type/inbox",
+    "agent-pattern":        "#type/pattern",
+    "workflow-learning":    "#type/learning",
+    "research-summary":     "#type/research",
+    "implementation-plan":  "#type/plan",
+    "debugging-guide":      "#type/debugging",
+    "inbox":                "#type/inbox",
 }
 
 # Valid enum values used across schemas
@@ -156,6 +157,10 @@ _REQUIRED_FIELDS: dict[str, list[str]] = {
     "research-summary": [
         "type", "research_id", "title", "topic", "date_researched",
         "sources_count", "confidence", "source", "tags",
+    ],
+    "implementation-plan": [
+        "type", "plan_id", "title", "date_created",
+        "confidence", "source", "tags",
     ],
     "debugging-guide": [
         "type", "title", "date_created", "source", "tags",

@@ -12,6 +12,7 @@ import logging
 import os
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -352,49 +353,122 @@ async def read_output(filename: str, token: str | None = None):
     return {"filename": filename, "content": path.read_text(errors="replace")}
 
 
-# --- Chat (CEO Nova) --------------------------------------------------------
+# --- Chat (CEO Nova) — async job-based pattern ------------------------------
+
+# In-memory job store for long-running chat requests.
+# Jobs expire after JOB_TTL_S to prevent unbounded growth.
+_chat_jobs: dict[str, dict] = {}
+_JOB_TTL_S = 900  # 15 minutes
+_MAX_JOBS = 100
+
+
+def _prune_jobs() -> None:
+    """Remove expired jobs to bound memory usage."""
+    if len(_chat_jobs) <= _MAX_JOBS // 2:
+        return
+    now = time.time()
+    expired = [jid for jid, j in _chat_jobs.items()
+               if now - j["created_at"] > _JOB_TTL_S]
+    for jid in expired:
+        _chat_jobs.pop(jid, None)
+
+
+async def _run_chat_job(job_id: str, message: str) -> None:
+    """Background coroutine that runs the LLM call and stores the result."""
+    try:
+        system_prompt = ""
+        persona_file = BASE / "telegram" / "persona.md"
+        if persona_file.exists():
+            system_prompt = persona_file.read_text()[:4000]
+
+        _conversations.reload_chat(SHARED_CHAT_ID)
+        _conversations.add_user_message(SHARED_CHAT_ID, message)
+
+        history = _conversations.get_history(SHARED_CHAT_ID)
+        context = format_history_for_prompt(history[:-1])
+
+        response = await generate_response(
+            prompt=message,
+            system_prompt=system_prompt,
+            conversation_context=context,
+        )
+
+        _conversations.add_assistant_message(SHARED_CHAT_ID, response)
+
+        _chat_jobs[job_id]["status"] = "completed"
+        _chat_jobs[job_id]["response"] = response
+        _chat_jobs[job_id]["completed_at"] = time.time()
+
+        await _broadcast("chat_response", {
+            "job_id": job_id,
+            "preview": response[:100],
+            "response": response,
+        })
+
+    except Exception as exc:
+        LOG.error("Chat job %s failed: %s", job_id, exc, exc_info=True)
+        _chat_jobs[job_id]["status"] = "failed"
+        _chat_jobs[job_id]["error"] = str(exc)[:500]
+        _chat_jobs[job_id]["completed_at"] = time.time()
+
+        await _broadcast("chat_response", {
+            "job_id": job_id,
+            "error": "Processing failed — please try again.",
+        })
 
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    """Send a message to CEO Nova and get a response.
+    """Submit a message to CEO Nova.
 
-    Uses the same conversation buffer as Telegram so both channels
-    share a single continuous thread.
+    Returns immediately with a job_id. The response is delivered via:
+    1. WebSocket push (event: chat_response, data.job_id + data.response)
+    2. Polling GET /api/chat/jobs/{job_id}
+
+    This prevents browser fetch timeouts on long-running LLM calls.
     """
     _check_token(req.token)
 
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Empty message")
 
-    # Load system prompt (same persona as Telegram)
-    system_prompt = ""
-    persona_file = BASE / "telegram" / "persona.md"
-    if persona_file.exists():
-        system_prompt = persona_file.read_text()[:4000]
+    _prune_jobs()
 
-    # Reload from disk to pick up any Telegram messages since last call
-    _conversations.reload_chat(SHARED_CHAT_ID)
+    job_id = uuid.uuid4().hex[:12]
+    _chat_jobs[job_id] = {
+        "status": "processing",
+        "message": req.message[:500],
+        "response": None,
+        "error": None,
+        "created_at": time.time(),
+        "completed_at": None,
+    }
 
-    # Record user message in shared conversation buffer
-    _conversations.add_user_message(SHARED_CHAT_ID, req.message)
+    # Fire-and-forget the LLM call as a background task
+    asyncio.create_task(_run_chat_job(job_id, req.message))
 
-    # Build conversation context from shared history
-    history = _conversations.get_history(SHARED_CHAT_ID)
-    context = format_history_for_prompt(history[:-1])  # exclude current msg
+    return {"job_id": job_id, "status": "processing"}
 
-    # Generate response using the same LLM function as Telegram
-    response = await generate_response(
-        prompt=req.message,
-        system_prompt=system_prompt,
-        conversation_context=context,
-    )
 
-    # Record assistant response in shared buffer
-    _conversations.add_assistant_message(SHARED_CHAT_ID, response)
+@app.get("/api/chat/jobs/{job_id}")
+async def get_chat_job(job_id: str, token: str | None = None):
+    """Poll for the result of a chat job.
 
-    await _broadcast("chat_response", {"preview": response[:100]})
-    return {"response": response}
+    Returns status: processing | completed | failed.
+    When completed, includes the full response.
+    """
+    _check_token(token)
+
+    job = _chat_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found or expired")
+
+    result: dict = {"job_id": job_id, "status": job["status"]}
+    if job["status"] == "completed":
+        result["response"] = job["response"]
+    elif job["status"] == "failed":
+        result["error"] = job["error"]
+    return result
 
 
 @app.get("/api/chat/history")
