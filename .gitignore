@@ -25,6 +25,9 @@ LOGS/
 *.env
 .env
 
+# MCP config (contains API tokens)
+.mcp.json
+
 # Google Workspace credentials
 .config/nova-core/google/
 
