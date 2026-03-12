@@ -157,8 +157,9 @@ _INJECTION_PATTERNS = [
 
     # System prompt extraction
     (r"(?i)(?:show|reveal|display|print|output|repeat|tell\s+me)"
-     r"\s+(?:your|the)\s+(?:system|initial|original|hidden)"
-     r"\s+(?:prompt|instructions?|message)", 25, "prompt_extraction"),
+     r"\s+(?:\w+\s+){0,3}(?:your|the)\s+"
+     r"(?:(?:system|initial|original|hidden|internal|secret)\s+)+"
+     r"(?:prompt|instructions?|message|rules?)", 25, "prompt_extraction"),
     (r"(?i)what\s+(?:is|are)\s+your\s+(?:system\s+)?(?:instructions?|rules?|prompt)", 15, "prompt_extraction"),
 
     # Delimiter breaking
@@ -168,8 +169,9 @@ _INJECTION_PATTERNS = [
 
     # Indirect injection / data exfiltration
     (r"(?i)(?:send|post|upload|transmit|exfiltrate)"
-     r"\s+(?:the\s+)?(?:data|contents?|secrets?|keys?|tokens?|passwords?)"
-     r"\s+(?:to|via)", 30, "exfiltration_attempt"),
+     r"\s+(?:\w+\s+){0,4}"
+     r"(?:data|contents?|secrets?|keys?|tokens?|passwords?|credentials?|info(?:rmation)?)"
+     r"(?:\s+\w+){0,4}\s+(?:to|via)", 30, "exfiltration_attempt"),
     (r"(?i)(?:curl|wget|fetch|http)\s+(?:https?://)", 15, "url_in_input"),
 
     # Jailbreak keywords
