@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-11T15:50:59Z
+Generated: 2026-03-12T11:28:59Z
 
 ## Overall: HEALTHY
 
@@ -9,7 +9,7 @@ Generated: 2026-03-11T15:50:59Z
 |--------|-------|
 | Active workflows | 0 |
 | Completed workflows | 6 |
-| Failed workflows | 2 |
+| Failed workflows | 1 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
 | Completed delegations | 0 |
@@ -21,7 +21,7 @@ Generated: 2026-03-11T15:50:59Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 120 |
+| Contract successes | 129 |
 | Contract failures | 0 |
 | Contract failure rate | 0.0% |
 | Budget exhaustions | 0 |
@@ -37,12 +37,11 @@ Generated: 2026-03-11T15:50:59Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| 0402_research_skills_capabilities | ? | completed | - |
-| 0404_revise_plan_with_reflection | ? | failed | - |
-| 0414_Can_you_make_sure_all_your_research_and_findings_are_in_nova-vault_memory_system | ? | completed | - |
-| 0417_I_want_it_so_every_heartbeat_Novacore_should_scan_its_codebase_scan_both_memorie | ? | failed | - |
-| hb_proactive_20260310_161521_investigate_stale_pending_tasks | ? | completed | - |
-| hb_proactive_20260311_084946_heartbeat_idle_research_injection | ? | completed | - |
+| 0421_Just_to_make_sure_every_hour_heartbeat_nova-core_scans_its_memory_then_codebase_ | ? | failed | - |
+| 0422_Are_theses_research_reports_being_saved_in_both_memory_systems_ | ? | completed | - |
+| hb_proactive_20260311_205354_research_agent_security_hardening_patterns | ? | completed | - |
+| hb_proactive_20260311_222411_research_mcp_server_ecosystem_2026 | ? | completed | - |
+| research_agent_security_hardening_patterns | ? | completed | - |
 | test_integration | ? | completed | - |
 | test_no_promo | ? | completed | - |
 

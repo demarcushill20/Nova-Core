@@ -4,9 +4,12 @@ Parses raw Telegram messages into canonical action dicts
 per PROTOCOL/telegram_commands.md v1.1.
 
 No file I/O. No side effects. Pure parsing only.
+Input sanitization integrated (Phase 1.1).
 """
 
 import re as _re
+
+from telegram.input_security import sanitize_input
 
 _MAX_MSG_LEN = 4096
 _MAX_TITLE_LEN = 200
@@ -16,7 +19,8 @@ _VALID_MODES = ("compact", "normal", "verbose")
 
 _KNOWN_COMMANDS = frozenset(
     ("run", "status", "last", "get", "tail", "cancel", "mode", "help",
-     "chat", "report", "goals", "briefing")
+     "chat", "report", "goals", "briefing",
+     "kill", "pause", "resume", "readonly", "security", "budget")
 )
 
 
@@ -83,6 +87,9 @@ def _parse_run(rest: str, chat_id: str, ts: float) -> dict:
         body = first_line + ("\n" + body if body else "")
     else:
         title = first_line
+    # Phase 1.1: Sanitize task title (shell metachar neutralization for task-bound text)
+    san = sanitize_input(title, for_task=True)
+    title = san.text
     action = _base("run_task", chat_id, ts)
     action["title"] = title
     action["body"] = body
@@ -229,6 +236,27 @@ def _parse_goals(rest: str, chat_id: str, ts: float) -> dict:
 def _parse_briefing(chat_id: str, ts: float) -> dict:
     """Parse /briefing — generate a system briefing."""
     return _ok(_base("briefing", chat_id, ts))
+
+
+# --- Security commands (Phase 1.2) ---
+
+def _parse_kill(chat_id: str, ts: float) -> dict:
+    return _ok(_base("kill_switch", chat_id, ts) | {"ks_action": "stop"})
+
+def _parse_pause(chat_id: str, ts: float) -> dict:
+    return _ok(_base("kill_switch", chat_id, ts) | {"ks_action": "pause"})
+
+def _parse_resume(chat_id: str, ts: float) -> dict:
+    return _ok(_base("kill_switch", chat_id, ts) | {"ks_action": "resume"})
+
+def _parse_readonly(chat_id: str, ts: float) -> dict:
+    return _ok(_base("kill_switch", chat_id, ts) | {"ks_action": "readonly"})
+
+def _parse_security(chat_id: str, ts: float) -> dict:
+    return _ok(_base("security_status", chat_id, ts))
+
+def _parse_budget(chat_id: str, ts: float) -> dict:
+    return _ok(_base("budget_status", chat_id, ts))
 
 
 # --- Intent classification ---------------------------------------------------
@@ -418,6 +446,12 @@ def parse_message(text: str, chat_id: str, ts: float) -> dict | None:
     if len(text) > _MAX_MSG_LEN:
         return _err(f"Error: message too long (max {_MAX_MSG_LEN} chars)")
 
+    # Phase 1.1: Run input sanitization before any processing
+    san = sanitize_input(text, for_task=False)
+    if san.blocked:
+        return _err(f"Message blocked by security filter: {san.block_reason}")
+    text = san.text  # use sanitized text from here on
+
     # Plain text (no leading /) → classify intent first
     if not text.startswith("/"):
         intent = classify_intent(text)
@@ -461,5 +495,17 @@ def parse_message(text: str, chat_id: str, ts: float) -> dict | None:
         return _parse_goals(rest, chat_id, ts)
     if cmd == "briefing":
         return _parse_briefing(chat_id, ts)
+    if cmd == "kill":
+        return _parse_kill(chat_id, ts)
+    if cmd == "pause":
+        return _parse_pause(chat_id, ts)
+    if cmd == "resume":
+        return _parse_resume(chat_id, ts)
+    if cmd == "readonly":
+        return _parse_readonly(chat_id, ts)
+    if cmd == "security":
+        return _parse_security(chat_id, ts)
+    if cmd == "budget":
+        return _parse_budget(chat_id, ts)
 
     return None  # unreachable but defensive

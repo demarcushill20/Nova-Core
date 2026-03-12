@@ -47,6 +47,7 @@ from telegram.parse import is_memory_persist_request, parse_message  # noqa: E40
 for _mod_name in (  # noqa: E501
     "conversation", "llm", "persona", "delegation", "goals",
     "hardening", "working_memory", "recent_completions", "recap",
+    "input_security",
 ):
     _mod_spec = importlib.util.spec_from_file_location(
         f"telegram.{_mod_name}", os.path.join(_here, "telegram", f"{_mod_name}.py")
@@ -80,6 +81,7 @@ from telegram.hardening import (  # noqa: E402
     RateLimiter,
     ResponseCache,
 )
+from telegram.input_security import sanitize_input  # noqa: E402
 from telegram.llm import format_history_for_prompt, generate_response  # noqa: E402
 from telegram.persona import (  # noqa: E402
     DELEGATION_ACK_PROMPT,
@@ -103,6 +105,23 @@ from telegram.recent_completions import (  # noqa: E402
     record_completion as rc_record_completion,
 )
 from telegram.working_memory import ActiveTask, WorkingMemoryStore  # noqa: E402
+
+# Kill switch — lives outside AI reasoning path
+sys.path.insert(0, _here)
+from nova_kill_switch import (  # noqa: E402
+    MODE_PAUSE,
+    MODE_READONLY,
+    MODE_STOPPED,
+    check_kill_switch,
+    set_mode_file,
+    set_mode_redis,
+)
+from nova_kill_switch import (  # noqa: E402
+    clear_all as ks_clear_all,
+)
+from nova_kill_switch import (  # noqa: E402
+    format_status as ks_format_status,
+)
 
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
@@ -707,17 +726,92 @@ def handle_get_mode(chat_id: str) -> str:
 def _allowed(update: Update) -> bool:
     allowed = os.environ.get("ALLOWED_CHAT_ID", "").strip()
     if not allowed:
-        return True
+        # Phase 1.4: Fail-closed — deny all if no ALLOWED_CHAT_ID configured
+        return False
     try:
         return str(update.effective_chat.id) == str(int(allowed))
     except Exception:
         return False
 
 
+# Phase 1.4: Auth failure rate limiting
+# Block sources with >5 auth failures in 60 seconds
+_AUTH_FAIL_WINDOW = 60  # seconds
+_AUTH_FAIL_THRESHOLD = 5
+_AUTH_FAIL_BLOCK_DURATION = 300  # 5 minutes
+_auth_failures: dict[str, list[float]] = {}  # chat_id -> [timestamps]
+_auth_blocked: dict[str, float] = {}  # chat_id -> blocked_until
+
+
+def _check_auth_rate_limit(chat_id: str) -> bool:
+    """Check if a chat_id is blocked due to repeated auth failures.
+
+    Returns True if the source is blocked and should be silently dropped.
+    """
+    now = time.time()
+
+    # Check if currently blocked
+    blocked_until = _auth_blocked.get(chat_id)
+    if blocked_until and now < blocked_until:
+        return True
+    elif blocked_until and now >= blocked_until:
+        # Block expired — clean up
+        _auth_blocked.pop(chat_id, None)
+        _auth_failures.pop(chat_id, None)
+
+    return False
+
+
+def _record_auth_failure(chat_id: str) -> bool:
+    """Record an auth failure. Returns True if the source is now blocked."""
+    now = time.time()
+    cutoff = now - _AUTH_FAIL_WINDOW
+    timestamps = _auth_failures.get(chat_id, [])
+    timestamps = [t for t in timestamps if t > cutoff]
+    timestamps.append(now)
+    _auth_failures[chat_id] = timestamps
+
+    if len(timestamps) > _AUTH_FAIL_THRESHOLD:
+        _auth_blocked[chat_id] = now + _AUTH_FAIL_BLOCK_DURATION
+        _log.warning(
+            "AUTH_BLOCKED chat_id=%s failures=%d blocked_for=%ds",
+            chat_id, len(timestamps), _AUTH_FAIL_BLOCK_DURATION,
+        )
+        return True
+    return False
+
+
 def _guard(func):
     @functools.wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not _allowed(update):
+            chat_id = update.effective_chat.id if update.effective_chat else "?"
+            chat_id_str = str(chat_id)
+
+            # Phase 1.4: Check auth rate limit — silently drop if blocked
+            if _check_auth_rate_limit(chat_id_str):
+                return  # silently ignore blocked source
+
+            # Phase 1.4: Log auth failures with details
+            user = update.effective_user
+            user_id = user.id if user else "?"
+            username = user.username if user else "?"
+            text_preview = (update.message.text or "")[:80] if update.message else ""
+            _log.warning(
+                "AUTH_DENIED chat_id=%s user_id=%s username=%s text_preview=%r",
+                chat_id, user_id, username, text_preview,
+            )
+            # Phase 2.5: Structured audit log for auth failures
+            try:
+                from utils.audit_log import get_audit_logger
+                _audit = get_audit_logger("telegram")
+                _audit.log_auth_failure(chat_id, user_id, username, text_preview)
+            except ImportError:
+                pass
+
+            # Record failure and check if threshold exceeded
+            _record_auth_failure(chat_id_str)
+
             await update.message.reply_text("Not authorized.")
             return
         return await func(update, context)
@@ -1123,10 +1217,40 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     """Single entry point for all messages. Routes through parse_message."""
     text = update.message.text or ""
     chat_id = str(update.effective_chat.id)
+    user_id = str(update.effective_user.id) if update.effective_user else ""
     ts = time.time()
 
     _log.info("MSG chat=%s len=%d text=%r", chat_id, len(text), text[:80])
     _metrics.record_message()
+
+    # --- Phase 1.2: Kill switch check ---
+    ks_mode = check_kill_switch()
+    if ks_mode == MODE_STOPPED:
+        await update.message.reply_text(
+            "Nova-Core is currently stopped. Use /resume to restart."
+        )
+        return
+    if ks_mode == MODE_PAUSE:
+        await update.message.reply_text(
+            "Nova-Core is paused — not accepting new work. Use /resume to unpause."
+        )
+        return
+
+    # --- Phase 1.1: Input sanitization ---
+    san = sanitize_input(text, user_id=user_id)
+    if san.blocked:
+        _log.warning(
+            "INPUT_BLOCKED chat=%s user=%s reason=%s risk=%d stages=%s",
+            chat_id, user_id, san.block_reason, san.risk_score, san.stages_triggered,
+        )
+        await update.message.reply_text(
+            "I couldn't process that message. Please try rephrasing."
+        )
+        return
+    # Use sanitized text from here on
+    text = san.text
+    if san.warnings:
+        _log.info("INPUT_SANITIZED chat=%s warnings=%s risk=%d", chat_id, san.warnings[:3], san.risk_score)
 
     result = parse_message(text, chat_id, ts)
 
@@ -1213,6 +1337,58 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             reply = _handle_goals(action)
         elif action_type == "briefing":
             reply = await _handle_briefing(chat_id)
+        elif action_type == "kill_switch":
+            ks_action = action.get("ks_action", "")
+            if ks_action == "stop":
+                set_mode_redis(MODE_STOPPED)
+                set_mode_file(MODE_STOPPED)
+                reply = "Nova-Core STOPPED. All operations halted. Use /resume to restart."
+            elif ks_action == "pause":
+                set_mode_redis(MODE_PAUSE, ttl=300)
+                reply = "Nova-Core PAUSED for 5 minutes. No new work accepted. Use /resume to unpause."
+            elif ks_action == "resume":
+                ks_clear_all()
+                reply = "Nova-Core RESUMED. Normal operations restored."
+            elif ks_action == "readonly":
+                set_mode_redis(MODE_READONLY)
+                reply = "Nova-Core in READ-ONLY mode. No writes or executions. Use /resume to restore."
+            else:
+                reply = f"Unknown kill switch action: {ks_action}"
+            _log.info("KILL_SWITCH action=%s by chat=%s", ks_action, chat_id)
+            # Phase 2.5: Audit log kill switch state changes
+            try:
+                from utils.audit_log import get_audit_logger
+                _audit = get_audit_logger("telegram")
+                _audit.log_kill_switch("unknown", ks_action, f"telegram_chat:{chat_id}")
+            except ImportError:
+                pass
+        elif action_type == "security_status":
+            # Phase 4.3: Security dashboard
+            try:
+                from utils.security_monitor import dashboard
+                dashboard.update()
+                reply = dashboard.get_summary_text()
+            except ImportError:
+                reply = f"Security Status:\n{ks_format_status()}"
+        elif action_type == "budget_status":
+            try:
+                from agents.budget_enforcer import budget
+                summary = budget.get_usage_summary()
+                cost = budget.get_cost_summary()
+                lines = [
+                    "Budget Status:",
+                    f"  Daily tokens: {summary['daily']['input_used']:,} / {summary['daily']['input_limit']:,} input",
+                    f"  Daily output: {summary['daily']['output_used']:,} / {summary['daily']['output_limit']:,}",
+                    f"  Today's cost: ${cost['daily_cost']:.2f}",
+                    f"  Monthly cost: ${cost['monthly_cost']:.2f} / ${cost['monthly_limit']:.2f}",
+                ]
+                alerts = budget.check_alerts()
+                if alerts:
+                    lines.append("\nAlerts:")
+                    lines.extend(f"  - {a}" for a in alerts)
+                reply = "\n".join(lines)
+            except ImportError:
+                reply = "Budget tracking: module not loaded"
         else:
             reply = f"Unknown action: {action_type}. Try /help"
     except Exception as exc:

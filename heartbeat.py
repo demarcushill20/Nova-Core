@@ -510,14 +510,14 @@ CHECKLIST_FILE = BASE / "HEARTBEAT_CHECKLIST.md"
 HEARTBEAT_AGENT_LOG = LOGS_DIR / "heartbeat_agent.log"
 
 # Autonomous research cycle configuration
-RESEARCH_TIMEOUT = 600  # 10 minutes for deep research
+RESEARCH_TIMEOUT = 14400  # 4 hours for deep research
 RESEARCH_COOLDOWN_MINUTES = 55  # skip if ran less than 55 min ago
 RESEARCH_COOLDOWN_FILE = STATE_DIR / "last_research_cycle.json"
 RESEARCH_LOG = LOGS_DIR / "research_cycle.log"
 
 # Planning cycle configuration — runs every 3rd active cycle
-PLANNING_TIMEOUT = 600  # 10 minutes for planning
-PLANNING_COOLDOWN_MINUTES = 80  # ~every 3rd heartbeat (90 min)
+PLANNING_TIMEOUT = 14400  # 4 hours for planning
+PLANNING_COOLDOWN_MINUTES = 170  # ~every 3 hours (timer fires every 30 min)
 PLANNING_COOLDOWN_FILE = STATE_DIR / "last_planning_cycle.json"
 PLANNING_LOG = LOGS_DIR / "planning_cycle.log"
 
@@ -1085,12 +1085,44 @@ def _run_research_cycle() -> None:
                 topic = line.lstrip("# ").strip()[:100]
                 break
 
+        # Check vault write outcome from subprocess output
+        response_lower = response.lower()
+        vault_ok = ("vault_write" in response_lower
+                    and ("success" in response_lower or "accepted" in response_lower
+                         or "written" in response_lower))
+        vault_failed = ("vault_write" in response_lower
+                        and ("error" in response_lower or "rejected" in response_lower
+                             or "failed" in response_lower or "invalid" in response_lower))
+        memory_ok = ("upsert_memory" in response_lower
+                     and ("success" in response_lower or "stored" in response_lower))
+
+        # Log persistence outcomes independently
+        if vault_ok:
+            _log_research("VAULT_WRITE: success")
+        elif vault_failed:
+            _log_research("VAULT_WRITE: FAILED — check vault audit log")
+        else:
+            _log_research("VAULT_WRITE: unknown (not detected in output)")
+
+        if memory_ok:
+            _log_research("FUSION_MEMORY: success")
+        else:
+            _log_research("FUSION_MEMORY: unknown (not detected in output)")
+
         _log_research(f"COMPLETED: {topic}")
         _update_research_cooldown(topic, success=True)
         print(f"[research-cycle] Completed: {topic}")
 
-        # Notify via Telegram
-        _send_telegram(f"🔬 Research Cycle Complete:\n{topic}")
+        # Build status summary for notification
+        sinks = []
+        if vault_ok:
+            sinks.append("vault ✓")
+        elif vault_failed:
+            sinks.append("vault ✗")
+        if memory_ok:
+            sinks.append("memory ✓")
+        sink_str = f" [{', '.join(sinks)}]" if sinks else ""
+        _send_telegram(f"🔬 Research Cycle Complete:\n{topic}{sink_str}")
 
     except subprocess.TimeoutExpired:
         _log_research(f"TIMEOUT after {RESEARCH_TIMEOUT}s")
@@ -1292,22 +1324,23 @@ Call `upsert_memory` with:
 STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY)
 ═══════════════════════════════════════════════════════════════
 
-Call `vault_write` with:
-- path: "00-inbox/plan-nova-core-{date_str}.md"
+Call `vault_write` with EXACTLY this frontmatter (do NOT change the type or source):
+- path: "00-inbox/plan-nova-core-{stamp}.md"
 - frontmatter:
-    type: "research-summary"
-    research_id: "plan-nova-core-{date_str}"
+    type: "implementation-plan"
+    plan_id: "plan-nova-core-{stamp}"
     title: "Nova-Core Enhancement Plan"
-    topic: "implementation-planning"
-    date_researched: "{date_str}"
-    sources_count: 0
+    date_created: "{date_str}"
     confidence: "high"
     source: "nova-core-memory"
     tags:
-      - "#type/research"
+      - "#type/plan"
       - "planning"
       - "heartbeat-planning"
 - body: Full plan content
+
+CRITICAL: You MUST use type: "implementation-plan" and source: "nova-core-memory".
+Any other values will be rejected by schema validation.
 
 ═══════════════════════════════════════════════════════════════
 STEP 7: SELF-CHECK
@@ -1375,11 +1408,44 @@ def _run_planning_cycle() -> None:
                 plan_title = line.lstrip("# ").strip()[:100]
                 break
 
+        # Check vault write outcome from subprocess output
+        response_lower = response.lower()
+        vault_ok = ("vault_write" in response_lower
+                    and ("success" in response_lower or "accepted" in response_lower
+                         or "written" in response_lower))
+        vault_failed = ("vault_write" in response_lower
+                        and ("error" in response_lower or "rejected" in response_lower
+                             or "failed" in response_lower or "invalid" in response_lower))
+        memory_ok = ("upsert_memory" in response_lower
+                     and ("success" in response_lower or "stored" in response_lower))
+
+        # Log persistence outcomes independently
+        if vault_ok:
+            _log_planning("VAULT_WRITE: success")
+        elif vault_failed:
+            _log_planning("VAULT_WRITE: FAILED — check vault audit log")
+        else:
+            _log_planning("VAULT_WRITE: unknown (not detected in output)")
+
+        if memory_ok:
+            _log_planning("FUSION_MEMORY: success")
+        else:
+            _log_planning("FUSION_MEMORY: unknown (not detected in output)")
+
         _log_planning(f"COMPLETED: {plan_title}")
         _update_planning_cooldown(plan_title, success=True)
         print(f"[planning-cycle] Completed: {plan_title}")
 
-        _send_telegram(f"📋 Planning Cycle Complete:\n{plan_title}")
+        # Build status summary for notification
+        sinks = []
+        if vault_ok:
+            sinks.append("vault ✓")
+        elif vault_failed:
+            sinks.append("vault ✗")
+        if memory_ok:
+            sinks.append("memory ✓")
+        sink_str = f" [{', '.join(sinks)}]" if sinks else ""
+        _send_telegram(f"📋 Planning Cycle Complete:\n{plan_title}{sink_str}")
 
     except subprocess.TimeoutExpired:
         _log_planning(f"TIMEOUT after {PLANNING_TIMEOUT}s")
@@ -1401,6 +1467,19 @@ def main() -> int:
     """Run all health checks, write HEARTBEAT.md, alert if unhealthy."""
     print(f"[heartbeat] Starting health check at "
           f"{datetime.now(timezone.utc).isoformat()}")
+
+    # --- Phase 1.2: Kill switch + dead man's switch ---
+    try:
+        from nova_kill_switch import MODE_RUN, MODE_STOPPED, check_kill_switch, heartbeat_alive
+        heartbeat_alive()  # Refresh dead man's switch TTL (45 min)
+        ks_mode = check_kill_switch()
+        if ks_mode == MODE_STOPPED:
+            print(f"[heartbeat] Kill switch ACTIVE (mode={ks_mode}) — skipping all work")
+            return 0
+        if ks_mode != MODE_RUN:
+            print(f"[heartbeat] Kill switch mode={ks_mode} — running health checks only")
+    except Exception as e:
+        print(f"[heartbeat] Kill switch check failed (non-fatal): {e}")
 
     checks = []
 
@@ -1481,15 +1560,17 @@ def main() -> int:
     except Exception as e:
         print(f"[heartbeat-agent] Failed (non-fatal): {e}")
 
-    # --- Autonomous cycles: planning (every ~3rd) or research ---
-    # Planning takes priority when its cooldown is met; otherwise research runs.
+    # --- Autonomous cycles: research (hourly) + planning (every 3 hours) ---
+    # Both run independently when their cooldowns are met.
     try:
-        if _planning_cooldown_ok():
-            _run_planning_cycle()
-        else:
-            _run_research_cycle()
+        _run_research_cycle()
     except Exception as e:
-        print(f"[autonomous-cycle] Failed (non-fatal): {e}")
+        print(f"[research-cycle] Failed (non-fatal): {e}")
+
+    try:
+        _run_planning_cycle()
+    except Exception as e:
+        print(f"[planning-cycle] Failed (non-fatal): {e}")
 
     # Append to heartbeat log
     LOGS_DIR.mkdir(parents=True, exist_ok=True)

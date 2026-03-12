@@ -41,13 +41,23 @@ async def generate_response(
     Returns:
         Claude's response text, or an error fallback string.
     """
-    # Build the full prompt with context
+    # Phase 1.1: Import delimiter defense
+    try:
+        from telegram.input_security import INSTRUCTION_HIERARCHY, wrap_user_input
+        wrapped_prompt = wrap_user_input(prompt)
+    except ImportError:
+        wrapped_prompt = prompt
+        INSTRUCTION_HIERARCHY = ""
+
+    # Build the full prompt with context + instruction hierarchy
     parts: list[str] = []
     if system_prompt:
         parts.append(system_prompt)
+    if INSTRUCTION_HIERARCHY:
+        parts.append(INSTRUCTION_HIERARCHY)
     if conversation_context:
         parts.append(f"RECENT CONVERSATION:\n{conversation_context}")
-    parts.append(f"USER MESSAGE:\n{prompt}")
+    parts.append(f"USER MESSAGE:\n{wrapped_prompt}")
     full_prompt = "\n\n".join(parts)
 
     cmd = [CLAUDE_BIN, "-p", "--model", MODEL, "--dangerously-skip-permissions"]
@@ -70,6 +80,16 @@ async def generate_response(
     child_env = os.environ.copy()
     child_env.pop("CLAUDECODE", None)
 
+    # Phase 2.2: Budget pre-flight check
+    try:
+        from agents.budget_enforcer import budget
+        can_go, budget_msg = budget.can_proceed(estimated_tokens=len(prompt) // 4)
+        if not can_go:
+            _log.warning("BUDGET_EXCEEDED: %s", budget_msg)
+            return f"Budget limit reached: {budget_msg}. Will resume next period."
+    except ImportError:
+        pass
+
     _log.info("LLM call: prompt_len=%d timeout=%ds", len(prompt), CONVERSATION_TIMEOUT)
 
     try:
@@ -91,6 +111,42 @@ async def generate_response(
         if not response:
             _log.warning("Claude CLI returned empty response")
             return "Hmm, I didn't get a response back. Could you try rephrasing?"
+
+        # Phase 2.2: Record token usage (estimate from char counts)
+        try:
+            from agents.budget_enforcer import budget
+            budget.record_usage(
+                input_tokens=len(prompt) // 4,
+                output_tokens=len(response) // 4,
+                model=MODEL,
+            )
+        except ImportError:
+            pass
+
+        # Phase 2.4: Redact secrets from LLM response before sending
+        try:
+            from utils.secrets import redact_text
+            response = redact_text(response)
+        except ImportError:
+            pass
+
+        # Phase 3.2: DLP gate — scan outbound response
+        try:
+            from utils.dlp_gate import dlp
+            response = dlp.scan_and_redact(response, context="telegram_llm")
+        except ImportError:
+            pass
+
+        # Phase 3.3: LLM Guard output scan
+        try:
+            from telegram.llm_guard_middleware import scan_output
+            out_result = scan_output(response)
+            if out_result.action == "block":
+                _log.warning("LLM_GUARD_OUTPUT_BLOCKED: findings=%s", out_result.findings)
+                return "I generated a response but it was flagged by security scanning. Let me try again differently."
+        except ImportError:
+            pass
+
         _log.info("LLM response: len=%d", len(response))
         return response
 

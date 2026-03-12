@@ -1,17 +1,17 @@
 [Unit]
-Description=NovaCore Telegram Bridge (Telegram -> TASKS)
-After=network.target
+Description=NovaCore Watcher/Dispatcher (TASKS -> Claude)
+After=network-online.target
 
 [Service]
 Type=simple
 User=nova
 WorkingDirectory=/home/nova/nova-core
 Environment=PYTHONUNBUFFERED=1
-EnvironmentFile=/etc/novacore/telegram.env
-ExecStart=/home/nova/nova-core/.venv/bin/python /home/nova/nova-core/telegram_bot.py
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 /home/nova/nova-core/watcher.py
 Restart=always
-RestartSec=10
-TimeoutStopSec=20
+RestartSec=3
+EnvironmentFile=/etc/novacore/telegram.env
 
 # --- Security hardening (Phase 1.3) ---
 # Filesystem restrictions
@@ -46,12 +46,12 @@ ProcSubset=pid
 RestrictRealtime=yes
 LockPersonality=yes
 
-# Network (required for Telegram API + Anthropic API)
+# Network (required for Claude CLI + APIs)
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 
 # Resource limits
-MemoryMax=2G
-TasksMax=256
+MemoryMax=4G
+TasksMax=512
 LimitNOFILE=4096
 
 [Install]

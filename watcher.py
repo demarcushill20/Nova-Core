@@ -22,9 +22,11 @@ from agents.memory_engine import (
     retrieve_related_patterns,
 )
 from agents.session_manager import SessionManager
+from nova_kill_switch import MODE_RUN, check_kill_switch
 from tools.contracts import validate_contract
 from tools.skills import load_skills, render_append_prompt, select_skills
 from tools.task_classifier import classify_and_route
+from utils.task_validator import audit_task_execution, validate_task_content
 
 # --- Configuration ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -37,7 +39,7 @@ CANCEL_DIR = STATE_DIR / "cancel"
 RUNNING_DIR = STATE_DIR / "running"
 LOG_FILE = LOGS_DIR / "watcher.log"
 POLL_INTERVAL = 60   # seconds between scans
-TASK_TIMEOUT = 300   # max seconds per task execution
+TASK_TIMEOUT = 14400  # max seconds per task execution (4 hours)
 ARTIFACT_WINDOW = 600  # seconds — OUTPUT file must be this recent
 MAX_SUPERVISOR_ATTEMPTS = 2  # total attempts per task (1 original + up to 1 retry)
 
@@ -568,6 +570,22 @@ def dispatch(task_path: Path):
     task_name = task_path.name
     stem = _task_stem(task_name)
 
+    # --- Phase 1.2: Kill switch check ---
+    ks_mode = check_kill_switch()
+    if ks_mode != MODE_RUN:
+        logger.info("KILL_SWITCH: mode=%s — skipping task %s", ks_mode, stem)
+        return
+
+    # --- Phase 2.2: Budget check before spawning worker ---
+    try:
+        from agents.budget_enforcer import budget
+        can_go, budget_msg = budget.can_proceed()
+        if not can_go:
+            logger.warning("BUDGET_EXCEEDED: %s — deferring task %s", budget_msg, stem)
+            return
+    except ImportError:
+        pass
+
     # --- Guard: skip if already dispatched or in-progress ---
     if task_name in _dispatched:
         return
@@ -607,6 +625,19 @@ def dispatch(task_path: Path):
     except Exception as exc:
         logger.warning("Could not read task file for skill selection: %s", exc)
         task_text = ""
+
+    # --- Phase 1.5: Task content validation ---
+    validation = validate_task_content(task_text, task_stem=stem)
+    if validation["blocked"]:
+        logger.warning("TASK_BLOCKED: %s — risk_score=%d risks=%s",
+                       stem, validation["risk_score"],
+                       [r["name"] for r in validation["risks"]])
+        audit_task_execution(stem, task_text, validation, execution_mode="blocked")
+        failed_path = inprogress_path.with_name(f"{stem}.md.failed")
+        inprogress_path.rename(failed_path)
+        return
+    audit_task_execution(stem, task_text, validation,
+                        classification="pre_validation", execution_mode="worker")
 
     # --- Task classification & routing ---
     routing = classify_and_route(task_text)

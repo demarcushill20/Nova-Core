@@ -8,7 +8,48 @@ ExecStart=/usr/bin/python3 /home/nova/nova-core/heartbeat.py
 WorkingDirectory=/home/nova/nova-core
 User=nova
 EnvironmentFile=/etc/novacore/telegram.env
-TimeoutStartSec=60
+TimeoutStartSec=300
+
+# --- Security hardening (Phase 1.3) ---
+# Filesystem restrictions
+ProtectSystem=strict
+ProtectHome=tmpfs
+ReadWritePaths=/home/nova/nova-core
+ReadWritePaths=/home/nova/nova-vault
+ReadWritePaths=/tmp
+ReadOnlyPaths=/etc/novacore
+PrivateTmp=yes
+PrivateDevices=yes
+
+# Privilege restrictions
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# System call filtering
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @reboot @swap @clock @module @raw-io @obsolete @debug
+
+# Namespace / kernel restrictions
+RestrictNamespaces=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictRealtime=yes
+LockPersonality=yes
+
+# Network (required for Telegram alerts + APIs)
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Resource limits
+MemoryMax=2G
+TasksMax=256
+LimitNOFILE=4096
 
 [Install]
 WantedBy=multi-user.target
