@@ -5,15 +5,15 @@ Provides tracing, cost tracking, and prompt versioning for all Claude CLI calls.
 Uses Langfuse Cloud free tier (50k observations/month) until self-hosting is justified.
 
 Setup:
-  1. Sign up at https://cloud.langfuse.com (free tier)
+  1. Sign up at https://us.cloud.langfuse.com (free tier)
   2. Create a project, get public + secret keys
   3. Add to /etc/novacore/langfuse.env:
        LANGFUSE_PUBLIC_KEY=pk-lf-...
        LANGFUSE_SECRET_KEY=sk-lf-...
-       LANGFUSE_HOST=https://cloud.langfuse.com
+       LANGFUSE_HOST=https://us.cloud.langfuse.com
 
 Usage:
-  from utils.langfuse_tracing import get_langfuse, trace_llm_call
+  from utils.langfuse_tracing import get_langfuse, trace_event, flush
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def get_langfuse():
         return Langfuse(
             public_key=public_key,
             secret_key=secret_key,
-            host=os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+            host=os.environ.get("LANGFUSE_HOST", "https://us.cloud.langfuse.com"),
         )
     except Exception:
         return None
@@ -62,47 +62,28 @@ def trace_llm_call(
     output_text: str,
     model: str = "claude-sonnet-4-20250514",
     metadata: dict | None = None,
-    tags: list[str] | None = None,
 ):
     """Record an LLM call trace in Langfuse.
 
     Gracefully no-ops if Langfuse is not configured.
+    Uses Langfuse v4 SDK (start_observation as_type="generation").
     """
     lf = get_langfuse()
     if lf is None:
         return None
 
-    trace = lf.trace(
-        name=name,
-        metadata=metadata or {},
-        tags=tags or ["nova-core"],
-    )
-
-    trace.generation(
-        name=f"{name}_generation",
-        model=model,
-        input=input_text,
-        output=output_text,
-        metadata=metadata or {},
-    )
-
-    return trace
-
-
-def trace_task(task_name: str, metadata: dict | None = None):
-    """Create a trace span for a NovaCore task execution.
-
-    Returns a trace object for adding child spans, or None if not configured.
-    """
-    lf = get_langfuse()
-    if lf is None:
+    try:
+        obs = lf.start_observation(
+            name=name,
+            as_type="generation",
+            input=input_text,
+            output=output_text,
+            model=model,
+            metadata=metadata or {},
+        )
+        return obs
+    except Exception:
         return None
-
-    return lf.trace(
-        name=f"task:{task_name}",
-        metadata=metadata or {},
-        tags=["nova-core", "task"],
-    )
 
 
 def trace_event(
@@ -112,7 +93,7 @@ def trace_event(
     level: str = "info",
     **data,
 ):
-    """Send a structured event to Langfuse as a trace span.
+    """Send a structured event to Langfuse.
 
     Called automatically by StructuredLogger when Langfuse is configured.
     Gracefully no-ops otherwise.
@@ -121,13 +102,36 @@ def trace_event(
     if lf is None:
         return None
 
-    trace = lf.trace(
-        name=event_type,
-        id=trace_id or None,
-        metadata={"component": component, "level": level, **data},
-        tags=["nova-core", component] if component else ["nova-core"],
-    )
-    return trace
+    try:
+        meta = {"component": component, "level": level, **data}
+        if trace_id:
+            meta["trace_id"] = trace_id
+        event = lf.create_event(
+            name=event_type,
+            metadata=meta,
+            level=level.upper() if level in ("warn", "error") else None,
+        )
+        return event
+    except Exception:
+        return None
+
+
+def trace_task(task_name: str, metadata: dict | None = None):
+    """Create a trace span for a NovaCore task execution.
+
+    Returns an observation object for adding child spans, or None.
+    """
+    lf = get_langfuse()
+    if lf is None:
+        return None
+
+    try:
+        return lf.start_observation(
+            name=f"task:{task_name}",
+            metadata=metadata or {},
+        )
+    except Exception:
+        return None
 
 
 def flush():
