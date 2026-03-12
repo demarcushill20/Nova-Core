@@ -1,6 +1,7 @@
 ---
 name: context7-docs
-description: "Retrieve version-specific library documentation via Context7 MCP to eliminate hallucinated API references. Auto-invoked when tasks require library docs, code generation with specific APIs, or setup/configuration steps."
+description: "Retrieve version-specific library documentation via Context7 MCP to eliminate hallucinated API references. Use when writing code that imports any library, answering 'how do I use X?', debugging API errors, or generating setup/config steps — even if the user doesn't explicitly ask for docs. Prefer this over guessing API signatures."
+argument-hint: "[library-name] [question]"
 disable-model-invocation: false
 allowed-tools:
   - mcp__context7__resolve-library-id

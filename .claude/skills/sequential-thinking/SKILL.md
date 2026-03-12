@@ -1,6 +1,7 @@
 ---
 name: sequential-thinking
-description: "Structured step-by-step reasoning for complex problems using the Sequential Thinking MCP server. Provides auditable thought chains with branching, revision, and dynamic extension. Invoke explicitly via /sequential-thinking for hard problems."
+description: "Structured step-by-step reasoning for complex problems using the Sequential Thinking MCP server. Use when a problem has multiple trade-offs, competing approaches, or requires systematic elimination — architecture decisions, complex debugging, multi-phase planning, risk analysis. Also use when the user says 'think through', 'break this down', or 'reason about'."
+argument-hint: "[problem-description]"
 disable-model-invocation: false
 allowed-tools:
   - mcp__sequential-thinking__sequentialthinking

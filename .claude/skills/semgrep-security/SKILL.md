@@ -1,6 +1,7 @@
 ---
 name: semgrep-security
-description: "Static security scanning on code using Semgrep MCP. Detects vulnerabilities, code smells, and anti-patterns in generated or existing code. Auto-invoked after writing security-sensitive code or when reviewing code for vulnerabilities."
+description: "Static security scanning on code using Semgrep MCP. Detects vulnerabilities, code smells, and anti-patterns. Use after writing any code that handles auth, user input, crypto, secrets, network requests, or file I/O. Also use when the user asks to scan, audit, review, or check code for security issues, OWASP compliance, or CVEs."
+argument-hint: "[file-or-directory] [scope: quick|standard|deep]"
 disable-model-invocation: false
 allowed-tools:
   - mcp__semgrep__security_check
