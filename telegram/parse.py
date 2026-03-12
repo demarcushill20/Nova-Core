@@ -9,7 +9,19 @@ Input sanitization integrated (Phase 1.1).
 
 import re as _re
 
-from telegram.input_security import sanitize_input
+import importlib.util as _imputil
+import pathlib as _pathlib
+import sys as _sys
+
+# Import from local telegram/input_security.py (not python-telegram-bot)
+_input_sec_path = _pathlib.Path(__file__).parent / "input_security.py"
+_input_sec_spec = _imputil.spec_from_file_location(
+    "nova_input_security", _input_sec_path
+)
+_input_sec_mod = _imputil.module_from_spec(_input_sec_spec)
+_sys.modules["nova_input_security"] = _input_sec_mod
+_input_sec_spec.loader.exec_module(_input_sec_mod)
+sanitize_input = _input_sec_mod.sanitize_input
 
 _MAX_MSG_LEN = 4096
 _MAX_TITLE_LEN = 200
