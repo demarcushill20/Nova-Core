@@ -28,7 +28,9 @@ from tools.skills import load_skills, render_append_prompt, select_skills
 from tools.task_classifier import classify_and_route
 from utils.audit_log import get_audit_logger
 from utils.dlp_gate import dlp
+from utils.structured_log import slog
 from utils.task_validator import audit_task_execution, validate_task_content
+from utils.trace_context import TraceContext
 
 # --- Audit logger for watcher lifecycle events ---
 _audit = get_audit_logger("watcher")
@@ -43,7 +45,7 @@ STATE_DIR = BASE_DIR / "STATE"
 CANCEL_DIR = STATE_DIR / "cancel"
 RUNNING_DIR = STATE_DIR / "running"
 LOG_FILE = LOGS_DIR / "watcher.log"
-POLL_INTERVAL = 60   # seconds between scans
+POLL_INTERVAL = 60  # seconds between scans
 TASK_TIMEOUT = 14400  # max seconds per task execution (4 hours)
 ARTIFACT_WINDOW = 600  # seconds — OUTPUT file must be this recent
 MAX_SUPERVISOR_ATTEMPTS = 2  # total attempts per task (1 original + up to 1 retry)
@@ -52,26 +54,123 @@ METRICS_FILE = STATE_DIR / "metrics.json"
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
 
 # Stopwords for keyword extraction (memory retrieval)
-_STOPWORDS = frozenset([
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
-    "should", "may", "might", "can", "could", "of", "in", "to", "for",
-    "on", "with", "at", "by", "from", "as", "into", "through", "during",
-    "before", "after", "above", "below", "between", "out", "up", "down",
-    "off", "over", "under", "again", "further", "then", "once", "here",
-    "there", "when", "where", "why", "how", "all", "each", "every",
-    "both", "few", "more", "most", "other", "some", "such", "no", "not",
-    "only", "own", "same", "so", "than", "too", "very", "and", "but",
-    "or", "nor", "if", "this", "that", "these", "those", "it", "its",
-    "my", "your", "his", "her", "our", "their", "what", "which", "who",
-    "whom", "please", "also", "just", "about", "using", "use", "used",
-    "create", "make",
-])
+_STOPWORDS = frozenset(
+    [
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "shall",
+        "should",
+        "may",
+        "might",
+        "can",
+        "could",
+        "of",
+        "in",
+        "to",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "through",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
+        "between",
+        "out",
+        "up",
+        "down",
+        "off",
+        "over",
+        "under",
+        "again",
+        "further",
+        "then",
+        "once",
+        "here",
+        "there",
+        "when",
+        "where",
+        "why",
+        "how",
+        "all",
+        "each",
+        "every",
+        "both",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "no",
+        "not",
+        "only",
+        "own",
+        "same",
+        "so",
+        "than",
+        "too",
+        "very",
+        "and",
+        "but",
+        "or",
+        "nor",
+        "if",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "my",
+        "your",
+        "his",
+        "her",
+        "our",
+        "their",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "please",
+        "also",
+        "just",
+        "about",
+        "using",
+        "use",
+        "used",
+        "create",
+        "make",
+    ]
+)
 
 
 def _extract_keywords(task_text: str, max_keywords: int = 10) -> list[str]:
     """Extract meaningful keywords from task text for memory retrieval."""
     import re
+
     words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", task_text.lower())
     seen = set()
     keywords = []
@@ -82,6 +181,7 @@ def _extract_keywords(task_text: str, max_keywords: int = 10) -> list[str]:
             if len(keywords) >= max_keywords:
                 break
     return keywords
+
 
 DISPATCH_PROMPT_TEMPLATE = """\
 You are the NovaCore Executive Agent. Execute the task described below.
@@ -155,8 +255,7 @@ _session_mgr = SessionManager()
 logger = logging.getLogger("watcher")
 logger.setLevel(logging.INFO)
 
-formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s",
-                              datefmt="%Y-%m-%d %H:%M:%S")
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
 file_handler = logging.FileHandler(LOG_FILE)
 file_handler.setFormatter(formatter)
@@ -201,8 +300,7 @@ def _find_recent_output(task_stem: str) -> Path | None:
         return None
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=ARTIFACT_WINDOW)
     matches = sorted(
-        (p for p in OUTPUT_DIR.iterdir()
-         if task_stem in p.name and p.suffix == ".md"),
+        (p for p in OUTPUT_DIR.iterdir() if task_stem in p.name and p.suffix == ".md"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -222,7 +320,8 @@ def get_pending_tasks() -> list[Path]:
     if not TASKS_DIR.exists():
         return []
     return sorted(
-        p for p in TASKS_DIR.iterdir()
+        p
+        for p in TASKS_DIR.iterdir()
         if p.suffix == ".md"
         and not p.name.endswith(".md.done")
         and not p.name.endswith(".md.failed")
@@ -270,15 +369,12 @@ def _update_metrics(event: str, tool_name: str | None = None):
         key = tool_name or "unknown"
         data[event][key] = data[event].get(key, 0) + 1
 
-        METRICS_FILE.write_text(
-            json.dumps(data, indent=2) + "\n", encoding="utf-8"
-        )
+        METRICS_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except Exception:
         pass  # Never throw, never block
 
 
-def _create_retry_task(stem: str, output_file: Path, errors: list[str],
-                       warnings: list[str]) -> Path:
+def _create_retry_task(stem: str, output_file: Path, errors: list[str], warnings: list[str]) -> Path:
     """Create a retry TASK file that asks the agent to repair the contract.
 
     Returns the path to the created retry task file.
@@ -379,8 +475,7 @@ def verify_artifacts(stem: str) -> tuple[bool, list[str]]:
     return passed, messages
 
 
-def _maybe_create_retry(stem: str, output_file: Path,
-                        contract_msgs: list[str]):
+def _maybe_create_retry(stem: str, output_file: Path, contract_msgs: list[str]):
     """Create a retry task if this is the first contract failure for stem.
 
     Does nothing if:
@@ -401,10 +496,8 @@ def _maybe_create_retry(stem: str, output_file: Path,
             return
 
     # Extract errors and warnings from contract messages
-    errors = [m.replace("  contract error: ", "")
-              for m in contract_msgs if m.startswith("  contract error:")]
-    warnings = [m.replace("  contract warning: ", "")
-                for m in contract_msgs if m.startswith("  contract warning:")]
+    errors = [m.replace("  contract error: ", "") for m in contract_msgs if m.startswith("  contract error:")]
+    warnings = [m.replace("  contract warning: ", "") for m in contract_msgs if m.startswith("  contract warning:")]
 
     retry_path = _create_retry_task(stem, output_file, errors, warnings)
     _update_metrics("retry_issued", stem)
@@ -486,9 +579,7 @@ def _execute_worker(
     Returns the process exit code (-1 on timeout/error).
     Appends to *worker_log*; on attempt > 1, writes a retry separator first.
     """
-    logger.info(
-        "EXECUTION STARTED: %s (attempt %d/%d)", stem, attempt, max_attempts
-    )
+    logger.info("EXECUTION STARTED: %s (attempt %d/%d)", stem, attempt, max_attempts)
     start_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     exit_code = -1
     pid_file = RUNNING_DIR / f"{stem}.pid"
@@ -503,8 +594,7 @@ def _execute_worker(
         wf.write(f"=== START: {start_utc} ===\n")
         wf.write(f"=== SKILLS: {', '.join(selected_names) or '(none)'} ===\n")
         wf.write(
-            f"=== COMMAND: {CLAUDE_BIN} -p --verbose"
-            f" --dangerously-skip-permissions{skill_flag_note} <prompt> ===\n\n"
+            f"=== COMMAND: {CLAUDE_BIN} -p --verbose --dangerously-skip-permissions{skill_flag_note} <prompt> ===\n\n"
         )
 
     try:
@@ -584,6 +674,7 @@ def dispatch(task_path: Path):
     # --- Phase 2.2: Budget check before spawning worker ---
     try:
         from agents.budget_enforcer import budget
+
         can_go, budget_msg = budget.can_proceed()
         if not can_go:
             logger.warning("BUDGET_EXCEEDED: %s — deferring task %s", budget_msg, stem)
@@ -604,10 +695,11 @@ def dispatch(task_path: Path):
     task_path.rename(inprogress_path)
     logger.info("TASK DETECTED: %s → renamed to %s", task_name, inprogress_path.name)
 
-    # --- Audit: task pickup ---
+    # --- Trace context + audit: task pickup ---
     task_correlation_id = f"task_{stem}"
-    _audit.log("task.pickup", {"task_stem": stem, "task_file": task_name},
-               correlation_id=task_correlation_id)
+    trace_ctx = TraceContext.new("watcher", task=stem)
+    _audit.log("task.pickup", {"task_stem": stem, "task_file": task_name}, correlation_id=task_correlation_id)
+    slog.event("task.pickup", trace_ctx, stem=stem, file=task_name)
 
     # --- Cancel check: before running Claude, see if cancel was requested ---
     cancel_marker = CANCEL_DIR / f"{stem}.cancel"
@@ -631,7 +723,7 @@ def dispatch(task_path: Path):
 
     # --- Read task text for skill selection (cap 50 KB) ---
     try:
-        task_text = inprogress_path.read_text(encoding="utf-8")[:50 * 1024]
+        task_text = inprogress_path.read_text(encoding="utf-8")[: 50 * 1024]
     except Exception as exc:
         logger.warning("Could not read task file for skill selection: %s", exc)
         task_text = ""
@@ -639,35 +731,37 @@ def dispatch(task_path: Path):
     # --- Phase 1.5: Task content validation ---
     validation = validate_task_content(task_text, task_stem=stem)
     if validation["blocked"]:
-        logger.warning("TASK_BLOCKED: %s — risk_score=%d risks=%s",
-                       stem, validation["risk_score"],
-                       [r["name"] for r in validation["risks"]])
+        logger.warning(
+            "TASK_BLOCKED: %s — risk_score=%d risks=%s",
+            stem,
+            validation["risk_score"],
+            [r["name"] for r in validation["risks"]],
+        )
         audit_task_execution(stem, task_text, validation, execution_mode="blocked")
         failed_path = inprogress_path.with_name(f"{stem}.md.failed")
         inprogress_path.rename(failed_path)
         return
-    audit_task_execution(stem, task_text, validation,
-                        classification="pre_validation", execution_mode="worker")
+    audit_task_execution(stem, task_text, validation, classification="pre_validation", execution_mode="worker")
 
     # --- Phase 3.2: DLP scan on task input ---
     dlp_result = dlp.scan(task_text, context="task_input")
     if dlp_result.action == "block":
-        logger.warning("DLP_BLOCKED: %s — findings=%s",
-                       stem, [f.pattern_name for f in dlp_result.findings])
-        _audit.log("task.dlp_blocked",
-                   {"task_stem": stem,
-                    "findings": [f.pattern_name for f in dlp_result.findings]},
-                   correlation_id=task_correlation_id)
+        logger.warning("DLP_BLOCKED: %s — findings=%s", stem, [f.pattern_name for f in dlp_result.findings])
+        _audit.log(
+            "task.dlp_blocked",
+            {"task_stem": stem, "findings": [f.pattern_name for f in dlp_result.findings]},
+            correlation_id=task_correlation_id,
+        )
         failed_path = inprogress_path.with_name(f"{stem}.md.failed")
         inprogress_path.rename(failed_path)
         return
     if dlp_result.action == "redact":
-        logger.info("DLP_REDACT: %s — redacted %d finding(s)",
-                    stem, len(dlp_result.findings))
-        _audit.log("task.dlp_redacted",
-                   {"task_stem": stem,
-                    "findings": [f.pattern_name for f in dlp_result.findings]},
-                   correlation_id=task_correlation_id)
+        logger.info("DLP_REDACT: %s — redacted %d finding(s)", stem, len(dlp_result.findings))
+        _audit.log(
+            "task.dlp_redacted",
+            {"task_stem": stem, "findings": [f.pattern_name for f in dlp_result.findings]},
+            correlation_id=task_correlation_id,
+        )
         task_text = dlp_result.redacted_text
 
     # --- Task classification & routing ---
@@ -685,12 +779,15 @@ def dispatch(task_path: Path):
     if routing["use_orchestrator"]:
         # Rollout pre-flight: health + rate-limit gating
         from agents.production_hardening import GracefulDegradation
+
         gd = GracefulDegradation()
         preflight = gd.check_orchestrator_available(routing["task_class"])
         if preflight.action != "proceed":
             logger.info(
                 "ROLLOUT GATE: %s → %s (reason=%s, fallback=%s)",
-                stem, preflight.action, preflight.reason,
+                stem,
+                preflight.action,
+                preflight.reason,
                 preflight.fallback or "worker",
             )
             routing["use_orchestrator"] = False
@@ -700,6 +797,7 @@ def dispatch(task_path: Path):
         logger.info("ORCHESTRATOR PATH: %s (class=%s, stage=%s)", stem, routing["task_class"], stage or "default")
         try:
             from tools.orchestrator_adapter import execute_via_orchestrator
+
             orch_result = execute_via_orchestrator(stem, task_text, inprogress_path, routing=routing)
             # Verify artifacts using standard gate
             passed, messages = verify_artifacts(stem)
@@ -744,8 +842,9 @@ def dispatch(task_path: Path):
     append_prompt_content = render_append_prompt(selected)
     if append_prompt_content:
         skill_injection_path.write_text(append_prompt_content, encoding="utf-8")
-        logger.info("SKILL INJECTION: %s (%d bytes)",
-                     skill_injection_path.name, len(append_prompt_content.encode("utf-8")))
+        logger.info(
+            "SKILL INJECTION: %s (%d bytes)", skill_injection_path.name, len(append_prompt_content.encode("utf-8"))
+        )
 
     # --- Session tracking (Phase 5) ---
     _session_mgr.record_task_start(stem)
@@ -760,8 +859,12 @@ def dispatch(task_path: Path):
             patterns = retrieve_related_patterns(task_class, keywords)
             if patterns:
                 memory_context = format_retrieval_for_planner(patterns)
-                logger.info("MEMORY CONTEXT: %d prior pattern(s) for class=%s keywords=%s",
-                            len(patterns), task_class, keywords[:5])
+                logger.info(
+                    "MEMORY CONTEXT: %d prior pattern(s) for class=%s keywords=%s",
+                    len(patterns),
+                    task_class,
+                    keywords[:5],
+                )
     except Exception as exc:
         logger.warning("Memory retrieval failed (non-fatal): %s", exc)
 
@@ -776,16 +879,18 @@ def dispatch(task_path: Path):
     context_prefix = ""
     if session_context:
         context_prefix += session_context + "\n\n"
-        logger.info("SESSION CONTEXT: injected %d bytes from session %s",
-                     len(session_context), _session_mgr.get_or_create_session().session_id)
+        logger.info(
+            "SESSION CONTEXT: injected %d bytes from session %s",
+            len(session_context),
+            _session_mgr.get_or_create_session().session_id,
+        )
     if memory_context:
         context_prefix += memory_context + "\n\n"
     if context_prefix:
         prompt = context_prefix + prompt
 
     # --- Deterministic worker log ---
-    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions",
-           "--model", "claude-opus-4-6"]
+    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", "--model", "claude-opus-4-6"]
     if append_prompt_content and skill_injection_path.exists():
         cmd += ["--append-system-prompt", append_prompt_content]
     cmd.append(prompt)
@@ -793,17 +898,17 @@ def dispatch(task_path: Path):
     LOGS_DIR.mkdir(exist_ok=True)
 
     skill_flag_note = f" --append-system-prompt <{len(selected_names)} skills>" if selected_names else ""
-    logger.info("COMMAND: %s -p --verbose --dangerously-skip-permissions%s <prompt>",
-                CLAUDE_BIN, skill_flag_note)
+    logger.info("COMMAND: %s -p --verbose --dangerously-skip-permissions%s <prompt>", CLAUDE_BIN, skill_flag_note)
     logger.info("WORKER LOG: %s", worker_log)
     prompt_header = "\n".join(prompt.splitlines()[:20])
     logger.info("PROMPT (first 20 lines):\n%s", prompt_header)
 
     # --- Audit: task execution start ---
-    _audit.log("task.execution_start",
-               {"task_stem": stem, "skills": selected_names,
-                "routing": routing.get("task_class", "unknown")},
-               correlation_id=task_correlation_id)
+    _audit.log(
+        "task.execution_start",
+        {"task_stem": stem, "skills": selected_names, "routing": routing.get("task_class", "unknown")},
+        correlation_id=task_correlation_id,
+    )
 
     # --- Execute: always create worker log, even on failure ---
     logger.info("EXECUTION STARTED: %s", stem)
@@ -823,6 +928,10 @@ def dispatch(task_path: Path):
         # Strip CLAUDECODE so the child doesn't refuse to start
         child_env = os.environ.copy()
         child_env.pop("CLAUDECODE", None)
+        # Propagate trace context to worker subprocess
+        child_env.update(trace_ctx.to_env())
+
+        slog.event("task.worker_start", trace_ctx, cmd=cmd[0], pid_file=str(pid_file))
 
         proc = subprocess.Popen(
             cmd,
@@ -905,16 +1014,23 @@ def dispatch(task_path: Path):
             done_path = inprogress_path.with_name(f"{stem}.md.done")
             inprogress_path.rename(done_path)
             logger.info("TASK SUCCEEDED: %s → %s", stem, done_path.name)
-            _audit.log("task.completed",
-                       {"task_stem": stem, "exit_code": exit_code},
-                       correlation_id=task_correlation_id)
+            _audit.log(
+                "task.completed", {"task_stem": stem, "exit_code": exit_code}, correlation_id=task_correlation_id
+            )
+            slog.event("task.completed", trace_ctx, stem=stem, exit_code=exit_code, duration_ms=trace_ctx.elapsed_ms())
         else:
             failed_path = inprogress_path.with_name(f"{stem}.md.failed")
             inprogress_path.rename(failed_path)
             logger.warning("TASK FAILED: %s → %s (missing artifacts)", stem, failed_path.name)
-            _audit.log("task.failed",
-                       {"task_stem": stem, "exit_code": exit_code},
-                       correlation_id=task_correlation_id)
+            _audit.log("task.failed", {"task_stem": stem, "exit_code": exit_code}, correlation_id=task_correlation_id)
+            slog.event(
+                "task.failed",
+                trace_ctx,
+                level="warn",
+                stem=stem,
+                exit_code=exit_code,
+                duration_ms=trace_ctx.elapsed_ms(),
+            )
     except FileNotFoundError:
         logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
 
@@ -927,8 +1043,10 @@ def dispatch(task_path: Path):
         if contract.get("summary"):
             task_class = routing.get("task_class", "unknown")
             mem_path = capture_direct_task_memory(
-                task_stem=stem, task_class=task_class,
-                contract=contract, success=passed,
+                task_stem=stem,
+                task_class=task_class,
+                contract=contract,
+                success=passed,
             )
             if mem_path:
                 logger.info("MEMORY CAPTURE: %s → %s", stem, mem_path.name)
@@ -950,8 +1068,7 @@ def _run_test_gate(stem: str) -> dict:
     logger.info("TEST GATE: running pytest for %s", stem)
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/", "-x",
-             f"--timeout={PYTEST_TIMEOUT}", "-q", "--tb=short"],
+            [sys.executable, "-m", "pytest", "tests/", "-x", f"--timeout={PYTEST_TIMEOUT}", "-q", "--tb=short"],
             cwd=str(BASE_DIR),
             capture_output=True,
             text=True,
@@ -966,13 +1083,11 @@ def _run_test_gate(stem: str) -> dict:
             return {"status": "pass", "summary": "All tests passed", "output": truncated}
         else:
             logger.warning("TEST GATE FAILED: %s (exit %d)", stem, result.returncode)
-            return {"status": "fail", "summary": f"pytest exited with code {result.returncode}",
-                    "output": truncated}
+            return {"status": "fail", "summary": f"pytest exited with code {result.returncode}", "output": truncated}
 
     except subprocess.TimeoutExpired:
         logger.warning("TEST GATE TIMEOUT: %s (exceeded %ds) — skipping gate", stem, PYTEST_TIMEOUT)
-        return {"status": "timeout", "summary": f"pytest timed out after {PYTEST_TIMEOUT}s",
-                "output": ""}
+        return {"status": "timeout", "summary": f"pytest timed out after {PYTEST_TIMEOUT}s", "output": ""}
     except Exception as exc:
         logger.warning("TEST GATE ERROR: %s — %s — skipping gate", stem, exc)
         return {"status": "error", "summary": f"pytest error: {exc}", "output": ""}
@@ -1000,11 +1115,7 @@ def _apply_test_gate_result(stem: str, gate_result: dict) -> bool:
 
     # Append test failure summary to output
     failure_block = (
-        "\n\n---\n## TEST GATE FAILURE\n\n"
-        f"**Status:** {gate_result['summary']}\n\n"
-        "```\n"
-        f"{gate_result['output']}\n"
-        "```\n"
+        f"\n\n---\n## TEST GATE FAILURE\n\n**Status:** {gate_result['summary']}\n\n```\n{gate_result['output']}\n```\n"
     )
     with output_file.open("a", encoding="utf-8") as f:
         f.write(failure_block)
@@ -1012,6 +1123,7 @@ def _apply_test_gate_result(stem: str, gate_result: dict) -> bool:
     # Downgrade confidence to 'low' in the CONTRACT block
     text = output_file.read_text(encoding="utf-8")
     import re
+
     text = re.sub(
         r"(confidence:\s*)(high|medium)",
         r"\1low",
@@ -1043,8 +1155,7 @@ def scan_and_dispatch():
 def run():
     """Main loop: poll TASKS/ every POLL_INTERVAL seconds."""
     logger.info("Dispatcher started. Monitoring %s every %ds.", TASKS_DIR, POLL_INTERVAL)
-    logger.info("Claude binary: %s | Timeout: %ds | Artifact window: %ds",
-                CLAUDE_BIN, TASK_TIMEOUT, ARTIFACT_WINDOW)
+    logger.info("Claude binary: %s | Timeout: %ds | Artifact window: %ds", CLAUDE_BIN, TASK_TIMEOUT, ARTIFACT_WINDOW)
 
     while _running:
         try:

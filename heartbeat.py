@@ -16,6 +16,13 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from utils.structured_log import slog
+    from utils.trace_context import TraceContext
+except ImportError:
+    slog = None  # type: ignore[assignment]
+    TraceContext = None  # type: ignore[assignment,misc]
+
 # --- Configuration -----------------------------------------------------------
 
 BASE = Path("/home/nova/nova-core")
@@ -308,7 +315,7 @@ def check_log_sizes() -> dict:
 
     ok = len(large) == 0
     if ok:
-        total_mb = 0
+        total_mb: float = 0
         if LOGS_DIR.exists():
             total_mb = sum(f.stat().st_size for f in LOGS_DIR.iterdir() if f.is_file()) / (1024**2)
         detail = f"all under {LOG_SIZE_WARN_MB}MB (total: {round(total_mb, 1)}MB)"
@@ -833,7 +840,7 @@ def _scan_codebase() -> str:
                 recently_modified.append((py.relative_to(BASE), round(age_hr, 1)))
         if recently_modified:
             parts.append("\n### Recently Modified (last 24h)")
-            for f, age in sorted(recently_modified, key=lambda x: x[1]):
+            for f, age in sorted(recently_modified, key=lambda x: x[1]):  # type: ignore[assignment]
                 parts.append(f"  {f} ({age}h ago)")
     except Exception:
         pass
@@ -1461,6 +1468,11 @@ def main() -> int:
     """Run all health checks, write HEARTBEAT.md, alert if unhealthy."""
     print(f"[heartbeat] Starting health check at {datetime.now(timezone.utc).isoformat()}")
 
+    # Structured tracing for this heartbeat cycle
+    hb_ctx = TraceContext.new("heartbeat") if TraceContext is not None else None
+    if slog and hb_ctx:
+        slog.event("heartbeat.started", hb_ctx)
+
     # --- Phase 1.2: Kill switch + dead man's switch ---
     try:
         from nova_kill_switch import MODE_RUN, MODE_STOPPED, check_kill_switch, heartbeat_alive
@@ -1546,11 +1558,23 @@ def main() -> int:
     # Always send heartbeat pulse to Telegram
     send_telegram_heartbeat(checks)
 
+    fail_names = [c["name"] for c in checks if not c["ok"]]
     if all_ok:
         print("[heartbeat] All checks passed. HEALTHY.")
+        if slog and hb_ctx:
+            slog.event("heartbeat.healthy", hb_ctx, checks=len(checks), duration_ms=hb_ctx.elapsed_ms())
     else:
         print("[heartbeat] Some checks FAILED. Alerting...")
         inject_repair_task(checks)
+        if slog and hb_ctx:
+            slog.event(
+                "heartbeat.unhealthy",
+                hb_ctx,
+                level="warn",
+                checks=len(checks),
+                failed=fail_names,
+                duration_ms=hb_ctx.elapsed_ms(),
+            )
 
     # --- LLM-driven proactive heartbeat ---
     try:

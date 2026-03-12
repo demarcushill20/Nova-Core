@@ -105,6 +105,31 @@ def trace_task(task_name: str, metadata: dict | None = None):
     )
 
 
+def trace_event(
+    event_type: str,
+    trace_id: str = "",
+    component: str = "",
+    level: str = "info",
+    **data,
+):
+    """Send a structured event to Langfuse as a trace span.
+
+    Called automatically by StructuredLogger when Langfuse is configured.
+    Gracefully no-ops otherwise.
+    """
+    lf = get_langfuse()
+    if lf is None:
+        return None
+
+    trace = lf.trace(
+        name=event_type,
+        id=trace_id or None,
+        metadata={"component": component, "level": level, **data},
+        tags=["nova-core", component] if component else ["nova-core"],
+    )
+    return trace
+
+
 def flush():
     """Flush any pending Langfuse events."""
     lf = get_langfuse()
