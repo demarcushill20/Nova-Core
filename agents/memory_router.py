@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -670,6 +671,16 @@ class VaultAdapter:
 _FUSION_MEMORY_REPO = Path("/home/nova/Nova_AI_Fusion_Memory_MCP")
 _FUSION_MEMORY_ENV = _FUSION_MEMORY_REPO / ".env"
 
+# Configurable timeout for all FusionMemory async operations.
+# Default: 3600s (1 hour). Override via FUSION_MEMORY_TIMEOUT env var.
+# This is intentionally large to tolerate slow backend startup and heavy queries.
+FUSION_MEMORY_TIMEOUT_S: int = int(os.environ.get("FUSION_MEMORY_TIMEOUT", "3600"))
+
+# Retry/backoff for FusionMemoryAdapter initialization.
+# After a failed init, wait at least this many seconds before retrying.
+_FUSION_INIT_RETRY_COOLDOWN_S: int = 300  # 5 minutes
+_FUSION_INIT_MAX_RETRIES: int = 5  # then stop until process restart
+
 
 def _ensure_fusion_env() -> bool:
     """Load Fusion Memory .env and add repo to sys.path. Returns success."""
@@ -692,13 +703,20 @@ def _ensure_fusion_env() -> bool:
     return True
 
 
-def _run_async(coro: Any) -> Any:
+def _run_async(coro: Any, *, timeout: int | None = None) -> Any:
     """Run an async coroutine from sync code.
 
     Uses asyncio.run() if no loop is running, otherwise creates a new
     thread-based event loop to avoid 'cannot run nested' errors.
+
+    Args:
+        coro: The coroutine to run.
+        timeout: Max seconds to wait. Defaults to FUSION_MEMORY_TIMEOUT_S.
     """
     import asyncio
+
+    if timeout is None:
+        timeout = FUSION_MEMORY_TIMEOUT_S
 
     try:
         loop = asyncio.get_running_loop()
@@ -713,7 +731,7 @@ def _run_async(coro: Any) -> Any:
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(asyncio.run, coro)
-        return future.result(timeout=30)
+        return future.result(timeout=timeout)
 
 
 class FusionMemoryAdapter:
@@ -722,26 +740,51 @@ class FusionMemoryAdapter:
     Phase 3: Direct Python bridge. Imports MemoryService from the Fusion
     Memory repo and calls perform_query / perform_upsert directly.
     Lazy-initializes on first use. Falls back gracefully if unavailable.
+
+    Resilience behavior:
+    - Init retries up to _FUSION_INIT_MAX_RETRIES times with cooldown.
+    - Request timeout: FUSION_MEMORY_TIMEOUT_S (default 3600s, env-configurable).
+    - Transient request failures invalidate the service so next call retries init.
+    - Degraded/recovered state transitions are logged.
     """
 
     name = "fusion_memory"
 
     def __init__(self) -> None:
         self._service: Any = None
-        self._init_attempted = False
         self._available = False
+        self._init_attempts = 0
+        self._last_init_attempt: float = 0.0  # monotonic timestamp
+        self._degraded = False  # True when a previously-working service fails
 
     def _ensure_service(self) -> bool:
-        """Lazy-initialize MemoryService. Returns True if ready."""
+        """Lazy-initialize MemoryService with bounded retry and cooldown.
+
+        Returns True if the service is ready for requests.
+        """
         if self._service is not None:
             return True
-        if self._init_attempted:
-            return False  # Already failed once, don't retry
 
-        self._init_attempted = True
+        # Check retry budget
+        if self._init_attempts >= _FUSION_INIT_MAX_RETRIES:
+            return False
+
+        # Check cooldown (skip on first attempt)
+        if self._init_attempts > 0:
+            elapsed = time.monotonic() - self._last_init_attempt
+            if elapsed < _FUSION_INIT_RETRY_COOLDOWN_S:
+                return False
+
+        self._init_attempts += 1
+        self._last_init_attempt = time.monotonic()
+
         try:
             if not _ensure_fusion_env():
-                logger.debug("Fusion Memory .env not found")
+                logger.debug(
+                    "Fusion Memory .env not found (attempt %d/%d)",
+                    self._init_attempts,
+                    _FUSION_INIT_MAX_RETRIES,
+                )
                 return False
 
             from app.services.memory_service import MemoryService
@@ -749,16 +792,40 @@ class FusionMemoryAdapter:
             svc = MemoryService()
             ok = _run_async(svc.initialize())
             if not ok:
-                logger.warning("FusionMemoryAdapter: MemoryService.initialize() returned False")
+                logger.warning(
+                    "FusionMemoryAdapter: MemoryService.initialize() returned False (attempt %d/%d)",
+                    self._init_attempts,
+                    _FUSION_INIT_MAX_RETRIES,
+                )
                 return False
 
             self._service = svc
             self._available = True
-            logger.info("FusionMemoryAdapter: MemoryService initialized successfully")
+            was_degraded = self._degraded
+            self._degraded = False
+            if was_degraded:
+                logger.info("FusionMemoryAdapter: recovered from degraded state (attempt %d)", self._init_attempts)
+            else:
+                logger.info("FusionMemoryAdapter: MemoryService initialized successfully")
             return True
         except Exception as exc:
-            logger.warning("FusionMemoryAdapter init failed: %s", exc)
+            logger.warning(
+                "FusionMemoryAdapter init failed (attempt %d/%d): %s",
+                self._init_attempts,
+                _FUSION_INIT_MAX_RETRIES,
+                exc,
+            )
             return False
+
+    def _invalidate_service(self, reason: str) -> None:
+        """Mark the service as unavailable after a transient failure.
+
+        Allows _ensure_service to retry on the next call (subject to cooldown).
+        """
+        if self._service is not None:
+            self._service = None
+            self._degraded = True
+            logger.warning("FusionMemoryAdapter: entering degraded state (%s)", reason)
 
     def recall(self, query: str, **kwargs: Any) -> list[dict]:
         """Semantic + graph search via Fusion Memory."""
@@ -791,6 +858,7 @@ class FusionMemoryAdapter:
                 )
             return normalized
         except Exception as exc:
+            self._invalidate_service(f"recall error: {exc}")
             logger.warning("FusionMemoryAdapter.recall failed: %s", exc)
             return []
 
@@ -841,6 +909,7 @@ class FusionMemoryAdapter:
                 rejection_reason="perform_upsert returned None",
             )
         except Exception as exc:
+            self._invalidate_service(f"store error: {exc}")
             return StoreResult(
                 stored=False,
                 store_used=self.name,
@@ -849,6 +918,17 @@ class FusionMemoryAdapter:
 
     def is_available(self) -> bool:
         return self._ensure_service()
+
+    def get_health_status(self) -> dict[str, Any]:
+        """Return adapter health for metrics/observability."""
+        return {
+            "available": self._available,
+            "degraded": self._degraded,
+            "init_attempts": self._init_attempts,
+            "max_retries": _FUSION_INIT_MAX_RETRIES,
+            "retries_remaining": max(0, _FUSION_INIT_MAX_RETRIES - self._init_attempts),
+            "timeout_s": FUSION_MEMORY_TIMEOUT_S,
+        }
 
 
 def _map_event_to_category(event_type: str) -> str:

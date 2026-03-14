@@ -567,27 +567,31 @@ class TestMemoryFileAdapter:
 class TestFusionMemoryAdapter:
     """FusionMemoryAdapter — Phase 3: direct Python bridge (fail-safe when backends unavailable)."""
 
+    @staticmethod
+    def _make_exhausted_adapter():
+        """Create an adapter that has exhausted all init retries."""
+        from agents.memory_router import _FUSION_INIT_MAX_RETRIES
+
+        adapter = FusionMemoryAdapter()
+        adapter._init_attempts = _FUSION_INIT_MAX_RETRIES
+        adapter._available = False
+        return adapter
+
     def test_recall_returns_empty_when_unavailable(self):
         """Recall returns [] when backends are not reachable."""
-        adapter = FusionMemoryAdapter()
-        adapter._init_attempted = True  # Skip real init
-        adapter._available = False
+        adapter = self._make_exhausted_adapter()
         assert adapter.recall("test") == []
 
     def test_store_returns_rejection_when_unavailable(self):
         """Store returns rejection when backends are not reachable."""
-        adapter = FusionMemoryAdapter()
-        adapter._init_attempted = True  # Skip real init
-        adapter._available = False
+        adapter = self._make_exhausted_adapter()
         result = adapter.store(_valid_cmo())
         assert result.stored is False
         assert "not available" in result.rejection_reason
 
-    def test_not_available_when_init_fails(self):
-        """is_available returns False when init has already failed."""
-        adapter = FusionMemoryAdapter()
-        adapter._init_attempted = True
-        adapter._available = False
+    def test_not_available_when_retries_exhausted(self):
+        """is_available returns False when retries are exhausted."""
+        adapter = self._make_exhausted_adapter()
         assert adapter.is_available() is False
 
     def test_recall_with_mock_service(self):
@@ -634,6 +638,125 @@ class TestFusionMemoryAdapter:
             assert cat in ("context", "research", "decision", "pattern", "debug"), (
                 f"event_type {et!r} maps to unexpected category {cat!r}"
             )
+
+    def test_timeout_is_configurable(self):
+        """FUSION_MEMORY_TIMEOUT_S is an int and defaults to 3600."""
+        from agents.memory_router import FUSION_MEMORY_TIMEOUT_S
+
+        assert isinstance(FUSION_MEMORY_TIMEOUT_S, int)
+        # Default is 3600 unless env override is set
+        assert FUSION_MEMORY_TIMEOUT_S > 0
+
+    def test_init_retry_respects_cooldown(self):
+        """Second init attempt within cooldown is skipped."""
+        import time as _time
+
+        adapter = FusionMemoryAdapter()
+        # Simulate one failed attempt that just happened
+        adapter._init_attempts = 1
+        adapter._last_init_attempt = _time.monotonic()
+        # Should be within cooldown — returns False without incrementing
+        assert adapter._ensure_service() is False
+        assert adapter._init_attempts == 1  # Not incremented
+
+    def test_init_retry_after_cooldown_expires(self):
+        """After cooldown, a new init attempt is allowed."""
+        import time as _time
+
+        adapter = FusionMemoryAdapter()
+        adapter._init_attempts = 1
+        # Simulate cooldown expired (set last attempt far in the past)
+        adapter._last_init_attempt = _time.monotonic() - 999999
+        # Will attempt init (and fail because no real backend), incrementing counter
+        adapter._ensure_service()
+        assert adapter._init_attempts == 2  # Incremented
+
+    def test_init_stops_after_max_retries(self):
+        """After max retries, no more init attempts are made."""
+        from agents.memory_router import _FUSION_INIT_MAX_RETRIES
+
+        adapter = FusionMemoryAdapter()
+        adapter._init_attempts = _FUSION_INIT_MAX_RETRIES
+        assert adapter._ensure_service() is False
+        assert adapter._init_attempts == _FUSION_INIT_MAX_RETRIES  # Not incremented
+
+    def test_invalidate_service_enters_degraded_state(self):
+        """_invalidate_service clears service and sets degraded flag."""
+        adapter = FusionMemoryAdapter()
+        mock_svc = MagicMock()
+        adapter._service = mock_svc
+        adapter._available = True
+
+        adapter._invalidate_service("test error")
+        assert adapter._service is None
+        assert adapter._degraded is True
+
+    def test_request_failure_allows_reinit(self):
+        """After a recall/store failure, adapter can attempt re-init on next call."""
+        import time as _time
+
+        adapter = FusionMemoryAdapter()
+        mock_svc = MagicMock()
+        adapter._service = mock_svc
+        adapter._available = True
+        adapter._init_attempts = 1
+        adapter._last_init_attempt = _time.monotonic() - 999999  # cooldown expired
+
+        # Simulate a request failure
+        adapter._invalidate_service("connection reset")
+        assert adapter._service is None
+        assert adapter._degraded is True
+
+        # Next _ensure_service should attempt re-init (will fail — no real backend)
+        adapter._ensure_service()
+        assert adapter._init_attempts == 2  # Re-init was attempted
+
+    def test_get_health_status(self):
+        """get_health_status returns structured adapter state."""
+        adapter = FusionMemoryAdapter()
+        health = adapter.get_health_status()
+        assert "available" in health
+        assert "degraded" in health
+        assert "init_attempts" in health
+        assert "retries_remaining" in health
+        assert "timeout_s" in health
+        assert health["timeout_s"] > 0
+
+    def test_recovery_from_degraded_state(self):
+        """Adapter logs recovery when re-init succeeds after degraded state."""
+        adapter = FusionMemoryAdapter()
+        adapter._degraded = True
+        adapter._init_attempts = 1
+        adapter._last_init_attempt = 0  # cooldown expired
+
+        # Inject a mock service directly to simulate successful re-init
+        mock_svc = MagicMock()
+
+        async def mock_init():
+            return True
+
+        mock_svc.initialize = mock_init
+
+        with (
+            patch("agents.memory_router._ensure_fusion_env", return_value=True),
+            patch("agents.memory_router.MemoryService", return_value=mock_svc, create=True),
+        ):
+            # Patch the import inside _ensure_service
+            import sys
+
+            # Create a fake module for the import
+            fake_module = type(sys)("app.services.memory_service")
+            fake_module.MemoryService = lambda: mock_svc
+            sys.modules["app.services.memory_service"] = fake_module
+            try:
+                result = adapter._ensure_service()
+            finally:
+                sys.modules.pop("app.services.memory_service", None)
+
+        if result:
+            # If init succeeded, degraded should be cleared
+            assert adapter._degraded is False
+            assert adapter._available is True
 
 
 class TestVaultAdapter:

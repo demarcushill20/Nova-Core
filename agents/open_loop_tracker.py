@@ -575,7 +575,7 @@ def detect_loop_from_event(
             store=store,
         )
 
-    # Pattern 2: Plan with pending next steps
+    # Pattern 2: Plan with pending next steps or follow-ups
     if event_type in ("plan_created", "plan_revised"):
         next_actions = event.get("next_actions", [])
         open_threads = event.get("open_threads", [])
@@ -586,9 +586,23 @@ def detect_loop_from_event(
                 summary=f"Pending: {'; '.join(items[:5])}"[:500],
                 source=source,
                 confidence=confidence,
+                related_task_ids=[event.get("task_stem", "")] if event.get("task_stem") else [],
                 tags=["#loop/plan_followup"],
                 store=store,
             )
+
+    # Pattern 2b: Failed plan without explicit next_actions
+    if event_type == "plan_revised" and event.get("plan_status") == "failed":
+        task_stem = event.get("task_stem", "")
+        return create_loop(
+            title=f"Failed plan: {title}"[:100],
+            summary=f"Plan failed: {summary}"[:500],
+            source=source,
+            confidence=confidence,
+            related_task_ids=[task_stem] if task_stem else [],
+            tags=["#loop/plan_failure"],
+            store=store,
+        )
 
     # Pattern 3: Session end with unresolved threads
     if event_type == "session_end":

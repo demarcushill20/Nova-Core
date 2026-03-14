@@ -692,3 +692,111 @@ class TestOpenLoopAutomation:
         assert resolved is not None
         assert resolved.status == "resolved"
         assert "0500_flaky" in resolved.closure_evidence
+
+    def test_plan_failure_with_next_actions_creates_loop(self, tmp_path):
+        """plan_revised with next_actions (from failed plan) creates a loop."""
+        engine = _make_engine(tmp_path)
+        loop_dir = tmp_path / "open_loops"
+        loop_dir.mkdir(parents=True, exist_ok=True)
+        engine.router._loop_store_base = loop_dir
+
+        result = engine.fire(
+            trigger_class="plan_lifecycle",
+            event_type="plan_revised",
+            source="orchestrator",
+            title="plan_revised: plan p-001 (failed)",
+            summary="Plan p-001 for task 0600_deploy failed at step 2.",
+            caller="orchestrator.run_plan",
+            task_stem="0600_deploy",
+            extra={
+                "plan_status": "failed",
+                "next_actions": ["Resolve: step 2 contract violation"],
+            },
+        )
+        assert result.fired is True
+
+        from agents.open_loop_tracker import LoopStore
+
+        store = LoopStore(base=loop_dir)
+        active = store.get_active_loops()
+        assert len(active) >= 1
+        loop = active[0]
+        assert "#loop/plan_followup" in loop.tags
+        assert "0600_deploy" in loop.related_task_ids
+
+    def test_plan_failure_without_next_actions_creates_loop(self, tmp_path):
+        """plan_revised with plan_status=failed creates a loop even without next_actions."""
+        engine = _make_engine(tmp_path)
+        loop_dir = tmp_path / "open_loops"
+        loop_dir.mkdir(parents=True, exist_ok=True)
+        engine.router._loop_store_base = loop_dir
+
+        result = engine.fire(
+            trigger_class="plan_lifecycle",
+            event_type="plan_revised",
+            source="orchestrator",
+            title="plan_revised: plan p-002 (failed)",
+            summary="Plan p-002 failed due to supervisor abort.",
+            caller="orchestrator.run_plan",
+            task_stem="0700_migrate",
+            extra={"plan_status": "failed"},
+        )
+        assert result.fired is True
+
+        from agents.open_loop_tracker import LoopStore
+
+        store = LoopStore(base=loop_dir)
+        active = store.get_active_loops()
+        assert len(active) >= 1
+        loop = active[0]
+        assert "#loop/plan_failure" in loop.tags
+        assert "0700_migrate" in loop.related_task_ids
+
+    def test_successful_plan_does_not_create_loop(self, tmp_path):
+        """plan_created (successful) should NOT create a loop."""
+        engine = _make_engine(tmp_path)
+        loop_dir = tmp_path / "open_loops"
+        loop_dir.mkdir(parents=True, exist_ok=True)
+        engine.router._loop_store_base = loop_dir
+
+        result = engine.fire(
+            trigger_class="plan_lifecycle",
+            event_type="plan_created",
+            source="orchestrator",
+            title="plan_created: plan p-003 (done)",
+            summary="Plan p-003 completed all steps successfully.",
+            caller="orchestrator.run_plan",
+            extra={"plan_status": "done"},
+        )
+        assert result.fired is True
+
+        from agents.open_loop_tracker import LoopStore
+
+        store = LoopStore(base=loop_dir)
+        assert len(store.get_active_loops()) == 0
+
+    def test_duplicate_plan_failures_deduplicated(self, tmp_path):
+        """Same plan failure fired twice creates only one loop."""
+        engine = _make_engine(tmp_path)
+        loop_dir = tmp_path / "open_loops"
+        loop_dir.mkdir(parents=True, exist_ok=True)
+        engine.router._loop_store_base = loop_dir
+
+        for _ in range(2):
+            engine.fire(
+                trigger_class="plan_lifecycle",
+                event_type="plan_revised",
+                source="orchestrator",
+                title="plan_revised: plan p-004 (failed)",
+                summary="Plan p-004 failed due to timeout.",
+                caller="orchestrator.run_plan",
+                task_stem="0800_retry",
+                extra={"plan_status": "failed"},
+            )
+
+        from agents.open_loop_tracker import LoopStore
+
+        store = LoopStore(base=loop_dir)
+        active = store.get_active_loops()
+        # Only 1 loop despite 2 fires (dedupe by title hash)
+        assert len(active) == 1

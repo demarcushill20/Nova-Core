@@ -41,8 +41,14 @@ def _fire_plan_trigger(
     grade: str = "",
     summary: str = "",
     step_count: int = 0,
+    failure_reason: str = "",
+    followup_reason: str = "",
 ) -> None:
-    """Fire a plan lifecycle memory trigger (non-fatal)."""
+    """Fire a plan lifecycle memory trigger (non-fatal).
+
+    When status is 'failed', passes failure context through extra fields
+    so open-loop detection can create continuity loops automatically.
+    """
     try:
         from agents.memory_triggers import trigger_engine
 
@@ -51,6 +57,17 @@ def _fire_plan_trigger(
             summary = f"Plan {plan_id} for task {task_id} finished with status={status}"
             if grade:
                 summary += f", grade={grade}"
+
+        extra: dict[str, Any] = {"step_count": step_count, "plan_status": status}
+        # Populate next_actions for open-loop detection on failures
+        if status == "failed":
+            next_actions: list[str] = []
+            if failure_reason:
+                next_actions.append(f"Resolve: {failure_reason}")
+            if followup_reason:
+                next_actions.append(f"Follow-up: {followup_reason}")
+            if next_actions:
+                extra["next_actions"] = next_actions
 
         trigger_engine.fire(
             trigger_class="plan_lifecycle",
@@ -62,7 +79,7 @@ def _fire_plan_trigger(
             task_stem=task_id,
             confidence="high" if grade in ("A", "B") else "medium",
             tags=[f"#plan/{plan_id}", f"#grade/{grade}"] if grade else [f"#plan/{plan_id}"],
-            extra={"step_count": step_count},
+            extra=extra,
         )
     except Exception as exc:
         logger.warning("Plan memory trigger failed (non-fatal): %s", exc)
@@ -174,6 +191,11 @@ class Orchestrator:
 
         # Phase 3: Fire plan lifecycle memory trigger
         event_type = "plan_created" if plan.status == "done" else "plan_revised"
+        # Extract failure context for open-loop detection
+        failure_reason = ""
+        if plan.status == "failed" and decisions:
+            failure_reason = decisions[-1].get("reason", "")
+        followup_reason = (plan_eval.followup_reason or "") if plan_eval.followup_recommended else ""
         _fire_plan_trigger(
             event_type=event_type,
             plan_id=plan.plan_id,
@@ -182,6 +204,8 @@ class Orchestrator:
             grade=plan_eval.grade,
             summary=plan_eval.summary[:500] if plan_eval.summary else "",
             step_count=len(step_results),
+            failure_reason=failure_reason,
+            followup_reason=followup_reason,
         )
 
         return {
