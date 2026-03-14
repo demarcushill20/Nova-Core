@@ -277,6 +277,8 @@ def validate_canonical_object(obj: CanonicalMemoryObject) -> tuple[bool, list[st
         errors.append(f"invalid candidate_next_layer: {obj.candidate_next_layer!r}")
     if obj.promotion_eligibility not in VALID_PROMOTION_ELIGIBILITY:
         errors.append(f"invalid promotion_eligibility: {obj.promotion_eligibility!r}")
+    if obj.provenance not in VALID_PROVENANCES:
+        errors.append(f"invalid provenance: {obj.provenance!r}")
 
     return (len(errors) == 0), errors
 
