@@ -757,12 +757,18 @@ def _run_memory_maintenance() -> None:
 
     Phase 8: Scheduled maintenance jobs. Runs every 6 hours via heartbeat timer.
     All operations are fail-open — maintenance failures never block heartbeat.
+
+    Safety note: Governance and compaction run with dry_run=False (active mode).
+    This is intentional — the module defaults are dry_run=True for API safety,
+    but heartbeat explicitly opts into real maintenance. Actions taken:
+    - Governance: marks stale loops (>14d), archives terminal loops (>30d)
+    - Compaction: removes detected duplicates, cleans supersession chains
     """
     if not _memory_maintenance_cooldown_ok():
         print("[memory-maintenance] Cooldown not met, skipping")
         return
 
-    print("[memory-maintenance] Starting scheduled maintenance...")
+    print("[memory-maintenance] Starting scheduled maintenance (active mode, dry_run=False)...")
     results: dict[str, str] = {}
 
     # 1. Governance sweeps (retention, stale loop detection, protection enforcement)

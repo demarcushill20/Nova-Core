@@ -1155,6 +1155,26 @@ def dispatch(task_path: Path):
     except Exception as exc:
         logger.warning("Memory trigger failed (non-fatal): %s", exc)
 
+    # --- Resolve open loops on task completion ---
+    if passed:
+        try:
+            from agents.open_loop_tracker import LoopStore
+
+            loop_store = LoopStore()
+            active_loops = loop_store.get_active_loops()
+            for loop in active_loops:
+                if stem in loop.related_task_ids:
+                    memory_router.resolve_open_loop(
+                        loop.loop_id,
+                        closure_reason=f"Task {stem} completed successfully",
+                        closure_evidence=stem,
+                        caller="watcher.dispatch",
+                        ctx=trace_ctx,
+                    )
+                    logger.info("LOOP RESOLVED: %s (task %s completed)", loop.loop_id, stem)
+        except Exception as exc:
+            logger.warning("Open-loop resolution failed (non-fatal): %s", exc)
+
 
 PYTEST_TIMEOUT = 120  # seconds — hard timeout for the test gate
 

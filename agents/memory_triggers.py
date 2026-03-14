@@ -411,6 +411,7 @@ class TriggerEngine:
             "related_task_ids": related_task_ids or [],
         }
         if task_stem:
+            event_dict["task_stem"] = task_stem
             event_dict["related_task_ids"] = event_dict.get("related_task_ids", []) + [task_stem]
         if target_store:
             event_dict["target_store"] = target_store
@@ -464,6 +465,18 @@ class TriggerEngine:
                 caller,
                 f"store_error: {exc}",
             )
+
+        # --- Step 5b: Detect open loops from failure/continuity events ---
+        _LOOP_EVENT_TYPES = frozenset({"task_failed", "plan_created", "plan_revised", "session_end"})
+        if event_type in _LOOP_EVENT_TYPES:
+            try:
+                self.router.detect_open_loops(
+                    event_dict,
+                    caller=f"trigger:{caller}" if caller else f"trigger:{trigger_class}",
+                    ctx=ctx,
+                )
+            except Exception as exc:
+                logger.warning("Open-loop detection failed (non-fatal): %s", exc)
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
 

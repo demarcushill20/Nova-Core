@@ -549,3 +549,146 @@ class TestSingleton:
     def test_singleton_has_router(self):
         # Accessing .router should lazy-import the module-level router
         assert trigger_engine.router is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests: Open-loop automation (Phase B Priority 1)
+# ---------------------------------------------------------------------------
+
+
+class TestOpenLoopAutomation:
+    """Verify that trigger engine automatically creates open loops from
+    failure/continuity events and that watcher resolves them on completion."""
+
+    def test_task_failed_creates_open_loop(self, tmp_path):
+        """task_failed trigger should auto-detect and create an open loop."""
+        engine = _make_engine(tmp_path)
+        # Set up loop store directory
+        loop_dir = tmp_path / "open_loops"
+        loop_dir.mkdir(parents=True, exist_ok=True)
+        engine.router._loop_store_base = loop_dir
+
+        result = engine.fire(
+            trigger_class="task_lifecycle",
+            event_type="task_failed",
+            source="watcher",
+            title="task_failed: 0300_broken_task",
+            summary="Task 0300_broken_task failed due to missing artifacts.",
+            caller="test",
+            task_stem="0300_broken_task",
+        )
+        assert result.fired is True
+
+        # Verify a loop was created
+        from agents.open_loop_tracker import LoopStore
+
+        store = LoopStore(base=loop_dir)
+        active = store.get_active_loops()
+        assert len(active) >= 1
+        loop = active[0]
+        assert "0300_broken_task" in loop.related_task_ids
+        assert loop.status in ("open", "blocked", "proposed")
+
+    def test_task_completed_does_not_create_loop(self, tmp_path):
+        """task_completed should NOT create a loop."""
+        engine = _make_engine(tmp_path)
+        loop_dir = tmp_path / "open_loops"
+        loop_dir.mkdir(parents=True, exist_ok=True)
+        engine.router._loop_store_base = loop_dir
+
+        result = _fire_task_completed(engine)
+        assert result.fired is True
+
+        from agents.open_loop_tracker import LoopStore
+
+        store = LoopStore(base=loop_dir)
+        assert len(store.get_active_loops()) == 0
+
+    def test_session_end_with_open_threads_creates_loop(self, tmp_path):
+        """session_end with open_threads should create a loop."""
+        engine = _make_engine(tmp_path)
+        loop_dir = tmp_path / "open_loops"
+        loop_dir.mkdir(parents=True, exist_ok=True)
+        engine.router._loop_store_base = loop_dir
+
+        result = engine.fire(
+            trigger_class="session_boundary",
+            event_type="session_end",
+            source="heartbeat",
+            title="Session end with pending work",
+            summary="Session ended with 2 open threads remaining.",
+            caller="test",
+            extra={"open_threads": ["finish auth migration", "review PR #42"]},
+        )
+        assert result.fired is True
+
+        from agents.open_loop_tracker import LoopStore
+
+        store = LoopStore(base=loop_dir)
+        active = store.get_active_loops()
+        assert len(active) >= 1
+        assert "#loop/session_continuity" in active[0].tags
+
+    def test_loop_detection_failure_is_non_fatal(self, tmp_path):
+        """If detect_open_loops raises, trigger still succeeds."""
+        engine = _make_engine(tmp_path)
+        # Don't set loop_store_base — detect will use default which may not exist
+        # but the try/except should catch any error
+
+        with patch.object(engine.router, "detect_open_loops", side_effect=RuntimeError("boom")):
+            result = engine.fire(
+                trigger_class="task_lifecycle",
+                event_type="task_failed",
+                source="watcher",
+                title="task_failed: 0400_crasher",
+                summary="Task failed but loop detection should not block trigger.",
+                caller="test",
+                task_stem="0400_crasher",
+            )
+        # Trigger still fired despite loop detection failure
+        assert result.fired is True
+
+    def test_end_to_end_loop_lifecycle(self, tmp_path):
+        """Full lifecycle: task_failed creates loop, task_completed resolves it."""
+        engine = _make_engine(tmp_path)
+        loop_dir = tmp_path / "open_loops"
+        loop_dir.mkdir(parents=True, exist_ok=True)
+        engine.router._loop_store_base = loop_dir
+
+        # Step 1: Fire task_failed → should create loop
+        engine.fire(
+            trigger_class="task_lifecycle",
+            event_type="task_failed",
+            source="watcher",
+            title="task_failed: 0500_flaky",
+            summary="Task 0500_flaky failed with import error.",
+            caller="test",
+            task_stem="0500_flaky",
+        )
+
+        from agents.open_loop_tracker import LoopStore
+
+        store = LoopStore(base=loop_dir)
+        active = store.get_active_loops()
+        assert len(active) == 1
+        loop_id = active[0].loop_id
+        assert "0500_flaky" in active[0].related_task_ids
+
+        # Step 2: Resolve via router (simulating watcher completion path)
+        resolve_result = engine.router.resolve_open_loop(
+            loop_id,
+            closure_reason="Task 0500_flaky completed successfully",
+            closure_evidence="0500_flaky",
+            caller="watcher.dispatch",
+        )
+        assert resolve_result["action"] == "loop_resolved"
+
+        # Step 3: Verify loop is no longer active
+        active_after = store.get_active_loops()
+        assert len(active_after) == 0
+
+        # Step 4: Verify resolved loop still exists with correct status
+        resolved = store.load(loop_id)
+        assert resolved is not None
+        assert resolved.status == "resolved"
+        assert "0500_flaky" in resolved.closure_evidence
