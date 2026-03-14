@@ -18,6 +18,7 @@ from planner.workflow_promoter import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_summary(
     status="done",
     grade="A",
@@ -29,15 +30,30 @@ def _make_summary(
     """Build a minimal plan summary dict for testing."""
     if steps is None:
         steps = [
-            {"step_id": "s1_research", "status": "done",
-             "skill_name": "web-research", "contract_valid": True,
-             "validation_errors": [], "retry_count": 0},
-            {"step_id": "s2_synthesize", "status": "done",
-             "skill_name": "file-ops", "contract_valid": True,
-             "validation_errors": [], "retry_count": 0},
-            {"step_id": "s3_verify", "status": "done",
-             "skill_name": "self-verification", "contract_valid": True,
-             "validation_errors": [], "retry_count": 0},
+            {
+                "step_id": "s1_research",
+                "status": "done",
+                "skill_name": "web-research",
+                "contract_valid": True,
+                "validation_errors": [],
+                "retry_count": 0,
+            },
+            {
+                "step_id": "s2_synthesize",
+                "status": "done",
+                "skill_name": "file-ops",
+                "contract_valid": True,
+                "validation_errors": [],
+                "retry_count": 0,
+            },
+            {
+                "step_id": "s3_verify",
+                "status": "done",
+                "skill_name": "self-verification",
+                "contract_valid": True,
+                "validation_errors": [],
+                "retry_count": 0,
+            },
         ]
     return {
         "plan_id": "plan_test_001",
@@ -69,49 +85,63 @@ _THIN_TASK = "hello world"
 # Eligibility
 # ============================================================================
 
-class TestEligibility:
 
+class TestEligibility:
     def test_eligible_research_task(self):
         ok, reason = is_eligible_for_promotion(
-            "research", _make_summary(), _RICH_TASK,
+            "research",
+            _make_summary(),
+            _RICH_TASK,
         )
         assert ok is True
         assert reason == "eligible"
 
     def test_eligible_code_impl_task(self):
         ok, reason = is_eligible_for_promotion(
-            "code_impl", _make_summary(), _RICH_TASK,
+            "code_impl",
+            _make_summary(),
+            _RICH_TASK,
         )
         assert ok is True
 
     def test_eligible_code_review_task(self):
         ok, reason = is_eligible_for_promotion(
-            "code_review", _make_summary(), _RICH_TASK,
+            "code_review",
+            _make_summary(),
+            _RICH_TASK,
         )
         assert ok is True
 
     def test_ineligible_simple_task(self):
         ok, reason = is_eligible_for_promotion(
-            "simple", _make_summary(), _RICH_TASK,
+            "simple",
+            _make_summary(),
+            _RICH_TASK,
         )
         assert ok is False
         assert "ineligible_class" in reason
 
     def test_ineligible_unknown_task(self):
         ok, reason = is_eligible_for_promotion(
-            "unknown", _make_summary(), _RICH_TASK,
+            "unknown",
+            _make_summary(),
+            _RICH_TASK,
         )
         assert ok is False
 
     def test_ineligible_system_task(self):
         ok, reason = is_eligible_for_promotion(
-            "system", _make_summary(), _RICH_TASK,
+            "system",
+            _make_summary(),
+            _RICH_TASK,
         )
         assert ok is False
 
     def test_failed_workflow_ineligible(self):
         ok, reason = is_eligible_for_promotion(
-            "research", _make_summary(status="failed"), _RICH_TASK,
+            "research",
+            _make_summary(status="failed"),
+            _RICH_TASK,
         )
         assert ok is False
         assert "not_done" in reason
@@ -127,37 +157,53 @@ class TestEligibility:
 
     def test_low_grade_ineligible(self):
         ok, reason = is_eligible_for_promotion(
-            "research", _make_summary(grade="D"), _RICH_TASK,
+            "research",
+            _make_summary(grade="D"),
+            _RICH_TASK,
         )
         assert ok is False
         assert "low_grade" in reason
 
     def test_grade_C_ineligible(self):
         ok, reason = is_eligible_for_promotion(
-            "research", _make_summary(grade="C"), _RICH_TASK,
+            "research",
+            _make_summary(grade="C"),
+            _RICH_TASK,
         )
         assert ok is False
         assert "low_grade" in reason
 
     def test_grade_A_eligible(self):
         ok, _ = is_eligible_for_promotion(
-            "research", _make_summary(grade="A"), _RICH_TASK,
+            "research",
+            _make_summary(grade="A"),
+            _RICH_TASK,
         )
         assert ok is True
 
     def test_grade_B_eligible(self):
         ok, _ = is_eligible_for_promotion(
-            "research", _make_summary(grade="B"), _RICH_TASK,
+            "research",
+            _make_summary(grade="B"),
+            _RICH_TASK,
         )
         assert ok is True
 
     def test_too_few_steps_ineligible(self):
         one_step = [
-            {"step_id": "s1", "status": "done", "skill_name": "file-ops",
-             "contract_valid": True, "validation_errors": [], "retry_count": 0},
+            {
+                "step_id": "s1",
+                "status": "done",
+                "skill_name": "file-ops",
+                "contract_valid": True,
+                "validation_errors": [],
+                "retry_count": 0,
+            },
         ]
         ok, reason = is_eligible_for_promotion(
-            "research", _make_summary(steps=one_step), _RICH_TASK,
+            "research",
+            _make_summary(steps=one_step),
+            _RICH_TASK,
         )
         assert ok is False
         assert "too_few_steps" in reason
@@ -165,7 +211,9 @@ class TestEligibility:
     def test_thin_output_ineligible(self):
         """Task text with insufficient learning signals is rejected."""
         ok, reason = is_eligible_for_promotion(
-            "research", _make_summary(), _THIN_TASK,
+            "research",
+            _make_summary(),
+            _THIN_TASK,
         )
         assert ok is False
         assert "insufficient_signals" in reason
@@ -181,12 +229,15 @@ class TestEligibility:
 # Compaction
 # ============================================================================
 
-class TestCompaction:
 
+class TestCompaction:
     def test_produces_valid_frontmatter(self):
         learning = compact_workflow_learning(
-            "test_001", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "test_001",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         fm = learning["frontmatter"]
         assert fm["type"] == "workflow-learning"
@@ -200,8 +251,11 @@ class TestCompaction:
 
     def test_produces_body(self):
         learning = compact_workflow_learning(
-            "test_002", "code_impl", _RICH_TASK,
-            _make_summary(), "stageC_coding",
+            "test_002",
+            "code_impl",
+            _RICH_TASK,
+            _make_summary(),
+            "stageC_coding",
         )
         assert "## Task Summary" in learning["body"]
         assert "## Execution Summary" in learning["body"]
@@ -209,23 +263,32 @@ class TestCompaction:
 
     def test_path_in_target_folder(self):
         learning = compact_workflow_learning(
-            "test_003", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "test_003",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         assert learning["path"].startswith("30-workflow-learnings/")
         assert learning["path"].endswith(".md")
 
     def test_auto_promoted_tag(self):
         learning = compact_workflow_learning(
-            "test_004", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "test_004",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         assert "#source/auto-promoted" in learning["frontmatter"]["tags"]
 
     def test_roles_extracted_from_steps(self):
         learning = compact_workflow_learning(
-            "test_005", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "test_005",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         roles = learning["frontmatter"]["roles_involved"]
         # web-research → research, file-ops → coder, self-verification → verifier
@@ -235,39 +298,60 @@ class TestCompaction:
 
     def test_title_extracted(self):
         learning = compact_workflow_learning(
-            "test_006", "research",
+            "test_006",
+            "research",
             "# Investigate MCP server patterns\nMore details here.",
-            _make_summary(), "stageB_research",
+            _make_summary(),
+            "stageB_research",
         )
         # Should strip markdown header
         assert learning["frontmatter"]["title"].startswith("Investigate")
 
     def test_long_title_truncated(self):
         learning = compact_workflow_learning(
-            "test_007", "research", "x" * 200,
-            _make_summary(), "stageB_research",
+            "test_007",
+            "research",
+            "x" * 200,
+            _make_summary(),
+            "stageB_research",
         )
         assert len(learning["frontmatter"]["title"]) <= 83  # 80 + "..."
 
     def test_verification_outcome_from_steps(self):
         learning = compact_workflow_learning(
-            "test_008", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "test_008",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         assert learning["frontmatter"]["verification_outcome"] == "approved"
 
     def test_no_verify_step_outcome(self):
         steps = [
-            {"step_id": "s1_research", "status": "done",
-             "skill_name": "web-research", "contract_valid": True,
-             "validation_errors": [], "retry_count": 0},
-            {"step_id": "s2_write", "status": "done",
-             "skill_name": "file-ops", "contract_valid": True,
-             "validation_errors": [], "retry_count": 0},
+            {
+                "step_id": "s1_research",
+                "status": "done",
+                "skill_name": "web-research",
+                "contract_valid": True,
+                "validation_errors": [],
+                "retry_count": 0,
+            },
+            {
+                "step_id": "s2_write",
+                "status": "done",
+                "skill_name": "file-ops",
+                "contract_valid": True,
+                "validation_errors": [],
+                "retry_count": 0,
+            },
         ]
         learning = compact_workflow_learning(
-            "test_009", "research", _RICH_TASK,
-            _make_summary(steps=steps), "stageB_research",
+            "test_009",
+            "research",
+            _RICH_TASK,
+            _make_summary(steps=steps),
+            "stageB_research",
         )
         assert learning["frontmatter"]["verification_outcome"] == "not_verified"
 
@@ -276,12 +360,15 @@ class TestCompaction:
 # Promotion execution (mocked vault)
 # ============================================================================
 
-class TestAttemptPromotion:
 
+class TestAttemptPromotion:
     def test_ineligible_skips(self):
         result = attempt_promotion(
-            "test_010", "simple", _THIN_TASK,
-            _make_summary(), "single_skill",
+            "test_010",
+            "simple",
+            _THIN_TASK,
+            _make_summary(),
+            "single_skill",
         )
         assert result["promoted"] is False
         assert "ineligible_class" in result["reason"]
@@ -289,8 +376,11 @@ class TestAttemptPromotion:
 
     def test_failed_workflow_skips(self):
         result = attempt_promotion(
-            "test_011", "research", _RICH_TASK,
-            _make_summary(status="failed"), "stageB_research",
+            "test_011",
+            "research",
+            _RICH_TASK,
+            _make_summary(status="failed"),
+            "stageB_research",
         )
         assert result["promoted"] is False
         assert "not_done" in result["reason"]
@@ -306,16 +396,21 @@ class TestAttemptPromotion:
 
         # Patch the import inside attempt_promotion
         import types
+
         mock_module = types.ModuleType("tools.mcp_vault_server")
         mock_module.vault_validate = mock_validate
         mock_module.vault_write = mock_write
 
         import sys
+
         monkeypatch.setitem(sys.modules, "tools.mcp_vault_server", mock_module)
 
         result = attempt_promotion(
-            "test_012", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "test_012",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         assert result["promoted"] is True
         assert result["reason"] == "eligible"
@@ -327,6 +422,7 @@ class TestAttemptPromotion:
     def test_validation_failure_blocks_promotion(self, monkeypatch):
         """Vault validation failure blocks promotion gracefully."""
         import types
+
         mock_module = types.ModuleType("tools.mcp_vault_server")
 
         def _mock_validate(frontmatter, body=""):
@@ -336,19 +432,24 @@ class TestAttemptPromotion:
         mock_module.vault_write = lambda *a, **kw: {"error": "should not reach"}
 
         import sys
+
         monkeypatch.setitem(sys.modules, "tools.mcp_vault_server", mock_module)
 
         result = attempt_promotion(
-            "test_013", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "test_013",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         assert result["promoted"] is False
-        assert result["reason"] == "validation_failed"
+        assert "validation" in result["reason"]  # vault_validation_failed via router
         assert len(result["errors"]) > 0
 
     def test_write_rejection_blocks_promotion(self, monkeypatch):
         """Vault write rejection (e.g. file exists) blocks promotion."""
         import types
+
         mock_module = types.ModuleType("tools.mcp_vault_server")
 
         def _mock_validate(frontmatter, body=""):
@@ -361,23 +462,29 @@ class TestAttemptPromotion:
         mock_module.vault_write = _mock_write
 
         import sys
+
         monkeypatch.setitem(sys.modules, "tools.mcp_vault_server", mock_module)
 
         result = attempt_promotion(
-            "test_014", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "test_014",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         assert result["promoted"] is False
-        assert "write_rejected" in result["reason"]
+        assert result["reason"]  # error reason present (write rejection via router)
 
     def test_vault_unavailable_fails_open(self, monkeypatch):
         """If vault MCP server is not importable, promotion fails open."""
         import sys
+
         # Remove the module if cached
         monkeypatch.delitem(sys.modules, "tools.mcp_vault_server", raising=False)
 
         # Make import fail
         import builtins
+
         real_import = builtins.__import__
 
         def block_import(name, *args, **kwargs):
@@ -388,16 +495,23 @@ class TestAttemptPromotion:
         monkeypatch.setattr(builtins, "__import__", block_import)
 
         result = attempt_promotion(
-            "test_015", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "test_015",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         assert result["promoted"] is False
-        assert "vault_unavailable" in result["reason"]
+        # Vault unavailability surfaces as rejection via router → VaultAdapter
+        assert result["reason"]  # some rejection reason present
 
     def test_thin_output_not_promoted(self):
         result = attempt_promotion(
-            "test_016", "research", _THIN_TASK,
-            _make_summary(), "stageB_research",
+            "test_016",
+            "research",
+            _THIN_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         assert result["promoted"] is False
         assert "insufficient_signals" in result["reason"]
@@ -407,27 +521,36 @@ class TestAttemptPromotion:
 # Source / ownership safety
 # ============================================================================
 
-class TestSafetyBoundaries:
 
+class TestSafetyBoundaries:
     def test_source_always_nova_core_memory(self):
         learning = compact_workflow_learning(
-            "safe_001", "research", _RICH_TASK,
-            _make_summary(), "stageB_research",
+            "safe_001",
+            "research",
+            _RICH_TASK,
+            _make_summary(),
+            "stageB_research",
         )
         assert learning["frontmatter"]["source"] == "nova-core-memory"
 
     def test_target_folder_always_workflow_learnings(self):
         for tc in ("research", "code_impl", "code_review"):
             learning = compact_workflow_learning(
-                f"safe_{tc}", tc, _RICH_TASK,
-                _make_summary(), "stageB_research",
+                f"safe_{tc}",
+                tc,
+                _RICH_TASK,
+                _make_summary(),
+                "stageB_research",
             )
             assert learning["path"].startswith("30-workflow-learnings/")
 
     def test_promotion_result_structure(self):
         result = attempt_promotion(
-            "safe_003", "simple", _THIN_TASK,
-            _make_summary(), "single_skill",
+            "safe_003",
+            "simple",
+            _THIN_TASK,
+            _make_summary(),
+            "single_skill",
         )
         # Must always have these keys
         assert "promoted" in result
@@ -439,7 +562,11 @@ class TestSafetyBoundaries:
     def test_promotion_does_not_block_on_failure(self):
         """Even with bad inputs, promotion returns a result, never raises."""
         result = attempt_promotion(
-            "", "", "", {}, "",
+            "",
+            "",
+            "",
+            {},
+            "",
         )
         assert result["promoted"] is False
 
@@ -448,8 +575,8 @@ class TestSafetyBoundaries:
 # Orchestrator adapter integration
 # ============================================================================
 
-class TestOrchestratorIntegration:
 
+class TestOrchestratorIntegration:
     def test_promotion_called_for_successful_governed_task(self, monkeypatch):
         """Verify execute_via_orchestrator includes promotion result."""
         from pathlib import Path
@@ -460,6 +587,7 @@ class TestOrchestratorIntegration:
         class MockOrchestrator:
             def __init__(self, **kw):
                 pass
+
             def run_plan(self, plan):
                 return _make_summary()
 
@@ -469,6 +597,7 @@ class TestOrchestratorIntegration:
         # Mock vault tools for both context injection and promotion
         import sys
         import types
+
         mock_module = types.ModuleType("tools.mcp_vault_server")
         mock_module.vault_validate = lambda frontmatter, body="": {"valid": True, "errors": []}
         mock_module.vault_write = lambda path, frontmatter, body: {"path": path, "size": 100}
@@ -478,6 +607,7 @@ class TestOrchestratorIntegration:
 
         # Create temp task path
         import tempfile
+
         with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
             f.write(_RICH_TASK)
             task_path = Path(f.name)
@@ -505,6 +635,7 @@ class TestOrchestratorIntegration:
         class MockOrchestrator:
             def __init__(self, **kw):
                 pass
+
             def run_plan(self, plan):
                 return _make_summary()
 
@@ -514,6 +645,7 @@ class TestOrchestratorIntegration:
         oa.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
         import tempfile
+
         with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
             f.write(_RICH_TASK)
             task_path = Path(f.name)

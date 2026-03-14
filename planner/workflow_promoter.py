@@ -7,7 +7,7 @@ writes it via the existing bounded write path.
 Design constraints:
   - Promotion is post-execution only, never mid-execution.
   - Promotion is selective: only eligible successful workflows qualify.
-  - Promotion reuses vault_validate + vault_write (bounded write path).
+  - Promotion routes through Memory Router → VaultAdapter (Phase 2).
   - Promotion produces one compact workflow-learning note per workflow.
   - Failed, thin, trivial, or runtime-state outputs are never promoted.
   - All promotion attempts are logged for auditability.
@@ -52,9 +52,16 @@ _LEARNING_SIGNALS = re.compile(
 _MIN_LEARNING_SIGNALS = 2
 
 # Roles eligible for the roles_involved field
-_VALID_ROLES = frozenset({
-    "research", "coder", "critic", "verifier", "planner", "memory",
-})
+_VALID_ROLES = frozenset(
+    {
+        "research",
+        "coder",
+        "critic",
+        "verifier",
+        "planner",
+        "memory",
+    }
+)
 
 
 def is_eligible_for_promotion(
@@ -106,6 +113,7 @@ def is_eligible_for_promotion(
 # ---------------------------------------------------------------------------
 # Compaction: extract learning from plan summary
 # ---------------------------------------------------------------------------
+
 
 def compact_workflow_learning(
     stem: str,
@@ -189,10 +197,7 @@ def compact_workflow_learning(
     if decisions:
         body_parts.append("\n## Key Decisions\n")
         for d in decisions[:5]:
-            body_parts.append(
-                f"- **{d.get('step_id', '?')}**: "
-                f"{d.get('action', '?')} — {d.get('reason', '?')}\n"
-            )
+            body_parts.append(f"- **{d.get('step_id', '?')}**: {d.get('action', '?')} — {d.get('reason', '?')}\n")
 
     # Extract learning signals from evaluation summary
     eval_summary = evaluation.get("summary", "")
@@ -237,12 +242,13 @@ def _grade_to_confidence(grade: str) -> str:
 def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
-    return text[:max_len - 3] + "..."
+    return text[: max_len - 3] + "..."
 
 
 # ---------------------------------------------------------------------------
 # Promotion execution (uses bounded vault write path)
 # ---------------------------------------------------------------------------
+
 
 def attempt_promotion(
     stem: str,
@@ -279,7 +285,11 @@ def attempt_promotion(
     # 2. Compact into learning note
     try:
         learning = compact_workflow_learning(
-            stem, task_class, task_text, plan_summary, strategy,
+            stem,
+            task_class,
+            task_text,
+            plan_summary,
+            strategy,
         )
     except Exception as exc:
         logger.warning("PROMOTION COMPACTION FAILED: %s — %s", stem, exc)
@@ -291,82 +301,76 @@ def attempt_promotion(
             "errors": [str(exc)],
         }
 
-    # 3. Validate via bounded write path
+    # 3. Route through unified Memory Router (validate + write)
     try:
-        from tools.mcp_vault_server import vault_validate, vault_write
+        from agents.memory_router import router
     except ImportError:
-        logger.warning("PROMOTION SKIPPED: %s — vault MCP server not available", stem)
+        logger.warning("PROMOTION SKIPPED: %s — memory router not available", stem)
         return {
             "promoted": False,
-            "reason": "vault_unavailable",
+            "reason": "router_unavailable",
             "note_path": None,
             "learning_id": learning["frontmatter"].get("learning_id"),
-            "errors": ["vault MCP server not importable"],
+            "errors": ["memory router not importable"],
         }
 
+    learning_id = learning["frontmatter"].get("learning_id", "")
     try:
-        validation = vault_validate(
-            frontmatter=learning["frontmatter"],
-            body=learning["body"],
+        obj = router.ingest_event(
+            {
+                "source": "promoter",
+                "event_type": "workflow_learning_promoted",
+                "title": learning["frontmatter"].get("title", f"Learning: {stem}")[:100],
+                "summary": f"Workflow learning promoted from task {stem}",
+                "content": learning["body"],
+                "current_layer": "semantic",
+                "target_store": "obsidian_vault",
+                "confidence": learning["frontmatter"].get("confidence", "medium"),
+                "tags": learning["frontmatter"].get("tags", []),
+                "related_task_ids": [stem],
+                "provenance": "automatic",
+                "storage_intent": "workflow_promotion",
+                "promotion_status": "promoted",
+                "adapter_metadata": {
+                    "vault_frontmatter": learning["frontmatter"],
+                    "vault_body": learning["body"],
+                    "vault_path": learning["path"],
+                },
+            },
+            caller="workflow_promoter",
         )
+        store_result = router.store(obj, caller="workflow_promoter")
     except Exception as exc:
-        logger.warning("PROMOTION VALIDATION FAILED: %s — %s", stem, exc)
+        logger.warning("PROMOTION ROUTER FAILED: %s — %s", stem, exc)
         return {
             "promoted": False,
-            "reason": f"validation_error:{exc}",
-            "note_path": None,
-            "learning_id": learning["frontmatter"].get("learning_id"),
+            "reason": f"router_error:{exc}",
+            "note_path": learning["path"],
+            "learning_id": learning_id,
             "errors": [str(exc)],
         }
 
-    if not validation.get("valid", False):
-        errors = validation.get("errors", ["unknown validation error"])
-        logger.warning("PROMOTION VALIDATION REJECTED: %s — %s", stem, errors)
+    if not store_result.stored:
+        reason = store_result.rejection_reason or "unknown"
+        errors = store_result.validation_errors or [reason]
+        logger.warning("PROMOTION REJECTED: %s — %s", stem, reason)
         return {
             "promoted": False,
-            "reason": "validation_failed",
+            "reason": reason,
             "note_path": learning["path"],
-            "learning_id": learning["frontmatter"].get("learning_id"),
+            "learning_id": learning_id,
             "errors": errors,
         }
 
-    # 4. Write via bounded write path
-    try:
-        write_result = vault_write(
-            path=learning["path"],
-            frontmatter=learning["frontmatter"],
-            body=learning["body"],
-        )
-    except Exception as exc:
-        logger.warning("PROMOTION WRITE FAILED: %s — %s", stem, exc)
-        return {
-            "promoted": False,
-            "reason": f"write_error:{exc}",
-            "note_path": learning["path"],
-            "learning_id": learning["frontmatter"].get("learning_id"),
-            "errors": [str(exc)],
-        }
-
-    if "error" in write_result:
-        logger.warning(
-            "PROMOTION WRITE REJECTED: %s — %s", stem, write_result["error"]
-        )
-        return {
-            "promoted": False,
-            "reason": f"write_rejected:{write_result['error']}",
-            "note_path": learning["path"],
-            "learning_id": learning["frontmatter"].get("learning_id"),
-            "errors": [write_result["error"]],
-        }
-
     logger.info(
-        "PROMOTION SUCCESS: %s → %s (%d bytes)",
-        stem, learning["path"], write_result.get("size", 0),
+        "PROMOTION SUCCESS: %s → %s (via router)",
+        stem,
+        store_result.path_or_id,
     )
     return {
         "promoted": True,
         "reason": "eligible",
-        "note_path": learning["path"],
-        "learning_id": learning["frontmatter"].get("learning_id"),
+        "note_path": store_result.path_or_id or learning["path"],
+        "learning_id": learning_id,
         "errors": [],
     }

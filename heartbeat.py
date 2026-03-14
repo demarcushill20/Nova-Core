@@ -502,6 +502,10 @@ PLANNING_COOLDOWN_MINUTES = 170  # ~every 3 hours (timer fires every 30 min)
 PLANNING_COOLDOWN_FILE = STATE_DIR / "last_planning_cycle.json"
 PLANNING_LOG = LOGS_DIR / "planning_cycle.log"
 
+# Memory maintenance configuration — runs periodically
+MEMORY_MAINTENANCE_COOLDOWN_MINUTES = 360  # every 6 hours
+MEMORY_MAINTENANCE_COOLDOWN_FILE = STATE_DIR / "last_memory_maintenance.json"
+
 
 def _gather_extended_state(checks: list) -> str:
     """Collect system state summary for the LLM heartbeat agent."""
@@ -727,6 +731,101 @@ def _log_agent(message: str) -> None:
     ts = datetime.now(timezone.utc).isoformat()
     with open(HEARTBEAT_AGENT_LOG, "a") as f:
         f.write(f"[{ts}] {message}\n")
+
+
+# --- Memory Maintenance Scheduler (Phase 8) -----------------------------------
+
+
+def _memory_maintenance_cooldown_ok() -> bool:
+    """Check if enough time has passed since the last memory maintenance run."""
+    if not MEMORY_MAINTENANCE_COOLDOWN_FILE.exists():
+        return True
+    try:
+        data = json.loads(MEMORY_MAINTENANCE_COOLDOWN_FILE.read_text())
+        last_run = data.get("last_run_utc", "")
+        if not last_run:
+            return True
+        last_dt = datetime.fromisoformat(last_run)
+        age_min = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
+        return age_min >= MEMORY_MAINTENANCE_COOLDOWN_MINUTES
+    except Exception:
+        return True
+
+
+def _run_memory_maintenance() -> None:
+    """Run periodic memory maintenance: governance sweeps, consolidation, compaction.
+
+    Phase 8: Scheduled maintenance jobs. Runs every 6 hours via heartbeat timer.
+    All operations are fail-open — maintenance failures never block heartbeat.
+    """
+    if not _memory_maintenance_cooldown_ok():
+        print("[memory-maintenance] Cooldown not met, skipping")
+        return
+
+    print("[memory-maintenance] Starting scheduled maintenance...")
+    results: dict[str, str] = {}
+
+    # 1. Governance sweeps (retention, stale loop detection, protection enforcement)
+    try:
+        from agents.memory_governance import GovernanceEngine
+
+        gov = GovernanceEngine()
+        sweep = gov.run_sweep(dry_run=False)
+        results["governance"] = f"ok ({sweep.items_acted_on} actions, {sweep.items_protected} protected)"
+        print(f"[memory-maintenance] Governance: {sweep.items_acted_on} actions")
+    except Exception as exc:
+        results["governance"] = f"error: {exc}"
+        print(f"[memory-maintenance] Governance failed: {exc}")
+
+    # 2. Memory consolidation (window-based compression of working memory)
+    try:
+        from agents.memory_consolidator import WindowSpec, consolidate_window
+        from agents.memory_router import WorkingMemoryAdapter
+
+        adapter = WorkingMemoryAdapter()
+        items = adapter.recall("", max_results=50)
+        if items:
+            spec = WindowSpec(
+                window_type="working_memory",
+                source_items=items,
+            )
+            consol = consolidate_window(spec)
+            results["consolidation"] = (
+                f"ok ({consol.dedupe_removed} deduped from {consol.input_count}, action={consol.action})"
+            )
+            print(f"[memory-maintenance] Consolidation: {consol.action}, {consol.dedupe_removed} deduped")
+        else:
+            results["consolidation"] = "ok (no items to consolidate)"
+    except Exception as exc:
+        results["consolidation"] = f"error: {exc}"
+        print(f"[memory-maintenance] Consolidation failed: {exc}")
+
+    # 3. Memory compaction (duplicate detection, supersession chain cleanup)
+    try:
+        from agents.memory_compactor import CompactionEngine
+
+        compactor = CompactionEngine()
+        compact = compactor.run_compaction(dry_run=False)
+        results["compaction"] = f"ok ({compact.items_compacted} compacted, {compact.duplicates_found} dupes)"
+        print(f"[memory-maintenance] Compaction: {compact.items_compacted} compacted")
+    except Exception as exc:
+        results["compaction"] = f"error: {exc}"
+        print(f"[memory-maintenance] Compaction failed: {exc}")
+
+    # Update cooldown
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    MEMORY_MAINTENANCE_COOLDOWN_FILE.write_text(
+        json.dumps(
+            {
+                "last_run_utc": datetime.now(timezone.utc).isoformat(),
+                "results": results,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    print(f"[memory-maintenance] Complete: {results}")
 
 
 # --- Autonomous Research Cycle -----------------------------------------------
@@ -985,7 +1084,7 @@ Call `upsert_memory` with these exact parameters:
     "topic": "<the research topic>",
     "date": "{date_str}",
     "confidence": "high",
-    "source": "heartbeat_research_cycle"
+    "source": "heartbeat"
   }}
 
 ═══════════════════════════════════════════════════════════════
@@ -1311,7 +1410,7 @@ Call `upsert_memory` with:
     "topic": "enhancement_plan",
     "date": "{date_str}",
     "confidence": "high",
-    "source": "heartbeat_planning_cycle",
+    "source": "heartbeat",
     "plan_version": "<version number>"
   }}
 
@@ -1627,6 +1726,12 @@ def main() -> int:
         _run_heartbeat_agent(checks)
     except Exception as e:
         print(f"[heartbeat-agent] Failed (non-fatal): {e}")
+
+    # --- Memory maintenance scheduler (Phase 8) ---
+    try:
+        _run_memory_maintenance()
+    except Exception as e:
+        print(f"[memory-maintenance] Failed (non-fatal): {e}")
 
     # --- Autonomous cycles: research (hourly) + planning (every 3 hours) ---
     # Both run independently when their cooldowns are met.

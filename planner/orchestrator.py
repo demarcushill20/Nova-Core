@@ -356,7 +356,8 @@ class Orchestrator:
     def _run_with_executor(self, step: PlanStep) -> StepResult:
         """Run step through the pluggable executor and validate output."""
         try:
-            assert self._step_executor is not None
+            if self._step_executor is None:
+                raise RuntimeError("step executor not configured")
             output_text, success, error = self._step_executor(step)
         except Exception as exc:
             step.status = "failed"

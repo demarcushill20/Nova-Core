@@ -1,7 +1,7 @@
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-exclude = [".venv", "venv", "WORK"]
+exclude = [".venv", "venv", "WORK", "TASKS", "OUTPUT", "LOGS", "MEMORY"]
 
 [tool.ruff.lint]
 select = [
@@ -12,6 +12,7 @@ select = [
     "UP",   # pyupgrade — modernize syntax
     "B",    # flake8-bugbear — common bugs
     "SIM",  # flake8-simplify — simplifications
+    "S",    # flake8-bandit — security checks
 ]
 ignore = [
     "E501",   # line-too-long — handled by formatter
@@ -21,7 +22,19 @@ ignore = [
     "SIM108", # if-else-block-instead-of-if-exp — readability preference
     "SIM300", # yoda-conditions — not harmful
     "B011",   # assert-false — used in tests
+    "S603",   # subprocess-call — intentional in agent runtime
+    "S607",   # start-process-with-partial-path — intentional CLI calls
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S108"]  # assert, test tokens, and /tmp paths are standard in tests
+"scripts/**/*.py" = ["S108"]  # temp file usage acceptable in scripts
+"nova_kill_switch.py" = ["S108"]  # /tmp sentinel files are the intended kill-switch mechanism
+"utils/security_monitor.py" = ["S105"]  # secret_status variable names are false positives
+"tools/runner.py" = ["S105"]  # _CONFIRM_TOKEN is a confirmation string, not a secret
+"tools/adapters/system_service.py" = ["S105"]  # _CONFIRM_TOKEN is a confirmation string
+"heartbeat.py" = ["S110", "S310"]  # try-except-pass and urlopen are intentional in heartbeat checks
+"watcher.py" = ["S110"]  # try-except-pass is intentional for non-fatal ops
 
 [tool.ruff.lint.isort]
 known-first-party = ["agents", "planner", "telegram", "utils"]

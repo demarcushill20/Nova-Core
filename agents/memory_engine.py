@@ -60,9 +60,11 @@ ARTIFACT_ID_RE = re.compile(r"^mem_[a-zA-Z0-9_-]+_\d+$")
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MemoryArtifact:
     """Structured memory artifact from a completed workflow."""
+
     artifact_id: str
     workflow_id: str
     task_summary: str
@@ -94,6 +96,7 @@ class MemoryArtifact:
 # Validation
 # ---------------------------------------------------------------------------
 
+
 def validate_memory_artifact(data: dict) -> tuple[bool, list[str]]:
     """Validate a memory artifact dict. Returns (valid, errors).
 
@@ -121,16 +124,10 @@ def validate_memory_artifact(data: dict) -> tuple[bool, list[str]]:
 
     # Enum checks
     if data.get("confidence") not in VALID_CONFIDENCE:
-        errors.append(
-            f"invalid confidence: {data.get('confidence')!r} "
-            f"(must be one of {sorted(VALID_CONFIDENCE)})"
-        )
+        errors.append(f"invalid confidence: {data.get('confidence')!r} (must be one of {sorted(VALID_CONFIDENCE)})")
 
     if data.get("task_class") not in VALID_TASK_CLASSES:
-        errors.append(
-            f"invalid task_class: {data.get('task_class')!r} "
-            f"(must be one of {sorted(VALID_TASK_CLASSES)})"
-        )
+        errors.append(f"invalid task_class: {data.get('task_class')!r} (must be one of {sorted(VALID_TASK_CLASSES)})")
 
     if data.get("verification_outcome") not in VALID_VERIFICATION_OUTCOMES:
         errors.append(
@@ -141,19 +138,13 @@ def validate_memory_artifact(data: dict) -> tuple[bool, list[str]]:
     # Artifact ID format
     aid = data.get("artifact_id", "")
     if not ARTIFACT_ID_RE.match(aid):
-        errors.append(
-            f"invalid artifact_id format: {aid!r} "
-            f"(must match mem_<workflow_id>_<timestamp>)"
-        )
+        errors.append(f"invalid artifact_id format: {aid!r} (must match mem_<workflow_id>_<timestamp>)")
 
     # Size bound check (serialized)
     try:
         serialized = json.dumps(data, default=str)
         if len(serialized.encode()) > MAX_ARTIFACT_SIZE:
-            errors.append(
-                f"artifact too large: {len(serialized.encode())} bytes "
-                f"(max {MAX_ARTIFACT_SIZE})"
-            )
+            errors.append(f"artifact too large: {len(serialized.encode())} bytes (max {MAX_ARTIFACT_SIZE})")
     except (TypeError, ValueError) as e:
         errors.append(f"artifact not JSON-serializable: {e}")
 
@@ -163,6 +154,7 @@ def validate_memory_artifact(data: dict) -> tuple[bool, list[str]]:
 # ---------------------------------------------------------------------------
 # Write path
 # ---------------------------------------------------------------------------
+
 
 def _atomic_write_json(path: Path, data: dict) -> None:
     """Atomic write: write to tmp + rename."""
@@ -214,6 +206,7 @@ def write_memory_artifact(
 # ---------------------------------------------------------------------------
 # Workflow compaction
 # ---------------------------------------------------------------------------
+
 
 def compact_workflow_summary(
     workflow_id: str,
@@ -282,26 +275,16 @@ def compact_workflow_summary(
         if ratio == 1.0:
             guidance_parts.append("All subtasks completed successfully.")
         elif ratio >= 0.5:
-            guidance_parts.append(
-                f"{completed}/{total} subtasks completed; "
-                f"review failure patterns before reuse."
-            )
+            guidance_parts.append(f"{completed}/{total} subtasks completed; review failure patterns before reuse.")
         else:
-            guidance_parts.append(
-                f"Low completion rate ({completed}/{total}); "
-                f"consider restructuring approach."
-            )
+            guidance_parts.append(f"Low completion rate ({completed}/{total}); consider restructuring approach.")
 
     latency = metrics.get("mean_subtask_latency_s")
     if latency is not None and latency > 120:
-        guidance_parts.append(
-            f"Mean subtask latency was {latency:.0f}s — consider parallelism."
-        )
+        guidance_parts.append(f"Mean subtask latency was {latency:.0f}s — consider parallelism.")
 
     if failure_patterns:
-        guidance_parts.append(
-            f"Common failure modes: {', '.join(fp.split(':')[0] for fp in failure_patterns[:3])}."
-        )
+        guidance_parts.append(f"Common failure modes: {', '.join(fp.split(':')[0] for fp in failure_patterns[:3])}.")
 
     reusable_guidance = " ".join(guidance_parts) if guidance_parts else "No specific guidance."
 
@@ -331,6 +314,7 @@ def compact_workflow_summary(
 # ---------------------------------------------------------------------------
 # Planner retrieval hook
 # ---------------------------------------------------------------------------
+
 
 def _load_artifacts(directory: Path) -> list[dict]:
     """Load all JSON artifacts from a directory."""
@@ -364,11 +348,13 @@ def _relevance_score(artifact: dict, task_class: str, keywords: list[str]) -> fl
         score += 3.0
 
     # Keyword matching in text fields
-    searchable = " ".join([
-        artifact.get("task_summary", ""),
-        artifact.get("reusable_guidance", ""),
-        " ".join(artifact.get("key_decisions", [])),
-    ]).lower()
+    searchable = " ".join(
+        [
+            artifact.get("task_summary", ""),
+            artifact.get("reusable_guidance", ""),
+            " ".join(artifact.get("key_decisions", [])),
+        ]
+    ).lower()
 
     for kw in keywords:
         if kw.lower() in searchable:
@@ -419,10 +405,7 @@ def retrieve_related_patterns(
     max_results = min(max_results, MAX_RETRIEVAL_RESULTS)  # enforce hard cap
 
     # Gather from both subdirectories
-    all_artifacts = (
-        _load_artifacts(root / "agent_patterns")
-        + _load_artifacts(root / "workflow_learnings")
-    )
+    all_artifacts = _load_artifacts(root / "agent_patterns") + _load_artifacts(root / "workflow_learnings")
 
     if not all_artifacts:
         return []
@@ -474,6 +457,7 @@ def format_retrieval_for_planner(artifacts: list[dict]) -> str:
 # Integration: capture memory from completed workflow
 # ---------------------------------------------------------------------------
 
+
 def capture_workflow_memory(
     workflow_id: str,
     task_summary: str,
@@ -517,6 +501,12 @@ def capture_direct_task_memory(
     base: Path | None = None,
 ) -> Path | None:
     """Capture memory from a direct worker task (non-orchestrator path).
+
+    .. deprecated::
+        Legacy direct write path. New memory writes should go through
+        ``agents.memory_router.router.store()`` or ``trigger_engine.fire()``.
+        Retained for backward compatibility until Phase 2 migration completes.
+        See MEMORY/direct_memory_call_migration_map.md for migration plan.
 
     Uses the CONTRACT block from the output report to build a lightweight
     memory artifact. This closes the learning loop for tasks that bypass

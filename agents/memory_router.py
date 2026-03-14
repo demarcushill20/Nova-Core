@@ -64,6 +64,7 @@ VALID_SOURCES = frozenset(
         "promoter",
         "operator",
         "daily_summary",
+        "consolidator",
     }
 )
 VALID_EVENT_TYPES = frozenset(
@@ -83,6 +84,7 @@ VALID_EVENT_TYPES = frozenset(
         "conversation_insight",
         "workflow_learning_promoted",
         "agent_pattern_promoted",
+        "open_loop",
     }
 )
 VALID_PROVENANCES = frozenset(
@@ -150,6 +152,8 @@ EVENT_TYPE_TO_LAYER: dict[str, str] = {
     "user_preference": "semantic",
     # procedural: proven reusable methods
     "agent_pattern_promoted": "procedural",
+    # open-loop tracking
+    "open_loop": "episodic",
 }
 
 # Which stores are allowed for each layer
@@ -220,6 +224,9 @@ class CanonicalMemoryObject:
     open_loop_status: str | None = None
     rejection_reason: str | None = None
 
+    # Adapter-specific hints (e.g., pre-built vault frontmatter/body/path)
+    adapter_metadata: dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -250,6 +257,8 @@ def validate_canonical_object(obj: CanonicalMemoryObject) -> tuple[bool, list[st
 
     if obj.source not in VALID_SOURCES:
         errors.append(f"invalid source: {obj.source!r}")
+    if obj.event_type not in VALID_EVENT_TYPES:
+        errors.append(f"invalid event_type: {obj.event_type!r}")
     if obj.confidence not in VALID_CONFIDENCES:
         errors.append(f"invalid confidence: {obj.confidence!r}")
     if obj.memory_layer_candidate not in VALID_LAYERS:
@@ -540,9 +549,18 @@ class VaultAdapter:
         return normalized
 
     def store(self, obj: CanonicalMemoryObject) -> StoreResult:
-        """Store to vault via vault_write. Only for appropriate note types."""
+        """Store to vault via vault_write. Only for appropriate note types.
+
+        Supports two modes:
+        1. Pre-built payload: If ``obj.adapter_metadata`` contains
+           ``vault_frontmatter``, ``vault_body``, and ``vault_path``, those
+           are used directly (enables promoter-quality vault notes).
+        2. Auto-built: Constructs minimal frontmatter from canonical fields.
+
+        Both modes validate through ``vault_validate`` before writing.
+        """
         try:
-            from tools.mcp_vault_server import vault_write
+            from tools.mcp_vault_server import vault_validate, vault_write
         except ImportError:
             return StoreResult(
                 stored=False,
@@ -550,39 +568,65 @@ class VaultAdapter:
                 rejection_reason="vault MCP server not available",
             )
 
-        # Map event_type to vault note type and folder
-        type_map = {
-            "research_completed": ("research-summary", "40-research"),
-            "workflow_learning_promoted": ("workflow-learning", "30-workflow-learnings"),
-            "agent_pattern_promoted": ("agent-pattern", "20-agent-patterns"),
-        }
+        # --- Mode 1: Pre-built vault payload from promoters ---
+        pre_fm = obj.adapter_metadata.get("vault_frontmatter")
+        pre_body = obj.adapter_metadata.get("vault_body")
+        pre_path = obj.adapter_metadata.get("vault_path")
 
-        mapping = type_map.get(obj.event_type)
-        if not mapping:
+        if pre_fm and pre_body and pre_path:
+            frontmatter = pre_fm
+            body = pre_body
+            path = pre_path
+        else:
+            # --- Mode 2: Auto-build from canonical fields ---
+            type_map = {
+                "research_completed": ("research-summary", "40-research"),
+                "workflow_learning_promoted": ("workflow-learning", "30-workflow-learnings"),
+                "agent_pattern_promoted": ("agent-pattern", "20-agent-patterns"),
+            }
+
+            mapping = type_map.get(obj.event_type)
+            if not mapping:
+                return StoreResult(
+                    stored=False,
+                    store_used=self.name,
+                    rejection_reason=f"no vault mapping for event_type={obj.event_type!r}",
+                )
+
+            note_type, folder = mapping
+            from schemas.vault_note_schema import VALID_NOTE_TYPES
+
+            required_tag = VALID_NOTE_TYPES.get(note_type, "")
+
+            frontmatter = {
+                "type": note_type,
+                "title": obj.title[:100],
+                "confidence": obj.confidence,
+                "source": "nova-core-memory",
+                "tags": [required_tag] + [t for t in obj.tags if t != required_tag][:9],
+            }
+
+            slug = obj.memory_id.replace("/", "-").replace(" ", "-")[:60]
+            path = f"{folder}/{slug}.md"
+            body = obj.content or obj.summary
+
+        # Validate before writing (both modes)
+        try:
+            validation = vault_validate(frontmatter=frontmatter, body=body)
+        except Exception as exc:
             return StoreResult(
                 stored=False,
                 store_used=self.name,
-                rejection_reason=f"no vault mapping for event_type={obj.event_type!r}",
+                rejection_reason=f"vault_validate error: {exc}",
             )
 
-        note_type, folder = mapping
-        # Build minimal valid frontmatter
-        from schemas.vault_note_schema import VALID_NOTE_TYPES
-
-        required_tag = VALID_NOTE_TYPES.get(note_type, "")
-
-        frontmatter: dict[str, Any] = {
-            "type": note_type,
-            "title": obj.title[:100],
-            "confidence": obj.confidence,
-            "source": "nova-core-memory",
-            "tags": [required_tag] + [t for t in obj.tags if t != required_tag][:9],
-        }
-
-        # Build path
-        slug = obj.memory_id.replace("/", "-").replace(" ", "-")[:60]
-        path = f"{folder}/{slug}.md"
-        body = obj.content or obj.summary
+        if not validation.get("valid", False):
+            return StoreResult(
+                stored=False,
+                store_used=self.name,
+                rejection_reason="vault_validation_failed",
+                validation_errors=validation.get("errors", ["unknown validation error"]),
+            )
 
         try:
             result = vault_write(path=path, frontmatter=frontmatter, body=body)
@@ -618,35 +662,214 @@ class VaultAdapter:
 
 
 # ---------------------------------------------------------------------------
-# FusionMemoryAdapter — skeleton for prompt-delegated MCP backend
+# FusionMemoryAdapter — direct Python bridge to Fusion Memory MCP backend
 # ---------------------------------------------------------------------------
+
+_FUSION_MEMORY_REPO = Path("/home/nova/Nova_AI_Fusion_Memory_MCP")
+_FUSION_MEMORY_ENV = _FUSION_MEMORY_REPO / ".env"
+
+
+def _ensure_fusion_env() -> bool:
+    """Load Fusion Memory .env and add repo to sys.path. Returns success."""
+    import os
+    import sys as _sys
+
+    if not _FUSION_MEMORY_ENV.exists():
+        return False
+
+    # Load .env (setdefault to avoid overriding existing vars)
+    for line in _FUSION_MEMORY_ENV.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
+    repo_str = str(_FUSION_MEMORY_REPO)
+    if repo_str not in _sys.path:
+        _sys.path.insert(0, repo_str)
+    return True
+
+
+def _run_async(coro: Any) -> Any:
+    """Run an async coroutine from sync code.
+
+    Uses asyncio.run() if no loop is running, otherwise creates a new
+    thread-based event loop to avoid 'cannot run nested' errors.
+    """
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is None:
+        return asyncio.run(coro)
+
+    # Already in an async context — run in a new thread
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, coro)
+        return future.result(timeout=30)
 
 
 class FusionMemoryAdapter:
     """Adapter for Fusion Memory MCP (Pinecone + Neo4j + Redis).
 
-    Phase 1 skeleton. Fusion Memory writes are currently prompt-delegated
-    (embedded in Claude subprocess prompts, not called from Python).
-    The adapter cannot make real MCP calls from Python yet.
+    Phase 3: Direct Python bridge. Imports MemoryService from the Fusion
+    Memory repo and calls perform_query / perform_upsert directly.
+    Lazy-initializes on first use. Falls back gracefully if unavailable.
     """
 
     name = "fusion_memory"
 
+    def __init__(self) -> None:
+        self._service: Any = None
+        self._init_attempted = False
+        self._available = False
+
+    def _ensure_service(self) -> bool:
+        """Lazy-initialize MemoryService. Returns True if ready."""
+        if self._service is not None:
+            return True
+        if self._init_attempted:
+            return False  # Already failed once, don't retry
+
+        self._init_attempted = True
+        try:
+            if not _ensure_fusion_env():
+                logger.debug("Fusion Memory .env not found")
+                return False
+
+            from app.services.memory_service import MemoryService
+
+            svc = MemoryService()
+            ok = _run_async(svc.initialize())
+            if not ok:
+                logger.warning("FusionMemoryAdapter: MemoryService.initialize() returned False")
+                return False
+
+            self._service = svc
+            self._available = True
+            logger.info("FusionMemoryAdapter: MemoryService initialized successfully")
+            return True
+        except Exception as exc:
+            logger.warning("FusionMemoryAdapter init failed: %s", exc)
+            return False
+
     def recall(self, query: str, **kwargs: Any) -> list[dict]:
-        """Fusion Memory recall is not yet callable from Python."""
-        logger.debug("FusionMemoryAdapter.recall: not implemented in Phase 1")
-        return []
+        """Semantic + graph search via Fusion Memory."""
+        if not self._ensure_service():
+            return []
+
+        max_results = kwargs.get("max_results", 5)
+        try:
+            results = _run_async(
+                self._service.perform_query(
+                    query_text=query,
+                    top_k_final=max_results,
+                )
+            )
+            # Normalize to standard format
+            normalized: list[dict] = []
+            for item in results[:max_results]:
+                meta = item.get("metadata", {})
+                normalized.append(
+                    {
+                        "memory_id": item.get("id", ""),
+                        "content": item.get("content", meta.get("content", "")),
+                        "score": item.get("score", 0),
+                        "category": meta.get("category", ""),
+                        "tags": meta.get("tags", []),
+                        "timestamp": meta.get("timestamp", ""),
+                        "source": self.name,
+                        "_source_adapter": self.name,
+                    }
+                )
+            return normalized
+        except Exception as exc:
+            logger.warning("FusionMemoryAdapter.recall failed: %s", exc)
+            return []
 
     def store(self, obj: CanonicalMemoryObject) -> StoreResult:
-        """Fusion Memory store is not yet callable from Python."""
-        return StoreResult(
-            stored=False,
-            store_used=self.name,
-            rejection_reason="fusion_memory writes are prompt-delegated; not callable from Python in Phase 1",
-        )
+        """Upsert a memory object to Fusion Memory (Pinecone + Neo4j)."""
+        if not self._ensure_service():
+            return StoreResult(
+                stored=False,
+                store_used=self.name,
+                rejection_reason="fusion_memory service not available",
+            )
+
+        # Build content string for embedding
+        content = f"{obj.title}\n\n{obj.summary}"
+        if obj.content:
+            content += f"\n\n{obj.content[:2000]}"
+
+        metadata = {
+            "category": _map_event_to_category(obj.event_type),
+            "source": obj.source,
+            "event_type": obj.event_type,
+            "layer": obj.current_layer,
+            "confidence": obj.confidence,
+            "project": obj.related_project,
+            "tags": obj.tags[:10],
+            "timestamp": obj.timestamp,
+        }
+        if obj.related_task_ids:
+            metadata["task_ids"] = obj.related_task_ids[:5]
+
+        try:
+            result_id = _run_async(
+                self._service.perform_upsert(
+                    content=content,
+                    memory_id=obj.memory_id,
+                    metadata=metadata,
+                )
+            )
+            if result_id:
+                return StoreResult(
+                    stored=True,
+                    store_used=self.name,
+                    path_or_id=result_id,
+                )
+            return StoreResult(
+                stored=False,
+                store_used=self.name,
+                rejection_reason="perform_upsert returned None",
+            )
+        except Exception as exc:
+            return StoreResult(
+                stored=False,
+                store_used=self.name,
+                rejection_reason=f"fusion_memory upsert failed: {exc}",
+            )
 
     def is_available(self) -> bool:
-        return False
+        return self._ensure_service()
+
+
+def _map_event_to_category(event_type: str) -> str:
+    """Map router event_type to Fusion Memory category."""
+    mapping = {
+        "task_completed": "context",
+        "task_failed": "debug",
+        "research_completed": "research",
+        "plan_created": "decision",
+        "plan_revised": "decision",
+        "code_changed": "context",
+        "pattern_detected": "pattern",
+        "decision_made": "decision",
+        "bug_fixed": "debug",
+        "user_preference": "context",
+        "heartbeat_cycle": "context",
+        "session_end": "context",
+        "conversation_insight": "context",
+        "workflow_learning_promoted": "pattern",
+        "agent_pattern_promoted": "pattern",
+        "open_loop": "context",
+    }
+    return mapping.get(event_type, "context")
 
 
 # ---------------------------------------------------------------------------
@@ -1293,6 +1516,7 @@ class MemoryRouter:
             supersedes=event.get("supersedes"),
             promotion_status=event.get("promotion_status", "candidate"),
             open_loop_status=event.get("open_loop_status"),
+            adapter_metadata=event.get("adapter_metadata", {}),
         )
 
         slog.event(

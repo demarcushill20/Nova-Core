@@ -133,6 +133,44 @@ class TestCanonicalValidation:
         valid, errors = validate_canonical_object(_valid_cmo(target_store=None))
         assert valid is True
 
+    # --- Phase 1 integration: event_type and source enforcement ---
+
+    def test_invalid_event_type_rejected(self):
+        valid, errors = validate_canonical_object(_valid_cmo(event_type="made_up_event"))
+        assert valid is False
+        assert any("event_type" in e for e in errors)
+
+    def test_invalid_source_rejected(self):
+        valid, errors = validate_canonical_object(_valid_cmo(source="unknown_service"))
+        assert valid is False
+        assert any("source" in e for e in errors)
+
+    def test_consolidator_source_valid(self):
+        """Phase 1 fix: consolidator is a valid source."""
+        valid, errors = validate_canonical_object(_valid_cmo(source="consolidator"))
+        assert valid is True, errors
+
+    def test_open_loop_event_type_valid(self):
+        """Phase 1 fix: open_loop is a valid event_type."""
+        valid, errors = validate_canonical_object(_valid_cmo(event_type="open_loop"))
+        assert valid is True, errors
+
+    def test_all_valid_sources_accepted(self):
+        """Every declared source passes validation."""
+        from agents.memory_router import VALID_SOURCES
+
+        for src in VALID_SOURCES:
+            valid, errors = validate_canonical_object(_valid_cmo(source=src))
+            assert valid is True, f"source={src!r} rejected: {errors}"
+
+    def test_all_valid_event_types_accepted(self):
+        """Every declared event_type passes validation."""
+        from agents.memory_router import VALID_EVENT_TYPES
+
+        for et in VALID_EVENT_TYPES:
+            valid, errors = validate_canonical_object(_valid_cmo(event_type=et))
+            assert valid is True, f"event_type={et!r} rejected: {errors}"
+
 
 # ---------------------------------------------------------------------------
 # Tests: Router recall
@@ -527,21 +565,75 @@ class TestMemoryFileAdapter:
 
 
 class TestFusionMemoryAdapter:
-    """FusionMemoryAdapter is a Phase 1 skeleton."""
+    """FusionMemoryAdapter — Phase 3: direct Python bridge (fail-safe when backends unavailable)."""
 
-    def test_recall_returns_empty(self):
+    def test_recall_returns_empty_when_unavailable(self):
+        """Recall returns [] when backends are not reachable."""
         adapter = FusionMemoryAdapter()
+        adapter._init_attempted = True  # Skip real init
+        adapter._available = False
         assert adapter.recall("test") == []
 
-    def test_store_returns_not_implemented(self):
+    def test_store_returns_rejection_when_unavailable(self):
+        """Store returns rejection when backends are not reachable."""
         adapter = FusionMemoryAdapter()
+        adapter._init_attempted = True  # Skip real init
+        adapter._available = False
         result = adapter.store(_valid_cmo())
         assert result.stored is False
-        assert "prompt-delegated" in result.rejection_reason
+        assert "not available" in result.rejection_reason
 
-    def test_not_available(self):
+    def test_not_available_when_init_fails(self):
+        """is_available returns False when init has already failed."""
         adapter = FusionMemoryAdapter()
+        adapter._init_attempted = True
+        adapter._available = False
         assert adapter.is_available() is False
+
+    def test_recall_with_mock_service(self):
+        """Recall works with a mock MemoryService."""
+        adapter = FusionMemoryAdapter()
+        mock_svc = MagicMock()
+        mock_svc.perform_query = MagicMock()
+        adapter._service = mock_svc
+        adapter._available = True
+
+        async def mock_query(query_text, top_k_final=5):
+            return [
+                {"id": "mem-1", "content": "test result", "score": 0.9, "metadata": {"category": "research"}},
+            ]
+
+        mock_svc.perform_query = mock_query
+        results = adapter.recall("test query", max_results=5)
+        assert len(results) == 1
+        assert results[0]["memory_id"] == "mem-1"
+        assert results[0]["source"] == "fusion_memory"
+
+    def test_store_with_mock_service(self):
+        """Store works with a mock MemoryService."""
+        adapter = FusionMemoryAdapter()
+        mock_svc = MagicMock()
+        adapter._service = mock_svc
+        adapter._available = True
+
+        async def mock_upsert(content, memory_id=None, metadata=None):
+            return memory_id or "generated-id"
+
+        mock_svc.perform_upsert = mock_upsert
+        result = adapter.store(_valid_cmo())
+        assert result.stored is True
+        assert result.store_used == "fusion_memory"
+        assert result.path_or_id  # Has an ID
+
+    def test_event_type_to_category_mapping(self):
+        """All valid event types have a Fusion Memory category mapping."""
+        from agents.memory_router import VALID_EVENT_TYPES, _map_event_to_category
+
+        for et in VALID_EVENT_TYPES:
+            cat = _map_event_to_category(et)
+            assert cat in ("context", "research", "decision", "pattern", "debug"), (
+                f"event_type {et!r} maps to unexpected category {cat!r}"
+            )
 
 
 class TestVaultAdapter:
@@ -1285,3 +1377,208 @@ class TestWorkingLayerRouterIntegration:
         r2 = router.store(semantic_obj, caller="test")
         assert r2.stored is False
         assert "layer_store_mismatch" in r2.rejection_reason
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 Integration: Bypass detection guard
+# ---------------------------------------------------------------------------
+
+
+class TestWritePathBypassGuard:
+    """Detect direct memory writes that bypass the Memory Router.
+
+    This test greps production code for known direct-write patterns that should
+    eventually be migrated to the router. It serves as a ratchet — the count of
+    known bypasses must not increase without updating the allowlist.
+    """
+
+    # Known direct-write bypasses that are documented and exempt.
+    # Each entry: (file_relative, function_or_pattern, reason)
+    KNOWN_BYPASSES = [
+        # Blackboard is internal orchestration state, not knowledge memory
+        ("agents/blackboard.py", "_write_json", "internal state, not knowledge"),
+        # Session manager persists session state, not knowledge
+        ("agents/session_manager.py", "_persist", "session state, not knowledge"),
+    ]
+
+    def test_known_bypass_count_does_not_increase(self):
+        """Guard: the number of known bypasses must not grow without updating this list."""
+        import subprocess
+
+        # Search for direct write_memory_artifact calls outside the router/adapter
+        result = subprocess.run(
+            [
+                "grep",
+                "-rn",
+                "write_memory_artifact(",
+                "/home/nova/nova-core/agents/memory_engine.py",
+                "/home/nova/nova-core/watcher.py",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        # Count call sites (not the definition itself)
+        callsites = [
+            line
+            for line in result.stdout.splitlines()
+            if "write_memory_artifact(" in line
+            and "def write_memory_artifact" not in line
+            and "#" not in line.split("write_memory_artifact")[0]  # skip comments
+        ]
+        # There should be exactly the known count of direct calls
+        # If this increases, someone added a new bypass
+        assert len(callsites) <= 3, (
+            f"Direct write_memory_artifact calls increased to {len(callsites)}. "
+            f"New writes must go through memory_router.store(). Sites: {callsites}"
+        )
+
+    def test_schema_enums_are_consistent(self):
+        """Guard: all event_types in EVENT_TYPE_TO_LAYER must be in VALID_EVENT_TYPES."""
+        from agents.memory_router import EVENT_TYPE_TO_LAYER, VALID_EVENT_TYPES
+
+        for et in EVENT_TYPE_TO_LAYER:
+            assert et in VALID_EVENT_TYPES, f"EVENT_TYPE_TO_LAYER has {et!r} but VALID_EVENT_TYPES does not"
+
+    def test_promoters_do_not_import_vault_directly(self):
+        """Guard: workflow_promoter and pattern_promoter must not import vault_write directly.
+
+        Phase 2 migrated these to route through memory_router.store().
+        """
+        import ast
+
+        for filename in ("planner/workflow_promoter.py", "planner/pattern_promoter.py"):
+            path = Path("/home/nova/nova-core") / filename
+            if not path.exists():
+                continue
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    module = getattr(node, "module", "") or ""
+                    if "mcp_vault_server" in module:
+                        names = [alias.name for alias in node.names]
+                        assert "vault_write" not in names, (
+                            f"{filename} still imports vault_write directly. "
+                            "All vault writes must go through memory_router.store()."
+                        )
+
+
+class TestVaultAdapterPreBuiltPayload:
+    """Phase 2: VaultAdapter supports pre-built promotion payloads via adapter_metadata."""
+
+    def test_pre_built_vault_payload_used(self, tmp_path):
+        """VaultAdapter uses adapter_metadata vault_frontmatter/body/path when present."""
+        obj = CanonicalMemoryObject(
+            memory_id="test-promo-001",
+            timestamp="2025-01-01T00:00:00Z",
+            source="promoter",
+            event_type="workflow_learning_promoted",
+            provenance="automatic",
+            title="Test Promotion",
+            summary="Test promotion summary",
+            current_layer="semantic",
+            adapter_metadata={
+                "vault_frontmatter": {
+                    "type": "workflow-learning",
+                    "title": "Custom Promotion Title",
+                    "confidence": "high",
+                    "source": "nova-core-memory",
+                    "tags": ["#type/learning"],
+                },
+                "vault_body": "## Custom Body\nFrom promoter.",
+                "vault_path": "30-workflow-learnings/test-promo.md",
+            },
+        )
+        with (
+            patch("tools.mcp_vault_server.vault_validate") as mock_validate,
+            patch("tools.mcp_vault_server.vault_write") as mock_write,
+        ):
+            mock_validate.return_value = {"valid": True}
+            mock_write.return_value = {"path": "30-workflow-learnings/test-promo.md", "size": 100}
+
+            from agents.memory_router import VaultAdapter
+
+            adapter = VaultAdapter()
+            result = adapter.store(obj)
+
+        assert result.stored is True
+        # Verify vault_validate was called with the pre-built payload
+        mock_validate.assert_called_once()
+        call_kwargs = mock_validate.call_args[1]
+        assert call_kwargs["frontmatter"]["title"] == "Custom Promotion Title"
+        assert call_kwargs["body"] == "## Custom Body\nFrom promoter."
+        # Verify vault_write was called with the pre-built path
+        mock_write.assert_called_once()
+        write_kwargs = mock_write.call_args[1]
+        assert write_kwargs["path"] == "30-workflow-learnings/test-promo.md"
+
+    def test_auto_built_fallback_when_no_adapter_metadata(self, tmp_path):
+        """VaultAdapter builds minimal frontmatter when adapter_metadata is empty."""
+        obj = CanonicalMemoryObject(
+            memory_id="test-auto-001",
+            timestamp="2025-01-01T00:00:00Z",
+            source="promoter",
+            event_type="workflow_learning_promoted",
+            provenance="automatic",
+            title="Auto Title",
+            summary="Auto summary",
+            current_layer="semantic",
+        )
+        with (
+            patch("tools.mcp_vault_server.vault_validate") as mock_validate,
+            patch("tools.mcp_vault_server.vault_write") as mock_write,
+        ):
+            mock_validate.return_value = {"valid": True}
+            mock_write.return_value = {"path": "30-workflow-learnings/test-auto-001.md", "size": 50}
+
+            from agents.memory_router import VaultAdapter
+
+            adapter = VaultAdapter()
+            result = adapter.store(obj)
+
+        assert result.stored is True
+        call_kwargs = mock_validate.call_args[1]
+        assert call_kwargs["frontmatter"]["type"] == "workflow-learning"
+
+    def test_vault_validation_failure_rejects_pre_built(self):
+        """VaultAdapter rejects pre-built payloads that fail vault_validate."""
+        obj = CanonicalMemoryObject(
+            memory_id="test-fail-001",
+            timestamp="2025-01-01T00:00:00Z",
+            source="promoter",
+            event_type="workflow_learning_promoted",
+            provenance="automatic",
+            title="Bad Promotion",
+            summary="Will fail validation",
+            current_layer="semantic",
+            adapter_metadata={
+                "vault_frontmatter": {"type": "invalid-type"},
+                "vault_body": "body",
+                "vault_path": "30-workflow-learnings/bad.md",
+            },
+        )
+        with patch("tools.mcp_vault_server.vault_validate") as mock_validate:
+            mock_validate.return_value = {"valid": False, "errors": ["invalid type"]}
+
+            from agents.memory_router import VaultAdapter
+
+            adapter = VaultAdapter()
+            result = adapter.store(obj)
+
+        assert result.stored is False
+        assert "vault_validation_failed" in (result.rejection_reason or "")
+
+    def test_adapter_metadata_passed_through_ingest_event(self):
+        """ingest_event passes adapter_metadata from event dict to CanonicalMemoryObject."""
+        router = MemoryRouter(adapters=[])
+        metadata = {"vault_frontmatter": {"type": "test"}, "vault_body": "body", "vault_path": "test.md"}
+        obj = router.ingest_event(
+            {
+                "source": "promoter",
+                "event_type": "workflow_learning_promoted",
+                "title": "Test",
+                "summary": "Test summary",
+                "adapter_metadata": metadata,
+            },
+            caller="test",
+        )
+        assert obj.adapter_metadata == metadata

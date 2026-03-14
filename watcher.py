@@ -17,8 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agents.memory_engine import (
-    capture_direct_task_memory,
-    format_retrieval_for_planner,  # legacy — retained for fallback
+    format_retrieval_for_planner,  # legacy — retained for recall result formatting
 )
 from agents.memory_router import router as memory_router
 from agents.memory_triggers import trigger_engine
@@ -1120,23 +1119,9 @@ def dispatch(task_path: Path):
     # --- Session completion recording (Phase 5) ---
     _session_mgr.record_task_completion(stem, success=passed)
 
-    # --- Memory capture (learning loop) ---
-    try:
-        contract = _session_mgr._extract_task_summary(stem)
-        if contract.get("summary"):
-            task_class = routing.get("task_class", "unknown")
-            mem_path = capture_direct_task_memory(
-                task_stem=stem,
-                task_class=task_class,
-                contract=contract,
-                success=passed,
-            )
-            if mem_path:
-                logger.info("MEMORY CAPTURE: %s → %s", stem, mem_path.name)
-    except Exception as exc:
-        logger.warning("Memory capture failed (non-fatal): %s", exc)
-
-    # --- Phase 3: Automatic memory trigger (router-based) ---
+    # --- Memory capture via router-based trigger engine (Phase 2 migration) ---
+    # Legacy capture_direct_task_memory removed — all memory writes now go
+    # through trigger_engine.fire() → router.ingest_event() → router.store().
     try:
         contract = _session_mgr._extract_task_summary(stem)
         task_class = routing.get("task_class", "unknown")

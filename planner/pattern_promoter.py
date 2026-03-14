@@ -9,7 +9,7 @@ Design constraints:
   - Requires 2+ independent workflow learnings sharing a common method.
   - Searches only 30-workflow-learnings/ (scoped, bounded).
   - Dedup checks 20-agent-patterns/ before writing (no duplicates).
-  - Uses vault_validate + vault_write (bounded write path).
+  - Routes through Memory Router → VaultAdapter (Phase 2).
   - Produces one compact agent-pattern note per promotion.
   - Fail-open: pattern promotion failure does not block execution.
   - All attempts are logged for auditability.
@@ -44,22 +44,102 @@ _MAX_DEDUP_RESULTS = 5
 _PATTERN_ELIGIBLE_CLASSES = frozenset({"research", "code_impl", "code_review"})
 
 # Stopwords for keyword extraction (same approach as vault_context.py)
-_STOPWORDS = frozenset({
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "shall", "can", "to", "of", "in", "for",
-    "on", "with", "at", "by", "from", "as", "into", "through", "during",
-    "before", "after", "above", "below", "between", "and", "but", "or",
-    "nor", "not", "no", "so", "if", "then", "than", "that", "this",
-    "it", "its", "my", "your", "our", "their", "he", "she", "we", "they",
-    "i", "me", "him", "her", "us", "them", "what", "which", "who",
-    "task", "step", "execute", "output", "input", "file", "run",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "through",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
+        "between",
+        "and",
+        "but",
+        "or",
+        "nor",
+        "not",
+        "no",
+        "so",
+        "if",
+        "then",
+        "than",
+        "that",
+        "this",
+        "it",
+        "its",
+        "my",
+        "your",
+        "our",
+        "their",
+        "he",
+        "she",
+        "we",
+        "they",
+        "i",
+        "me",
+        "him",
+        "her",
+        "us",
+        "them",
+        "what",
+        "which",
+        "who",
+        "task",
+        "step",
+        "execute",
+        "output",
+        "input",
+        "file",
+        "run",
+    }
+)
 
 # Valid agent roles (from vault schema)
-_VALID_AGENT_ROLES = frozenset({
-    "research", "coder", "critic", "verifier", "planner", "memory",
-})
+_VALID_AGENT_ROLES = frozenset(
+    {
+        "research",
+        "coder",
+        "critic",
+        "verifier",
+        "planner",
+        "memory",
+    }
+)
 
 # Map task_class to default agent_role for the pattern
 _TASK_CLASS_TO_ROLE: dict[str, str] = {
@@ -95,6 +175,7 @@ def _keyword_overlap(keywords_a: list[str], text_b: str) -> float:
 # ---------------------------------------------------------------------------
 # Candidate assessment
 # ---------------------------------------------------------------------------
+
 
 def assess_pattern_candidate(
     task_class: str,
@@ -177,21 +258,20 @@ def assess_pattern_candidate(
         # Check keyword overlap
         overlap = _keyword_overlap(keywords, snippet + " " + hit_path)
         if overlap >= _MIN_KEYWORD_OVERLAP:
-            converging.append({
-                "path": hit_path,
-                "snippet": snippet,
-                "overlap": overlap,
-            })
+            converging.append(
+                {
+                    "path": hit_path,
+                    "snippet": snippet,
+                    "overlap": overlap,
+                }
+            )
 
     result["evidence_count"] = len(converging) + 1  # +1 for current learning
     result["evidence_paths"] = [learning_path] + [c["path"] for c in converging]
 
     # 5. Need at least _MIN_CONVERGING_LEARNINGS total (current + related)
     if len(converging) < _MIN_CONVERGING_LEARNINGS - 1:
-        result["reason"] = (
-            f"insufficient_evidence:{result['evidence_count']}"
-            f"_need:{_MIN_CONVERGING_LEARNINGS}"
-        )
+        result["reason"] = f"insufficient_evidence:{result['evidence_count']}_need:{_MIN_CONVERGING_LEARNINGS}"
         return result
 
     # 6. Dedup: check for existing agent patterns covering this topic
@@ -236,6 +316,7 @@ def assess_pattern_candidate(
 # ---------------------------------------------------------------------------
 # Pattern payload assembly
 # ---------------------------------------------------------------------------
+
 
 def _build_pattern_payload(
     task_class: str,
@@ -319,9 +400,7 @@ def _build_pattern_payload(
     body_parts.append("\n## Trace\n")
     body_parts.append("- **Promotion**: auto-promoted by Phase 6.5\n")
     body_parts.append(f"- **Date**: {date_str}\n")
-    body_parts.append(
-        f"- **Evidence count**: {len(evidence_paths)} workflow learnings\n"
-    )
+    body_parts.append(f"- **Evidence count**: {len(evidence_paths)} workflow learnings\n")
 
     body = "\n".join(body_parts)
     path = f"20-agent-patterns/{date_str}-{slug}.md"
@@ -336,12 +415,13 @@ def _build_pattern_payload(
 def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
-    return text[:max_len - 3] + "..."
+    return text[: max_len - 3] + "..."
 
 
 # ---------------------------------------------------------------------------
 # Pattern promotion execution
 # ---------------------------------------------------------------------------
+
 
 def attempt_pattern_promotion(
     task_class: str,
@@ -400,7 +480,8 @@ def attempt_pattern_promotion(
         base_result["reason"] = assessment.get("reason", "not_candidate")
         logger.debug(
             "PATTERN PROMOTION DEFERRED: %s — %s",
-            learning_id, base_result["reason"],
+            learning_id,
+            base_result["reason"],
         )
         return base_result
 
@@ -409,68 +490,67 @@ def attempt_pattern_promotion(
         base_result["reason"] = "no_payload"
         return base_result
 
-    # 2. Validate via bounded write path
+    # 2. Route through unified Memory Router (validate + write)
     try:
-        from tools.mcp_vault_server import vault_validate, vault_write
+        from agents.memory_router import router
     except ImportError:
-        base_result["reason"] = "vault_unavailable"
-        base_result["errors"].append("vault MCP server not importable")
+        base_result["reason"] = "router_unavailable"
+        base_result["errors"].append("memory router not importable")
         return base_result
 
+    pattern_id = payload["frontmatter"].get("pattern_id", "")
     try:
-        validation = vault_validate(
-            frontmatter=payload["frontmatter"],
-            body=payload["body"],
+        obj = router.ingest_event(
+            {
+                "source": "promoter",
+                "event_type": "agent_pattern_promoted",
+                "title": payload["frontmatter"].get("title", f"Pattern from {learning_id}")[:100],
+                "summary": f"Agent pattern promoted from learning {learning_id}",
+                "content": payload["body"],
+                "current_layer": "procedural",
+                "target_store": "obsidian_vault",
+                "confidence": payload["frontmatter"].get("confidence", "medium"),
+                "tags": payload["frontmatter"].get("tags", []),
+                "related_task_ids": [learning_id],
+                "provenance": "automatic",
+                "storage_intent": "pattern_promotion",
+                "promotion_status": "promoted",
+                "adapter_metadata": {
+                    "vault_frontmatter": payload["frontmatter"],
+                    "vault_body": payload["body"],
+                    "vault_path": payload["path"],
+                },
+            },
+            caller="pattern_promoter",
         )
+        store_result = router.store(obj, caller="pattern_promoter")
     except Exception as exc:
-        logger.warning("PATTERN VALIDATION FAILED: %s — %s", learning_id, exc)
-        base_result["reason"] = f"validation_error:{exc}"
+        logger.warning("PATTERN ROUTER FAILED: %s — %s", learning_id, exc)
+        base_result["reason"] = f"router_error:{exc}"
+        base_result["note_path"] = payload["path"]
         base_result["errors"].append(str(exc))
         return base_result
 
-    if not validation.get("valid", False):
-        errors = validation.get("errors", ["unknown validation error"])
-        logger.warning(
-            "PATTERN VALIDATION REJECTED: %s — %s", learning_id, errors
-        )
-        base_result["reason"] = "validation_failed"
+    if not store_result.stored:
+        reason = store_result.rejection_reason or "unknown"
+        errors = store_result.validation_errors or [reason]
+        logger.warning("PATTERN REJECTED: %s — %s", learning_id, reason)
+        base_result["reason"] = reason
         base_result["note_path"] = payload["path"]
         base_result["errors"] = errors
         return base_result
 
-    # 3. Write via bounded write path
-    try:
-        write_result = vault_write(
-            path=payload["path"],
-            frontmatter=payload["frontmatter"],
-            body=payload["body"],
-        )
-    except Exception as exc:
-        logger.warning("PATTERN WRITE FAILED: %s — %s", learning_id, exc)
-        base_result["reason"] = f"write_error:{exc}"
-        base_result["note_path"] = payload["path"]
-        base_result["errors"].append(str(exc))
-        return base_result
-
-    if "error" in write_result:
-        logger.warning(
-            "PATTERN WRITE REJECTED: %s — %s", learning_id, write_result["error"]
-        )
-        base_result["reason"] = f"write_rejected:{write_result['error']}"
-        base_result["note_path"] = payload["path"]
-        base_result["errors"].append(write_result["error"])
-        return base_result
-
     # Success
-    pattern_id = payload["frontmatter"].get("pattern_id", "")
     logger.info(
-        "PATTERN PROMOTION SUCCESS: %s → %s (%s, %d evidence)",
-        learning_id, payload["path"], pattern_id,
+        "PATTERN PROMOTION SUCCESS: %s → %s (%s, %d evidence, via router)",
+        learning_id,
+        store_result.path_or_id or payload["path"],
+        pattern_id,
         assessment.get("evidence_count", 0),
     )
 
     base_result["promoted"] = True
     base_result["reason"] = "converging_evidence"
     base_result["pattern_id"] = pattern_id
-    base_result["note_path"] = payload["path"]
+    base_result["note_path"] = store_result.path_or_id or payload["path"]
     return base_result
