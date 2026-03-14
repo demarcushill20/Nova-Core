@@ -18,9 +18,10 @@ from pathlib import Path
 
 from agents.memory_engine import (
     capture_direct_task_memory,
-    format_retrieval_for_planner,
-    retrieve_related_patterns,
+    format_retrieval_for_planner,  # legacy — retained for fallback
 )
+from agents.memory_router import router as memory_router
+from agents.memory_triggers import trigger_engine
 from agents.session_manager import SessionManager
 from nova_kill_switch import MODE_RUN, check_kill_switch
 from tools.contracts import validate_contract
@@ -854,18 +855,25 @@ def dispatch(task_path: Path):
     _session_mgr.record_task_start(stem)
     session_context = _session_mgr.build_context_injection(stem)
 
-    # --- Memory retrieval (learning loop) ---
+    # --- Memory retrieval via router (Phase 1 migration) ---
     memory_context = ""
     try:
         task_class = routing.get("task_class", "unknown")
         keywords = _extract_keywords(task_text)
         if keywords:
-            patterns = retrieve_related_patterns(task_class, keywords)
-            if patterns:
-                memory_context = format_retrieval_for_planner(patterns)
+            recall_result = memory_router.recall(
+                query=" ".join(keywords[:5]),
+                intent="pattern_retrieval",
+                task_class=task_class,
+                keywords=keywords,
+                caller="watcher.dispatch_task",
+                ctx=trace_ctx,
+            )
+            if recall_result.results:
+                memory_context = format_retrieval_for_planner(recall_result.results)
                 logger.info(
-                    "MEMORY CONTEXT: %d prior pattern(s) for class=%s keywords=%s",
-                    len(patterns),
+                    "MEMORY CONTEXT (routed): %d prior pattern(s) for class=%s keywords=%s",
+                    recall_result.total_found,
                     task_class,
                     keywords[:5],
                 )
@@ -1127,6 +1135,40 @@ def dispatch(task_path: Path):
                 logger.info("MEMORY CAPTURE: %s → %s", stem, mem_path.name)
     except Exception as exc:
         logger.warning("Memory capture failed (non-fatal): %s", exc)
+
+    # --- Phase 3: Automatic memory trigger (router-based) ---
+    try:
+        contract = _session_mgr._extract_task_summary(stem)
+        task_class = routing.get("task_class", "unknown")
+        summary_text = contract.get("summary", "").strip()
+        files_changed = contract.get("files_changed", "")
+        confidence = contract.get("confidence", "medium")
+        event_type = "task_completed" if passed else "task_failed"
+
+        if summary_text:
+            trigger_result = trigger_engine.fire(
+                trigger_class="task_lifecycle",
+                event_type=event_type,
+                source="watcher",
+                title=f"{event_type}: {stem}"[:100],
+                summary=summary_text[:500],
+                caller="watcher.dispatch",
+                ctx=trace_ctx,
+                task_stem=stem,
+                task_class=task_class,
+                confidence=confidence,
+                related_files=[f.strip() for f in files_changed.split(",") if f.strip() and f.strip() != "none"][:10],
+                tags=[f"#class/{task_class}"],
+            )
+            if trigger_result.fired:
+                logger.info(
+                    "MEMORY TRIGGER: %s → stored=%s layer=%s",
+                    stem,
+                    trigger_result.stored,
+                    trigger_result.assigned_layer,
+                )
+    except Exception as exc:
+        logger.warning("Memory trigger failed (non-fatal): %s", exc)
 
 
 PYTEST_TIMEOUT = 120  # seconds — hard timeout for the test gate

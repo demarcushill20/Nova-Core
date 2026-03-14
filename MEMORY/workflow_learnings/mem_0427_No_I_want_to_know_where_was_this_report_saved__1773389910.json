@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0427_No_I_want_to_know_where_was_this_report_saved__1773389910",
+  "workflow_id": "0427_No_I_want_to_know_where_was_this_report_saved_",
+  "task_summary": "Located and catalogued all save locations for the security hardening research report across OUTPUT/, Obsidian vault, and Fusion Memory",
+  "task_class": "unknown",
+  "roles_involved": [
+    "direct_worker"
+  ],
+  "key_decisions": [
+    "Located and catalogued all save locations for the security hardening research report across OUTPUT/, Obsidian vault, and Fusion Memory"
+  ],
+  "successful_patterns": [
+    "direct_worker: Located and catalogued all save locations for the security hardening research report across OUTPUT/, Obsidian vault, and Fusion Memory"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "approved",
+  "reusable_guidance": "Located and catalogued all save locations for the security hardening research report across OUTPUT/, Obsidian vault, and Fusion Memory (files: OUTPUT/0427_No_I_want_to_know_where_was_this_report_saved___20260313-081605.md)",
+  "created_at": "2026-03-13T08:18:30Z",
+  "confidence": "high"
+}

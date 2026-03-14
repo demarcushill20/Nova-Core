@@ -31,6 +31,43 @@ from tools.adapters.contracts_validate import contracts_validate
 
 logger = logging.getLogger(__name__)
 
+
+# Phase 3: Lazy import helper to avoid circular dependency
+def _fire_plan_trigger(
+    event_type: str,
+    plan_id: str,
+    task_id: str,
+    status: str,
+    grade: str = "",
+    summary: str = "",
+    step_count: int = 0,
+) -> None:
+    """Fire a plan lifecycle memory trigger (non-fatal)."""
+    try:
+        from agents.memory_triggers import trigger_engine
+
+        title = f"{event_type}: plan {plan_id} ({status})"[:100]
+        if not summary:
+            summary = f"Plan {plan_id} for task {task_id} finished with status={status}"
+            if grade:
+                summary += f", grade={grade}"
+
+        trigger_engine.fire(
+            trigger_class="plan_lifecycle",
+            event_type=event_type,
+            source="orchestrator",
+            title=title,
+            summary=summary[:500],
+            caller="orchestrator.run_plan",
+            task_stem=task_id,
+            confidence="high" if grade in ("A", "B") else "medium",
+            tags=[f"#plan/{plan_id}", f"#grade/{grade}"] if grade else [f"#plan/{plan_id}"],
+            extra={"step_count": step_count},
+        )
+    except Exception as exc:
+        logger.warning("Plan memory trigger failed (non-fatal): %s", exc)
+
+
 STATE_DIR = Path(os.environ.get("NOVACORE_STATE", "/home/nova/nova-core/STATE"))
 PLANS_DIR = STATE_DIR / "plans"
 
@@ -80,21 +117,20 @@ class Orchestrator:
             if decision.action == "escalate":
                 followup = self.supervisor.generate_followup_task(result)
 
-            decisions.append({
-                "step_id": step.step_id,
-                "action": decision.action,
-                "reason": decision.reason,
-                "retry_allowed": decision.retry_allowed,
-                "followup_task": followup,
-            })
+            decisions.append(
+                {
+                    "step_id": step.step_id,
+                    "action": decision.action,
+                    "reason": decision.reason,
+                    "retry_allowed": decision.retry_allowed,
+                    "followup_task": followup,
+                }
+            )
 
             # Record history with real measured duration
             self.history_store.record_run(
                 skill_name=step.skill_name,
-                success=(
-                    result.status == "success"
-                    and result.contract_valid is True
-                ),
+                success=(result.status == "success" and result.contract_valid is True),
                 duration_ms=duration_ms,
                 retries=result.retry_count,
             )
@@ -107,7 +143,9 @@ class Orchestrator:
                 plan.status = "failed"
                 logger.warning(
                     "Plan %s stopped at step %s: %s",
-                    plan.plan_id, step.step_id, decision.reason,
+                    plan.plan_id,
+                    step.step_id,
+                    decision.reason,
                 )
                 break
         else:
@@ -116,16 +154,10 @@ class Orchestrator:
 
         # Evaluate execution quality
         evaluator = Evaluator()
-        plan_eval = evaluator.evaluate_plan(
-            plan, step_results, step_durations
-        )
-        eval_followup = self.supervisor.recommend_followup_from_evaluation(
-            plan_eval
-        )
+        plan_eval = evaluator.evaluate_plan(plan, step_results, step_durations)
+        eval_followup = self.supervisor.recommend_followup_from_evaluation(plan_eval)
         evaluation_data = {
-            "step_evaluations": [
-                _eval_to_dict(e) for e in plan_eval.step_evaluations
-            ],
+            "step_evaluations": [_eval_to_dict(e) for e in plan_eval.step_evaluations],
             "aggregate_score": plan_eval.aggregate_score,
             "grade": plan_eval.grade,
             "summary": plan_eval.summary,
@@ -135,12 +167,22 @@ class Orchestrator:
         }
 
         # Final save with evaluation
-        self.save_plan_state(
-            plan, step_results, decisions, step_durations, evaluation_data
-        )
+        self.save_plan_state(plan, step_results, decisions, step_durations, evaluation_data)
 
         # Phase 6: bounded self-improvement cycle
         improvement_data = self._run_improvement_cycle(plan_eval)
+
+        # Phase 3: Fire plan lifecycle memory trigger
+        event_type = "plan_created" if plan.status == "done" else "plan_revised"
+        _fire_plan_trigger(
+            event_type=event_type,
+            plan_id=plan.plan_id,
+            task_id=plan.task_id,
+            status=plan.status,
+            grade=plan_eval.grade,
+            summary=plan_eval.summary[:500] if plan_eval.summary else "",
+            step_count=len(step_results),
+        )
 
         return {
             "plan_id": plan.plan_id,
@@ -218,9 +260,7 @@ class Orchestrator:
             return None
 
         # 2. Build bounded improvement plan
-        improvement_plan = ip.build_improvement_plan(
-            findings, source_plan_id=plan_eval.plan_id
-        )
+        improvement_plan = ip.build_improvement_plan(findings, source_plan_id=plan_eval.plan_id)
 
         # 3. Gate execution
         should_run = ip.should_execute(improvement_plan)
@@ -262,7 +302,9 @@ class Orchestrator:
 
         logger.info(
             "Improvement cycle for plan %s: executed=%s, status=%s",
-            plan_eval.plan_id, result.executed, result.final_status,
+            plan_eval.plan_id,
+            result.executed,
+            result.final_status,
         )
 
         return {
@@ -303,7 +345,9 @@ class Orchestrator:
                 retry_count += 1
                 logger.info(
                     "Retrying step %s (attempt %d): %s",
-                    step.step_id, retry_count, decision.reason,
+                    step.step_id,
+                    retry_count,
+                    decision.reason,
                 )
                 continue
 
@@ -312,6 +356,7 @@ class Orchestrator:
     def _run_with_executor(self, step: PlanStep) -> StepResult:
         """Run step through the pluggable executor and validate output."""
         try:
+            assert self._step_executor is not None
             output_text, success, error = self._step_executor(step)
         except Exception as exc:
             step.status = "failed"

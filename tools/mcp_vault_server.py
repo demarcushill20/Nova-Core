@@ -132,6 +132,7 @@ _VALID_NOTE_TYPES = {
     "implementation-plan": "#type/plan",
     "debugging-guide": "#type/debugging",
     "inbox": "#type/inbox",
+    "adr": "#type/adr",
 }
 
 # Valid enum values used across schemas
@@ -197,6 +198,15 @@ _REQUIRED_FIELDS: dict[str, list[str]] = {
     "inbox": [
         "type",
         "title",
+        "source",
+        "tags",
+    ],
+    "adr": [
+        "type",
+        "adr_id",
+        "title",
+        "status",
+        "date",
         "source",
         "tags",
     ],
@@ -462,6 +472,28 @@ def validate_frontmatter(fm: dict, note_type: str | None = None) -> tuple[bool, 
         sc = fm.get("sources_count")
         if sc is not None and not isinstance(sc, int):
             errors.append(f"sources_count must be an integer, got {type(sc).__name__}")
+
+    elif actual_type == "implementation-plan":
+        # Phase 0 fix: validate optional fields used by plan-tracker skill
+        _plan_statuses = {"backlog", "active", "completed", "paused"}
+        _plan_priorities = {"high", "medium", "low"}
+        _progress_re = __import__("re").compile(r"^\d+/\d+$")
+        status = fm.get("status")
+        if status is not None and status not in _plan_statuses:
+            errors.append(f"invalid status: {status!r} (allowed: {sorted(_plan_statuses)})")
+        priority = fm.get("priority")
+        if priority is not None and priority not in _plan_priorities:
+            errors.append(f"invalid priority: {priority!r} (allowed: {sorted(_plan_priorities)})")
+        progress = fm.get("progress")
+        if progress is not None and (not isinstance(progress, str) or not _progress_re.match(progress)):
+            errors.append(f"invalid progress format: {progress!r} (must match 'X/Y', e.g. '3/7')")
+
+    elif actual_type == "adr":
+        # Phase 0: validate ADR-specific fields
+        _adr_statuses = {"proposed", "accepted", "deprecated", "superseded"}
+        adr_status = fm.get("status")
+        if adr_status and adr_status not in _adr_statuses:
+            errors.append(f"invalid ADR status: {adr_status!r} (allowed: {sorted(_adr_statuses)})")
 
     return (len(errors) == 0), errors
 

@@ -480,8 +480,8 @@ def inject_repair_task(checks: list) -> None:
 # --- LLM-driven proactive heartbeat ------------------------------------------
 
 # Active hours (UTC) — only run LLM heartbeat during these hours
-ACTIVE_HOURS_START = int(os.environ.get("HEARTBEAT_ACTIVE_START", "6"))
-ACTIVE_HOURS_END = int(os.environ.get("HEARTBEAT_ACTIVE_END", "23"))
+ACTIVE_HOURS_START = int(os.environ.get("HEARTBEAT_ACTIVE_START", "0"))
+ACTIVE_HOURS_END = int(os.environ.get("HEARTBEAT_ACTIVE_END", "24"))
 
 # Model for heartbeat reasoning
 HEARTBEAT_MODEL = os.environ.get("HEARTBEAT_MODEL", "claude-opus-4-6")
@@ -1600,6 +1600,27 @@ def main() -> int:
                 failed=fail_names,
                 duration_ms=hb_ctx.elapsed_ms(),
             )
+
+    # --- Phase 3: Automatic memory trigger for heartbeat cycle ---
+    try:
+        from agents.memory_triggers import trigger_engine
+
+        hb_summary = f"Heartbeat: {len(checks)} checks, {len(fail_names)} failed"
+        if fail_names:
+            hb_summary += f" ({', '.join(fail_names[:5])})"
+        trigger_engine.fire(
+            trigger_class="session_boundary",
+            event_type="heartbeat_cycle",
+            source="heartbeat",
+            title=f"heartbeat_cycle: {'HEALTHY' if all_ok else 'UNHEALTHY'}"[:100],
+            summary=hb_summary[:500],
+            caller="heartbeat.main",
+            ctx=hb_ctx,
+            confidence="high" if all_ok else "medium",
+            tags=["#heartbeat"] + ([f"#failed/{f}" for f in fail_names[:3]] if fail_names else []),
+        )
+    except Exception as exc:
+        print(f"[heartbeat] Memory trigger failed (non-fatal): {exc}")
 
     # --- LLM-driven proactive heartbeat ---
     try:

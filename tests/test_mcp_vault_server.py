@@ -622,23 +622,25 @@ class TestTokenization:
         assert score >= 4.0
 
     def test_score_match_all_tokens_in_name(self):
-        score = _score_match("openclaw autonomy", ["openclaw", "autonomy"],
-                             "openclaw-autonomy-analysis", "some content")
+        score = _score_match(
+            "openclaw autonomy", ["openclaw", "autonomy"], "openclaw-autonomy-analysis", "some content"
+        )
         assert 3.0 <= score < 4.0
 
     def test_score_match_exact_phrase_in_content(self):
-        score = _score_match("openclaw autonomy", ["openclaw", "autonomy"],
-                             "analysis", "the openclaw autonomy framework")
+        score = _score_match(
+            "openclaw autonomy", ["openclaw", "autonomy"], "analysis", "the openclaw autonomy framework"
+        )
         assert 2.0 <= score < 3.0
 
     def test_score_match_tokens_spread_across(self):
-        score = _score_match("openclaw autonomy", ["openclaw", "autonomy"],
-                             "openclaw-analysis", "agent autonomy framework")
+        score = _score_match(
+            "openclaw autonomy", ["openclaw", "autonomy"], "openclaw-analysis", "agent autonomy framework"
+        )
         assert 1.0 <= score < 2.0
 
     def test_score_match_missing_token(self):
-        score = _score_match("openclaw autonomy", ["openclaw", "autonomy"],
-                             "analysis", "some other content")
+        score = _score_match("openclaw autonomy", ["openclaw", "autonomy"], "analysis", "some other content")
         assert score == 0.0
 
 
@@ -860,8 +862,11 @@ def _vault_config(vault_dir, **overrides):
         "canonical": True,
         "human_editable": True,
         "nova_core_managed_folders": [
-            "00-inbox", "20-agent-patterns", "30-workflow-learnings",
-            "40-research", "70-debugging",
+            "00-inbox",
+            "20-agent-patterns",
+            "30-workflow-learnings",
+            "40-research",
+            "70-debugging",
         ],
         "human_managed_folders": ["10-adrs", "50-playbooks", "60-project", "80-references", "90-diary"],
         "created": "2026-03-07",
@@ -909,6 +914,7 @@ class TestValidateVaultPath:
 
     def test_missing_vault_root(self, vault_dir):
         import tools.mcp_vault_server as mod
+
         original = mod.VAULT_ROOT
         mod.VAULT_ROOT = Path("/nonexistent/path/unlikely")
         valid, issues = validate_vault_path()
@@ -918,6 +924,7 @@ class TestValidateVaultPath:
 
     def test_missing_obsidian_dir(self, vault_dir):
         import shutil
+
         shutil.rmtree(vault_dir / ".obsidian")
         valid, issues = validate_vault_path()
         assert any(".obsidian" in i for i in issues)
@@ -1145,6 +1152,170 @@ class TestValidateFrontmatter:
         assert valid is False
         assert any("null" in e and "pattern_id" in e for e in errors)
 
+    # --- Phase 0: ADR type validation ---
+
+    def test_valid_adr(self):
+        fm = {
+            "type": "adr",
+            "adr_id": "ADR-001",
+            "title": "Test ADR",
+            "status": "proposed",
+            "date": "2026-03-13",
+            "source": "nova-core-memory",
+            "tags": ["#type/adr"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is True, errors
+
+    def test_adr_invalid_status(self):
+        fm = {
+            "type": "adr",
+            "adr_id": "ADR-002",
+            "title": "Bad Status ADR",
+            "status": "draft",
+            "date": "2026-03-13",
+            "source": "nova-core-memory",
+            "tags": ["#type/adr"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("ADR status" in e or "invalid" in e.lower() for e in errors)
+
+    def test_adr_missing_adr_id(self):
+        fm = {
+            "type": "adr",
+            "title": "No ID ADR",
+            "status": "accepted",
+            "date": "2026-03-13",
+            "source": "nova-core-memory",
+            "tags": ["#type/adr"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("adr_id" in e for e in errors)
+
+    def test_adr_missing_required_tag(self):
+        fm = {
+            "type": "adr",
+            "adr_id": "ADR-003",
+            "title": "Wrong Tag ADR",
+            "status": "accepted",
+            "date": "2026-03-13",
+            "source": "nova-core-memory",
+            "tags": ["#status/active"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("#type/adr" in e for e in errors)
+
+    # --- Phase 0: implementation-plan optional field validation ---
+
+    def test_valid_implementation_plan(self):
+        fm = {
+            "type": "implementation-plan",
+            "plan_id": "plan-test",
+            "title": "Test Plan",
+            "date_created": "2026-03-13",
+            "confidence": "medium",
+            "source": "nova-core-memory",
+            "tags": ["#type/plan"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is True, errors
+
+    def test_plan_valid_optional_fields(self):
+        fm = {
+            "type": "implementation-plan",
+            "plan_id": "plan-test",
+            "title": "Test Plan With Optionals",
+            "date_created": "2026-03-13",
+            "confidence": "high",
+            "source": "nova-core-memory",
+            "tags": ["#type/plan"],
+            "status": "active",
+            "priority": "high",
+            "progress": "3/7",
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is True, errors
+
+    def test_plan_invalid_status(self):
+        fm = {
+            "type": "implementation-plan",
+            "plan_id": "plan-bad",
+            "title": "Bad Status Plan",
+            "date_created": "2026-03-13",
+            "confidence": "low",
+            "source": "nova-core-memory",
+            "tags": ["#type/plan"],
+            "status": "not-started",
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("status" in e for e in errors)
+
+    def test_plan_invalid_priority(self):
+        fm = {
+            "type": "implementation-plan",
+            "plan_id": "plan-bad",
+            "title": "Bad Priority Plan",
+            "date_created": "2026-03-13",
+            "confidence": "low",
+            "source": "nova-core-memory",
+            "tags": ["#type/plan"],
+            "priority": "critical",
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("priority" in e for e in errors)
+
+    def test_plan_invalid_progress(self):
+        fm = {
+            "type": "implementation-plan",
+            "plan_id": "plan-bad",
+            "title": "Bad Progress Plan",
+            "date_created": "2026-03-13",
+            "confidence": "low",
+            "source": "nova-core-memory",
+            "tags": ["#type/plan"],
+            "progress": "almost done",
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("progress" in e for e in errors)
+
+    # --- Phase 0: debugging-guide and inbox types ---
+
+    def test_valid_debugging_guide(self):
+        fm = {
+            "type": "debugging-guide",
+            "title": "Worker Timeout Fix",
+            "date_created": "2026-03-13",
+            "source": "nova-core-memory",
+            "tags": ["#type/debugging"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is True, errors
+
+    def test_valid_inbox(self):
+        fm = {
+            "type": "inbox",
+            "title": "Quick Note",
+            "source": "nova-core-memory",
+            "tags": ["#type/inbox"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is True, errors
+
+    # --- Phase 0: all canonical types accepted ---
+
+    def test_all_canonical_types_in_validator(self):
+        """Every type in the canonical enum must be accepted by validate_frontmatter."""
+        from schemas.vault_note_schema import VALID_NOTE_TYPES as CANONICAL_TYPES
+
+        for note_type in CANONICAL_TYPES:
+            assert note_type in CANONICAL_TYPES, f"{note_type} not in canonical enum"
+
 
 # ===========================================================================
 # Phase 2: Sensitive content detection tests
@@ -1240,10 +1411,7 @@ class TestFeatureFlag:
         assert result["valid"] is True
 
     def test_update_disabled_by_flag(self, write_disabled):
-        result = vault_update(
-            "20-agent-patterns/research-patterns.md",
-            "## New Section", "Some content"
-        )
+        result = vault_update("20-agent-patterns/research-patterns.md", "## New Section", "Some content")
         assert "error" in result
         assert "disabled" in result["error"]
 
