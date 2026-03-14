@@ -8,6 +8,7 @@ WebSocket endpoint for real-time push updates.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 import os
@@ -24,7 +25,11 @@ from pydantic import BaseModel
 
 # Shared conversation system with Telegram
 from telegram.conversation import ConversationManager
-from telegram.llm import format_history_for_prompt, generate_response
+from telegram.llm import generate_response
+
+# Thread system (importlib needed because "nova-link" has a hyphen)
+_threads_mod = importlib.import_module("nova-link.threads")
+ThreadStore = _threads_mod.ThreadStore
 
 # --- Configuration -----------------------------------------------------------
 
@@ -46,6 +51,9 @@ API_TOKEN = ""
 # Share conversation with Telegram — same chat ID = same thread
 SHARED_CHAT_ID = "530812511"
 _conversations = ConversationManager(persist=True)
+
+# Thread store for Nova-Link threaded conversations
+_thread_store = ThreadStore()
 
 LOG = logging.getLogger("nova-link")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
@@ -77,6 +85,7 @@ def _check_token(token: str | None):
 
 class ChatRequest(BaseModel):
     message: str
+    thread_id: str | None = None  # None = use default thread
     token: str | None = None
 
 
@@ -216,7 +225,7 @@ async def get_dashboard(token: str | None = None):
             goals_list = data.get("goals", []) if isinstance(data, dict) else data
             goals = [g for g in goals_list if g.get("status") != "done"]
         except Exception:
-            pass
+            LOG.debug("Failed to load goals", exc_info=True)
 
     # Metrics
     metrics = {}
@@ -224,7 +233,7 @@ async def get_dashboard(token: str | None = None):
         try:
             metrics = json.loads(METRICS_FILE.read_text())
         except Exception:
-            pass
+            LOG.debug("Failed to load metrics", exc_info=True)
 
     # Services (async to avoid blocking the event loop)
     services = {}
@@ -387,20 +396,267 @@ def _prune_jobs() -> None:
         _chat_jobs.pop(jid, None)
 
 
-async def _run_chat_job(job_id: str, message: str) -> None:
-    """Background coroutine that runs the LLM call and stores the result."""
-    LOG.info("Chat job %s: starting LLM call (msg_len=%d)", job_id, len(message))
+def _build_thread_context(
+    messages: list,
+    summary: dict | None,
+) -> str:
+    """Build LLM conversation context from thread messages and summary.
+
+    The thread summary (if present) is injected as a bracketed context
+    block — visible to the LLM but clearly marked as background context,
+    not as a user message.  Recent turns use the same Human/You format
+    that ``format_history_for_prompt`` produces.
+    """
+    parts: list[str] = []
+
+    if summary:
+        summary_text = summary.get("content", "")
+        if summary_text:
+            parts.append(f"[Earlier conversation context: {summary_text}]")
+
+    if messages:
+        lines: list[str] = []
+        for m in messages:
+            role = "You" if m.role == "assistant" else "Human"
+            lines.append(f"{role}: {m.content}")
+        parts.append("\n".join(lines))
+
+    return "\n\n".join(parts)
+
+
+# Max recent thread turns to include in LLM context (roughly 10 exchanges)
+_THREAD_CONTEXT_LIMIT = 20
+
+# --- Thread summarization (Phase 5) -----------------------------------------
+
+# Trigger summarization when message count exceeds this threshold
+_SUMMARIZE_THRESHOLD = 30
+# Keep this many recent messages after compaction
+_SUMMARIZE_KEEP_RECENT = 15
+
+_SUMMARIZE_PROMPT = """\
+You are summarizing a conversation thread for an AI assistant's context window.
+
+{existing_section}
+
+Here are the messages to summarize:
+
+{messages_text}
+
+Produce a JSON object with exactly these keys:
+- "type": "structured"
+- "content": A 2-3 sentence plain-text summary (fallback for simple readers)
+- "goals": List of active goals the user is pursuing (strings, max 5)
+- "decisions": List of key decisions made in this conversation (strings, max 5)
+- "open_questions": List of unresolved questions or pending items (strings, max 3)
+- "artifacts": List of important files, URLs, or outputs mentioned (strings, max 5)
+- "user_preferences": List of preferences the user expressed (strings, max 3)
+
+Output ONLY the JSON object, no markdown fencing, no commentary."""
+
+
+def _deterministic_fallback_summary(
+    messages: list,
+    existing_summary: dict | None,
+) -> dict:
+    """Build a simple summary without LLM when the LLM call fails."""
+    user_msgs = [m for m in messages if m.role == "user"]
+    topics = []
+    for m in user_msgs[:5]:
+        first_line = m.content[:80].split("\n")[0]
+        if first_line:
+            topics.append(first_line)
+
+    content_parts = []
+    if existing_summary and existing_summary.get("content"):
+        content_parts.append(existing_summary["content"])
+    if topics:
+        content_parts.append(f"Recent topics: {'; '.join(topics)}")
+
+    return {
+        "type": "text",
+        "content": " | ".join(content_parts) if content_parts else "Conversation history",
+    }
+
+
+async def _summarize_via_llm(prompt_text: str) -> str | None:
+    """Run a lightweight Claude CLI call for summarization.
+
+    Returns the raw stdout text, or None on failure.
+    """
+    import subprocess
+
+    claude_bin = os.environ.get("CLAUDE_BIN", CLAUDE_BIN)
+    cmd = [
+        claude_bin,
+        "-p",
+        "--model",
+        "claude-sonnet-4-20250514",
+        "--dangerously-skip-permissions",
+        prompt_text,
+    ]
+
+    child_env = os.environ.copy()
+    child_env.pop("CLAUDECODE", None)
+
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=child_env,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        LOG.warning("Summarization CLI returned code %d", result.returncode)
+        return None
+    except Exception as exc:
+        LOG.warning("Summarization CLI failed: %s", exc)
+        return None
+
+
+async def _generate_thread_summary(
+    messages: list,
+    existing_summary: dict | None,
+) -> dict:
+    """Generate a structured thread summary via LLM with deterministic fallback."""
+    # Build existing summary section for the prompt
+    existing_section = ""
+    if existing_summary and existing_summary.get("content"):
+        existing_section = (
+            f"The conversation already has this summary from earlier:\n"
+            f'"{existing_summary["content"]}"\n'
+            f"Incorporate and update it — don't lose prior context."
+        )
+
+    # Format messages for the prompt
+    lines = []
+    for m in messages:
+        role = "User" if m.role == "user" else "Assistant"
+        # Truncate very long messages to keep the summarization prompt reasonable
+        content = m.content[:500] + "..." if len(m.content) > 500 else m.content
+        lines.append(f"{role}: {content}")
+    messages_text = "\n".join(lines)
+
+    prompt_text = _SUMMARIZE_PROMPT.format(
+        existing_section=existing_section,
+        messages_text=messages_text,
+    )
+
+    raw = await _summarize_via_llm(prompt_text)
+    if raw:
+        try:
+            # Strip markdown fencing if present
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = "\n".join(cleaned.split("\n")[1:])
+            if cleaned.endswith("```"):
+                cleaned = "\n".join(cleaned.split("\n")[:-1])
+            parsed = json.loads(cleaned.strip())
+            # Validate required fields
+            if isinstance(parsed, dict) and "content" in parsed:
+                parsed.setdefault("type", "structured")
+                return parsed
+        except (json.JSONDecodeError, ValueError) as exc:
+            LOG.warning("Failed to parse LLM summary JSON: %s", exc)
+
+    LOG.info("Using deterministic fallback for thread summary")
+    return _deterministic_fallback_summary(messages, existing_summary)
+
+
+async def _maybe_summarize_thread(thread_id: str) -> None:
+    """Check if a thread needs summarization and compact it if so.
+
+    Called after each assistant response. Only triggers when message_count
+    exceeds _SUMMARIZE_THRESHOLD to avoid unnecessary LLM calls.
+    """
+    thread = _thread_store.get_thread(thread_id)
+    if thread is None:
+        return
+
+    if thread.message_count < _SUMMARIZE_THRESHOLD:
+        return
+
+    LOG.info(
+        "Thread %s has %d messages (threshold=%d) — summarizing",
+        thread_id,
+        thread.message_count,
+        _SUMMARIZE_THRESHOLD,
+    )
+
+    # Get ALL messages (we'll summarize older ones, keep recent)
+    all_msgs = _thread_store.get_messages(thread_id, limit=9999, order="asc")
+    if len(all_msgs) <= _SUMMARIZE_KEEP_RECENT:
+        return
+
+    # Messages to summarize = everything except the most recent N
+    to_summarize = all_msgs[:-_SUMMARIZE_KEEP_RECENT]
+
+    new_summary = await _generate_thread_summary(to_summarize, thread.summary)
+
+    _thread_store.compact_thread(
+        thread_id,
+        keep_recent=_SUMMARIZE_KEEP_RECENT,
+        new_summary=new_summary,
+    )
+    LOG.info(
+        "Compacted thread %s: summarized %d messages, kept %d",
+        thread_id,
+        len(to_summarize),
+        _SUMMARIZE_KEEP_RECENT,
+    )
+
+
+async def _run_chat_job(job_id: str, message: str, thread_id: str | None = None) -> None:
+    """Background coroutine that runs the LLM call and stores the result.
+
+    Context is assembled from the active thread's recent messages and
+    summary.  The legacy ConversationBuffer is kept in sync for Telegram.
+    """
+    # Resolve thread (creates default / migrates legacy on first call)
+    if thread_id:
+        thread = _thread_store.get_thread(thread_id)
+        if thread is None:
+            thread = _thread_store.get_or_create_default_thread()
+    else:
+        thread = _thread_store.get_or_create_default_thread()
+
+    LOG.info(
+        "Chat job %s: starting LLM call (msg_len=%d, thread=%s)",
+        job_id,
+        len(message),
+        thread.id,
+    )
     try:
         system_prompt = ""
         persona_file = BASE / "telegram" / "persona.md"
         if persona_file.exists():
             system_prompt = persona_file.read_text()[:4000]
 
+        # 1. Persist user message to thread FIRST (survives crashes)
+        _thread_store.add_message(thread.id, "user", message)
+
+        # 2. Build context from thread history
+        thread_obj = _thread_store.get_thread(thread.id)
+        recent = _thread_store.get_messages(
+            thread.id,
+            limit=_THREAD_CONTEXT_LIMIT + 1,
+            order="asc",
+        )
+        # Exclude the message we just added (it's the prompt, not context)
+        prior_turns = recent[:-1] if recent else []
+        # Keep only the most recent N turns for context
+        prior_turns = prior_turns[-_THREAD_CONTEXT_LIMIT:]
+        context = _build_thread_context(
+            prior_turns,
+            thread_obj.summary if thread_obj else None,
+        )
+
+        # 3. Sync to ConversationBuffer (Telegram compatibility)
         _conversations.reload_chat(SHARED_CHAT_ID)
         _conversations.add_user_message(SHARED_CHAT_ID, message)
-
-        history = _conversations.get_history(SHARED_CHAT_ID)
-        context = format_history_for_prompt(history[:-1])
 
         response = await generate_response(
             prompt=message,
@@ -408,10 +664,19 @@ async def _run_chat_job(job_id: str, message: str) -> None:
             conversation_context=context,
         )
 
+        # 4. Save response to both stores
+        _thread_store.add_message(thread.id, "assistant", response)
         _conversations.add_assistant_message(SHARED_CHAT_ID, response)
+
+        # 5. Trigger rolling summarization if needed (fire-and-forget)
+        try:
+            await _maybe_summarize_thread(thread.id)
+        except Exception as sum_exc:
+            LOG.warning("Thread summarization failed (non-fatal): %s", sum_exc)
 
         _chat_jobs[job_id]["status"] = "completed"
         _chat_jobs[job_id]["response"] = response
+        _chat_jobs[job_id]["thread_id"] = thread.id
         _chat_jobs[job_id]["completed_at"] = time.time()
         LOG.info("Chat job %s: completed (response_len=%d)", job_id, len(response))
 
@@ -419,6 +684,7 @@ async def _run_chat_job(job_id: str, message: str) -> None:
             "chat_response",
             {
                 "job_id": job_id,
+                "thread_id": thread.id,
                 "preview": response[:100],
                 "response": response,
             },
@@ -460,6 +726,7 @@ async def chat(req: ChatRequest):
     _chat_jobs[job_id] = {
         "status": "processing",
         "message": req.message[:500],
+        "thread_id": req.thread_id,
         "response": None,
         "error": None,
         "created_at": time.time(),
@@ -467,7 +734,7 @@ async def chat(req: ChatRequest):
     }
 
     # Fire-and-forget — but MUST keep a strong reference (Python 3.10 GC issue)
-    task = asyncio.create_task(_run_chat_job(job_id, req.message))
+    task = asyncio.create_task(_run_chat_job(job_id, req.message, req.thread_id))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
@@ -489,6 +756,8 @@ async def get_chat_job(job_id: str, token: str | None = None):
         raise HTTPException(status_code=404, detail="Job not found or expired")
 
     result: dict = {"job_id": job_id, "status": job["status"]}
+    if job.get("thread_id"):
+        result["thread_id"] = job["thread_id"]
     if job["status"] == "completed":
         result["response"] = job["response"]
     elif job["status"] == "failed":
@@ -503,6 +772,77 @@ async def chat_history(token: str | None = None):
     _conversations.reload_chat(SHARED_CHAT_ID)
     history = _conversations.get_history(SHARED_CHAT_ID)
     return {"messages": history}
+
+
+# --- Threads -----------------------------------------------------------------
+
+
+@app.get("/api/threads")
+async def list_threads(
+    status: str | None = "active",
+    limit: int = 50,
+    offset: int = 0,
+    token: str | None = None,
+):
+    """List conversation threads, newest first."""
+    _check_token(token)
+    threads = _thread_store.list_threads(status=status, limit=limit, offset=offset)
+    return {
+        "threads": [t.to_dict() for t in threads],
+        "count": len(threads),
+        "offset": offset,
+        "limit": limit,
+    }
+
+
+@app.get("/api/threads/default")
+async def get_default_thread(token: str | None = None):
+    """Get or create the default thread (triggers migration if needed)."""
+    _check_token(token)
+    thread = _thread_store.get_or_create_default_thread()
+    return thread.to_dict()
+
+
+@app.get("/api/threads/{thread_id}")
+async def get_thread(thread_id: str, token: str | None = None):
+    """Get a thread by ID."""
+    _check_token(token)
+    thread = _thread_store.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return thread.to_dict()
+
+
+@app.get("/api/threads/{thread_id}/messages")
+async def get_thread_messages(
+    thread_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    order: str = "asc",
+    token: str | None = None,
+):
+    """Get messages for a thread with pagination.
+
+    order: "asc" (oldest first) or "desc" (newest first).
+    """
+    _check_token(token)
+    thread = _thread_store.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    messages = _thread_store.get_messages(
+        thread_id,
+        limit=limit,
+        offset=offset,
+        order=order,
+    )
+    return {
+        "thread_id": thread_id,
+        "messages": [m.to_dict() for m in messages],
+        "count": len(messages),
+        "total": thread.message_count,
+        "offset": offset,
+        "limit": limit,
+    }
 
 
 # --- Memory ------------------------------------------------------------------

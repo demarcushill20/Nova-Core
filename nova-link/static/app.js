@@ -123,6 +123,7 @@ async function loadHealthChecks() {
 // --- Chat ---
 const chatMessages = [];
 let chatHistoryLoaded = false;
+let activeThreadId = null;
 let chatMode = 'text';  // 'text' or 'voice'
 let ttsEnabled = true;
 let isListening = false;
@@ -131,11 +132,37 @@ let selectedVoice = null;
 
 async function loadChatHistory() {
   if (chatHistoryLoaded) return;
+
+  // Load from thread API (Phase 2+) — falls back to legacy if unavailable
+  const threadData = await api('/api/threads/default');
+  if (threadData && threadData.id) {
+    activeThreadId = threadData.id;
+    const msgData = await api(`/api/threads/${activeThreadId}/messages?limit=100&order=asc`);
+    if (msgData && msgData.messages) {
+      chatMessages.length = 0;
+      for (const m of msgData.messages) {
+        if (m.role === 'user' || m.role === 'assistant') {
+          chatMessages.push({
+            role: m.role,
+            content: m.content,
+            created_at: m.created_at,
+          });
+        }
+      }
+      chatHistoryLoaded = true;
+      renderChat();
+      return;
+    }
+  }
+
+  // Fallback: legacy chat history endpoint
   const data = await api('/api/chat/history');
   if (!data || !data.messages) return;
   chatMessages.length = 0;
   for (const m of data.messages) {
     if (m.role === 'user' || m.role === 'assistant') {
+      // Filter out injected summary blobs
+      if (m.content && m.content.startsWith('[Prior conversation summary:')) continue;
       chatMessages.push({ role: m.role, content: m.content });
     }
   }
@@ -175,20 +202,24 @@ function _updateTypingIndicator() {
   renderChat();
 }
 
-function _deliverChatResponse(response, error) {
+function _deliverChatResponse(response, error, threadId) {
   // Stop polling and typing updates
   _stopJobPolling();
   _typingStartTime = null;
+
+  // Track thread from response
+  if (threadId && !activeThreadId) activeThreadId = threadId;
 
   // Remove typing indicator
   const idx = chatMessages.findIndex(m => m.role === 'typing');
   if (idx !== -1) chatMessages.splice(idx, 1);
 
+  const now = Date.now() / 1000;
   if (response) {
-    chatMessages.push({ role: 'assistant', content: response });
+    chatMessages.push({ role: 'assistant', content: response, created_at: now });
     if (ttsEnabled) speak(response);
   } else {
-    chatMessages.push({ role: 'assistant', content: error || 'No response received.' });
+    chatMessages.push({ role: 'assistant', content: error || 'No response received.', created_at: now });
   }
   renderChat();
 }
@@ -227,9 +258,9 @@ async function _pollChatJob(jobId) {
 
     if (data.status === 'completed') {
       // Deliver even if response is empty (edge case: treat as success with fallback)
-      _deliverChatResponse(data.response || '(empty response)', null);
+      _deliverChatResponse(data.response || '(empty response)', null, data.thread_id);
     } else if (data.status === 'failed') {
-      _deliverChatResponse(null, data.error || 'Processing failed.');
+      _deliverChatResponse(null, data.error || 'Processing failed.', data.thread_id);
     }
     // status === 'processing' → keep polling
   } catch (e) {
@@ -248,7 +279,7 @@ async function sendChat() {
 
   unlockTTS();
   input.value = '';
-  chatMessages.push({ role: 'user', content: msg });
+  chatMessages.push({ role: 'user', content: msg, created_at: Date.now() / 1000 });
   renderChat();
 
   // Show typing indicator with elapsed time
@@ -258,7 +289,7 @@ async function sendChat() {
 
   const data = await api('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({ message: msg }),
+    body: JSON.stringify({ message: msg, thread_id: activeThreadId }),
   });
 
   if (data && data.job_id) {
@@ -276,7 +307,9 @@ function renderChat() {
       const detail = m.content ? ` — ${escapeHtml(m.content)}` : '';
       return `<div class="chat-bubble assistant"><span class="spinner"></span> Thinking${detail}</div>`;
     }
-    return `<div class="chat-bubble ${m.role}">${escapeHtml(m.content)}</div>`;
+    const ts = m.created_at ? formatTimestamp(m.created_at) : '';
+    const timeHtml = ts ? `<span class="msg-time">${ts}</span>` : '';
+    return `<div class="chat-bubble ${m.role}">${escapeHtml(m.content)}${timeHtml}</div>`;
   }).join('');
   el.scrollTop = el.scrollHeight;
 }
@@ -546,7 +579,7 @@ function stopListening() {
 
 async function sendVoiceMessage(text) {
   // Add to chat and send — uses same async job pattern as sendChat
-  chatMessages.push({ role: 'user', content: text });
+  chatMessages.push({ role: 'user', content: text, created_at: Date.now() / 1000 });
   renderChat();
 
   _typingStartTime = Date.now();
@@ -558,15 +591,15 @@ async function sendVoiceMessage(text) {
 
   // Override _deliverChatResponse for voice to also update voice status
   const origDeliver = _deliverChatResponse;
-  _deliverChatResponse = function(response, error) {
-    origDeliver(response, error);
+  _deliverChatResponse = function(response, error, threadId) {
+    origDeliver(response, error, threadId);
     document.getElementById('voice-status').textContent = 'Tap to speak';
     _deliverChatResponse = origDeliver; // restore
   };
 
   const data = await api('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({ message: text }),
+    body: JSON.stringify({ message: text, thread_id: activeThreadId }),
   });
 
   if (data && data.job_id) {
@@ -672,9 +705,9 @@ function connectWS() {
         const d = msg.data;
         if (_pendingJobId && d.job_id === _pendingJobId) {
           if (d.response) {
-            _deliverChatResponse(d.response, null);
+            _deliverChatResponse(d.response, null, d.thread_id);
           } else if (d.error) {
-            _deliverChatResponse(null, d.error);
+            _deliverChatResponse(null, d.error, d.thread_id);
           }
         }
       }
@@ -694,6 +727,16 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function formatTimestamp(unix) {
+  const d = new Date(unix * 1000);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return time;
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
 }
 
 function formatBytes(b) {

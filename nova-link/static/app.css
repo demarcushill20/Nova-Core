@@ -183,6 +183,16 @@ body {
   border-bottom-left-radius: 4px;
 }
 
+.msg-time {
+  display: block;
+  font-size: 10px;
+  margin-top: 4px;
+  opacity: 0.5;
+}
+
+.chat-bubble.user .msg-time { text-align: right; }
+.chat-bubble.assistant .msg-time { color: var(--text-dim); }
+
 .chat-input-bar {
   display: flex;
   gap: 8px;

@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-14T14:03:58Z
+Generated: 2026-03-14T16:33:00Z
 
 ## Overall: HEALTHY
 
@@ -8,8 +8,8 @@ Generated: 2026-03-14T14:03:58Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 7 |
-| Failed workflows | 4 |
+| Completed workflows | 5 |
+| Failed workflows | 3 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
 | Completed delegations | 0 |
@@ -37,9 +37,6 @@ Generated: 2026-03-14T14:03:58Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| hb_proactive_20260313_152434_research_agent_self_monitoring_observability | ? | failed | - |
-| hb_proactive_20260313_152541_research_agent_self_monitoring_observability | ? | completed | - |
-| hb_proactive_20260313_155540_research_python_project_hardening_tools_2026 | ? | completed | - |
 | hb_proactive_20260313_165546_research_structured_output_validation_tools_2026 | ? | failed | verifier_rejected |
 | hb_proactive_20260313_172623_research_multi_agent_orchestration_frameworks_2026 | ? | failed | verifier_rejected |
 | hb_proactive_20260313_175603_research_agent_evaluation_testing_frameworks_2026 | ? | completed | - |
