@@ -7,6 +7,12 @@ allowed-tools:
   - mcp__nova-vault__vault_read
   - mcp__nova-vault__vault_list
   - mcp__nova-vault__vault_frontmatter
+activation:
+  keywords:
+    - task pattern
+    - prior task
+    - similar work
+    - how did we handle
 ---
 
 # Retrieving Task Patterns

@@ -1,22 +1,18 @@
 ---
 name: plan-tracker
 description: "Query, update, and manage Nova-Core implementation plans stored in the Obsidian vault. Provides a unified view of all plan statuses across any access point (Telegram, webapp, Claude Code)."
-auto_invoke: true
-triggers:
-  - "plan status"
-  - "what plans"
-  - "show plans"
-  - "update plan"
-  - "which plans are active"
-  - "what are we working on"
-  - "what's left to do"
-  - "roadmap"
-  - "plan progress"
-tools:
+allowed-tools:
   - mcp__nova-vault__vault_search
   - mcp__nova-vault__vault_read
   - mcp__nova-vault__vault_update
   - mcp__nova-vault__vault_frontmatter
+activation:
+  keywords:
+    - plan
+    - implementation plan
+    - plan status
+    - roadmap
+    - what are we working on
 ---
 
 # Plan Tracker

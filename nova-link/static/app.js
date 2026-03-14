@@ -176,7 +176,7 @@ let _pendingJobTimer = null;
 let _typingStartTime = null;
 let _pollFailures = 0;        // consecutive poll failures
 const _MAX_POLL_FAILURES = 5; // give up after 5 consecutive network errors
-const _MAX_POLL_DURATION_S = 720; // 12 minutes — longer than backend 10m timeout
+const _MAX_POLL_DURATION_S = 14400; // 4 hours — matches backend CONVERSATION_TIMEOUT
 
 function _updateTypingIndicator() {
   const typingMsg = chatMessages.find(m => m.role === 'typing');

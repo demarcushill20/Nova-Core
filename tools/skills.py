@@ -111,27 +111,30 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
         if not stripped or stripped.startswith("#"):
             continue
 
+        indent = len(line) - len(line.lstrip())
+
         # List item under a key (e.g. "  - keyword")
         if stripped.startswith("- ") and current_list is not None:
             current_list.append(stripped[2:].strip().strip('"').strip("'"))
             continue
 
-        # Nested key start (e.g. "activation:")
-        if stripped.endswith(":") and ":" not in stripped[:-1]:
+        # Top-level group key (e.g. "activation:" at indent 0)
+        if stripped.endswith(":") and ":" not in stripped[:-1] and indent == 0:
             current_key = stripped[:-1].strip()
             current_list = None
             continue
 
-        # Top-level or nested key: value
+        # Any key: value or sub-key
         if ":" in stripped:
             key, _, val = stripped.partition(":")
             key = key.strip()
             val = val.strip().strip('"').strip("'")
 
-            # Handle nested keys like "activation.keywords"
-            full_key = f"{current_key}.{key}" if current_key and not val else key
-            if current_key and not val:
-                # This is a sub-key with no value — expect list items next
+            # Compose nested key (e.g. "activation" + "keywords")
+            full_key = f"{current_key}.{key}" if current_key and indent > 0 else key
+
+            if not val:
+                # Sub-key with no value — expect list items next
                 current_list = []
                 meta[full_key] = current_list
                 continue
@@ -139,10 +142,12 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
             if val.startswith("[") and val.endswith("]"):
                 # Inline list: [a, b, c]
                 items = [v.strip().strip('"').strip("'") for v in val[1:-1].split(",") if v.strip()]
-                meta[key] = items
+                meta[full_key] = items
             else:
-                meta[key] = val
-            current_key = current_key if current_key else ""
+                meta[full_key] = val
+            # Reset current_key if this is a top-level key
+            if indent == 0:
+                current_key = ""
             current_list = None
 
     return meta, body

@@ -14,6 +14,13 @@ tool_doctrine:
       - summarize_before_checkpoint
       - link_to_previous_session
       - include_next_actions
+activation:
+  keywords:
+    - checkpoint
+    - session boundary
+    - save session
+    - wrap up
+    - save progress
 output_contract:
   required:
     - summary

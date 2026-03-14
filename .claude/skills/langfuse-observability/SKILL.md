@@ -7,6 +7,13 @@ description: >-
   or observability. Also auto-invoke after noticing repeated failures or
   unexpected LLM behavior.
 argument-hint: "[action: costs|traces|prompts|health]"
+activation:
+  keywords:
+    - langfuse
+    - observability
+    - trace
+    - token cost
+    - llm usage
 ---
 
 # Langfuse LLM Observability

@@ -6,7 +6,7 @@ description: >-
   connect external services (Slack, webhooks, APIs, scheduled jobs). Also use
   when automating repetitive multi-step processes.
 argument-hint: "[action: list|create|run|status] [workflow-name]"
-tools:
+allowed-tools:
   - mcp__n8n__workflow_list
   - mcp__n8n__workflow_get
   - mcp__n8n__workflow_create
@@ -19,6 +19,12 @@ tools:
   - mcp__n8n__execution_list
   - mcp__n8n__execution_stop
   - mcp__n8n__run_webhook
+activation:
+  keywords:
+    - n8n
+    - workflow
+    - automation
+    - webhook
 ---
 
 # n8n Workflow Automation

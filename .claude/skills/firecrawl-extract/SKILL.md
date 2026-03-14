@@ -7,9 +7,16 @@ description: >-
   compare structured data across sites, or says 'extract', 'pull data from',
   'get the pricing from', 'parse this page'.
 argument-hint: "[url] [what to extract]"
-tools:
+allowed-tools:
   - mcp__firecrawl__firecrawl_scrape
   - mcp__firecrawl__firecrawl_extract
+activation:
+  keywords:
+    - extract
+    - pull data
+    - parse page
+    - structured data
+    - get the pricing
 ---
 
 # Firecrawl Structured Extraction

@@ -7,6 +7,12 @@ allowed-tools:
   - mcp__nova-vault__vault_read
   - mcp__nova-vault__vault_search
   - mcp__nova-vault__vault_frontmatter
+activation:
+  keywords:
+    - audit memory
+    - memory safety
+    - validate write
+    - memory audit
 ---
 
 # Auditing Obsidian Memory Safety

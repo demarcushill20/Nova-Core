@@ -7,6 +7,13 @@ allowed-tools:
   - mcp__brave-search__brave_news_search
   - mcp__tavily__tavily_search
   - mcp__tavily__tavily_research
+activation:
+  keywords:
+    - search
+    - research
+    - find information
+    - current events
+    - look up
 ---
 
 # Web Research

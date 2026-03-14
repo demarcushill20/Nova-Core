@@ -8,6 +8,12 @@ allowed-tools:
   - mcp__nova-vault__vault_write
   - mcp__nova-vault__vault_read
   - mcp__nova-vault__vault_frontmatter
+activation:
+  keywords:
+    - agent pattern
+    - write pattern
+    - promote method
+    - codify pattern
 ---
 
 # Writing Agent Patterns

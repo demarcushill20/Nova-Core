@@ -1,12 +1,15 @@
 ---
-skill: memory-unified-recall
-version: "1.0"
-trigger: auto
+name: memory-unified-recall
 description: >
   Unified cross-system memory retrieval. Routes queries to Fusion Memory
   (nova-memory) and/or Obsidian Vault (nova-vault) based on intent
   classification. Returns synthesized results with source attribution.
-
+activation:
+  keywords:
+    - unified recall
+    - cross-system
+    - memory search
+    - search all memory
 allowed-tools:
   # Fusion Memory (nova-memory MCP)
   - mcp__nova-memory__query_memory

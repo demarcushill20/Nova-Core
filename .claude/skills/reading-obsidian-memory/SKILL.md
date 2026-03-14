@@ -8,6 +8,12 @@ allowed-tools:
   - mcp__nova-vault__vault_list
   - mcp__nova-vault__vault_frontmatter
   - mcp__nova-vault__vault_info
+activation:
+  keywords:
+    - obsidian
+    - vault read
+    - prior knowledge
+    - vault search
 ---
 
 # Reading Obsidian Memory

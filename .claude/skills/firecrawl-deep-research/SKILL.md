@@ -8,9 +8,15 @@ description: >-
   Also use when the user says 'deep research', 'thorough search', or needs
   content from multiple full pages.
 argument-hint: "[topic or question]"
-tools:
+allowed-tools:
   - mcp__firecrawl__firecrawl_search
   - mcp__firecrawl__firecrawl_scrape
+activation:
+  keywords:
+    - deep research
+    - thorough search
+    - full page
+    - firecrawl search
 ---
 
 # Firecrawl Deep Research

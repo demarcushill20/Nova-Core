@@ -16,6 +16,14 @@ tool_doctrine:
       - one_concept_per_item
       - never_store_secrets
       - enrich_from_vault_best_effort
+activation:
+  keywords:
+    - store memory
+    - persist
+    - save knowledge
+    - upsert
+    - remember this
+    - save this to memory
 output_contract:
   required:
     - summary

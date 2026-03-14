@@ -5,6 +5,12 @@ disable-model-invocation: false
 allowed-tools:
   - mcp__fetch__fetch
   - mcp__tavily__tavily_extract
+activation:
+  keywords:
+    - fetch url
+    - http
+    - download page
+    - fetch this
 ---
 
 # HTTP Fetch

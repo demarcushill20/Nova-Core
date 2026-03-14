@@ -6,7 +6,7 @@ description: >-
   checking CI status, or code search across GitHub. Also use when the user
   references a GitHub URL, issue number, or repository name.
 argument-hint: "[owner/repo] [action: issues|prs|ci|search|create-issue]"
-tools:
+allowed-tools:
   - mcp__github__search_repositories
   - mcp__github__get_file_contents
   - mcp__github__create_or_update_file
@@ -21,6 +21,14 @@ tools:
   - mcp__github__list_pull_requests
   - mcp__github__merge_pull_request
   - mcp__github__search_code
+activation:
+  keywords:
+    - github
+    - repo
+    - issue
+    - pull request
+    - pr
+    - ci
 ---
 
 # GitHub Operations

@@ -97,7 +97,8 @@ done <<< "$FILES"
 
 # ─── Check 4: ruff lint on staged Python files ────────────────────────────────
 
-PY_FILES=$(echo "$FILES" | grep '\.py$' || true)
+# Exclude vendored Anthropic skill-creator scripts from lint check
+PY_FILES=$(echo "$FILES" | grep '\.py$' | grep -v '^\.claude/skills/skill-creator/' || true)
 
 if [ -n "$PY_FILES" ]; then
     echo "Running ruff on staged Python files..."

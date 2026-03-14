@@ -1,14 +1,17 @@
 ---
-skill: memory-promote-pattern
-version: "1.0"
-trigger: manual
+name: memory-promote-pattern
 description: >
   Promotes stable patterns from Fusion Memory to Obsidian agent-pattern
   notes. A pattern is "stable" when it appears across 2+ sessions and
   has not been contradicted. Runs the full safety audit before writing.
   Invoke at session end or periodically to bridge operational memory
   into curated knowledge.
-
+activation:
+  keywords:
+    - promote pattern
+    - stable pattern
+    - promote to vault
+    - bridge pattern
 allowed-tools:
   # Fusion Memory — find and verify patterns
   - mcp__nova-memory__query_memory

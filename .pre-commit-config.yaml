@@ -21,3 +21,4 @@ repos:
         language: system
         types: [python]
         require_serial: true
+        exclude: '^\.claude/skills/skill-creator/(scripts|eval-viewer)/'

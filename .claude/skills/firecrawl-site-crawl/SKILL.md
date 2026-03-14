@@ -7,11 +7,18 @@ description: >-
   audit a site, or extract content from multiple pages on the same domain.
   Also use for 'crawl this site', 'index these docs', 'get all pages from'.
 argument-hint: "[url] [--limit N] [--paths pattern]"
-tools:
+allowed-tools:
   - mcp__firecrawl__firecrawl_map
   - mcp__firecrawl__firecrawl_crawl
   - mcp__firecrawl__firecrawl_check_crawl_status
   - mcp__firecrawl__firecrawl_scrape
+activation:
+  keywords:
+    - crawl site
+    - index docs
+    - crawl
+    - sitemap
+    - get all pages
 ---
 
 # Firecrawl Site Crawl

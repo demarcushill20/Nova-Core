@@ -1,13 +1,16 @@
 ---
-skill: memory-surface-adr-candidates
-version: "1.0"
-trigger: manual
+name: memory-surface-adr-candidates
 description: >
   Surfaces architectural decisions from Fusion Memory that lack matching
   ADRs in Obsidian. Writes candidate ADR notes to 00-inbox/ for operator
   review. Invoke periodically or at session end to bridge decisions into
   the ADR lifecycle.
-
+activation:
+  keywords:
+    - adr
+    - architectural decision
+    - surface decisions
+    - adr candidates
 allowed-tools:
   # Fusion Memory — find decisions
   - mcp__nova-memory__query_memory

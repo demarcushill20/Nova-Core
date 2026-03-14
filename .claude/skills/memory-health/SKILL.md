@@ -20,6 +20,13 @@ tool_doctrine:
       - cross_system_consistency
       - report_component_status
       - suggest_remediation
+activation:
+  keywords:
+    - memory health
+    - memory status
+    - memory diagnose
+    - is memory working
+    - check memory
 output_contract:
   required:
     - summary

@@ -1,12 +1,16 @@
 ---
-skill: memory-checkpoint-to-diary
-version: "1.0"
-trigger: auto
+name: memory-checkpoint-to-diary
 description: >
   Generates an Obsidian diary entry from a Fusion Memory session checkpoint.
   Writes to 00-inbox/ with diary tags for operator triage to 90-diary/.
   Invoke after create_checkpoint completes, or manually to backfill.
-
+activation:
+  keywords:
+    - diary
+    - checkpoint diary
+    - session diary
+    - diary entry
+    - write diary
 allowed-tools:
   # Fusion Memory — read checkpoint and session data
   - mcp__nova-memory__get_last_checkpoint

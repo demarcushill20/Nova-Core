@@ -17,6 +17,12 @@ allowed-tools:
   - mcp__playwright__browser_wait_for
   - mcp__playwright__browser_take_screenshot
   - mcp__playwright__browser_close
+activation:
+  keywords:
+    - research to action
+    - escalate research
+    - search then fetch
+    - multi-phase research
 ---
 
 # Research-to-Action

@@ -8,6 +8,12 @@ allowed-tools:
   - mcp__nova-vault__vault_read
   - mcp__nova-vault__vault_search
   - mcp__nova-vault__vault_frontmatter
+activation:
+  keywords:
+    - workflow learning
+    - capture learning
+    - save learning
+    - workflow outcome
 ---
 
 # Capturing Workflow Learnings

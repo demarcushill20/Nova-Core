@@ -15,6 +15,14 @@ tool_doctrine:
       - targeted_queries_first
       - synthesize_dont_dump
       - cite_memory_ids
+activation:
+  keywords:
+    - recall
+    - remember
+    - prior session
+    - previous session
+    - where were we
+    - what did we do
 output_contract:
   required:
     - summary
