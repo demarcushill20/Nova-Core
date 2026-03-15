@@ -1,0 +1,6 @@
+{
+  "candidate_id": 1,
+  "description": "Invoke whenever a question would benefit from live web evidence, even if the user doesn't say \"search\" or \"look up.\" Covers: technology comparisons (X vs Y, which is better for our use case), best pra",
+  "train_score": 0.9071,
+  "rank": 2
+}

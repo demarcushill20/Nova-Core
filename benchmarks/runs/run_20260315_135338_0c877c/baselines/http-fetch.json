@@ -1,0 +1,25 @@
+{
+  "skill_name": "http-fetch",
+  "description": "Deterministic HTTP retrieval of specific URLs for documentation pages, raw text, JSON endpoints, and structured data extraction. Auto-invoked when the task requires fetching a known URL.",
+  "split": "train",
+  "metrics": {
+    "true_positives": 4,
+    "true_negatives": 6,
+    "false_positives": 0,
+    "false_negatives": 2,
+    "precision": 1.0,
+    "recall": 0.6667,
+    "f1": 0.8,
+    "fpr": 0.0,
+    "fnr": 0.3333,
+    "specificity": 1.0,
+    "accuracy": 0.8333,
+    "weighted_score": 0.89,
+    "paraphrase_consistency": 1.0,
+    "neighbor_conflict_rate": 0.0
+  },
+  "elapsed_seconds": 207.69,
+  "timestamp": "2026-03-15T14:00:53Z",
+  "model": null,
+  "result_count": 12
+}

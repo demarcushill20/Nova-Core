@@ -1,0 +1,281 @@
+{
+  "skill_name": "http-fetch",
+  "neighbors_tested": 2,
+  "total_queries": 18,
+  "total_false_triggers": 0,
+  "max_conflict_rate": 0.0,
+  "aggregate_conflict_rate": 0.0,
+  "runs_per_query": 3,
+  "trigger_threshold": 0.5,
+  "elapsed_seconds": 852.57,
+  "results": [
+    {
+      "neighbor": "web-research",
+      "queries_tested": 10,
+      "false_triggers": 0,
+      "conflict_rate": 0.0,
+      "details": [
+        {
+          "query": "search the web for recent news about Rust programming language",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "find information about the latest Python 3.13 release",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "what are the best practices for microservices architecture",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "research the differences between PostgreSQL and MySQL for our use case",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "look up how to configure nginx reverse proxy",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "I need current information about Claude API pricing",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "compare different CI/CD tools available in 2026",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "google what Andrej Karpathy said about autoresearch",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "find out if there is a newer version of FastAPI",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "what is the current status of the WebGPU specification",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "neighbor": "firecrawl-deep-research",
+      "queries_tested": 8,
+      "false_triggers": 0,
+      "conflict_rate": 0.0,
+      "details": [
+        {
+          "query": "do deep research on transformer architecture evolution with full article text",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "thoroughly research and compare RAG vs fine-tuning approaches across multiple sources",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "I need comprehensive analysis of LLM pricing models from multiple provider pages",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "deep dive into Kubernetes autoscaling strategies with full page content from each source",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "research everything about MCP server architecture, need complete articles not just snippets",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "thorough search across multiple sites about best GPU for inference workloads",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "need full page content from multiple sources about vector database benchmarks",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "comprehensive research on serverless vs containers for ML inference",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    }
+  ]
+}

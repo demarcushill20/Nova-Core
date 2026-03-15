@@ -1,0 +1,6 @@
+{
+  "candidate_id": 1,
+  "description": "Use when a complete URL is already provided in the user's message and they want its content retrieved via HTTP. Covers any static web resource: documentation pages, JSON API endpoints, package registr",
+  "train_score": 1.0,
+  "rank": 2
+}

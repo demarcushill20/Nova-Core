@@ -1,0 +1,42 @@
+{
+  "skill_name": "http-fetch",
+  "decision": "ACCEPT",
+  "reason": "All gates passed. Score: 0.890 \u2192 1.000 (+0.1100)",
+  "reason_code": "ACCEPT",
+  "baseline_score": 0.89,
+  "candidate_score": 1.0,
+  "delta": 0.11,
+  "gate_details": {
+    "precision": {
+      "value": 1.0,
+      "floor": 0.8,
+      "passed": true
+    },
+    "fpr": {
+      "baseline": 0.0,
+      "candidate": 0.0,
+      "delta": 0.0,
+      "limit": 0.05,
+      "passed": true
+    },
+    "neighbor": {
+      "conflict_rate": 0.0,
+      "limit": 0.1,
+      "passed": true
+    },
+    "smoke": {
+      "regressions": 0,
+      "tolerance": 0,
+      "passed": true
+    },
+    "anti_broadening": {
+      "hard_negative_regression": false,
+      "passed": true
+    },
+    "gain": {
+      "delta": 0.11,
+      "min_required": 0.02,
+      "passed": true
+    }
+  }
+}

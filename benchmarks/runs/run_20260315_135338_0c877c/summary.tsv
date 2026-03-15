@@ -1,0 +1,4 @@
+skill	decision	reason	baseline_score	candidate_score	delta
+firecrawl-deep-research	skipped	baseline_perfect			
+http-fetch	ACCEPT	All gates passed. Score: 0.890 → 1.000 (+0.1100)	0.89	1.0	0.10999999999999999
+web-research	no_improvement	best score 0.9071 vs baseline 0.9071			

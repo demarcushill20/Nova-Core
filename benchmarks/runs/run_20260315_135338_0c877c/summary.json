@@ -1,0 +1,39 @@
+{
+  "run_id": "run_20260315_135338_0c877c",
+  "mode": "dry-run",
+  "total_skills": 3,
+  "processed": 3,
+  "accepted": 1,
+  "rejected": 0,
+  "skipped": 2,
+  "errors": 0,
+  "halted": false,
+  "halt_reason": "",
+  "completed": "2026-03-15T14:48:08Z",
+  "skills": [
+    {
+      "skill": "firecrawl-deep-research",
+      "decision": "skipped",
+      "reason": "baseline_perfect",
+      "baseline_score": "",
+      "candidate_score": "",
+      "delta": ""
+    },
+    {
+      "skill": "http-fetch",
+      "decision": "ACCEPT",
+      "reason": "All gates passed. Score: 0.890 \u2192 1.000 (+0.1100)",
+      "baseline_score": 0.89,
+      "candidate_score": 1.0,
+      "delta": 0.10999999999999999
+    },
+    {
+      "skill": "web-research",
+      "decision": "no_improvement",
+      "reason": "best score 0.9071 vs baseline 0.9071",
+      "baseline_score": "",
+      "candidate_score": "",
+      "delta": ""
+    }
+  ]
+}

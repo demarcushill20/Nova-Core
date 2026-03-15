@@ -1,0 +1,6 @@
+{
+  "candidate_id": 0,
+  "description": "Use this skill to retrieve content from a specific, known URL. Auto-invoked when the user provides a URL and wants to fetch, read, download, or get content from it \u2014 documentation pages, API endpoints",
+  "train_score": 1.0,
+  "rank": 1
+}
