@@ -1142,6 +1142,13 @@ def _run_research_cycle() -> None:
     Runs a full Claude session with 600s timeout. Only during active hours.
     Respects cooldown to avoid running back-to-back.
     """
+    # Paused 2026-03-14: in active build mode, research cycles are not needed.
+    # Planning cycle remains active. Flip this to False to re-enable.
+    RESEARCH_CYCLE_PAUSED = True
+    if RESEARCH_CYCLE_PAUSED:
+        print("[research-cycle] Paused (RESEARCH_CYCLE_PAUSED=True), skipping")
+        return
+
     current_hour = datetime.now(timezone.utc).hour
     if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
         print(f"[research-cycle] Outside active hours ({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
