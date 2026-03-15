@@ -1,0 +1,23 @@
+{
+  "run_id": "run_20260315_061235_ea71e0",
+  "mode": "dry-run",
+  "total_skills": 1,
+  "processed": 1,
+  "accepted": 0,
+  "rejected": 1,
+  "skipped": 0,
+  "errors": 0,
+  "halted": false,
+  "halt_reason": "",
+  "completed": "2026-03-15T06:43:22Z",
+  "skills": [
+    {
+      "skill": "web-research",
+      "decision": "REJECT_NEIGHBOR",
+      "reason": "Neighbor conflict rate 0.118 exceeds limit 0.10",
+      "baseline_score": 0.9071,
+      "candidate_score": 1.0,
+      "delta": 0.09289999999999998
+    }
+  ]
+}

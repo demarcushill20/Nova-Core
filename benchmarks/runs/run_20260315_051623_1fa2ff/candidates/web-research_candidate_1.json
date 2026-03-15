@@ -1,0 +1,6 @@
+{
+  "candidate_id": 1,
+  "description": "Use this skill whenever the user's question should be answered with information retrieved from the web rather than from training data alone. Trigger for: explicit search requests (\"search for\", \"look ",
+  "train_score": 0.9555,
+  "rank": 1
+}

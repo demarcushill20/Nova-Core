@@ -77,6 +77,15 @@ def write_decision(run_dir: Path, skill_name: str, decision: dict) -> Path:
     return path
 
 
+def write_interference(run_dir: Path, skill_name: str, report_dict: dict) -> Path:
+    """Write interference check results with per-query detail."""
+    interference_dir = run_dir / "interference"
+    interference_dir.mkdir(exist_ok=True)
+    path = interference_dir / f"{skill_name}.json"
+    path.write_text(json.dumps(report_dict, indent=2, default=str) + "\n")
+    return path
+
+
 def write_summary(run_dir: Path, summary: dict) -> Path:
     """Write the run summary."""
     # JSON summary

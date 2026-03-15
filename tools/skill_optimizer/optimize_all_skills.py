@@ -30,6 +30,7 @@ from tools.skill_optimizer.artifact_writer import (
     write_baseline,
     write_candidate,
     write_decision,
+    write_interference,
     write_log,
     write_manifest,
     write_summary,
@@ -47,7 +48,7 @@ from tools.skill_optimizer.decision_engine import (
 from tools.skill_optimizer.detect_neighbors import detect_neighbors
 from tools.skill_optimizer.evaluate_skill import evaluate_skill
 from tools.skill_optimizer.global_smoke import run_smoke_test
-from tools.skill_optimizer.interference_check import check_interference
+from tools.skill_optimizer.interference_check import check_interference, load_neighbor_eval_set
 from tools.skill_optimizer.skill_discovery import SkillRecord, discover_all, get_eligible_skills
 from tools.skill_optimizer.skill_validator import check_readiness
 
@@ -250,19 +251,40 @@ def optimize_skill(
         # Step 9: Interference check
         log("Running interference check")
         neighbor_data = detect_neighbors(skill.name)
-        neighbor_names = neighbor_data.get("merged", [])
+        all_neighbors = neighbor_data.get("merged", [])
+        manual_neighbors = set(neighbor_data.get("manual", []))
 
-        # Only check neighbors that have eval data
+        # Priority-order neighbors: manually curated with eval data first,
+        # then other neighbors with eval data, then the rest.
+        # This ensures high-value boundary neighbors (e.g. http-fetch) are
+        # never silently excluded by an alphabetical cutoff.
+        max_neighbors = 5
+        with_eval: list[str] = []
+        without_eval: list[str] = []
+        for n in all_neighbors:
+            positives = load_neighbor_eval_set(n)
+            if positives:
+                with_eval.append(n)
+            else:
+                without_eval.append(n)
+        # Within each group, sort manual-curated first, then alphabetical
+        with_eval.sort(key=lambda n: (0 if n in manual_neighbors else 1, n))
+        without_eval.sort(key=lambda n: (0 if n in manual_neighbors else 1, n))
+        neighbor_names = (with_eval + without_eval)[:max_neighbors]
+
         interference_report = check_interference(
             skill_name=skill.name,
             candidate_description=candidate_desc,
-            neighbor_names=neighbor_names[:5],  # limit for speed
+            neighbor_names=neighbor_names,
             model=model,
         )
         log(
             f"Interference: {interference_report.total_false_triggers}/{interference_report.total_queries} "
             f"conflicts (rate={interference_report.aggregate_conflict_rate:.3f})"
         )
+
+        # Persist per-query interference details for diagnosis (P2)
+        write_interference(run_dir, skill.name, interference_report.to_dict())
 
         # Step 10: Smoke test
         log("Running smoke test")

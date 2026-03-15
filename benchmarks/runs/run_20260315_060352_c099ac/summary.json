@@ -1,0 +1,23 @@
+{
+  "run_id": "run_20260315_060352_c099ac",
+  "mode": "dry-run",
+  "total_skills": 1,
+  "processed": 1,
+  "accepted": 0,
+  "rejected": 0,
+  "skipped": 1,
+  "errors": 0,
+  "halted": false,
+  "halt_reason": "",
+  "completed": "2026-03-15T06:09:47Z",
+  "skills": [
+    {
+      "skill": "web-research",
+      "decision": "no_candidates",
+      "reason": "all candidates failed policy check",
+      "baseline_score": "",
+      "candidate_score": "",
+      "delta": ""
+    }
+  ]
+}

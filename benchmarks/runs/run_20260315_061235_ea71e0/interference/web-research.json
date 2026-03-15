@@ -1,0 +1,267 @@
+{
+  "skill_name": "web-research",
+  "neighbors_tested": 2,
+  "total_queries": 17,
+  "total_false_triggers": 2,
+  "max_conflict_rate": 0.25,
+  "aggregate_conflict_rate": 0.1176,
+  "runs_per_query": 3,
+  "trigger_threshold": 0.5,
+  "elapsed_seconds": 712.24,
+  "results": [
+    {
+      "neighbor": "firecrawl-deep-research",
+      "queries_tested": 8,
+      "false_triggers": 2,
+      "conflict_rate": 0.25,
+      "details": [
+        {
+          "query": "do deep research on transformer architecture evolution with full article text",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "thoroughly research and compare RAG vs fine-tuning approaches across multiple sources",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 2,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.6667,
+          "conflict": true,
+          "run_outcomes": [
+            true,
+            false,
+            true
+          ]
+        },
+        {
+          "query": "I need comprehensive analysis of LLM pricing models from multiple provider pages",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "deep dive into Kubernetes autoscaling strategies with full page content from each source",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "research everything about MCP server architecture, need complete articles not just snippets",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "thorough search across multiple sites about best GPU for inference workloads",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 3,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 1.0,
+          "conflict": true,
+          "run_outcomes": [
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "query": "need full page content from multiple sources about vector database benchmarks",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "comprehensive research on serverless vs containers for ML inference",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "neighbor": "http-fetch",
+      "queries_tested": 9,
+      "false_triggers": 0,
+      "conflict_rate": 0.0,
+      "details": [
+        {
+          "query": "fetch the JSON response from https://api.github.com/repos/anthropics/claude-code",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "download the raw content from https://example.com/config.yaml",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "get the documentation page at https://docs.anthropic.com/en/docs/overview",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "retrieve the status from our health endpoint https://api.novacore.dev/health",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "pull the latest release info from https://pypi.org/pypi/fastapi/json",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "read what's at this URL: https://raw.githubusercontent.com/anthropics/claude-code/main/README.md",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "grab the response from https://httpbin.org/get",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "load the API spec from https://petstore.swagger.io/v2/swagger.json",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "what does the endpoint at https://api.weather.gov/points/38.8894,-77.0352 return",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+{"type": "optimization", "skill": "web-research", "run_id": "run_20260315_051623_1fa2ff", "decision": "REJECT_NEIGHBOR", "baseline_score": 0.9071, "candidate_score": 1.0, "delta": 0.09289999999999998, "timestamp": "2026-03-15T05:32:31Z"}
+{"type": "optimization", "skill": "web-research", "run_id": "run_20260315_061235_ea71e0", "decision": "REJECT_NEIGHBOR", "baseline_score": 0.9071, "candidate_score": 1.0, "delta": 0.09289999999999998, "timestamp": "2026-03-15T06:43:22Z"}

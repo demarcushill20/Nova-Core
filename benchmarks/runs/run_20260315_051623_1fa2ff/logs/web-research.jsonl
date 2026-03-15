@@ -1,0 +1,16 @@
+{"timestamp": "2026-03-15T05:16:23Z", "skill": "web-research", "message": "Starting optimization"}
+{"timestamp": "2026-03-15T05:16:23Z", "skill": "web-research", "message": "Running baseline evaluation"}
+{"timestamp": "2026-03-15T05:20:14Z", "skill": "web-research", "message": "Baseline: P=1.000 R=0.714 F1=0.833 score=0.9071"}
+{"timestamp": "2026-03-15T05:20:14Z", "skill": "web-research", "message": "Generating candidates"}
+{"timestamp": "2026-03-15T05:21:39Z", "skill": "web-research", "message": "Generated 3 candidates, 1 valid"}
+{"timestamp": "2026-03-15T05:21:39Z", "skill": "web-research", "message": "Ranking candidates on train set"}
+{"timestamp": "2026-03-15T05:25:27Z", "skill": "web-research", "message": "Candidate 1: score=0.9555 (rank=1)"}
+{"timestamp": "2026-03-15T05:25:27Z", "skill": "web-research", "message": "Best candidate: 1 (score=0.9555)"}
+{"timestamp": "2026-03-15T05:25:27Z", "skill": "web-research", "message": "Running holdout test evaluation"}
+{"timestamp": "2026-03-15T05:27:23Z", "skill": "web-research", "message": "Test: P=1.000 R=1.000 F1=1.000 score=1.0000"}
+{"timestamp": "2026-03-15T05:30:29Z", "skill": "web-research", "message": "Running interference check"}
+{"timestamp": "2026-03-15T05:32:19Z", "skill": "web-research", "message": "Interference: 1/8 conflicts (rate=0.125)"}
+{"timestamp": "2026-03-15T05:32:19Z", "skill": "web-research", "message": "Running smoke test"}
+{"timestamp": "2026-03-15T05:32:31Z", "skill": "web-research", "message": "Smoke: 1/1 passed"}
+{"timestamp": "2026-03-15T05:32:31Z", "skill": "web-research", "message": "Evaluating decision gates"}
+{"timestamp": "2026-03-15T05:32:31Z", "skill": "web-research", "message": "Decision: REJECT_NEIGHBOR \u2014 Neighbor conflict rate 0.125 exceeds limit 0.10"}

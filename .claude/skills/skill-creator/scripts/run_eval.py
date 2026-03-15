@@ -32,6 +32,42 @@ def find_project_root() -> Path:
     return current
 
 
+def _matches_skill(text: str, clean_name: str, skill_name: str) -> bool:
+    """Check if text references the temp command alias OR the real installed skill.
+
+    Matches the temp alias (e.g. "web-research-skill-a1b2c3d4") or the real
+    skill name (e.g. "web-research") so that evaluation works correctly whether
+    Claude routes to the temp command or the already-installed real skill.
+    """
+    return clean_name in text or skill_name in text
+
+
+def _get_allowed_tools(skill_name: str, project_root: str) -> set[str]:
+    """Extract allowed-tools from the real installed skill's SKILL.md.
+
+    Returns an empty set if the skill is not installed or has no allowed-tools.
+    Used to detect indirect activation where Claude loads the skill's tools
+    via ToolSearch instead of routing through the Skill tool.
+    """
+    import re
+
+    import yaml
+
+    skill_md = Path(project_root) / ".claude" / "skills" / skill_name / "SKILL.md"
+    if not skill_md.exists():
+        return set()
+    try:
+        text = skill_md.read_text()
+        fm_match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
+        if not fm_match:
+            return set()
+        fm = yaml.safe_load(fm_match.group(1))
+        tools = fm.get("allowed-tools", [])
+        return set(tools) if isinstance(tools, list) else set()
+    except Exception:
+        return set()
+
+
 def run_single_query(
     query: str,
     skill_name: str,
@@ -47,11 +83,25 @@ def run_single_query(
     Uses --include-partial-messages to detect triggering early from
     stream events (content_block_start) rather than waiting for the
     full assistant message, which only arrives after tool execution.
+
+    Detects triggering via three paths:
+    1. Claude invokes the Skill tool with the skill name
+    2. Claude reads the skill's SKILL.md via the Read tool
+    3. Claude loads one of the skill's allowed-tools via ToolSearch
+       (indirect activation — Claude bypasses Skill routing but uses
+       the same underlying tools the skill would use)
     """
     unique_id = uuid.uuid4().hex[:8]
     clean_name = f"{skill_name}-skill-{unique_id}"
     project_commands_dir = Path(project_root) / ".claude" / "commands"
     command_file = project_commands_dir / f"{clean_name}.md"
+
+    # Build the path pattern for the real installed skill's SKILL.md so we
+    # can detect Read tool calls that target it directly.
+    real_skill_path_fragment = f".claude/skills/{skill_name}"
+
+    # Get the skill's allowed-tools for indirect activation detection.
+    allowed_tools = _get_allowed_tools(skill_name, project_root)
 
     try:
         project_commands_dir.mkdir(parents=True, exist_ok=True)
@@ -136,41 +186,86 @@ def run_single_query(
                             cb = se.get("content_block", {})
                             if cb.get("type") == "tool_use":
                                 tool_name = cb.get("name", "")
-                                if tool_name in ("Skill", "Read"):
+                                if tool_name in ("Skill", "Read", "ToolSearch"):
                                     pending_tool_name = tool_name
                                     accumulated_json = ""
+                                elif allowed_tools and tool_name in allowed_tools:
+                                    # Claude is directly calling one of the
+                                    # skill's allowed tools (e.g. tavily_search)
+                                    # without going through Skill or ToolSearch.
+                                    return True
                                 else:
-                                    return False
+                                    # Non-skill-related tool call. Continue
+                                    # scanning — don't short-circuit.
+                                    continue
 
                         elif se_type == "content_block_delta" and pending_tool_name:
                             delta = se.get("delta", {})
                             if delta.get("type") == "input_json_delta":
                                 accumulated_json += delta.get("partial_json", "")
-                                if clean_name in accumulated_json:
-                                    return True
+                                if pending_tool_name in ("Skill", "Read"):
+                                    if _matches_skill(accumulated_json, clean_name, skill_name):
+                                        return True
+                                elif pending_tool_name == "ToolSearch" and allowed_tools:
+                                    # Check if ToolSearch is loading one of
+                                    # the skill's allowed tools.
+                                    for tool in allowed_tools:
+                                        if tool in accumulated_json:
+                                            return True
 
                         elif se_type in ("content_block_stop", "message_stop"):
                             if pending_tool_name:
-                                return clean_name in accumulated_json
+                                if pending_tool_name in ("Skill", "Read"):
+                                    if _matches_skill(accumulated_json, clean_name, skill_name):
+                                        return True
+                                elif pending_tool_name == "ToolSearch" and allowed_tools:
+                                    for tool in allowed_tools:
+                                        if tool in accumulated_json:
+                                            return True
+                                # Reset for next content block (Claude may
+                                # emit multiple tool calls in one message).
+                                pending_tool_name = None
+                                accumulated_json = ""
+                                continue
                             if se_type == "message_stop":
-                                return False
+                                return triggered
 
                     # Fallback: full assistant message
                     elif event.get("type") == "assistant":
                         message = event.get("message", {})
-                        for content_item in message.get("content", []):
-                            if content_item.get("type") != "tool_use":
-                                continue
+                        tool_uses = [ci for ci in message.get("content", []) if ci.get("type") == "tool_use"]
+                        if not tool_uses:
+                            # Assistant message with no tool calls (e.g.
+                            # thinking-only or text-only partial message).
+                            # Skip — don't return early; more events may
+                            # follow with actual tool invocations.
+                            continue
+                        for content_item in tool_uses:
                             tool_name = content_item.get("name", "")
                             tool_input = content_item.get("input", {})
                             if (
                                 tool_name == "Skill"
-                                and clean_name in tool_input.get("skill", "")
+                                and _matches_skill(tool_input.get("skill", ""), clean_name, skill_name)
                                 or tool_name == "Read"
-                                and clean_name in tool_input.get("file_path", "")
+                                and (
+                                    _matches_skill(tool_input.get("file_path", ""), clean_name, skill_name)
+                                    or real_skill_path_fragment in tool_input.get("file_path", "")
+                                )
                             ):
                                 triggered = True
-                            return triggered
+                            elif tool_name == "ToolSearch" and allowed_tools:
+                                q = tool_input.get("query", "")
+                                for tool in allowed_tools:
+                                    if tool in q:
+                                        triggered = True
+                                        break
+                            elif allowed_tools and tool_name in allowed_tools:
+                                # Direct call to an allowed tool
+                                triggered = True
+                        if triggered:
+                            return True
+                        # Don't return False yet — more messages may follow
+                        continue
 
                     elif event.get("type") == "result":
                         return triggered
