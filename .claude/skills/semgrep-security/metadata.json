@@ -1,0 +1,25 @@
+{
+  "name": "semgrep-security",
+  "version": "0.1.0",
+  "description": "Static security scanning on code using Semgrep MCP. Detects vulnerabilities, code smells, and anti-patterns. Use after writing any code that handles auth, user input, crypto, secrets, network requests",
+  "skill_type": "prompt",
+  "domains": [
+    "devops",
+    "security"
+  ],
+  "risk_level": "critical",
+  "optimization_enabled": false,
+  "frozen_reason": "security-critical \u2014 scans for vulnerabilities",
+  "neighbors": [
+    "file-ops",
+    "git-ops",
+    "github-ops",
+    "langfuse-observability",
+    "shell-ops"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

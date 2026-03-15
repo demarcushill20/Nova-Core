@@ -1,0 +1,12 @@
+{"query": "do deep research on transformer architecture evolution with full article text", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "thoroughly research and compare RAG vs fine-tuning approaches across multiple sources", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "I need comprehensive analysis of LLM pricing models from multiple provider pages", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "deep dive into Kubernetes autoscaling strategies with full page content from each source", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
+{"query": "research everything about MCP server architecture, need complete articles not just snippets", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "thorough search across multiple sites about best GPU for inference workloads", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "read the TASKS directory and list pending items", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "commit changes and push to remote", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "create a new Python script for data processing", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "check my calendar for tomorrow's meetings", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "run pytest on the tests directory", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "what time is my next meeting", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}

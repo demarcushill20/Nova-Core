@@ -1,0 +1,59 @@
+# Mutation Policy
+# Defines what the optimizer is allowed to change and how.
+# This is a binding policy document — the candidate generator enforces these rules.
+
+version: "1.0.0"
+
+# Allowed mutation targets
+# Only these sections of a skill can be modified by the optimizer.
+allowed_targets:
+  - description       # SKILL.md frontmatter description
+  - activation_criteria  # activation.keywords in frontmatter
+  - exclusions        # negative trigger patterns
+  - examples          # example queries in description
+
+# Forbidden mutation targets
+# These must NEVER be modified by the optimizer.
+forbidden_targets:
+  - tool_permissions
+  - output_contract
+  - safety_rules
+  - tool_doctrine
+  - workflow_steps
+  - failure_handling
+  - verification_rules
+  - body_content       # SKILL.md body (only description/frontmatter is mutable)
+
+# Disallowed patterns in generated descriptions
+# Reject any candidate containing these patterns (case-insensitive).
+disallowed_patterns:
+  - "any task"
+  - "anything"
+  - "everything"
+  - "all purposes"
+  - "general purpose"
+  - "always use"
+  - "for all"
+  - "universal"
+  - "catch-all"
+  - "do anything"
+
+# Description constraints
+description:
+  min_length: 30
+  max_length: 1024
+  # Must contain at least one action verb
+  require_action_verb: true
+  # Must not duplicate another skill's description
+  uniqueness_required: true
+
+# Mutation budget per iteration
+budget:
+  max_candidates_per_skill: 3
+  max_description_changes_per_run: 1  # only description in rollout 1
+
+# Model used for mutation generation
+model:
+  default: "claude-sonnet-4-6"
+  # Higher-quality model for high-risk skills
+  high_risk: "claude-sonnet-4-6"

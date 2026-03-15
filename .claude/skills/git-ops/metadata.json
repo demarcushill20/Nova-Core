@@ -1,0 +1,25 @@
+{
+  "name": "git-ops",
+  "version": "0.1.0",
+  "description": "Perform safe Git operations while respecting NovaCore git safety rules, deny patterns, and audit discipline.",
+  "skill_type": "prompt",
+  "domains": [
+    "devops",
+    "git"
+  ],
+  "risk_level": "high",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "file-ops",
+    "github-ops",
+    "langfuse-observability",
+    "semgrep-security",
+    "shell-ops"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

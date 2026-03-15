@@ -1,0 +1,18 @@
+{
+  "name": "sequential-thinking",
+  "version": "0.1.0",
+  "description": "Structured step-by-step reasoning for complex problems using the Sequential Thinking MCP server. Use when a problem has multiple trade-offs, competing approaches, or requires systematic elimination \u2014 ",
+  "skill_type": "prompt",
+  "domains": [
+    "reasoning"
+  ],
+  "risk_level": "low",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

@@ -1,0 +1,6 @@
+{"query": "grab the response from https://httpbin.org/get", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "load the API spec from https://petstore.swagger.io/v2/swagger.json", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
+{"query": "what does the endpoint at https://api.weather.gov/points/38.8894,-77.0352 return", "should_trigger": true, "difficulty": "hard", "category": "paraphrase"}
+{"query": "research what machine learning frameworks are trending", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "edit the Python file to fix the import error", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "store this finding in Fusion Memory", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}

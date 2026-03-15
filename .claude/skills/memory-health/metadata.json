@@ -1,0 +1,26 @@
+{
+  "name": "memory-health",
+  "version": "0.1.0",
+  "description": "Diagnose Fusion Memory system health, verify backend connectivity, and troubleshoot failures. Auto-invoked when memory operations fail or when the user asks about memory system status.",
+  "skill_type": "prompt",
+  "domains": [
+    "memory"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "memory-checkpoint",
+    "memory-checkpoint-to-diary",
+    "memory-promote-pattern",
+    "memory-recall",
+    "memory-store",
+    "memory-surface-adr-candidates",
+    "memory-unified-recall"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

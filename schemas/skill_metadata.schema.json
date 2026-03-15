@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Skill Metadata",
+  "description": "Machine-readable metadata for NovaCore skills — used by the autonomous skill improvement pipeline.",
+  "type": "object",
+  "required": ["name", "version", "description", "domains", "risk_level", "optimization_enabled"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+    "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$"},
+    "description": {"type": "string", "maxLength": 200},
+    "skill_type": {"enum": ["prompt", "execution"]},
+    "domains": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "risk_level": {"enum": ["low", "medium", "high", "critical"]},
+    "optimization_enabled": {"type": "boolean"},
+    "neighbors": {"type": "array", "items": {"type": "string"}},
+    "eval_profile": {"enum": ["standard", "strict", "lenient"]},
+    "owner": {"type": "string", "default": "nova"},
+    "created": {"type": "string", "format": "date"},
+    "last_optimized": {"type": ["string", "null"], "format": "date-time"},
+    "frozen_reason": {"type": ["string", "null"], "description": "Why this skill is excluded from auto-optimization"},
+    "generated_by": {"type": "string", "description": "Tool that generated this metadata file"}
+  }
+}

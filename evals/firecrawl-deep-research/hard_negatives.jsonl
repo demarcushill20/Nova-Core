@@ -1,0 +1,5 @@
+{"query": "quickly search for the latest Node.js version number", "should_trigger": false, "difficulty": "hard", "category": "neighbor-confusable", "neighbor_skill": "web-research", "notes": "quick factual lookup is web-research"}
+{"query": "find information about Go 1.22 release notes", "should_trigger": false, "difficulty": "hard", "category": "neighbor-confusable", "neighbor_skill": "web-research", "notes": "simple info lookup is web-research"}
+{"query": "fetch the raw HTML from https://example.com/api/docs", "should_trigger": false, "difficulty": "medium", "category": "neighbor-confusable", "neighbor_skill": "http-fetch", "notes": "single URL fetch is http-fetch"}
+{"query": "crawl the entire Next.js documentation site", "should_trigger": false, "difficulty": "medium", "category": "neighbor-confusable", "neighbor_skill": "firecrawl-site-crawl", "notes": "full site crawl is firecrawl-site-crawl"}
+{"query": "extract pricing data from the AWS pricing page", "should_trigger": false, "difficulty": "medium", "category": "neighbor-confusable", "neighbor_skill": "firecrawl-extract", "notes": "structured extraction is firecrawl-extract"}

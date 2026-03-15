@@ -1,0 +1,6 @@
+{"query": "need full page content from multiple sources about vector database benchmarks", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
+{"query": "comprehensive research on serverless vs containers for ML inference", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "edit the configuration file to change the port number", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "search for a quick answer about Python dictionary methods", "should_trigger": false, "difficulty": "hard", "category": "neighbor-confusable", "neighbor_skill": "web-research"}
+{"query": "look up what version of React is latest", "should_trigger": false, "difficulty": "hard", "category": "neighbor-confusable", "neighbor_skill": "web-research"}
+{"query": "store this research finding in memory for later", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}

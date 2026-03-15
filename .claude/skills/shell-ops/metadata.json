@@ -1,0 +1,25 @@
+{
+  "name": "shell-ops",
+  "version": "0.1.0",
+  "description": "Execute safe shell commands inside the NovaCore runtime sandbox while respecting runner deny rules and confirmation policies.",
+  "skill_type": "prompt",
+  "domains": [
+    "devops",
+    "system"
+  ],
+  "risk_level": "high",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "file-ops",
+    "git-ops",
+    "github-ops",
+    "langfuse-observability",
+    "semgrep-security"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

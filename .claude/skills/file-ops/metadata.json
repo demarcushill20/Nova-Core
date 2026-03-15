@@ -1,0 +1,26 @@
+{
+  "name": "file-ops",
+  "version": "0.1.0",
+  "description": "Safely create, read, edit, move, and rename files within the nova-core sandbox using a diff-first, read-before-write workflow.",
+  "skill_type": "prompt",
+  "domains": [
+    "devops",
+    "files"
+  ],
+  "risk_level": "high",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "git-ops",
+    "github-ops",
+    "google-drive",
+    "langfuse-observability",
+    "semgrep-security",
+    "shell-ops"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

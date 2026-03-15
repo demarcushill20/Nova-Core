@@ -1,0 +1,21 @@
+{
+  "name": "self-verification",
+  "version": "0.1.0",
+  "description": "Validate tool results and skill outputs to ensure correctness, completeness, and contract compliance before finalizing a task.",
+  "skill_type": "prompt",
+  "domains": [
+    "governance",
+    "verification"
+  ],
+  "risk_level": "critical",
+  "optimization_enabled": false,
+  "frozen_reason": "safety-critical \u2014 validates all other skill outputs",
+  "neighbors": [
+    "auditing-obsidian-memory-safety"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

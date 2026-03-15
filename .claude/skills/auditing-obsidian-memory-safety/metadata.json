@@ -1,0 +1,28 @@
+{
+  "name": "auditing-obsidian-memory-safety",
+  "version": "0.1.0",
+  "description": "Validate that proposed Obsidian memory writes are bounded, correctly typed, provenance-safe, non-secret-bearing, and compliant with the runtime-versus-memory boundary. Invoked when a workflow-learning",
+  "skill_type": "prompt",
+  "domains": [
+    "obsidian",
+    "governance"
+  ],
+  "risk_level": "critical",
+  "optimization_enabled": false,
+  "frozen_reason": "governance-critical \u2014 enforces memory write safety",
+  "neighbors": [
+    "capturing-workflow-learnings",
+    "memory-checkpoint-to-diary",
+    "memory-promote-pattern",
+    "memory-surface-adr-candidates",
+    "reading-obsidian-memory",
+    "retrieving-task-patterns",
+    "self-verification",
+    "writing-agent-patterns"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

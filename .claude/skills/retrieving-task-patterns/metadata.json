@@ -1,0 +1,28 @@
+{
+  "name": "retrieving-task-patterns",
+  "version": "0.1.0",
+  "description": "Targeted retrieval of prior task-class patterns, workflow learnings, and reusable examples from the synced Obsidian vault. Invoked when planning or execution benefits from knowing how Nova-Core handle",
+  "skill_type": "prompt",
+  "domains": [
+    "obsidian",
+    "knowledge"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "auditing-obsidian-memory-safety",
+    "capturing-workflow-learnings",
+    "memory-checkpoint-to-diary",
+    "memory-promote-pattern",
+    "memory-recall",
+    "memory-surface-adr-candidates",
+    "reading-obsidian-memory",
+    "writing-agent-patterns"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

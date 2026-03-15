@@ -1,0 +1,29 @@
+{
+  "name": "google-drive",
+  "version": "0.1.0",
+  "description": "Search, list, upload, and download Google Drive files using the NovaCore Google Workspace CLI. Auto-invoked for file management in Drive.",
+  "skill_type": "prompt",
+  "domains": [
+    "google-workspace",
+    "files"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "daily-briefing",
+    "email-to-task",
+    "file-ops",
+    "gmail-triage",
+    "google-calendar",
+    "google-docs",
+    "google-gmail",
+    "meeting-prep",
+    "weekly-digest"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

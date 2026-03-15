@@ -1,0 +1,28 @@
+{
+  "name": "capturing-workflow-learnings",
+  "version": "0.1.0",
+  "description": "Safely capture completed workflow outcomes into compact, reusable workflow-learning notes in the canonical synced Obsidian vault. Invoked when a workflow or implementation step completes successfully ",
+  "skill_type": "prompt",
+  "domains": [
+    "obsidian",
+    "knowledge"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "auditing-obsidian-memory-safety",
+    "memory-checkpoint-to-diary",
+    "memory-promote-pattern",
+    "memory-store",
+    "memory-surface-adr-candidates",
+    "reading-obsidian-memory",
+    "retrieving-task-patterns",
+    "writing-agent-patterns"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

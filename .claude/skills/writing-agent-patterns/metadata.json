@@ -1,0 +1,27 @@
+{
+  "name": "writing-agent-patterns",
+  "version": "0.1.0",
+  "description": "Promote stable, repeatable Nova-Core methods into structured Obsidian agent-pattern notes. Invoked when a technique has proven reusable across multiple tasks and is mature enough to preserve as a dura",
+  "skill_type": "prompt",
+  "domains": [
+    "obsidian",
+    "knowledge"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "auditing-obsidian-memory-safety",
+    "capturing-workflow-learnings",
+    "memory-checkpoint-to-diary",
+    "memory-promote-pattern",
+    "memory-surface-adr-candidates",
+    "reading-obsidian-memory",
+    "retrieving-task-patterns"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

@@ -1,0 +1,28 @@
+{
+  "name": "weekly-digest",
+  "version": "0.1.0",
+  "description": "Weekly digest: this week's meetings, email volume, completed tasks, and upcoming deadlines. Use when the user says 'weekly summary', 'week in review', 'what happened this week', or wants a retrospecti",
+  "skill_type": "prompt",
+  "domains": [
+    "google-workspace",
+    "overview"
+  ],
+  "risk_level": "low",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "daily-briefing",
+    "email-to-task",
+    "gmail-triage",
+    "google-calendar",
+    "google-docs",
+    "google-drive",
+    "google-gmail",
+    "meeting-prep"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

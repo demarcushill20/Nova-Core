@@ -1,0 +1,56 @@
+[
+  {
+    "skill_a": "web-research",
+    "skill_b": "firecrawl-deep-research",
+    "boundary": "web-research handles quick factual lookups; firecrawl-deep-research handles comprehensive multi-source analysis with full article text",
+    "test_queries": [
+      {"query": "what version of Python is latest", "expected": "web-research"},
+      {"query": "comprehensive analysis of Python vs Rust performance across multiple benchmarking articles", "expected": "firecrawl-deep-research"}
+    ]
+  },
+  {
+    "skill_a": "web-research",
+    "skill_b": "http-fetch",
+    "boundary": "web-research handles open-ended searches; http-fetch handles retrieval of specific known URLs",
+    "test_queries": [
+      {"query": "search for best practices in API design", "expected": "web-research"},
+      {"query": "fetch https://api.example.com/v1/config", "expected": "http-fetch"}
+    ]
+  },
+  {
+    "skill_a": "memory-recall",
+    "skill_b": "reading-obsidian-memory",
+    "boundary": "memory-recall queries Fusion Memory (Pinecone/Neo4j/Redis); reading-obsidian-memory queries Obsidian vault notes",
+    "test_queries": [
+      {"query": "what did we decide about auth in the last session", "expected": "memory-recall"},
+      {"query": "read the architecture decision records from the vault", "expected": "reading-obsidian-memory"}
+    ]
+  },
+  {
+    "skill_a": "memory-recall",
+    "skill_b": "memory-unified-recall",
+    "boundary": "memory-recall is Fusion Memory only; memory-unified-recall routes to both Fusion Memory and Obsidian",
+    "test_queries": [
+      {"query": "search Fusion Memory for prior research on caching", "expected": "memory-recall"},
+      {"query": "find everything we know about caching from any source", "expected": "memory-unified-recall"}
+    ]
+  },
+  {
+    "skill_a": "google-gmail",
+    "skill_b": "gmail-triage",
+    "boundary": "google-gmail for specific email operations (send, search, read); gmail-triage for inbox overview and priority sorting",
+    "test_queries": [
+      {"query": "send an email to john@example.com about the meeting", "expected": "google-gmail"},
+      {"query": "what's in my inbox that needs attention", "expected": "gmail-triage"}
+    ]
+  },
+  {
+    "skill_a": "daily-briefing",
+    "skill_b": "weekly-digest",
+    "boundary": "daily-briefing for today's overview; weekly-digest for week-level retrospective",
+    "test_queries": [
+      {"query": "good morning, what's on today", "expected": "daily-briefing"},
+      {"query": "give me a summary of this week", "expected": "weekly-digest"}
+    ]
+  }
+]

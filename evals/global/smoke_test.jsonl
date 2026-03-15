@@ -1,0 +1,15 @@
+{"query": "search the web for latest kubernetes release notes", "should_trigger": true, "skill": "web-research", "category": "smoke"}
+{"query": "do deep research across multiple full articles about LLM evaluation methods", "should_trigger": true, "skill": "firecrawl-deep-research", "category": "smoke"}
+{"query": "fetch the JSON at https://api.github.com/zen", "should_trigger": true, "skill": "http-fetch", "category": "smoke"}
+{"query": "commit these changes to the main branch", "should_trigger": true, "skill": "git-ops", "category": "smoke"}
+{"query": "check my gmail inbox", "should_trigger": true, "skill": "gmail-triage", "category": "smoke"}
+{"query": "create a new Google Doc for the meeting notes", "should_trigger": true, "skill": "google-docs", "category": "smoke"}
+{"query": "recall what we decided about the authentication architecture", "should_trigger": true, "skill": "memory-recall", "category": "smoke"}
+{"query": "save this decision to Fusion Memory", "should_trigger": true, "skill": "memory-store", "category": "smoke"}
+{"query": "list all n8n workflows and their status", "should_trigger": true, "skill": "n8n-workflows", "category": "smoke"}
+{"query": "scrape the entire documentation site at docs.astro.build", "should_trigger": true, "skill": "firecrawl-site-crawl", "category": "smoke"}
+{"query": "extract structured pricing data from the pricing page", "should_trigger": true, "skill": "firecrawl-extract", "category": "smoke"}
+{"query": "fill out the login form on the staging site", "should_trigger": true, "skill": "browser-automation", "category": "smoke"}
+{"query": "look up the fastapi library docs for the latest version", "should_trigger": true, "skill": "context7-docs", "category": "smoke"}
+{"query": "what's on my calendar for today", "should_trigger": true, "skill": "google-calendar", "category": "smoke"}
+{"query": "read the agent pattern notes from Obsidian", "should_trigger": true, "skill": "reading-obsidian-memory", "category": "smoke"}

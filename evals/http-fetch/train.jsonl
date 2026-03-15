@@ -1,0 +1,12 @@
+{"query": "fetch the JSON response from https://api.github.com/repos/anthropics/claude-code", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "download the raw content from https://example.com/config.yaml", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "get the documentation page at https://docs.anthropic.com/en/docs/overview", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "retrieve the status from our health endpoint https://api.novacore.dev/health", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "pull the latest release info from https://pypi.org/pypi/fastapi/json", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "read what's at this URL: https://raw.githubusercontent.com/anthropics/claude-code/main/README.md", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "search the web for best practices in Python testing", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "commit this file to git", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "create a new task for code review", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "check what's in my gmail inbox", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "run the unit tests", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "read the local file at /home/nova/nova-core/README.md", "should_trigger": false, "difficulty": "medium", "category": "wrong-domain"}

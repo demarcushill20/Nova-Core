@@ -1,0 +1,29 @@
+{
+  "name": "browser-automation",
+  "version": "0.1.0",
+  "description": "Playwright browser automation for multi-step web tasks \u2014 scraping dynamic pages, filling forms, navigating SPAs. Headless, login-free by default. Auto-invoked when HTTP fetch is insufficient.",
+  "skill_type": "prompt",
+  "domains": [
+    "research",
+    "web",
+    "automation"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "context7-docs",
+    "firecrawl-deep-research",
+    "firecrawl-extract",
+    "firecrawl-site-crawl",
+    "http-fetch",
+    "n8n-workflows",
+    "research-to-action",
+    "web-research"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

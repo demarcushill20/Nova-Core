@@ -1,0 +1,28 @@
+{
+  "name": "firecrawl-extract",
+  "version": "0.1.0",
+  "description": ">-",
+  "skill_type": "prompt",
+  "domains": [
+    "research",
+    "web",
+    "extraction"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "browser-automation",
+    "context7-docs",
+    "firecrawl-deep-research",
+    "firecrawl-site-crawl",
+    "http-fetch",
+    "research-to-action",
+    "web-research"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

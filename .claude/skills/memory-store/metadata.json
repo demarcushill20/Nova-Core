@@ -1,0 +1,27 @@
+{
+  "name": "memory-store",
+  "version": "0.1.0",
+  "description": "Store durable knowledge, decisions, and context into Fusion Memory (Pinecone + Neo4j + Redis). Auto-invoked when work produces insights, decisions, or context worth persisting beyond the current sessi",
+  "skill_type": "prompt",
+  "domains": [
+    "memory"
+  ],
+  "risk_level": "high",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "capturing-workflow-learnings",
+    "memory-checkpoint",
+    "memory-checkpoint-to-diary",
+    "memory-health",
+    "memory-promote-pattern",
+    "memory-recall",
+    "memory-surface-adr-candidates",
+    "memory-unified-recall"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

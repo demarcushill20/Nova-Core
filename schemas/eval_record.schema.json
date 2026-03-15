@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Eval Record",
+  "description": "Schema for skill trigger evaluation records used by the autonomous skill improvement pipeline.",
+  "type": "object",
+  "required": ["query", "should_trigger"],
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 500,
+      "description": "User query to test against the skill description"
+    },
+    "should_trigger": {
+      "type": "boolean",
+      "description": "Whether the skill should trigger for this query"
+    },
+    "difficulty": {
+      "enum": ["easy", "medium", "hard"],
+      "description": "How difficult this case is for the model to classify correctly"
+    },
+    "category": {
+      "type": "string",
+      "description": "Semantic category for analysis (e.g., 'direct-intent', 'paraphrase', 'edge-case', 'neighbor-confusable')"
+    },
+    "neighbor_skill": {
+      "type": "string",
+      "description": "For hard negatives: which neighbor skill this query actually belongs to"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional annotation explaining why this record exists"
+    }
+  },
+  "additionalProperties": false
+}

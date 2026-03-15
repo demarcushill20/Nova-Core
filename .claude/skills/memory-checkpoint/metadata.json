@@ -1,0 +1,26 @@
+{
+  "name": "memory-checkpoint",
+  "version": "0.1.0",
+  "description": "Create session checkpoints in Fusion Memory to mark session boundaries, enable session resumption, and build the temporal graph chain. Invoke at natural session boundaries or when the user says they'r",
+  "skill_type": "prompt",
+  "domains": [
+    "memory"
+  ],
+  "risk_level": "high",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "memory-checkpoint-to-diary",
+    "memory-health",
+    "memory-promote-pattern",
+    "memory-recall",
+    "memory-store",
+    "memory-surface-adr-candidates",
+    "memory-unified-recall"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

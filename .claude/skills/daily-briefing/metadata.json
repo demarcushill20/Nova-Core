@@ -1,0 +1,28 @@
+{
+  "name": "daily-briefing",
+  "version": "0.1.0",
+  "description": "Morning briefing: today's calendar, unread email summary, and pending NovaCore tasks in one view. Use when the user says 'good morning', 'daily brief', 'what's on today', 'standup', or wants a start-o",
+  "skill_type": "prompt",
+  "domains": [
+    "google-workspace",
+    "overview"
+  ],
+  "risk_level": "low",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "email-to-task",
+    "gmail-triage",
+    "google-calendar",
+    "google-docs",
+    "google-drive",
+    "google-gmail",
+    "meeting-prep",
+    "weekly-digest"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

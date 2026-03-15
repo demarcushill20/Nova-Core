@@ -1,0 +1,27 @@
+{
+  "name": "memory-unified-recall",
+  "version": "0.1.0",
+  "description": ">",
+  "skill_type": "prompt",
+  "domains": [
+    "memory"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "memory-checkpoint",
+    "memory-checkpoint-to-diary",
+    "memory-health",
+    "memory-promote-pattern",
+    "memory-recall",
+    "memory-store",
+    "memory-surface-adr-candidates",
+    "reading-obsidian-memory"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

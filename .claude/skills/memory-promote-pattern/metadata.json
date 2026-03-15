@@ -1,0 +1,32 @@
+{
+  "name": "memory-promote-pattern",
+  "version": "0.1.0",
+  "description": ">",
+  "skill_type": "prompt",
+  "domains": [
+    "memory",
+    "obsidian"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "auditing-obsidian-memory-safety",
+    "capturing-workflow-learnings",
+    "memory-checkpoint",
+    "memory-checkpoint-to-diary",
+    "memory-health",
+    "memory-recall",
+    "memory-store",
+    "memory-surface-adr-candidates",
+    "memory-unified-recall",
+    "reading-obsidian-memory",
+    "retrieving-task-patterns",
+    "writing-agent-patterns"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

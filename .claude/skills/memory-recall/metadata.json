@@ -1,0 +1,27 @@
+{
+  "name": "memory-recall",
+  "version": "0.1.0",
+  "description": "Retrieve knowledge from Fusion Memory using semantic search, temporal queries, or session replay. Auto-invoked when tasks need prior decisions, context, research findings, or session history.",
+  "skill_type": "prompt",
+  "domains": [
+    "memory"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "memory-checkpoint",
+    "memory-checkpoint-to-diary",
+    "memory-health",
+    "memory-promote-pattern",
+    "memory-store",
+    "memory-surface-adr-candidates",
+    "memory-unified-recall",
+    "reading-obsidian-memory"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

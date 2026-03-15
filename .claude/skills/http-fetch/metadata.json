@@ -1,0 +1,27 @@
+{
+  "name": "http-fetch",
+  "version": "0.1.0",
+  "description": "Deterministic HTTP retrieval of specific URLs for documentation pages, raw text, JSON endpoints, and structured data extraction. Auto-invoked when the task requires fetching a known URL.",
+  "skill_type": "prompt",
+  "domains": [
+    "research",
+    "web"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "browser-automation",
+    "context7-docs",
+    "firecrawl-deep-research",
+    "firecrawl-extract",
+    "firecrawl-site-crawl",
+    "research-to-action",
+    "web-research"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

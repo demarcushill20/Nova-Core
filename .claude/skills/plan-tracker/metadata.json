@@ -1,0 +1,22 @@
+{
+  "name": "plan-tracker",
+  "version": "0.1.0",
+  "description": "Query, update, and manage Nova-Core implementation plans stored in the Obsidian vault. Provides a unified view of all plan statuses across any access point (Telegram, webapp, Claude Code).",
+  "skill_type": "prompt",
+  "domains": [
+    "tasks",
+    "planning"
+  ],
+  "risk_level": "low",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "email-to-task",
+    "task-execution"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

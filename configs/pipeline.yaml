@@ -1,0 +1,67 @@
+# Pipeline Configuration
+# Controls the overall behavior of the skill optimization pipeline.
+
+version: "1.0.0"
+
+# Operating mode
+# dry-run: evaluate and score but don't persist changes
+# propose: evaluate, score, and write candidate artifacts for review
+# promote: evaluate, score, and create git branch with accepted changes
+mode: "dry-run"
+
+# Scope control
+scope:
+  # Only optimize prompt-trigger skills (execution skills are frozen)
+  skill_types: ["prompt"]
+  # Maximum number of skills per batch run
+  max_skills_per_batch: 10
+  # Specific skills to include (empty = all eligible)
+  include_skills: []
+  # Specific skills to exclude (on top of frozen)
+  exclude_skills: []
+  # Only process skills that have validated datasets
+  require_valid_datasets: true
+
+# Baseline behavior
+baseline:
+  # Reuse cached baseline if less than this many hours old
+  cache_ttl_hours: 24
+  # Force re-baseline even if cache exists
+  force_rebaseline: false
+
+# Candidate generation
+candidates:
+  # Number of mutation candidates to generate per skill
+  count: 3
+  # Temperature-like diversity control (passed to improve_description)
+  diversity: "medium"
+
+# Resume support
+resume:
+  # Enable checkpointing for interrupted runs
+  enabled: true
+  # Directory for checkpoint files
+  checkpoint_dir: "working/checkpoints"
+
+# Artifact persistence
+artifacts:
+  # Root directory for all pipeline artifacts
+  root: "benchmarks"
+  # Keep N most recent runs
+  max_retained_runs: 50
+
+# Reporting
+reporting:
+  # Generate markdown report after each run
+  generate_report: true
+  # Report output path
+  report_path: "reports/latest_report.md"
+  # Regression watchlist output path
+  watchlist_path: "reports/regression_watchlist.md"
+
+# Logging
+logging:
+  # JSONL structured log
+  log_file: "LOGS/skill_optimizer.jsonl"
+  # Verbosity
+  verbose: true

@@ -1,0 +1,25 @@
+{
+  "name": "langfuse-observability",
+  "version": "0.1.0",
+  "description": ">-",
+  "skill_type": "prompt",
+  "domains": [
+    "devops",
+    "observability"
+  ],
+  "risk_level": "low",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "file-ops",
+    "git-ops",
+    "github-ops",
+    "semgrep-security",
+    "shell-ops"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

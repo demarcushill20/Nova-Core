@@ -1,0 +1,804 @@
+version: 1.0.0
+generated_by: tools/skill_optimizer/skill_discovery.py
+summary:
+  total_skills: 46
+  prompt_skills: 42
+  execution_skills: 4
+  eligible_for_optimization: 37
+  frozen: 9
+skills:
+- name: auditing-obsidian-memory-safety
+  skill_type: prompt
+  description: Validate that proposed Obsidian memory writes are bounded, correctly typed, provenance-safe, non-secret-bearing,
+    and compliant with the runtime-versus-memory boundary. Invoked when a workflow-learning
+  path: /home/nova/nova-core/.claude/skills/auditing-obsidian-memory-safety
+  risk_level: critical
+  optimization_enabled: false
+  domains:
+  - obsidian
+  - governance
+  neighbors:
+  - capturing-workflow-learnings
+  - memory-checkpoint-to-diary
+  - memory-promote-pattern
+  - memory-surface-adr-candidates
+  - reading-obsidian-memory
+  - retrieving-task-patterns
+  - self-verification
+  - writing-agent-patterns
+  frozen_reason: "governance-critical \u2014 enforces memory write safety"
+- name: browser-automation
+  skill_type: prompt
+  description: "Playwright browser automation for multi-step web tasks \u2014 scraping dynamic pages, filling forms, navigating\
+    \ SPAs. Headless, login-free by default. Auto-invoked when HTTP fetch is insufficient."
+  path: /home/nova/nova-core/.claude/skills/browser-automation
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - research
+  - web
+  - automation
+  neighbors:
+  - context7-docs
+  - firecrawl-deep-research
+  - firecrawl-extract
+  - firecrawl-site-crawl
+  - http-fetch
+  - n8n-workflows
+  - research-to-action
+  - web-research
+- name: capturing-workflow-learnings
+  skill_type: prompt
+  description: 'Safely capture completed workflow outcomes into compact, reusable workflow-learning notes in the canonical
+    synced Obsidian vault. Invoked when a workflow or implementation step completes successfully '
+  path: /home/nova/nova-core/.claude/skills/capturing-workflow-learnings
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - obsidian
+  - knowledge
+  neighbors:
+  - auditing-obsidian-memory-safety
+  - memory-checkpoint-to-diary
+  - memory-promote-pattern
+  - memory-store
+  - memory-surface-adr-candidates
+  - reading-obsidian-memory
+  - retrieving-task-patterns
+  - writing-agent-patterns
+- name: code_improve
+  skill_type: execution
+  description: ''
+  path: /home/nova/nova-core/SKILLS/code_improve
+  risk_level: high
+  optimization_enabled: false
+  domains:
+  - execution
+  neighbors:
+  - generate_pdf_report
+  - repo_health_check
+  - system_supervisor
+  - task-execution
+  frozen_reason: execution skills frozen in rollout 1
+- name: context7-docs
+  skill_type: prompt
+  description: Retrieve version-specific library documentation via Context7 MCP to eliminate hallucinated API references.
+    Use when writing code that imports any library, answering 'how do I use X?', debugging API er
+  path: /home/nova/nova-core/.claude/skills/context7-docs
+  risk_level: low
+  optimization_enabled: true
+  domains:
+  - research
+  - documentation
+  neighbors:
+  - browser-automation
+  - firecrawl-deep-research
+  - firecrawl-extract
+  - firecrawl-site-crawl
+  - http-fetch
+  - research-to-action
+  - web-research
+- name: daily-briefing
+  skill_type: prompt
+  description: 'Morning briefing: today''s calendar, unread email summary, and pending NovaCore tasks in one view. Use when
+    the user says ''good morning'', ''daily brief'', ''what''s on today'', ''standup'', or wants a start-o'
+  path: /home/nova/nova-core/.claude/skills/daily-briefing
+  risk_level: low
+  optimization_enabled: true
+  domains:
+  - google-workspace
+  - overview
+  neighbors:
+  - email-to-task
+  - gmail-triage
+  - google-calendar
+  - google-docs
+  - google-drive
+  - google-gmail
+  - meeting-prep
+  - weekly-digest
+- name: email-to-task
+  skill_type: prompt
+  description: Convert a Gmail message into a NovaCore task file in TASKS/. Use when the user says 'make this a task', 'create
+    a task from that email', 'turn that email into a task', or wants to queue email-based wo
+  path: /home/nova/nova-core/.claude/skills/email-to-task
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - google-workspace
+  - email
+  - tasks
+  neighbors:
+  - daily-briefing
+  - gmail-triage
+  - google-calendar
+  - google-docs
+  - google-drive
+  - google-gmail
+  - meeting-prep
+  - plan-tracker
+  - task-execution
+  - weekly-digest
+- name: file-ops
+  skill_type: prompt
+  description: Safely create, read, edit, move, and rename files within the nova-core sandbox using a diff-first, read-before-write
+    workflow.
+  path: /home/nova/nova-core/.claude/skills/file-ops
+  risk_level: high
+  optimization_enabled: true
+  domains:
+  - devops
+  - files
+  neighbors:
+  - git-ops
+  - github-ops
+  - google-drive
+  - langfuse-observability
+  - semgrep-security
+  - shell-ops
+- name: firecrawl-deep-research
+  skill_type: prompt
+  description: '>-'
+  path: /home/nova/nova-core/.claude/skills/firecrawl-deep-research
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - research
+  - web
+  neighbors:
+  - browser-automation
+  - context7-docs
+  - firecrawl-extract
+  - firecrawl-site-crawl
+  - http-fetch
+  - research-to-action
+  - web-research
+- name: firecrawl-extract
+  skill_type: prompt
+  description: '>-'
+  path: /home/nova/nova-core/.claude/skills/firecrawl-extract
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - research
+  - web
+  - extraction
+  neighbors:
+  - browser-automation
+  - context7-docs
+  - firecrawl-deep-research
+  - firecrawl-site-crawl
+  - http-fetch
+  - research-to-action
+  - web-research
+- name: firecrawl-site-crawl
+  skill_type: prompt
+  description: '>-'
+  path: /home/nova/nova-core/.claude/skills/firecrawl-site-crawl
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - research
+  - web
+  neighbors:
+  - browser-automation
+  - context7-docs
+  - firecrawl-deep-research
+  - firecrawl-extract
+  - http-fetch
+  - research-to-action
+  - web-research
+- name: generate_pdf_report
+  skill_type: execution
+  description: ''
+  path: /home/nova/nova-core/SKILLS/generate_pdf_report
+  risk_level: high
+  optimization_enabled: false
+  domains:
+  - execution
+  neighbors:
+  - code_improve
+  - repo_health_check
+  - system_supervisor
+  - task-execution
+  frozen_reason: execution skills frozen in rollout 1
+- name: git-ops
+  skill_type: prompt
+  description: Perform safe Git operations while respecting NovaCore git safety rules, deny patterns, and audit discipline.
+  path: /home/nova/nova-core/.claude/skills/git-ops
+  risk_level: high
+  optimization_enabled: true
+  domains:
+  - devops
+  - git
+  neighbors:
+  - file-ops
+  - github-ops
+  - langfuse-observability
+  - semgrep-security
+  - shell-ops
+- name: github-ops
+  skill_type: prompt
+  description: '>-'
+  path: /home/nova/nova-core/.claude/skills/github-ops
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - devops
+  - git
+  - github
+  neighbors:
+  - file-ops
+  - git-ops
+  - langfuse-observability
+  - semgrep-security
+  - shell-ops
+- name: gmail-triage
+  skill_type: prompt
+  description: 'Triage your Gmail inbox: summarize unread messages by priority, flag urgent items, and suggest actions. Use
+    when the user says ''check my email'', ''what''s in my inbox'', ''any urgent emails'', ''triage my m'
+  path: /home/nova/nova-core/.claude/skills/gmail-triage
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - google-workspace
+  - email
+  neighbors:
+  - daily-briefing
+  - email-to-task
+  - google-calendar
+  - google-docs
+  - google-drive
+  - google-gmail
+  - meeting-prep
+  - weekly-digest
+- name: google-calendar
+  skill_type: prompt
+  description: List, create, update, and delete Google Calendar events using the NovaCore Google Workspace CLI. Auto-invoked
+    for scheduling tasks.
+  path: /home/nova/nova-core/.claude/skills/google-calendar
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - google-workspace
+  - scheduling
+  neighbors:
+  - daily-briefing
+  - email-to-task
+  - gmail-triage
+  - google-docs
+  - google-drive
+  - google-gmail
+  - meeting-prep
+  - weekly-digest
+- name: google-docs
+  skill_type: prompt
+  description: Read, create, and edit Google Docs and Sheets using the NovaCore Google Workspace CLI. Auto-invoked for document
+    and spreadsheet operations.
+  path: /home/nova/nova-core/.claude/skills/google-docs
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - google-workspace
+  - documents
+  neighbors:
+  - daily-briefing
+  - email-to-task
+  - gmail-triage
+  - google-calendar
+  - google-drive
+  - google-gmail
+  - meeting-prep
+  - weekly-digest
+- name: google-drive
+  skill_type: prompt
+  description: Search, list, upload, and download Google Drive files using the NovaCore Google Workspace CLI. Auto-invoked
+    for file management in Drive.
+  path: /home/nova/nova-core/.claude/skills/google-drive
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - google-workspace
+  - files
+  neighbors:
+  - daily-briefing
+  - email-to-task
+  - file-ops
+  - gmail-triage
+  - google-calendar
+  - google-docs
+  - google-gmail
+  - meeting-prep
+  - weekly-digest
+- name: google-gmail
+  skill_type: prompt
+  description: Search, read, and send Gmail messages using the NovaCore Google Workspace CLI. Auto-invoked when tasks involve
+    email.
+  path: /home/nova/nova-core/.claude/skills/google-gmail
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - google-workspace
+  - email
+  neighbors:
+  - daily-briefing
+  - email-to-task
+  - gmail-triage
+  - google-calendar
+  - google-docs
+  - google-drive
+  - meeting-prep
+  - weekly-digest
+- name: http-fetch
+  skill_type: prompt
+  description: Deterministic HTTP retrieval of specific URLs for documentation pages, raw text, JSON endpoints, and structured
+    data extraction. Auto-invoked when the task requires fetching a known URL.
+  path: /home/nova/nova-core/.claude/skills/http-fetch
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - research
+  - web
+  neighbors:
+  - browser-automation
+  - context7-docs
+  - firecrawl-deep-research
+  - firecrawl-extract
+  - firecrawl-site-crawl
+  - research-to-action
+  - web-research
+- name: langfuse-observability
+  skill_type: prompt
+  description: '>-'
+  path: /home/nova/nova-core/.claude/skills/langfuse-observability
+  risk_level: low
+  optimization_enabled: true
+  domains:
+  - devops
+  - observability
+  neighbors:
+  - file-ops
+  - git-ops
+  - github-ops
+  - semgrep-security
+  - shell-ops
+- name: meeting-prep
+  skill_type: prompt
+  description: 'Prepare for your next meeting: pull agenda, attendees, linked docs, and recent email threads from the attendees.
+    Use when the user says ''prep for my meeting'', ''what''s my next meeting'', ''get ready for '
+  path: /home/nova/nova-core/.claude/skills/meeting-prep
+  risk_level: low
+  optimization_enabled: true
+  domains:
+  - google-workspace
+  - scheduling
+  neighbors:
+  - daily-briefing
+  - email-to-task
+  - gmail-triage
+  - google-calendar
+  - google-docs
+  - google-drive
+  - google-gmail
+  - weekly-digest
+- name: memory-checkpoint
+  skill_type: prompt
+  description: Create session checkpoints in Fusion Memory to mark session boundaries, enable session resumption, and build
+    the temporal graph chain. Invoke at natural session boundaries or when the user says they'r
+  path: /home/nova/nova-core/.claude/skills/memory-checkpoint
+  risk_level: high
+  optimization_enabled: true
+  domains:
+  - memory
+  neighbors:
+  - memory-checkpoint-to-diary
+  - memory-health
+  - memory-promote-pattern
+  - memory-recall
+  - memory-store
+  - memory-surface-adr-candidates
+  - memory-unified-recall
+- name: memory-checkpoint-to-diary
+  skill_type: prompt
+  description: '>'
+  path: /home/nova/nova-core/.claude/skills/memory-checkpoint-to-diary
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - memory
+  - obsidian
+  neighbors:
+  - auditing-obsidian-memory-safety
+  - capturing-workflow-learnings
+  - memory-checkpoint
+  - memory-health
+  - memory-promote-pattern
+  - memory-recall
+  - memory-store
+  - memory-surface-adr-candidates
+  - memory-unified-recall
+  - reading-obsidian-memory
+  - retrieving-task-patterns
+  - writing-agent-patterns
+- name: memory-health
+  skill_type: prompt
+  description: Diagnose Fusion Memory system health, verify backend connectivity, and troubleshoot failures. Auto-invoked
+    when memory operations fail or when the user asks about memory system status.
+  path: /home/nova/nova-core/.claude/skills/memory-health
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - memory
+  neighbors:
+  - memory-checkpoint
+  - memory-checkpoint-to-diary
+  - memory-promote-pattern
+  - memory-recall
+  - memory-store
+  - memory-surface-adr-candidates
+  - memory-unified-recall
+- name: memory-promote-pattern
+  skill_type: prompt
+  description: '>'
+  path: /home/nova/nova-core/.claude/skills/memory-promote-pattern
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - memory
+  - obsidian
+  neighbors:
+  - auditing-obsidian-memory-safety
+  - capturing-workflow-learnings
+  - memory-checkpoint
+  - memory-checkpoint-to-diary
+  - memory-health
+  - memory-recall
+  - memory-store
+  - memory-surface-adr-candidates
+  - memory-unified-recall
+  - reading-obsidian-memory
+  - retrieving-task-patterns
+  - writing-agent-patterns
+- name: memory-recall
+  skill_type: prompt
+  description: Retrieve knowledge from Fusion Memory using semantic search, temporal queries, or session replay. Auto-invoked
+    when tasks need prior decisions, context, research findings, or session history.
+  path: /home/nova/nova-core/.claude/skills/memory-recall
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - memory
+  neighbors:
+  - memory-checkpoint
+  - memory-checkpoint-to-diary
+  - memory-health
+  - memory-promote-pattern
+  - memory-store
+  - memory-surface-adr-candidates
+  - memory-unified-recall
+  - reading-obsidian-memory
+- name: memory-store
+  skill_type: prompt
+  description: Store durable knowledge, decisions, and context into Fusion Memory (Pinecone + Neo4j + Redis). Auto-invoked
+    when work produces insights, decisions, or context worth persisting beyond the current sessi
+  path: /home/nova/nova-core/.claude/skills/memory-store
+  risk_level: high
+  optimization_enabled: true
+  domains:
+  - memory
+  neighbors:
+  - capturing-workflow-learnings
+  - memory-checkpoint
+  - memory-checkpoint-to-diary
+  - memory-health
+  - memory-promote-pattern
+  - memory-recall
+  - memory-surface-adr-candidates
+  - memory-unified-recall
+- name: memory-surface-adr-candidates
+  skill_type: prompt
+  description: '>'
+  path: /home/nova/nova-core/.claude/skills/memory-surface-adr-candidates
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - memory
+  - obsidian
+  neighbors:
+  - auditing-obsidian-memory-safety
+  - capturing-workflow-learnings
+  - memory-checkpoint
+  - memory-checkpoint-to-diary
+  - memory-health
+  - memory-promote-pattern
+  - memory-recall
+  - memory-store
+  - memory-unified-recall
+  - reading-obsidian-memory
+  - retrieving-task-patterns
+  - writing-agent-patterns
+- name: memory-unified-recall
+  skill_type: prompt
+  description: '>'
+  path: /home/nova/nova-core/.claude/skills/memory-unified-recall
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - memory
+  neighbors:
+  - memory-checkpoint
+  - memory-checkpoint-to-diary
+  - memory-health
+  - memory-promote-pattern
+  - memory-recall
+  - memory-store
+  - memory-surface-adr-candidates
+  - reading-obsidian-memory
+- name: n8n-workflows
+  skill_type: prompt
+  description: '>-'
+  path: /home/nova/nova-core/.claude/skills/n8n-workflows
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - automation
+  neighbors:
+  - browser-automation
+- name: plan-tracker
+  skill_type: prompt
+  description: Query, update, and manage Nova-Core implementation plans stored in the Obsidian vault. Provides a unified view
+    of all plan statuses across any access point (Telegram, webapp, Claude Code).
+  path: /home/nova/nova-core/.claude/skills/plan-tracker
+  risk_level: low
+  optimization_enabled: true
+  domains:
+  - tasks
+  - planning
+  neighbors:
+  - email-to-task
+  - task-execution
+- name: reading-obsidian-memory
+  skill_type: prompt
+  description: Read-only retrieval of prior knowledge from the synced Obsidian vault (Nova-Core open memory). Auto-invoked
+    when tasks benefit from prior architecture decisions, research summaries, workflow patterns,
+  path: /home/nova/nova-core/.claude/skills/reading-obsidian-memory
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - obsidian
+  - knowledge
+  neighbors:
+  - auditing-obsidian-memory-safety
+  - capturing-workflow-learnings
+  - memory-checkpoint-to-diary
+  - memory-promote-pattern
+  - memory-recall
+  - memory-surface-adr-candidates
+  - memory-unified-recall
+  - retrieving-task-patterns
+  - writing-agent-patterns
+- name: repo_health_check
+  skill_type: execution
+  description: ''
+  path: /home/nova/nova-core/SKILLS/repo_health_check
+  risk_level: high
+  optimization_enabled: false
+  domains:
+  - execution
+  neighbors:
+  - code_improve
+  - generate_pdf_report
+  - system_supervisor
+  - task-execution
+  frozen_reason: execution skills frozen in rollout 1
+- name: research-to-action
+  skill_type: prompt
+  description: Workflow skill chaining web-research, http-fetch, and browser-automation with a strict decision tree for tool
+    escalation. Invoke explicitly via /research-to-action.
+  path: /home/nova/nova-core/.claude/skills/research-to-action
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - research
+  - web
+  neighbors:
+  - browser-automation
+  - context7-docs
+  - firecrawl-deep-research
+  - firecrawl-extract
+  - firecrawl-site-crawl
+  - http-fetch
+  - web-research
+- name: retrieving-task-patterns
+  skill_type: prompt
+  description: Targeted retrieval of prior task-class patterns, workflow learnings, and reusable examples from the synced
+    Obsidian vault. Invoked when planning or execution benefits from knowing how Nova-Core handle
+  path: /home/nova/nova-core/.claude/skills/retrieving-task-patterns
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - obsidian
+  - knowledge
+  neighbors:
+  - auditing-obsidian-memory-safety
+  - capturing-workflow-learnings
+  - memory-checkpoint-to-diary
+  - memory-promote-pattern
+  - memory-recall
+  - memory-surface-adr-candidates
+  - reading-obsidian-memory
+  - writing-agent-patterns
+- name: self-verification
+  skill_type: prompt
+  description: Validate tool results and skill outputs to ensure correctness, completeness, and contract compliance before
+    finalizing a task.
+  path: /home/nova/nova-core/.claude/skills/self-verification
+  risk_level: critical
+  optimization_enabled: false
+  domains:
+  - governance
+  - verification
+  neighbors:
+  - auditing-obsidian-memory-safety
+  frozen_reason: "safety-critical \u2014 validates all other skill outputs"
+- name: semgrep-security
+  skill_type: prompt
+  description: Static security scanning on code using Semgrep MCP. Detects vulnerabilities, code smells, and anti-patterns.
+    Use after writing any code that handles auth, user input, crypto, secrets, network requests
+  path: /home/nova/nova-core/.claude/skills/semgrep-security
+  risk_level: critical
+  optimization_enabled: false
+  domains:
+  - devops
+  - security
+  neighbors:
+  - file-ops
+  - git-ops
+  - github-ops
+  - langfuse-observability
+  - shell-ops
+  frozen_reason: "security-critical \u2014 scans for vulnerabilities"
+- name: sequential-thinking
+  skill_type: prompt
+  description: "Structured step-by-step reasoning for complex problems using the Sequential Thinking MCP server. Use when\
+    \ a problem has multiple trade-offs, competing approaches, or requires systematic elimination \u2014 "
+  path: /home/nova/nova-core/.claude/skills/sequential-thinking
+  risk_level: low
+  optimization_enabled: true
+  domains:
+  - reasoning
+  neighbors: []
+- name: shell-ops
+  skill_type: prompt
+  description: Execute safe shell commands inside the NovaCore runtime sandbox while respecting runner deny rules and confirmation
+    policies.
+  path: /home/nova/nova-core/.claude/skills/shell-ops
+  risk_level: high
+  optimization_enabled: true
+  domains:
+  - devops
+  - system
+  neighbors:
+  - file-ops
+  - git-ops
+  - github-ops
+  - langfuse-observability
+  - semgrep-security
+- name: skill-creator
+  skill_type: prompt
+  description: Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to
+    create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill
+  path: /home/nova/nova-core/.claude/skills/skill-creator
+  risk_level: critical
+  optimization_enabled: false
+  domains:
+  - meta
+  neighbors: []
+  frozen_reason: "meta-skill \u2014 optimizing itself is recursive and unsafe"
+- name: system_supervisor
+  skill_type: execution
+  description: ''
+  path: /home/nova/nova-core/SKILLS/system_supervisor
+  risk_level: high
+  optimization_enabled: false
+  domains:
+  - execution
+  neighbors:
+  - code_improve
+  - generate_pdf_report
+  - repo_health_check
+  - task-execution
+  frozen_reason: execution skills frozen in rollout 1
+- name: task-execution
+  skill_type: prompt
+  description: Execute queued TASKS/*.md files, manage lifecycle transitions, and write results to OUTPUT/ while preserving
+    audit integrity.
+  path: /home/nova/nova-core/.claude/skills/task-execution
+  risk_level: critical
+  optimization_enabled: false
+  domains:
+  - tasks
+  - execution
+  neighbors:
+  - code_improve
+  - email-to-task
+  - generate_pdf_report
+  - plan-tracker
+  - repo_health_check
+  - system_supervisor
+  frozen_reason: "core execution pipeline \u2014 mutation risks task processing integrity"
+- name: web-research
+  skill_type: prompt
+  description: Fast, reliable web research using Brave Search and Tavily with citations, source quality scoring, and reproducible
+    query logging. Auto-invoked when tasks require finding current information, comparing
+  path: /home/nova/nova-core/.claude/skills/web-research
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - research
+  - web
+  neighbors:
+  - browser-automation
+  - context7-docs
+  - firecrawl-deep-research
+  - firecrawl-extract
+  - firecrawl-site-crawl
+  - http-fetch
+  - research-to-action
+- name: weekly-digest
+  skill_type: prompt
+  description: 'Weekly digest: this week''s meetings, email volume, completed tasks, and upcoming deadlines. Use when the
+    user says ''weekly summary'', ''week in review'', ''what happened this week'', or wants a retrospecti'
+  path: /home/nova/nova-core/.claude/skills/weekly-digest
+  risk_level: low
+  optimization_enabled: true
+  domains:
+  - google-workspace
+  - overview
+  neighbors:
+  - daily-briefing
+  - email-to-task
+  - gmail-triage
+  - google-calendar
+  - google-docs
+  - google-drive
+  - google-gmail
+  - meeting-prep
+- name: writing-agent-patterns
+  skill_type: prompt
+  description: Promote stable, repeatable Nova-Core methods into structured Obsidian agent-pattern notes. Invoked when a technique
+    has proven reusable across multiple tasks and is mature enough to preserve as a dura
+  path: /home/nova/nova-core/.claude/skills/writing-agent-patterns
+  risk_level: medium
+  optimization_enabled: true
+  domains:
+  - obsidian
+  - knowledge
+  neighbors:
+  - auditing-obsidian-memory-safety
+  - capturing-workflow-learnings
+  - memory-checkpoint-to-diary
+  - memory-promote-pattern
+  - memory-surface-adr-candidates
+  - reading-obsidian-memory
+  - retrieving-task-patterns

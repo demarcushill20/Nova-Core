@@ -1,0 +1,27 @@
+{
+  "name": "web-research",
+  "version": "0.1.0",
+  "description": "Fast, reliable web research using Brave Search and Tavily with citations, source quality scoring, and reproducible query logging. Auto-invoked when tasks require finding current information, comparing",
+  "skill_type": "prompt",
+  "domains": [
+    "research",
+    "web"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "browser-automation",
+    "context7-docs",
+    "firecrawl-deep-research",
+    "firecrawl-extract",
+    "firecrawl-site-crawl",
+    "http-fetch",
+    "research-to-action"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

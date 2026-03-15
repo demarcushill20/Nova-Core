@@ -1,0 +1,28 @@
+{
+  "name": "google-docs",
+  "version": "0.1.0",
+  "description": "Read, create, and edit Google Docs and Sheets using the NovaCore Google Workspace CLI. Auto-invoked for document and spreadsheet operations.",
+  "skill_type": "prompt",
+  "domains": [
+    "google-workspace",
+    "documents"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "daily-briefing",
+    "email-to-task",
+    "gmail-triage",
+    "google-calendar",
+    "google-drive",
+    "google-gmail",
+    "meeting-prep",
+    "weekly-digest"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

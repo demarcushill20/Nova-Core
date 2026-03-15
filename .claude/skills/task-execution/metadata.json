@@ -1,0 +1,26 @@
+{
+  "name": "task-execution",
+  "version": "0.1.0",
+  "description": "Execute queued TASKS/*.md files, manage lifecycle transitions, and write results to OUTPUT/ while preserving audit integrity.",
+  "skill_type": "prompt",
+  "domains": [
+    "tasks",
+    "execution"
+  ],
+  "risk_level": "critical",
+  "optimization_enabled": false,
+  "frozen_reason": "core execution pipeline \u2014 mutation risks task processing integrity",
+  "neighbors": [
+    "code_improve",
+    "email-to-task",
+    "generate_pdf_report",
+    "plan-tracker",
+    "repo_health_check",
+    "system_supervisor"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

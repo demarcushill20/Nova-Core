@@ -1,0 +1,23 @@
+{
+  "name": "system_supervisor",
+  "version": "0.1.0",
+  "description": "",
+  "skill_type": "execution",
+  "domains": [
+    "execution"
+  ],
+  "risk_level": "high",
+  "optimization_enabled": false,
+  "frozen_reason": "execution skills frozen in rollout 1",
+  "neighbors": [
+    "code_improve",
+    "generate_pdf_report",
+    "repo_health_check",
+    "task-execution"
+  ],
+  "eval_profile": "strict",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}

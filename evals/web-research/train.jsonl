@@ -1,0 +1,12 @@
+{"query": "search the web for recent news about Rust programming language", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "find information about the latest Python 3.13 release", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "what are the best practices for microservices architecture", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
+{"query": "research the differences between PostgreSQL and MySQL for our use case", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "look up how to configure nginx reverse proxy", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "I need current information about Claude API pricing", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "compare different CI/CD tools available in 2026", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
+{"query": "read the file at /home/nova/config.yaml", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "commit these changes to git with message fix typo", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "create a new task file for the API migration", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "check my gmail inbox for unread messages", "should_trigger": false, "difficulty": "medium", "category": "wrong-domain"}
+{"query": "run the test suite for the planner module", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}

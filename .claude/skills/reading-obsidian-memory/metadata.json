@@ -1,0 +1,29 @@
+{
+  "name": "reading-obsidian-memory",
+  "version": "0.1.0",
+  "description": "Read-only retrieval of prior knowledge from the synced Obsidian vault (Nova-Core open memory). Auto-invoked when tasks benefit from prior architecture decisions, research summaries, workflow patterns,",
+  "skill_type": "prompt",
+  "domains": [
+    "obsidian",
+    "knowledge"
+  ],
+  "risk_level": "medium",
+  "optimization_enabled": true,
+  "frozen_reason": null,
+  "neighbors": [
+    "auditing-obsidian-memory-safety",
+    "capturing-workflow-learnings",
+    "memory-checkpoint-to-diary",
+    "memory-promote-pattern",
+    "memory-recall",
+    "memory-surface-adr-candidates",
+    "memory-unified-recall",
+    "retrieving-task-patterns",
+    "writing-agent-patterns"
+  ],
+  "eval_profile": "standard",
+  "owner": "nova",
+  "created": "2026-03-15",
+  "last_optimized": null,
+  "generated_by": "skill_discovery"
+}
