@@ -1,6 +1,6 @@
 ---
 name: web-research
-description: "Fast, reliable web research using Brave Search and Tavily with citations, source quality scoring, and reproducible query logging. Auto-invoked when tasks require finding current information, comparing sources, or answering factual questions."
+description: "Fast, reliable web research using Brave Search and Tavily with citations, source quality scoring, and reproducible query logging. Auto-invoked when tasks require finding current information, comparing sources, or answering factual questions. NOT for thorough multi-source research or full-page content retrieval — use firecrawl-deep-research for that."
 disable-model-invocation: false
 allowed-tools:
   - mcp__brave-search__brave_web_search
@@ -20,10 +20,16 @@ activation:
 
 ## When to use
 - Answering factual questions that need current or verified data
-- Comparing information across multiple sources
+- Comparing information across multiple sources (snippet-level)
 - Finding official documentation, release notes, changelogs
 - Investigating errors, CVEs, or library compatibility
 - News and current events lookup
+
+## When NOT to use
+- Deep or thorough multi-source research requiring full page content → use firecrawl-deep-research
+- Fetching a specific known URL → use http-fetch
+- Crawling entire documentation sites → use firecrawl-site-crawl
+- Library-specific API docs → use context7-docs
 
 ## Inputs
 - **query**: The research question or topic (required)

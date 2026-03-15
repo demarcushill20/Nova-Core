@@ -1,0 +1,16 @@
+{
+  "skill_name": "web-research",
+  "decision": "REJECT_PRECISION",
+  "reason": "Precision 0.750 below floor 0.80 for medium risk",
+  "reason_code": "REJECT_PRECISION",
+  "baseline_score": 0.8539,
+  "candidate_score": 0.8571,
+  "delta": 0.0032,
+  "gate_details": {
+    "precision": {
+      "value": 0.75,
+      "floor": 0.8,
+      "passed": false
+    }
+  }
+}

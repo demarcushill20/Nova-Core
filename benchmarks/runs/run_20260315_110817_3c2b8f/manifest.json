@@ -1,0 +1,19 @@
+{
+  "type": "optimization",
+  "mode": "dry-run",
+  "total_skills": 1,
+  "model": null,
+  "started": "2026-03-15T11:08:17Z",
+  "config": {
+    "mode": "dry-run",
+    "max_skills": 10
+  },
+  "run_id": "run_20260315_110817_3c2b8f",
+  "timestamp": "2026-03-15T11:08:17Z",
+  "status": "completed",
+  "completed": "2026-03-15T11:43:53Z",
+  "accepted": 1,
+  "rejected": 0,
+  "skipped": 0,
+  "errors": 0
+}

@@ -1,6 +1,6 @@
 {"query": "google what Andrej Karpathy said about autoresearch", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
 {"query": "find out if there is a newer version of FastAPI", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
 {"query": "what is the current status of the WebGPU specification", "should_trigger": true, "difficulty": "hard", "category": "paraphrase"}
-{"query": "edit the SKILL.md file to improve the description", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "fix the typo in the README file", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
 {"query": "deploy the latest changes to the staging server", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
 {"query": "summarize this week's meetings and tasks", "should_trigger": false, "difficulty": "medium", "category": "wrong-domain"}

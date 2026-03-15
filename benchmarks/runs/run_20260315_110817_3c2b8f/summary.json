@@ -1,0 +1,23 @@
+{
+  "run_id": "run_20260315_110817_3c2b8f",
+  "mode": "dry-run",
+  "total_skills": 1,
+  "processed": 1,
+  "accepted": 1,
+  "rejected": 0,
+  "skipped": 0,
+  "errors": 0,
+  "halted": false,
+  "halt_reason": "",
+  "completed": "2026-03-15T11:43:53Z",
+  "skills": [
+    {
+      "skill": "web-research",
+      "decision": "ACCEPT",
+      "reason": "All gates passed. Score: 0.907 \u2192 1.000 (+0.0929)",
+      "baseline_score": 0.9071,
+      "candidate_score": 1.0,
+      "delta": 0.09289999999999998
+    }
+  ]
+}

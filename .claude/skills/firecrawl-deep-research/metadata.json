@@ -1,7 +1,7 @@
 {
   "name": "firecrawl-deep-research",
   "version": "0.1.0",
-  "description": ">-",
+  "description": "Deep web research using Firecrawl search + full-page scraping. Unlike web-research (Brave/Tavily snippets), this retrieves complete page content from search results. Auto-invoked when research needs f",
   "skill_type": "prompt",
   "domains": [
     "research",

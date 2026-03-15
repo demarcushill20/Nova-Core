@@ -1,0 +1,2 @@
+skill	decision	reason	baseline_score	candidate_score	delta
+web-research	REJECT_PRECISION	Precision 0.750 below floor 0.80 for medium risk	0.8539	0.8571	0.0031999999999999806
