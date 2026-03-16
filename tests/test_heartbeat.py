@@ -15,6 +15,7 @@ import heartbeat
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_tmp_base(tmp_path: Path) -> None:
     """Set heartbeat module paths to a temp directory."""
     heartbeat.BASE = tmp_path
@@ -23,15 +24,20 @@ def _make_tmp_base(tmp_path: Path) -> None:
     heartbeat.TASKS_DIR = tmp_path / "TASKS"
     heartbeat.OUTPUT_DIR = tmp_path / "OUTPUT"
     heartbeat.LOGS_DIR = tmp_path / "LOGS"
-    for d in (heartbeat.STATE_DIR, heartbeat.TASKS_DIR,
-              heartbeat.OUTPUT_DIR, heartbeat.LOGS_DIR,
-              heartbeat.STATE_DIR / "running"):
+    for d in (
+        heartbeat.STATE_DIR,
+        heartbeat.TASKS_DIR,
+        heartbeat.OUTPUT_DIR,
+        heartbeat.LOGS_DIR,
+        heartbeat.STATE_DIR / "running",
+    ):
         d.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
 # check_service
 # ---------------------------------------------------------------------------
+
 
 class TestCheckService:
     def test_active_service(self):
@@ -62,6 +68,7 @@ class TestCheckService:
 # check_disk
 # ---------------------------------------------------------------------------
 
+
 class TestCheckDisk:
     def test_healthy_disk(self):
         result = heartbeat.check_disk()
@@ -84,6 +91,7 @@ class TestCheckDisk:
 # check_claude_binary
 # ---------------------------------------------------------------------------
 
+
 class TestCheckClaudeBinary:
     def test_exists(self):
         result = heartbeat.check_claude_binary()
@@ -100,6 +108,7 @@ class TestCheckClaudeBinary:
 # ---------------------------------------------------------------------------
 # check_task_queue
 # ---------------------------------------------------------------------------
+
 
 class TestCheckTaskQueue:
     def test_empty_queue(self, tmp_path):
@@ -139,6 +148,7 @@ class TestCheckTaskQueue:
 # check_last_output
 # ---------------------------------------------------------------------------
 
+
 class TestCheckLastOutput:
     def test_no_outputs(self, tmp_path):
         _make_tmp_base(tmp_path)
@@ -156,6 +166,7 @@ class TestCheckLastOutput:
 # ---------------------------------------------------------------------------
 # check_stale_workers
 # ---------------------------------------------------------------------------
+
 
 class TestCheckStaleWorkers:
     def test_no_running(self, tmp_path):
@@ -183,6 +194,7 @@ class TestCheckStaleWorkers:
 # check_metrics
 # ---------------------------------------------------------------------------
 
+
 class TestCheckMetrics:
     def test_no_metrics_file(self, tmp_path):
         _make_tmp_base(tmp_path)
@@ -191,30 +203,42 @@ class TestCheckMetrics:
 
     def test_healthy_metrics(self, tmp_path):
         _make_tmp_base(tmp_path)
-        (tmp_path / "STATE" / "metrics.json").write_text(json.dumps({
-            "contract_success": {"_total": 90},
-            "contract_failure": {"_total": 10},
-        }))
+        (tmp_path / "STATE" / "metrics.json").write_text(
+            json.dumps(
+                {
+                    "contract_success": {"_total": 90},
+                    "contract_failure": {"_total": 10},
+                }
+            )
+        )
         result = heartbeat.check_metrics()
         assert result["ok"] is True
         assert "10.0%" in result["detail"]
 
     def test_unhealthy_metrics(self, tmp_path):
         _make_tmp_base(tmp_path)
-        (tmp_path / "STATE" / "metrics.json").write_text(json.dumps({
-            "contract_success": {"_total": 20},
-            "contract_failure": {"_total": 80},
-        }))
+        (tmp_path / "STATE" / "metrics.json").write_text(
+            json.dumps(
+                {
+                    "contract_success": {"_total": 20},
+                    "contract_failure": {"_total": 80},
+                }
+            )
+        )
         result = heartbeat.check_metrics()
         assert result["ok"] is False
         assert "80.0%" in result["detail"]
 
     def test_plain_int_metrics(self, tmp_path):
         _make_tmp_base(tmp_path)
-        (tmp_path / "STATE" / "metrics.json").write_text(json.dumps({
-            "contract_success": 9,
-            "contract_failure": 1,
-        }))
+        (tmp_path / "STATE" / "metrics.json").write_text(
+            json.dumps(
+                {
+                    "contract_success": 9,
+                    "contract_failure": 1,
+                }
+            )
+        )
         result = heartbeat.check_metrics()
         assert result["ok"] is True
 
@@ -229,6 +253,7 @@ class TestCheckMetrics:
 # ---------------------------------------------------------------------------
 # write_heartbeat
 # ---------------------------------------------------------------------------
+
 
 class TestWriteHeartbeat:
     def test_writes_file(self, tmp_path):
@@ -256,6 +281,7 @@ class TestWriteHeartbeat:
 # send_telegram_alert
 # ---------------------------------------------------------------------------
 
+
 class TestSendTelegram:
     def test_skips_without_creds(self, capsys):
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -263,10 +289,16 @@ class TestSendTelegram:
         assert "WARN" in capsys.readouterr().out
 
     def test_sends_message(self):
-        with mock.patch.dict(os.environ, {
-            "TELEGRAM_BOT_TOKEN": "test",
-            "ALLOWED_CHAT_ID": "123",
-        }), mock.patch("urllib.request.urlopen") as m:
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "TELEGRAM_BOT_TOKEN": "test",
+                    "ALLOWED_CHAT_ID": "123",
+                },
+            ),
+            mock.patch("urllib.request.urlopen") as m,
+        ):
             heartbeat._send_telegram("hello")
         m.assert_called_once()
 
@@ -314,6 +346,7 @@ class TestTelegramHeartbeat:
 # inject_repair_task
 # ---------------------------------------------------------------------------
 
+
 class TestInjectRepairTask:
     def test_injects_for_service_failure(self, tmp_path):
         _make_tmp_base(tmp_path)
@@ -348,16 +381,105 @@ class TestInjectRepairTask:
 
 
 # ---------------------------------------------------------------------------
+# check_cost_router
+# ---------------------------------------------------------------------------
+
+
+class TestCheckCostRouter:
+    """Tests for check_cost_router() heartbeat health check."""
+
+    @mock.patch("utils.cost_router.write_heartbeat_config")
+    @mock.patch("utils.cost_router.compute_heartbeat_config")
+    @mock.patch("utils.cost_router.check_budget_alerts")
+    @mock.patch("utils.cost_router.get_rolling_average_cost")
+    @mock.patch("utils.cost_router.get_cost_summary")
+    def test_healthy(self, m_cost, m_avg, m_alerts, m_hb_config, m_write):
+        """No alerts → ok=True with cost details and mode in detail."""
+        m_cost.return_value = {"daily_cost_usd": 5.0, "monthly_cost_usd": 50.0, "monthly_pct": 25.0}
+        m_avg.return_value = 4.5
+        m_alerts.return_value = []
+        hb_cfg = mock.MagicMock()
+        hb_cfg.mode = "idle"
+        m_hb_config.return_value = hb_cfg
+
+        result = heartbeat.check_cost_router()
+
+        assert result["ok"] is True
+        assert result["name"] == "cost_router"
+        assert "$5.00" in result["detail"]
+        assert "$50.00" in result["detail"]
+        assert "25.0%" in result["detail"]
+        assert "mode=idle" in result["detail"]
+        m_write.assert_called_once_with(hb_cfg)
+
+    @mock.patch("utils.cost_router.write_heartbeat_config")
+    @mock.patch("utils.cost_router.compute_heartbeat_config")
+    @mock.patch("utils.cost_router.check_budget_alerts")
+    @mock.patch("utils.cost_router.get_rolling_average_cost")
+    @mock.patch("utils.cost_router.get_cost_summary")
+    def test_alerts_present(self, m_cost, m_avg, m_alerts, m_hb_config, m_write):
+        """Budget alerts → ok=False with alert count and summary."""
+        m_cost.return_value = {"daily_cost_usd": 25.0, "monthly_cost_usd": 150.0, "monthly_pct": 75.0}
+        m_avg.return_value = 8.0
+        m_alerts.return_value = ["Daily cost $25 exceeds threshold", "2x rolling average spike"]
+        hb_cfg = mock.MagicMock()
+        hb_cfg.mode = "budget_constrained"
+        m_hb_config.return_value = hb_cfg
+
+        result = heartbeat.check_cost_router()
+
+        assert result["ok"] is False
+        assert result["name"] == "cost_router"
+        assert "2 alert(s)" in result["detail"]
+        assert "Daily cost" in result["detail"]
+        assert "mode=budget_constrained" in result["detail"]
+
+    @mock.patch("utils.cost_router.write_heartbeat_config")
+    @mock.patch("utils.cost_router.compute_heartbeat_config")
+    @mock.patch("utils.cost_router.check_budget_alerts")
+    @mock.patch("utils.cost_router.get_rolling_average_cost")
+    @mock.patch("utils.cost_router.get_cost_summary")
+    def test_budget_constrained_mode(self, m_cost, m_avg, m_alerts, m_hb_config, m_write):
+        """No alerts but budget_constrained mode → ok=True with mode visible."""
+        m_cost.return_value = {"daily_cost_usd": 18.0, "monthly_cost_usd": 170.0, "monthly_pct": 85.0}
+        m_avg.return_value = 10.0
+        m_alerts.return_value = []
+        hb_cfg = mock.MagicMock()
+        hb_cfg.mode = "budget_constrained"
+        m_hb_config.return_value = hb_cfg
+
+        result = heartbeat.check_cost_router()
+
+        assert result["ok"] is True
+        assert "mode=budget_constrained" in result["detail"]
+        assert "$18.00" in result["detail"]
+        assert "85.0%" in result["detail"]
+
+    def test_exception_handling(self):
+        """If cost_router functions fail, check degrades gracefully."""
+        with mock.patch("utils.cost_router.get_cost_summary", side_effect=RuntimeError("redis down")):
+            result = heartbeat.check_cost_router()
+
+        assert result["ok"] is True
+        assert result["name"] == "cost_router"
+        assert "check skipped" in result["detail"]
+        assert "redis down" in result["detail"]
+
+
+# ---------------------------------------------------------------------------
 # main (integration)
 # ---------------------------------------------------------------------------
+
 
 class TestMain:
     def test_healthy_run(self, tmp_path):
         _make_tmp_base(tmp_path)
-        with mock.patch("heartbeat.check_service") as m_svc, \
-             mock.patch("heartbeat.check_disk") as m_disk, \
-             mock.patch("heartbeat.check_claude_binary") as m_claude, \
-             mock.patch("heartbeat.send_telegram_heartbeat") as m_hb:
+        with (
+            mock.patch("heartbeat.check_service") as m_svc,
+            mock.patch("heartbeat.check_disk") as m_disk,
+            mock.patch("heartbeat.check_claude_binary") as m_claude,
+            mock.patch("heartbeat.send_telegram_heartbeat") as m_hb,
+        ):
             m_svc.return_value = {"name": "svc", "ok": True, "detail": "ok"}
             m_disk.return_value = {"name": "disk", "ok": True, "detail": "ok"}
             m_claude.return_value = {"name": "claude", "ok": True, "detail": "ok"}
@@ -369,11 +491,13 @@ class TestMain:
 
     def test_unhealthy_run(self, tmp_path):
         _make_tmp_base(tmp_path)
-        with mock.patch("heartbeat.check_service") as m_svc, \
-             mock.patch("heartbeat.check_disk") as m_disk, \
-             mock.patch("heartbeat.check_claude_binary") as m_claude, \
-             mock.patch("heartbeat.send_telegram_heartbeat") as m_hb, \
-             mock.patch("heartbeat.inject_repair_task") as m_repair:
+        with (
+            mock.patch("heartbeat.check_service") as m_svc,
+            mock.patch("heartbeat.check_disk") as m_disk,
+            mock.patch("heartbeat.check_claude_binary") as m_claude,
+            mock.patch("heartbeat.send_telegram_heartbeat") as m_hb,
+            mock.patch("heartbeat.inject_repair_task") as m_repair,
+        ):
             m_svc.return_value = {"name": "svc", "ok": False, "detail": "dead"}
             m_disk.return_value = {"name": "disk", "ok": True, "detail": "ok"}
             m_claude.return_value = {"name": "claude", "ok": True, "detail": "ok"}

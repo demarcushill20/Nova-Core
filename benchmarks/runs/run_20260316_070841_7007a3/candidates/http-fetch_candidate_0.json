@@ -1,0 +1,6 @@
+{
+  "candidate_id": 0,
+  "description": "Use this skill to fetch content from a known, specific URL. Covers documentation pages, JSON/REST API endpoints (e.g., PyPI, GitHub, npm), raw text files, and any URL where the goal is to retrieve and",
+  "train_score": 1.0,
+  "rank": 1
+}

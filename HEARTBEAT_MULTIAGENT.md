@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-16T07:40:34Z
+Generated: 2026-03-16T08:54:07Z
 
 ## Overall: HEALTHY
 
@@ -8,7 +8,7 @@ Generated: 2026-03-16T07:40:34Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 6 |
+| Completed workflows | 5 |
 | Failed workflows | 1 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
@@ -37,7 +37,6 @@ Generated: 2026-03-16T07:40:34Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| hb_proactive_20260315_070717_research_mcp_ecosystem_new_servers_2026 | ? | completed | - |
 | hb_proactive_20260315_160902_research_agent_reliability_self_healing_patterns | ? | failed | - |
 | hb_proactive_20260315_203923_research_claude_code_custom_slash_commands_and_hoo | ? | completed | - |
 | hb_proactive_20260316_041103_research_llm_eval_frameworks_2026 | ? | completed | - |
