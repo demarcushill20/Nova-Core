@@ -45,9 +45,14 @@ class EvidenceRecorder:
         records = recorder.load()              # read all records back
     """
 
-    def __init__(self, path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        campaign: str = "",
+    ) -> None:
         self._path = Path(path) if path else DEFAULT_EVIDENCE_PATH
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._campaign = campaign
 
     @property
     def path(self) -> Path:
@@ -56,6 +61,8 @@ class EvidenceRecorder:
     # -- Writers ---------------------------------------------------------------
 
     def _append(self, record: EvidenceRecord) -> None:
+        if self._campaign:
+            record.data["campaign"] = self._campaign
         with self._path.open("a") as f:
             f.write(json.dumps(record.to_dict()) + "\n")
         log.debug("evidence: recorded %s", record.event_type.value)

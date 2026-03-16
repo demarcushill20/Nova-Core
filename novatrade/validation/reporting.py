@@ -62,10 +62,13 @@ def generate_report(records: list[EvidenceRecord]) -> ValidationReport:
     return report
 
 
-def format_report(report: ValidationReport) -> str:
+def format_report(report: ValidationReport, campaign: str = "") -> str:
     """Render a ValidationReport as a human-readable text summary."""
+    title = "NovaTrade MVP Validation Report"
+    if campaign:
+        title += f" [{campaign}]"
     lines = [
-        "NovaTrade MVP Validation Report",
+        title,
         "=" * 40,
         "",
     ]

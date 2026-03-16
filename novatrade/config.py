@@ -93,6 +93,58 @@ class RiskConfig:
 
 
 @dataclass
+class FtmoProfile:
+    """FTMO-specific profile for demo/free-trial validation campaigns.
+
+    Provider-neutral where possible — stores broker metadata and optional
+    symbol mapping overrides for FTMO MT5 accounts.
+    """
+
+    enabled: bool = False
+    broker_label: str = "FTMO"
+    challenge_type: str = "free_trial"  # free_trial | challenge | verification
+    campaign_label: str = ""  # operator-chosen label for evidence tagging
+    symbol_suffix: str = ""  # e.g. ".ftmo" if broker appends suffix
+    symbol_map: dict[str, str] = field(default_factory=dict)  # display→broker overrides
+    account_size: int = 0  # nominal account size (e.g. 10000, 25000, 100000)
+
+    @classmethod
+    def from_env(cls) -> FtmoProfile:
+        enabled = os.environ.get("FTMO_ENABLED", "").lower() in ("true", "1", "yes")
+        if not enabled:
+            return cls(enabled=False)
+
+        symbol_map: dict[str, str] = {}
+        raw_map = os.environ.get("FTMO_SYMBOL_MAP", "")
+        for pair in raw_map.split(","):
+            pair = pair.strip()
+            if ":" in pair:
+                display, _, broker = pair.partition(":")
+                symbol_map[display.strip()] = broker.strip()
+
+        return cls(
+            enabled=True,
+            broker_label=os.environ.get("FTMO_BROKER_LABEL", "FTMO"),
+            challenge_type=os.environ.get("FTMO_CHALLENGE_TYPE", "free_trial"),
+            campaign_label=os.environ.get("FTMO_CAMPAIGN_LABEL", ""),
+            symbol_suffix=os.environ.get("FTMO_SYMBOL_SUFFIX", ""),
+            symbol_map=symbol_map,
+            account_size=int(os.environ.get("FTMO_ACCOUNT_SIZE", "0") or "0"),
+        )
+
+    def resolve_symbol(self, display_symbol: str) -> str:
+        """Map a display symbol to the broker symbol name.
+
+        Priority: explicit map → suffix append → passthrough.
+        """
+        if display_symbol in self.symbol_map:
+            return self.symbol_map[display_symbol]
+        if self.symbol_suffix:
+            return display_symbol + self.symbol_suffix
+        return display_symbol
+
+
+@dataclass
 class NovaTradeCfg:
     """Top-level NovaTrade configuration."""
 
@@ -102,6 +154,7 @@ class NovaTradeCfg:
     timeframes: list[str] = field(default_factory=lambda: ["H1"])
     metaapi: MetaApiConfig = field(default_factory=MetaApiConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
+    ftmo: FtmoProfile = field(default_factory=FtmoProfile)
     log_dir: Path = Path("LOGS/novatrade")
     data_dir: Path = Path("OUTPUT/novatrade")
     dry_run: bool = True  # safety default: no real orders
@@ -135,6 +188,7 @@ class NovaTradeCfg:
             timeframes=[t.strip() for t in timeframes_raw.split(",") if t.strip()],
             metaapi=MetaApiConfig.from_env(),
             risk=RiskConfig(),
+            ftmo=FtmoProfile.from_env(),
             dry_run=dry_run_raw.lower() in ("true", "1", "yes"),
         )
 
