@@ -4,13 +4,16 @@
 Monitors TASKS/ for pending .md files, dispatches each to a
 non-interactive Claude subprocess, and verifies output artifacts
 before marking tasks as done.
+
+Phase 4.3: Async task execution with bounded concurrency, priority queue,
+graceful cancellation, and observability.
 """
 
+import asyncio
 import json
 import logging
 import os
 import signal
-import subprocess
 import sys
 import threading
 from datetime import datetime, timedelta, timezone
@@ -26,7 +29,9 @@ from nova_kill_switch import MODE_RUN, check_kill_switch
 from tools.contracts import validate_contract
 from tools.skills import load_skills, render_append_prompt, select_skills
 from tools.task_classifier import classify_and_route
+from utils.async_worker_pool import AsyncWorkerPool, TaskPriority, parse_task_priority
 from utils.audit_log import get_audit_logger
+from utils.cost_router import route_task as cost_route_task
 from utils.dlp_gate import dlp
 from utils.file_watcher import TaskFileWatcher
 from utils.langfuse_tracing import trace_llm_call
@@ -51,6 +56,7 @@ POLL_INTERVAL = 60  # seconds between scans
 TASK_TIMEOUT = 14400  # max seconds per task execution (4 hours)
 ARTIFACT_WINDOW = 600  # seconds — OUTPUT file must be this recent
 MAX_SUPERVISOR_ATTEMPTS = 2  # total attempts per task (1 original + up to 1 retry)
+MAX_CONCURRENT_TASKS = int(os.environ.get("NOVA_MAX_CONCURRENT_TASKS", "2"))  # Phase 4.3
 
 METRICS_FILE = STATE_DIR / "metrics.json"
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
@@ -569,7 +575,7 @@ def _quick_contract_check(stem: str) -> tuple[bool, list[str]]:
     return False, result.get("errors", [])
 
 
-def _execute_worker(
+async def _execute_worker(
     stem: str,
     cmd: list[str],
     worker_log: Path,
@@ -577,8 +583,9 @@ def _execute_worker(
     skill_flag_note: str,
     attempt: int,
     max_attempts: int,
+    child_env: dict[str, str] | None = None,
 ) -> int:
-    """Execute a Claude worker subprocess.
+    """Execute a Claude worker subprocess (async).
 
     Returns the process exit code (-1 on timeout/error).
     Appends to *worker_log*; on attempt > 1, writes a retry separator first.
@@ -601,16 +608,17 @@ def _execute_worker(
             f"=== COMMAND: {CLAUDE_BIN} -p --verbose --dangerously-skip-permissions{skill_flag_note} <prompt> ===\n\n"
         )
 
-    try:
+    if child_env is None:
         child_env = os.environ.copy()
         child_env.pop("CLAUDECODE", None)
 
-        proc = subprocess.Popen(
-            cmd,
+    proc: asyncio.subprocess.Process | None = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
             cwd="/home/nova/nova-core",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             env=child_env,
         )
 
@@ -618,25 +626,39 @@ def _execute_worker(
         logger.info("Worker PID %d written to %s", proc.pid, pid_file)
 
         try:
-            stdout, stderr = proc.communicate(timeout=TASK_TIMEOUT)
-        except subprocess.TimeoutExpired:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=TASK_TIMEOUT,
+            )
+            stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+        except asyncio.TimeoutError:
             proc.kill()
-            stdout, stderr = proc.communicate()
+            await proc.communicate()
             end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
             logger.error("EXECUTION TIMEOUT: %s (exceeded %ds)", stem, TASK_TIMEOUT)
             with open(worker_log, "a") as wf:
                 wf.write(f"=== TIMEOUT after {TASK_TIMEOUT}s ===\n")
-                if stdout:
-                    wf.write("\n=== STDOUT (partial) ===\n")
-                    wf.write(stdout)
-                if stderr:
-                    wf.write("\n=== STDERR (partial) ===\n")
-                    wf.write(stderr)
                 wf.write("\n=== EXIT CODE: -1 (timeout) ===\n")
                 wf.write(f"=== END: {end_utc} ===\n")
             return -1
+        except asyncio.CancelledError:
+            # Graceful cancellation: terminate, wait, then kill if needed
+            logger.info("EXECUTION CANCELLED: %s — terminating subprocess", stem)
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.communicate(), timeout=30)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    proc.kill()
+                    await proc.communicate()
+            end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            with open(worker_log, "a") as wf:
+                wf.write("\n=== CANCELLED ===\n")
+                wf.write(f"=== END: {end_utc} ===\n")
+            raise
 
-        exit_code = proc.returncode
+        exit_code = proc.returncode if proc.returncode is not None else 0
         end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         with open(worker_log, "a") as wf:
             wf.write("=== STDOUT ===\n")
@@ -649,6 +671,8 @@ def _execute_worker(
         logger.info("Claude exited with code %d for %s", exit_code, stem)
         logger.info("Worker log: %s (%d bytes)", worker_log, worker_log.stat().st_size)
 
+    except asyncio.CancelledError:
+        raise  # re-raise, already handled above
     except Exception as exc:
         end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         logger.exception("EXECUTION ERROR: %s", stem)
@@ -664,10 +688,25 @@ def _execute_worker(
     return exit_code
 
 
-def dispatch(task_path: Path):
-    """Dispatch a single task to a non-interactive Claude subprocess."""
+async def dispatch(task_path: Path):
+    """Dispatch a single task (async). Wraps _dispatch_inner with cancellation handling."""
+    stem = _task_stem(task_path.name)
+    inprogress_path = task_path.with_name(f"{stem}.md.inprogress")
+    try:
+        await _dispatch_inner(task_path)
+    except asyncio.CancelledError:
+        logger.info("TASK CANCELLED (async): %s — saving partial progress", stem)
+        _save_partial_progress(stem, inprogress_path)
+        slog.event("task.cancelled", stem=stem, reason="async_cancellation")
+        _audit.log("task.cancelled", {"task_stem": stem, "reason": "async_cancellation"}, correlation_id=f"task_{stem}")
+        raise
+
+
+async def _dispatch_inner(task_path: Path):
+    """Core dispatch logic for a single task."""
     task_name = task_path.name
     stem = _task_stem(task_name)
+    inprogress_path = task_path.with_name(f"{stem}.md.inprogress")
 
     # --- Phase 1.2: Kill switch check ---
     ks_mode = check_kill_switch()
@@ -689,7 +728,6 @@ def dispatch(task_path: Path):
     # --- Guard: skip if already dispatched or in-progress ---
     if task_name in _dispatched:
         return
-    inprogress_path = task_path.with_name(f"{stem}.md.inprogress")
     if inprogress_path.exists():
         logger.info("Skipping %s — .inprogress file exists.", task_name)
         return
@@ -778,6 +816,35 @@ def dispatch(task_path: Path):
         routing["use_orchestrator"],
         stage or "default",
         routing.get("fallback_reason", "routed_to_orchestrator"),
+    )
+
+    # --- Phase 4.4: Cost-aware model routing ---
+    task_priority = parse_task_priority(task_text)
+    cost_decision = cost_route_task(
+        task_text,
+        task_class=routing["task_class"],
+        priority=task_priority.name.lower(),
+    )
+    routed_model = cost_decision.model
+    logger.info(
+        "COST_ROUTE: model=%s complexity=%s downgraded=%s budget=%.1f%% est_tokens=%d",
+        routed_model,
+        cost_decision.complexity.name,
+        cost_decision.downgraded,
+        cost_decision.budget_utilization_pct,
+        cost_decision.estimated_tokens,
+    )
+    for reason in cost_decision.reasons:
+        logger.debug("COST_ROUTE reason: %s", reason)
+    slog.event(
+        "cost_route.decision",
+        trace_ctx,
+        stem=stem,
+        model=routed_model,
+        complexity=cost_decision.complexity.name,
+        downgraded=cost_decision.downgraded,
+        budget_pct=cost_decision.budget_utilization_pct,
+        task_class=routing["task_class"],
     )
 
     if routing["use_orchestrator"]:
@@ -900,8 +967,8 @@ def dispatch(task_path: Path):
     if context_prefix:
         prompt = context_prefix + prompt
 
-    # --- Deterministic worker log ---
-    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", "--model", "claude-opus-4-6"]
+    # --- Deterministic worker log (Phase 4.4: model from cost router) ---
+    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", "--model", routed_model]
     if append_prompt_content and skill_injection_path.exists():
         cmd += ["--append-system-prompt", append_prompt_content]
     cmd.append(prompt)
@@ -921,98 +988,47 @@ def dispatch(task_path: Path):
         correlation_id=task_correlation_id,
     )
 
-    # --- Execute: always create worker log, even on failure ---
-    logger.info("EXECUTION STARTED: %s", stem)
-    start_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    exit_code = -1
-    pid_file = RUNNING_DIR / f"{stem}.pid"
+    # --- Execute via async subprocess (Phase 4.3) ---
+    # Strip CLAUDECODE so the child doesn't refuse to start
+    child_env = os.environ.copy()
+    child_env.pop("CLAUDECODE", None)
+    # Propagate trace context to worker subprocess
+    child_env.update(trace_ctx.to_env())
 
-    # Create the log file immediately so it exists during execution
-    with open(worker_log, "w") as wf:
-        wf.write(f"=== WORKER LOG: {stem} ===\n")
-        wf.write(f"=== START: {start_utc} ===\n")
-        wf.write(f"=== SKILLS: {', '.join(selected_names) or '(none)'} ===\n")
-        cmd_str = f"{CLAUDE_BIN} -p --verbose --dangerously-skip-permissions{skill_flag_note}"
-        wf.write(f"=== COMMAND: {cmd_str} <prompt> ===\n\n")
+    slog.event("task.worker_start", trace_ctx, cmd=cmd[0], stem=stem)
 
-    try:
-        # Strip CLAUDECODE so the child doesn't refuse to start
-        child_env = os.environ.copy()
-        child_env.pop("CLAUDECODE", None)
-        # Propagate trace context to worker subprocess
-        child_env.update(trace_ctx.to_env())
+    exit_code = await _execute_worker(
+        stem=stem,
+        cmd=cmd,
+        worker_log=worker_log,
+        selected_names=selected_names,
+        skill_flag_note=skill_flag_note,
+        attempt=1,
+        max_attempts=MAX_SUPERVISOR_ATTEMPTS,
+        child_env=child_env,
+    )
 
-        slog.event("task.worker_start", trace_ctx, cmd=cmd[0], pid_file=str(pid_file))
-
-        proc = subprocess.Popen(
-            cmd,
-            cwd="/home/nova/nova-core",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=child_env,
-        )
-
-        # Write PID file so telegram /cancel can SIGTERM this process
-        pid_file.write_text(str(proc.pid), encoding="utf-8")
-        logger.info("Worker PID %d written to %s", proc.pid, pid_file)
-
+    stdout_for_trace = ""
+    if exit_code >= 0:
+        # Read worker log tail for Langfuse tracing
         try:
-            stdout, stderr = proc.communicate(timeout=TASK_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, stderr = proc.communicate()
-            end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            logger.error("EXECUTION TIMEOUT: %s (exceeded %ds)", stem, TASK_TIMEOUT)
-            with open(worker_log, "a") as wf:
-                wf.write(f"=== TIMEOUT after {TASK_TIMEOUT}s ===\n")
-                if stdout:
-                    wf.write("\n=== STDOUT (partial) ===\n")
-                    wf.write(stdout)
-                if stderr:
-                    wf.write("\n=== STDERR (partial) ===\n")
-                    wf.write(stderr)
-                wf.write("\n=== EXIT CODE: -1 (timeout) ===\n")
-                wf.write(f"=== END: {end_utc} ===\n")
-            # skip the normal log-write below
-            exit_code = -1
-            stdout = None
-
-        if stdout is not None:
-            exit_code = proc.returncode
-            end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            with open(worker_log, "a") as wf:
-                wf.write("=== STDOUT ===\n")
-                wf.write(stdout or "(empty)\n")
-                wf.write("\n=== STDERR ===\n")
-                wf.write(stderr or "(empty)\n")
-                wf.write(f"\n=== EXIT CODE: {exit_code} ===\n")
-                wf.write(f"=== END: {end_utc} ===\n")
-
-            logger.info("Claude exited with code %d for %s", exit_code, stem)
-            logger.info("Worker log: %s (%d bytes)", worker_log, worker_log.stat().st_size)
-
-            # --- Langfuse LLM call tracing for per-task cost tracking ---
-            trace_llm_call(
-                name=f"task:{stem}",
-                input_text=prompt[:4000],  # truncate to avoid huge payloads
-                output_text=(stdout or "")[:4000],
-                model="claude-opus-4-6",
-                metadata={"task": stem, "exit_code": exit_code, "trace_id": trace_ctx.trace_id},
-            )
-
-    except Exception as exc:
-        end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        logger.exception("EXECUTION ERROR: %s", stem)
-        with open(worker_log, "a") as wf:
-            wf.write(f"\n=== EXCEPTION: {exc} ===\n")
-            wf.write("=== EXIT CODE: -1 (error) ===\n")
-            wf.write(f"=== END: {end_utc} ===\n")
-
-    finally:
-        # Always clean up PID file
-        pid_file.unlink(missing_ok=True)
-        logger.info("PID file removed: %s", pid_file)
+            log_text = worker_log.read_text(encoding="utf-8")
+            stdout_for_trace = log_text[-4000:]
+        except Exception:
+            pass
+        trace_llm_call(
+            name=f"task:{stem}",
+            input_text=prompt[:4000],
+            output_text=stdout_for_trace,
+            model=routed_model,
+            metadata={
+                "task": stem,
+                "exit_code": exit_code,
+                "trace_id": trace_ctx.trace_id,
+                "cost_complexity": cost_decision.complexity.name,
+                "cost_downgraded": cost_decision.downgraded,
+            },
+        )
 
     # --- Verify artifacts (with reflexion retry) ---
     passed, messages = verify_artifacts(stem)
@@ -1057,7 +1073,7 @@ def dispatch(task_path: Path):
                 "claude-opus-4-6",
                 reflection_prompt,
             ]
-            retry_exit = _execute_worker(
+            retry_exit = await _execute_worker(
                 stem=stem,
                 cmd=retry_cmd,
                 worker_log=worker_log,
@@ -1083,7 +1099,7 @@ def dispatch(task_path: Path):
 
     # --- Test gate: run pytest after contract validation ---
     if passed:
-        gate_result = _run_test_gate(stem)
+        gate_result = await _run_test_gate(stem)
         test_passed = _apply_test_gate_result(stem, gate_result)
         if not test_passed:
             # Tests failed — don't block delivery, but log it
@@ -1179,40 +1195,61 @@ def dispatch(task_path: Path):
 PYTEST_TIMEOUT = 120  # seconds — hard timeout for the test gate
 
 
-def _run_test_gate(stem: str) -> dict:
-    """Run pytest as a quality gate after contract validation.
+_test_gate_lock = asyncio.Lock()  # Serialize test gate runs to avoid concurrent pytest
+
+
+async def _run_test_gate(stem: str) -> dict:
+    """Run pytest as a quality gate after contract validation (async).
 
     Returns dict with keys:
       - status: "pass" | "fail" | "timeout" | "error"
       - summary: human-readable summary string
       - output: raw pytest output (truncated)
     """
-    logger.info("TEST GATE: running pytest for %s", stem)
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/", "-x", f"--timeout={PYTEST_TIMEOUT}", "-q", "--tb=short"],
-            cwd=str(BASE_DIR),
-            capture_output=True,
-            text=True,
-            timeout=PYTEST_TIMEOUT + 10,  # outer timeout slightly longer
-        )
-        # Truncate output to avoid bloating the output file
-        combined = (result.stdout or "") + (result.stderr or "")
-        truncated = combined[-2000:] if len(combined) > 2000 else combined
+    async with _test_gate_lock:
+        logger.info("TEST GATE: running pytest for %s", stem)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests/",
+                "-x",
+                f"--timeout={PYTEST_TIMEOUT}",
+                "-q",
+                "--tb=short",
+                cwd=str(BASE_DIR),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=PYTEST_TIMEOUT + 10,
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                logger.warning("TEST GATE TIMEOUT: %s (exceeded %ds) — skipping gate", stem, PYTEST_TIMEOUT)
+                return {"status": "timeout", "summary": f"pytest timed out after {PYTEST_TIMEOUT}s", "output": ""}
 
-        if result.returncode == 0:
-            logger.info("TEST GATE PASSED: %s (exit 0)", stem)
-            return {"status": "pass", "summary": "All tests passed", "output": truncated}
-        else:
-            logger.warning("TEST GATE FAILED: %s (exit %d)", stem, result.returncode)
-            return {"status": "fail", "summary": f"pytest exited with code {result.returncode}", "output": truncated}
+            stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            combined = stdout + stderr
+            truncated = combined[-2000:] if len(combined) > 2000 else combined
 
-    except subprocess.TimeoutExpired:
-        logger.warning("TEST GATE TIMEOUT: %s (exceeded %ds) — skipping gate", stem, PYTEST_TIMEOUT)
-        return {"status": "timeout", "summary": f"pytest timed out after {PYTEST_TIMEOUT}s", "output": ""}
-    except Exception as exc:
-        logger.warning("TEST GATE ERROR: %s — %s — skipping gate", stem, exc)
-        return {"status": "error", "summary": f"pytest error: {exc}", "output": ""}
+            if proc.returncode == 0:
+                logger.info("TEST GATE PASSED: %s (exit 0)", stem)
+                return {"status": "pass", "summary": "All tests passed", "output": truncated}
+            else:
+                logger.warning("TEST GATE FAILED: %s (exit %d)", stem, proc.returncode)
+                return {"status": "fail", "summary": f"pytest exited with code {proc.returncode}", "output": truncated}
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("TEST GATE ERROR: %s — %s — skipping gate", stem, exc)
+            return {"status": "error", "summary": f"pytest error: {exc}", "output": ""}
 
 
 def _apply_test_gate_result(stem: str, gate_result: dict) -> bool:
@@ -1258,8 +1295,37 @@ def _apply_test_gate_result(stem: str, gate_result: dict) -> bool:
     return False
 
 
-def scan_and_dispatch():
-    """Scan for pending tasks and dispatch each sequentially."""
+def _check_partial_tasks() -> None:
+    """Detect .partial files from previous interrupted runs and log them."""
+    partials = list(TASKS_DIR.glob("*.md.partial"))
+    for p in partials:
+        stem = p.name.replace(".md.partial", "")
+        logger.warning("PARTIAL TASK FOUND: %s — manual review recommended", stem)
+        slog.event("task.partial_found", stem=stem, path=str(p))
+
+
+def _save_partial_progress(stem: str, inprogress_path: Path) -> None:
+    """Save partial progress when a task is cancelled mid-execution."""
+    try:
+        partial_path = inprogress_path.with_name(f"{stem}.md.partial")
+        if inprogress_path.exists():
+            inprogress_path.rename(partial_path)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        report = (
+            f"# Partial: {stem}\n\n"
+            f"**Cancelled:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n"
+            f"Task was cancelled during execution. Partial progress may exist in WORK/.\n"
+        )
+        report_path = OUTPUT_DIR / f"{stem}__{stamp}.partial.md"
+        report_path.write_text(report, encoding="utf-8")
+        logger.info("PARTIAL SAVED: %s → %s", stem, report_path.name)
+        slog.event("task.partial_saved", stem=stem, report=str(report_path))
+    except Exception as exc:
+        logger.warning("Failed to save partial progress for %s: %s", stem, exc)
+
+
+async def scan_and_enqueue(pool: AsyncWorkerPool) -> None:
+    """Scan for pending tasks and enqueue them into the async worker pool."""
     pending = get_pending_tasks()
     new_tasks = [t for t in pending if t.name not in _dispatched]
 
@@ -1267,21 +1333,90 @@ def scan_and_dispatch():
         logger.info("Scan complete — no new tasks.")
         return
 
-    logger.info("Scan complete — %d new task(s) to dispatch.", len(new_tasks))
+    # Parse priorities and sort: highest priority first
+    task_priorities: list[tuple[TaskPriority, Path]] = []
     for task in new_tasks:
+        try:
+            text = task.read_text(encoding="utf-8")[:2048]  # only need frontmatter
+            prio = parse_task_priority(text)
+        except Exception:
+            prio = TaskPriority.NORMAL
+        task_priorities.append((prio, task))
+
+    task_priorities.sort(key=lambda x: x[0].value)
+
+    logger.info(
+        "Scan complete — %d new task(s) to enqueue. Priorities: %s",
+        len(task_priorities),
+        ", ".join(f"{t.name}={p.name}" for p, t in task_priorities),
+    )
+
+    for prio, task in task_priorities:
         if not _running:
             break
-        dispatch(task)
+        stem = _task_stem(task.name)
+        _dispatched.add(task.name)
+        await pool.submit(task, stem=stem, priority=prio)
+
+    pool_st = pool.status()
+    slog.event(
+        "pool.scan_complete",
+        enqueued=len(task_priorities),
+        queue_depth=pool_st["queue_depth"],
+        active_workers=pool_st["active_workers"],
+    )
 
 
-def run():
-    """Main loop: poll TASKS/ every POLL_INTERVAL seconds.
+async def _async_wait_for_wake(timeout: float) -> None:
+    """Bridge threading.Event (_wake_event) to async wait."""
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(_wake_event.wait, timeout),
+            timeout=timeout + 1,
+        )
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        _wake_event.clear()
+
+
+async def run() -> None:
+    """Main async loop: poll TASKS/ every POLL_INTERVAL seconds.
 
     Phase 4.1: Uses watchdog to detect new files instantly.
-    Falls back to pure polling if watchdog is unavailable.
+    Phase 4.3: Async worker pool with bounded concurrency and priority queue.
     """
+    global _running
+
     logger.info("Dispatcher started. Monitoring %s every %ds.", TASKS_DIR, POLL_INTERVAL)
-    logger.info("Claude binary: %s | Timeout: %ds | Artifact window: %ds", CLAUDE_BIN, TASK_TIMEOUT, ARTIFACT_WINDOW)
+    logger.info(
+        "Claude binary: %s | Timeout: %ds | Artifact window: %ds | Max concurrent: %d",
+        CLAUDE_BIN,
+        TASK_TIMEOUT,
+        ARTIFACT_WINDOW,
+        MAX_CONCURRENT_TASKS,
+    )
+
+    # Phase 4.3 — check for partial tasks from previous interrupted runs
+    _check_partial_tasks()
+
+    # Phase 4.3 — start async worker pool
+    pool = AsyncWorkerPool(max_workers=MAX_CONCURRENT_TASKS, worker_fn=dispatch)
+    pool.start()
+    slog.event("pool.started", max_workers=MAX_CONCURRENT_TASKS)
+
+    # Phase 4.3 — register signal handlers via the event loop
+    loop = asyncio.get_running_loop()
+
+    def _async_shutdown(signum: int) -> None:
+        global _running
+        sig_name = signal.Signals(signum).name
+        logger.info("Received %s — shutting down gracefully.", sig_name)
+        _running = False
+        _wake_event.set()
+
+    loop.add_signal_handler(signal.SIGINT, _async_shutdown, signal.SIGINT)
+    loop.add_signal_handler(signal.SIGTERM, _async_shutdown, signal.SIGTERM)
 
     # Phase 4.1 — start watchdog filesystem monitor
     file_watcher = TaskFileWatcher(TASKS_DIR, _wake_event)
@@ -1296,18 +1431,24 @@ def run():
     try:
         while _running:
             try:
-                scan_and_dispatch()
+                await scan_and_enqueue(pool)
             except Exception:
                 logger.exception("Error during scan cycle.")
 
             # Wait for watchdog trigger OR poll timeout — whichever comes first
-            _wake_event.wait(timeout=POLL_INTERVAL)
-            _wake_event.clear()
+            await _async_wait_for_wake(POLL_INTERVAL)
     finally:
+        logger.info("Shutting down worker pool...")
+        await pool.shutdown(timeout=30)
         file_watcher.stop()
+        pool_st = pool.status()
+        slog.event(
+            "pool.final_status",
+            **pool_st,
+        )
 
     logger.info("Dispatcher stopped.")
 
 
 if __name__ == "__main__":
-    run()
+    asyncio.run(run())

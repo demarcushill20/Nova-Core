@@ -207,7 +207,7 @@ class PreTradeGate:
         )
 
     def _check_symbol(self, request: OrderRequest) -> RiskCheckResult:
-        """Check symbol is in the configured allowlist."""
+        """Check symbol is in the configured allowlist (including FTMO-resolved names)."""
         allowed = self._cfg.symbols
         if request.symbol in allowed:
             return RiskCheckResult(
@@ -215,6 +215,15 @@ class PreTradeGate:
                 passed=True,
                 detail=f"{request.symbol} in allowlist",
             )
+        # Also accept FTMO-resolved broker symbols
+        if self._cfg.ftmo.enabled:
+            resolved = {self._cfg.ftmo.resolve_symbol(s) for s in allowed}
+            if request.symbol in resolved:
+                return RiskCheckResult(
+                    name="symbol_allowed",
+                    passed=True,
+                    detail=f"{request.symbol} in allowlist (via FTMO mapping)",
+                )
         return RiskCheckResult(
             name="symbol_allowed",
             passed=False,

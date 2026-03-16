@@ -413,6 +413,48 @@ def check_llm_cache() -> dict:
         return {"name": "llm_cache", "ok": True, "detail": f"check skipped: {e}"}
 
 
+def check_cost_router() -> dict:
+    """Check cost router health: budget utilization, alerts, and adaptive config."""
+    try:
+        from utils.cost_router import (
+            check_budget_alerts,
+            compute_heartbeat_config,
+            get_cost_summary,
+            get_rolling_average_cost,
+            write_heartbeat_config,
+        )
+
+        cost = get_cost_summary()
+        avg_daily = get_rolling_average_cost(days=7)
+        alerts = check_budget_alerts()
+
+        # Compute and persist adaptive heartbeat config
+        hb_config = compute_heartbeat_config(tasks_dir=TASKS_DIR)
+        write_heartbeat_config(hb_config)
+
+        daily = cost.get("daily_cost_usd", 0.0)
+        monthly = cost.get("monthly_cost_usd", 0.0)
+        monthly_pct = cost.get("monthly_pct", 0.0)
+
+        if alerts:
+            alert_summary = "; ".join(a[:80] for a in alerts[:3])
+            detail = (
+                f"{len(alerts)} alert(s): {alert_summary} | "
+                f"daily=${daily:.2f} monthly=${monthly:.2f} ({monthly_pct:.1f}%) "
+                f"7d_avg=${avg_daily:.2f}/day mode={hb_config.mode}"
+            )
+            return {"name": "cost_router", "ok": False, "detail": detail}
+
+        detail = (
+            f"daily=${daily:.2f} monthly=${monthly:.2f} ({monthly_pct:.1f}%) "
+            f"7d_avg=${avg_daily:.2f}/day mode={hb_config.mode}"
+        )
+        return {"name": "cost_router", "ok": True, "detail": detail}
+
+    except Exception as e:
+        return {"name": "cost_router", "ok": True, "detail": f"check skipped: {e}"}
+
+
 # --- Output ------------------------------------------------------------------
 
 
@@ -1660,6 +1702,7 @@ def main() -> int:
     checks.append(check_state_bloat())
     checks.append(check_pip_audit())
     checks.append(check_llm_cache())
+    checks.append(check_cost_router())
 
     # --- Drift detection (observability Phase 3) ---
     try:
@@ -1789,16 +1832,40 @@ def main() -> int:
         print(f"[memory-maintenance] Failed (non-fatal): {e}")
 
     # --- Autonomous cycles: research (hourly) + planning (every 3 hours) ---
-    # Both run independently when their cooldowns are met.
+    # Phase 4.4: Gate expensive cycles on adaptive heartbeat config (budget-aware).
+    _skip_research = False
+    _skip_planning = False
     try:
-        _run_research_cycle()
-    except Exception as e:
-        print(f"[research-cycle] Failed (non-fatal): {e}")
+        from utils.cost_router import read_heartbeat_config
 
-    try:
-        _run_planning_cycle()
-    except Exception as e:
-        print(f"[planning-cycle] Failed (non-fatal): {e}")
+        _hb_cfg = read_heartbeat_config()
+        if _hb_cfg:
+            _skip_research = _hb_cfg.skip_research
+            _skip_planning = _hb_cfg.skip_planning
+            if _skip_research or _skip_planning:
+                print(
+                    f"[cost-router] Adaptive config: mode={_hb_cfg.mode} "
+                    f"skip_research={_skip_research} skip_planning={_skip_planning} "
+                    f"reason={_hb_cfg.reason}"
+                )
+    except Exception:
+        pass  # cost router unavailable — run everything
+
+    if _skip_research:
+        print("[research-cycle] Skipped (budget-constrained mode)")
+    else:
+        try:
+            _run_research_cycle()
+        except Exception as e:
+            print(f"[research-cycle] Failed (non-fatal): {e}")
+
+    if _skip_planning:
+        print("[planning-cycle] Skipped (budget-constrained mode)")
+    else:
+        try:
+            _run_planning_cycle()
+        except Exception as e:
+            print(f"[planning-cycle] Failed (non-fatal): {e}")
 
     # Append to heartbeat log
     LOGS_DIR.mkdir(parents=True, exist_ok=True)

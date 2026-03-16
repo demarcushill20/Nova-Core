@@ -10,5 +10,10 @@
   },
   "run_id": "run_20260316_053945_0477a9",
   "timestamp": "2026-03-16T05:39:45Z",
-  "status": "in_progress"
+  "status": "completed",
+  "completed": "2026-03-16T06:42:19Z",
+  "accepted": 0,
+  "rejected": 1,
+  "skipped": 2,
+  "errors": 0
 }

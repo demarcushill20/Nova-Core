@@ -9,6 +9,7 @@ Phase 1.2 of Security Hardening Plan (2026-03-12).
 CRITICAL: Kill switch logic lives OUTSIDE the AI reasoning path.
 Stanford (March 2026) found models sabotaged shutdown in 79/100 tests.
 """
+
 from __future__ import annotations
 
 import logging
@@ -50,13 +51,14 @@ def _try_redis_mode() -> str | None:
     """Check Redis kill switch. Returns mode or None if Redis unavailable."""
     try:
         import redis
+
         r = redis.Redis(host="localhost", port=6379, db=0, socket_timeout=1)
         val = r.get("nova:killswitch")
-        if val:
+        if val and isinstance(val, bytes):
             mode = val.decode("utf-8").strip()
             if mode in VALID_MODES:
                 return mode
-    except Exception:
+    except Exception:  # noqa: S110
         pass
     return None
 
@@ -101,6 +103,7 @@ def set_mode_redis(mode: str, ttl: int | None = None) -> bool:
         return False
     try:
         import redis
+
         r = redis.Redis(host="localhost", port=6379, db=0, socket_timeout=2)
         if mode == MODE_RUN:
             r.delete("nova:killswitch")
@@ -174,6 +177,7 @@ def heartbeat_alive() -> bool:
     """Record that the heartbeat is alive. Call from heartbeat.py."""
     try:
         import redis
+
         r = redis.Redis(host="localhost", port=6379, db=0, socket_timeout=2)
         r.set(HEARTBEAT_KEY, str(time.time()), ex=HEARTBEAT_TTL)
         return True
@@ -189,6 +193,7 @@ def check_dead_man_switch() -> bool:
     """
     try:
         import redis
+
         r = redis.Redis(host="localhost", port=6379, db=0, socket_timeout=1)
         val = r.get(HEARTBEAT_KEY)
         return val is not None
