@@ -27,7 +27,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "S105", "S108"]  # assert, test tokens, and /tmp paths are standard in tests
+"tests/**/*.py" = ["S101", "S105", "S106", "S108"]  # assert, test tokens/passwords, and /tmp paths are standard in tests
 "scripts/**/*.py" = ["S108"]  # temp file usage acceptable in scripts
 "nova_kill_switch.py" = ["S108"]  # /tmp sentinel files are the intended kill-switch mechanism
 "utils/security_monitor.py" = ["S105"]  # secret_status variable names are false positives
@@ -37,7 +37,7 @@ ignore = [
 "watcher.py" = ["S110"]  # try-except-pass is intentional for non-fatal ops
 
 [tool.ruff.lint.isort]
-known-first-party = ["agents", "planner", "telegram", "utils"]
+known-first-party = ["agents", "novatrade", "planner", "telegram", "utils"]
 
 [tool.ruff.format]
 quote-style = "double"

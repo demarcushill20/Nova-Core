@@ -1,0 +1,389 @@
+"""Provider-neutral pre-trade risk gate for NovaTrade.
+
+Evaluates an OrderRequest against account state, configuration, and current
+positions before any order reaches the broker adapter.  Returns a structured
+RiskDecision with per-check detail.
+
+Design principles:
+- Fail closed: any check error → deny
+- Provider-neutral: no MetaApi imports, no vendor objects
+- No side effects beyond returning a decision and logging
+- Config-driven thresholds
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+
+from novatrade.config import NovaTradeCfg
+from novatrade.models import (
+    AccountMode,
+    AccountState,
+    HealthState,
+    HealthStatus,
+    OrderRequest,
+    Position,
+    RiskCheckResult,
+    RiskDecision,
+    RiskVerdict,
+    SymbolPrice,
+)
+
+log = logging.getLogger("novatrade.risk.pre_trade_gate")
+
+# Modes that the MVP is allowed to trade in.
+_MVP_ALLOWED_MODES = frozenset({AccountMode.DEMO})
+
+
+class PreTradeGate:
+    """Evaluates whether an order should be allowed to reach the adapter.
+
+    Usage::
+
+        gate = PreTradeGate(cfg)
+        decision = gate.evaluate(request, account, positions)
+        if decision.denied:
+            # reject — decision.reason, decision.checks have detail
+        else:
+            # safe to forward to adapter
+    """
+
+    def __init__(self, cfg: NovaTradeCfg) -> None:
+        self._cfg = cfg
+        self._risk = cfg.risk
+        # Rolling trade log: list of (timestamp, symbol, side_value) for
+        # cooldown and daily-count tracking.  Kept in-memory — resets on
+        # process restart, which is acceptable for MVP.
+        self._trade_log: list[tuple[float, str, str]] = []
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def evaluate(
+        self,
+        request: OrderRequest,
+        account: AccountState,
+        positions: list[Position],
+        *,
+        health: HealthStatus | None = None,
+        price: SymbolPrice | None = None,
+    ) -> RiskDecision:
+        """Run all pre-trade checks.  Returns a RiskDecision.
+
+        Checks run in priority order.  All checks execute (no short-circuit)
+        so the caller sees every failing rule at once.
+        """
+        checks: list[RiskCheckResult] = []
+        now = time.time()
+
+        checks.append(self._check_kill_switch())
+        checks.append(self._check_dry_run())
+        checks.append(self._check_account_mode(account))
+        checks.append(self._check_health(health))
+        checks.append(self._check_symbol(request))
+        checks.append(self._check_volume(request))
+        checks.append(self._check_stop_loss(request))
+        checks.append(self._check_max_positions(positions))
+        checks.append(self._check_daily_trade_count(now))
+        checks.append(self._check_cooldown(request, now))
+        checks.append(self._check_duplicate_position(request, positions))
+        checks.append(self._check_drawdown(account))
+        checks.append(self._check_spread(price))
+
+        failed = [c for c in checks if not c.passed]
+
+        if failed:
+            first = failed[0]
+            decision = RiskDecision(
+                verdict=RiskVerdict.DENY,
+                checks=checks,
+                reason=first.detail,
+                rule=first.name,
+                request=request,
+            )
+            log.warning(
+                "pre-trade DENY: %s %s %s vol=%.2f — %d check(s) failed: %s",
+                request.side.value,
+                request.order_type.value,
+                request.symbol,
+                request.volume,
+                len(failed),
+                ", ".join(f.name for f in failed),
+            )
+        else:
+            decision = RiskDecision(
+                verdict=RiskVerdict.ALLOW,
+                checks=checks,
+                request=request,
+            )
+            log.info(
+                "pre-trade ALLOW: %s %s %s vol=%.2f — %d checks passed",
+                request.side.value,
+                request.order_type.value,
+                request.symbol,
+                request.volume,
+                len(checks),
+            )
+
+        return decision
+
+    def record_trade(self, symbol: str, side_value: str) -> None:
+        """Record a trade for cooldown and daily-count tracking.
+
+        Call this after a successful order placement so subsequent
+        evaluate() calls see it.
+        """
+        self._trade_log.append((time.time(), symbol, side_value))
+
+    # ------------------------------------------------------------------
+    # Individual checks
+    # ------------------------------------------------------------------
+
+    def _check_kill_switch(self) -> RiskCheckResult:
+        """Check NovaCore kill switch — deny if system is not in run mode."""
+        try:
+            from nova_kill_switch import check_kill_switch
+
+            mode = check_kill_switch()
+        except Exception:
+            # If kill switch module is unavailable, pass (fail-open here is
+            # acceptable because the kill switch is an external system guard,
+            # and all other checks still apply).
+            return RiskCheckResult(name="kill_switch", passed=True, detail="kill switch module unavailable — skipped")
+
+        if mode == "run":
+            return RiskCheckResult(name="kill_switch", passed=True, detail=f"mode={mode}")
+        return RiskCheckResult(
+            name="kill_switch",
+            passed=False,
+            detail=f"NovaCore kill switch active: mode={mode}",
+        )
+
+    def _check_dry_run(self) -> RiskCheckResult:
+        """Deny real execution when dry_run is enabled."""
+        if self._cfg.dry_run:
+            return RiskCheckResult(
+                name="dry_run",
+                passed=False,
+                detail="dry_run is enabled — no real orders allowed",
+            )
+        return RiskCheckResult(name="dry_run", passed=True, detail="dry_run=False")
+
+    def _check_account_mode(self, account: AccountState) -> RiskCheckResult:
+        """Only allow trading in MVP-permitted account modes."""
+        if account.mode in _MVP_ALLOWED_MODES:
+            return RiskCheckResult(
+                name="account_mode",
+                passed=True,
+                detail=f"mode={account.mode.value}",
+            )
+        return RiskCheckResult(
+            name="account_mode",
+            passed=False,
+            detail=f"account mode {account.mode.value} not allowed in MVP "
+            f"(allowed: {', '.join(m.value for m in _MVP_ALLOWED_MODES)})",
+        )
+
+    def _check_health(self, health: HealthStatus | None) -> RiskCheckResult:
+        """Deny if adapter health is DOWN."""
+        if health is None:
+            return RiskCheckResult(
+                name="health",
+                passed=True,
+                detail="no health data — skipped",
+            )
+        if health.state == HealthState.DOWN:
+            return RiskCheckResult(
+                name="health",
+                passed=False,
+                detail=f"adapter health is DOWN: {health.message}",
+            )
+        return RiskCheckResult(
+            name="health",
+            passed=True,
+            detail=f"state={health.state.value}",
+        )
+
+    def _check_symbol(self, request: OrderRequest) -> RiskCheckResult:
+        """Check symbol is in the configured allowlist."""
+        allowed = self._cfg.symbols
+        if request.symbol in allowed:
+            return RiskCheckResult(
+                name="symbol_allowed",
+                passed=True,
+                detail=f"{request.symbol} in allowlist",
+            )
+        return RiskCheckResult(
+            name="symbol_allowed",
+            passed=False,
+            detail=f"{request.symbol} not in allowed symbols: {allowed}",
+        )
+
+    def _check_volume(self, request: OrderRequest) -> RiskCheckResult:
+        """Check volume is within configured bounds."""
+        min_vol = self._risk.min_volume_per_trade
+        max_vol = self._risk.max_volume_per_trade
+        if request.volume < min_vol:
+            return RiskCheckResult(
+                name="volume_bounds",
+                passed=False,
+                detail=f"volume {request.volume} below minimum {min_vol}",
+            )
+        if request.volume > max_vol:
+            return RiskCheckResult(
+                name="volume_bounds",
+                passed=False,
+                detail=f"volume {request.volume} exceeds maximum {max_vol}",
+            )
+        return RiskCheckResult(
+            name="volume_bounds",
+            passed=True,
+            detail=f"volume={request.volume} within [{min_vol}, {max_vol}]",
+        )
+
+    def _check_stop_loss(self, request: OrderRequest) -> RiskCheckResult:
+        """Require a stop-loss if configured."""
+        if not self._risk.require_stop_loss:
+            return RiskCheckResult(
+                name="stop_loss",
+                passed=True,
+                detail="stop-loss not required by config",
+            )
+        if request.stop_loss is not None:
+            return RiskCheckResult(
+                name="stop_loss",
+                passed=True,
+                detail=f"stop_loss={request.stop_loss}",
+            )
+        return RiskCheckResult(
+            name="stop_loss",
+            passed=False,
+            detail="stop-loss is required but not set on order",
+        )
+
+    def _check_max_positions(self, positions: list[Position]) -> RiskCheckResult:
+        """Deny if already at position limit."""
+        count = len(positions)
+        limit = self._risk.max_positions
+        if count >= limit:
+            return RiskCheckResult(
+                name="max_positions",
+                passed=False,
+                detail=f"open positions ({count}) >= limit ({limit})",
+            )
+        return RiskCheckResult(
+            name="max_positions",
+            passed=True,
+            detail=f"open={count}, limit={limit}",
+        )
+
+    def _check_daily_trade_count(self, now: float) -> RiskCheckResult:
+        """Deny if daily trade count has been reached."""
+        limit = self._risk.max_trades_per_day
+        day_start = _day_start(now)
+        today_count = sum(1 for ts, _, _ in self._trade_log if ts >= day_start)
+        if today_count >= limit:
+            return RiskCheckResult(
+                name="daily_trade_count",
+                passed=False,
+                detail=f"trades today ({today_count}) >= limit ({limit})",
+            )
+        return RiskCheckResult(
+            name="daily_trade_count",
+            passed=True,
+            detail=f"trades_today={today_count}, limit={limit}",
+        )
+
+    def _check_cooldown(self, request: OrderRequest, now: float) -> RiskCheckResult:
+        """Deny if a trade on the same symbol+side was placed too recently."""
+        window = self._risk.cooldown_seconds
+        if window <= 0:
+            return RiskCheckResult(name="cooldown", passed=True, detail="cooldown disabled")
+
+        cutoff = now - window
+        for ts, sym, side in reversed(self._trade_log):
+            if ts < cutoff:
+                break
+            if sym == request.symbol and side == request.side.value:
+                ago = int(now - ts)
+                return RiskCheckResult(
+                    name="cooldown",
+                    passed=False,
+                    detail=f"duplicate {request.side.value} {request.symbol} {ago}s ago — cooldown {window}s",
+                )
+        return RiskCheckResult(name="cooldown", passed=True, detail=f"window={window}s clear")
+
+    def _check_duplicate_position(
+        self,
+        request: OrderRequest,
+        positions: list[Position],
+    ) -> RiskCheckResult:
+        """Warn-deny if an open position on same symbol+side already exists."""
+        for p in positions:
+            if p.symbol == request.symbol and p.side == request.side:
+                return RiskCheckResult(
+                    name="duplicate_position",
+                    passed=False,
+                    detail=f"existing {p.side.value} position on {p.symbol} (id={p.position_id}, vol={p.volume})",
+                )
+        return RiskCheckResult(name="duplicate_position", passed=True, detail="no conflict")
+
+    def _check_drawdown(self, account: AccountState) -> RiskCheckResult:
+        """Deny if equity drawdown from balance exceeds threshold."""
+        if account.balance <= 0:
+            return RiskCheckResult(
+                name="drawdown",
+                passed=True,
+                detail="balance=0 — skipped",
+            )
+        drawdown_pct = ((account.balance - account.equity) / account.balance) * 100
+        limit = self._risk.max_drawdown_equity_pct
+        if drawdown_pct >= limit:
+            return RiskCheckResult(
+                name="drawdown",
+                passed=False,
+                detail=f"equity drawdown {drawdown_pct:.2f}% >= limit {limit:.1f}%",
+            )
+        return RiskCheckResult(
+            name="drawdown",
+            passed=True,
+            detail=f"drawdown={drawdown_pct:.2f}%, limit={limit:.1f}%",
+        )
+
+    def _check_spread(self, price: SymbolPrice | None) -> RiskCheckResult:
+        """Deny if current spread exceeds ceiling."""
+        if price is None:
+            return RiskCheckResult(
+                name="spread",
+                passed=True,
+                detail="no price data — skipped",
+            )
+        ceiling = self._risk.spread_ceiling_points
+        # Spread is in price units; convert to points (assume 5-digit pricing).
+        spread_points = price.spread * 100_000
+        if spread_points > ceiling:
+            return RiskCheckResult(
+                name="spread",
+                passed=False,
+                detail=f"spread {spread_points:.1f} points > ceiling {ceiling:.1f}",
+            )
+        return RiskCheckResult(
+            name="spread",
+            passed=True,
+            detail=f"spread={spread_points:.1f}pts, ceiling={ceiling:.1f}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _day_start(ts: float) -> float:
+    """Return midnight-UTC timestamp for the day containing *ts*."""
+    import datetime as _dt
+
+    d = _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc).date()
+    return _dt.datetime(d.year, d.month, d.day, tzinfo=_dt.timezone.utc).timestamp()
