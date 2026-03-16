@@ -1,0 +1,6 @@
+{"query": "index the entire Remix framework docs for future reference", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
+{"query": "crawl all the pages under docs.deno.com and save them as markdown", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "scrape the full Playwright documentation site for our knowledge base", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "look up how to use the pytest fixtures API", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "check the status of the n8n webhook workflow", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "search for recent articles about web scraping best practices", "should_trigger": false, "difficulty": "medium", "category": "wrong-domain"}

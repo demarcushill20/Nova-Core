@@ -1,0 +1,23 @@
+{
+  "run_id": "run_20260316_012012_425d7a",
+  "mode": "dry-run",
+  "total_skills": 1,
+  "processed": 1,
+  "accepted": 0,
+  "rejected": 0,
+  "skipped": 1,
+  "errors": 0,
+  "halted": false,
+  "halt_reason": "",
+  "completed": "2026-03-16T01:24:14Z",
+  "skills": [
+    {
+      "skill": "firecrawl-extract",
+      "decision": "skipped",
+      "reason": "baseline_perfect",
+      "baseline_score": "",
+      "candidate_score": "",
+      "delta": ""
+    }
+  ]
+}

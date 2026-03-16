@@ -1,0 +1,12 @@
+{"query": "crawl the entire Astro documentation site and summarize the key concepts", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "index all pages from docs.python.org for the standard library reference", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "get all pages from the Tailwind CSS docs site", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "I want to learn Svelte — crawl their tutorial site so we can reference it", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "map and scrape the entire MDN Web Docs section on JavaScript", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "audit all the pages on our company wiki at wiki.internal.com", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
+{"query": "crawl site https://htmx.org and extract the documentation structure", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "send an email to the team about the new release", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "read the TASKS/migration.md file and summarize it", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "what's the current price of Bitcoin", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "create a checkpoint in Fusion Memory for this session", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "commit the changes to git with a descriptive message", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}

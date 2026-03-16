@@ -1,0 +1,2 @@
+skill	decision	reason	baseline_score	candidate_score	delta
+context7-docs	REJECT_GAIN	Score improvement -0.2055 below minimum 0.02	0.9555	0.75	-0.20550000000000002

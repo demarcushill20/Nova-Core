@@ -1,0 +1,6 @@
+{
+  "candidate_id": 1,
+  "description": "HTTP GET skill \u2014 invoke when the user provides an explicit URL and wants its content retrieved. The URL is already in the message; this skill fetches it and returns the response. Works for REST API en",
+  "train_score": 0.9477,
+  "rank": 1
+}

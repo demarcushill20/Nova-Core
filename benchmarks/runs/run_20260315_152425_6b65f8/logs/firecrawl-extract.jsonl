@@ -1,0 +1,10 @@
+{"timestamp": "2026-03-15T16:22:53Z", "skill": "firecrawl-extract", "message": "Starting optimization"}
+{"timestamp": "2026-03-15T16:22:53Z", "skill": "firecrawl-extract", "message": "Running baseline evaluation"}
+{"timestamp": "2026-03-15T16:26:40Z", "skill": "firecrawl-extract", "message": "Baseline: P=1.000 R=0.286 F1=0.444 score=0.7262"}
+{"timestamp": "2026-03-15T16:26:40Z", "skill": "firecrawl-extract", "message": "Generating candidates"}
+{"timestamp": "2026-03-15T16:28:18Z", "skill": "firecrawl-extract", "message": "Generated 3 candidates, 3 valid"}
+{"timestamp": "2026-03-15T16:28:18Z", "skill": "firecrawl-extract", "message": "Ranking candidates on train set"}
+{"timestamp": "2026-03-15T16:40:16Z", "skill": "firecrawl-extract", "message": "Candidate 0: score=0.7262 (rank=1)"}
+{"timestamp": "2026-03-15T16:40:16Z", "skill": "firecrawl-extract", "message": "Candidate 1: score=0.7262 (rank=2)"}
+{"timestamp": "2026-03-15T16:40:16Z", "skill": "firecrawl-extract", "message": "Candidate 2: score=0.7262 (rank=3)"}
+{"timestamp": "2026-03-15T16:40:16Z", "skill": "firecrawl-extract", "message": "No candidate meets minimum improvement threshold"}

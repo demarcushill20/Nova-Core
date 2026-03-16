@@ -1,0 +1,6 @@
+{
+  "candidate_id": 1,
+  "description": "Before answering any question about how to correctly use a named library or framework \u2014 including popular ones like React, FastAPI, Pydantic, SQLAlchemy, or LangChain where APIs change between version",
+  "train_score": 1.0,
+  "rank": 2
+}

@@ -1,0 +1,6 @@
+{
+  "candidate_id": 0,
+  "description": "Use when the user wants to pull specific named fields from one or more web pages and get back structured output \u2014 JSON objects, tables, schemas, or datasets. Covers any request to turn a web page into",
+  "train_score": 0.7262,
+  "rank": 1
+}

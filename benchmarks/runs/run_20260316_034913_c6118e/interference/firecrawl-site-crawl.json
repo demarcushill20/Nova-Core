@@ -1,0 +1,641 @@
+{
+  "skill_name": "firecrawl-site-crawl",
+  "neighbors_tested": 5,
+  "total_queries": 42,
+  "total_false_triggers": 0,
+  "max_conflict_rate": 0.0,
+  "aggregate_conflict_rate": 0.0,
+  "runs_per_query": 3,
+  "trigger_threshold": 0.5,
+  "elapsed_seconds": 1951.86,
+  "results": [
+    {
+      "neighbor": "context7-docs",
+      "queries_tested": 10,
+      "false_triggers": 0,
+      "conflict_rate": 0.0,
+      "details": [
+        {
+          "query": "how do I use the FastAPI dependency injection system",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "look up the pydantic v2 docs for model_validator",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "what is the correct API for creating a React context provider",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "check the docs for the anthropic Python SDK streaming interface",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "how do I configure SQLAlchemy async sessions",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "I need the LangChain LCEL chain syntax for a retrieval pipeline",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "what is the latest click library API for defining CLI commands",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "show me how to use the httpx async client for parallel requests",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "what are the typing module generics for Python 3.12",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "get the redis-py docs for pub/sub subscriptions",
+          "neighbor": "context7-docs",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "neighbor": "firecrawl-deep-research",
+      "queries_tested": 8,
+      "false_triggers": 0,
+      "conflict_rate": 0.0,
+      "details": [
+        {
+          "query": "do deep research on transformer architecture evolution with full article text",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "thoroughly research and compare RAG vs fine-tuning approaches across multiple sources",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "I need comprehensive analysis of LLM pricing models from multiple provider pages",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "deep dive into Kubernetes autoscaling strategies with full page content from each source",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "research everything about MCP server architecture, need complete articles not just snippets",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "thorough search across multiple sites about best GPU for inference workloads",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "need full page content from multiple sources about vector database benchmarks",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "comprehensive research on serverless vs containers for ML inference",
+          "neighbor": "firecrawl-deep-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "neighbor": "firecrawl-extract",
+      "queries_tested": 5,
+      "false_triggers": 0,
+      "conflict_rate": 0.0,
+      "details": [
+        {
+          "query": "extract the pricing tiers from https://openai.com/pricing as structured JSON",
+          "neighbor": "firecrawl-extract",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "get the pricing from https://anthropic.com/pricing and structure it by model",
+          "neighbor": "firecrawl-extract",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "extract the feature comparison matrix from https://supabase.com/pricing into JSON",
+          "neighbor": "firecrawl-extract",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "pull the speaker bios and talk titles from the conference schedule page",
+          "neighbor": "firecrawl-extract",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "parse this page to get all the API endpoint details as structured data",
+          "neighbor": "firecrawl-extract",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "neighbor": "http-fetch",
+      "queries_tested": 9,
+      "false_triggers": 0,
+      "conflict_rate": 0.0,
+      "details": [
+        {
+          "query": "fetch the JSON response from https://api.github.com/repos/anthropics/claude-code",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "download the raw content from https://example.com/config.yaml",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "get the documentation page at https://docs.anthropic.com/en/docs/overview",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "retrieve the status from our health endpoint https://api.novacore.dev/health",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "pull the latest release info from https://pypi.org/pypi/fastapi/json",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "read what's at this URL: https://raw.githubusercontent.com/anthropics/claude-code/main/README.md",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "grab the response from https://httpbin.org/get",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "load the API spec from https://petstore.swagger.io/v2/swagger.json",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "what does the endpoint at https://api.weather.gov/points/38.8894,-77.0352 return",
+          "neighbor": "http-fetch",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "neighbor": "web-research",
+      "queries_tested": 10,
+      "false_triggers": 0,
+      "conflict_rate": 0.0,
+      "details": [
+        {
+          "query": "search the web for recent news about Rust programming language",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "find information about the latest Python 3.13 release",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "what are the best practices for microservices architecture",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "research the differences between PostgreSQL and MySQL for our use case",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "look up how to configure nginx reverse proxy",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "I need current information about Claude API pricing",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "compare different CI/CD tools available in 2026",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "google what Andrej Karpathy said about autoresearch",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "find out if there is a newer version of FastAPI",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "query": "what is the current status of the WebGPU specification",
+          "neighbor": "web-research",
+          "triggers": 0,
+          "runs": 3,
+          "runs_completed": 3,
+          "trigger_rate": 0.0,
+          "conflict": false,
+          "run_outcomes": [
+            false,
+            false,
+            false
+          ]
+        }
+      ]
+    }
+  ]
+}

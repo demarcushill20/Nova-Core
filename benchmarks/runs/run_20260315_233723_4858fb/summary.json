@@ -1,0 +1,23 @@
+{
+  "run_id": "run_20260315_233723_4858fb",
+  "mode": "dry-run",
+  "total_skills": 1,
+  "processed": 1,
+  "accepted": 0,
+  "rejected": 0,
+  "skipped": 1,
+  "errors": 0,
+  "halted": false,
+  "halt_reason": "",
+  "completed": "2026-03-15T23:54:31Z",
+  "skills": [
+    {
+      "skill": "firecrawl-extract",
+      "decision": "no_improvement",
+      "reason": "best score 0.7262 vs baseline 0.7262",
+      "baseline_score": "",
+      "candidate_score": "",
+      "delta": ""
+    }
+  ]
+}

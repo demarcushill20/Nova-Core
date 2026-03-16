@@ -1,0 +1,2 @@
+skill	decision	reason	baseline_score	candidate_score	delta
+firecrawl-site-crawl	ACCEPT	All gates passed. Score: 0.956 → 1.000 (+0.0445)	0.9555	1.0	0.044499999999999984

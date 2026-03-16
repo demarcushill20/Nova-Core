@@ -1,0 +1,12 @@
+{"query": "extract the pricing tiers from https://openai.com/pricing as structured JSON", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "pull the product specs from this page and format as a table", "should_trigger": false, "difficulty": "easy", "category": "direct-intent"}
+{"query": "get the contact information from the company's about page", "should_trigger": false, "difficulty": "easy", "category": "direct-intent"}
+{"query": "parse the API parameters from this documentation page into a schema", "should_trigger": false, "difficulty": "medium", "category": "paraphrase"}
+{"query": "I need structured data comparing features across these three SaaS pricing pages", "should_trigger": false, "difficulty": "medium", "category": "paraphrase"}
+{"query": "extract all the job listings from the careers page as JSON with title, location, and department", "should_trigger": false, "difficulty": "medium", "category": "direct-intent"}
+{"query": "get the pricing from https://anthropic.com/pricing and structure it by model", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "recall what we decided about the database migration strategy", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "write a Python script to process the CSV data", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "check the GitHub Actions CI status for the latest commit", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "schedule a meeting for next Tuesday at 2pm", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "list the files in the OUTPUT directory", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}

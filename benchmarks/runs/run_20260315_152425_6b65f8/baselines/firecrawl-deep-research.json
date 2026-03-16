@@ -1,0 +1,25 @@
+{
+  "skill_name": "firecrawl-deep-research",
+  "description": "Deep web research using Firecrawl search + full-page scraping. Unlike web-research (Brave/Tavily snippets), this retrieves complete page content from search results. Auto-invoked when research needs full article text, comprehensive analysis across sources, or when snippets are insufficient. Also use when the user says 'deep research', 'thorough search', or needs content from multiple full pages.",
+  "split": "train",
+  "metrics": {
+    "true_positives": 6,
+    "true_negatives": 6,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "fpr": 0.0,
+    "fnr": 0.0,
+    "specificity": 1.0,
+    "accuracy": 1.0,
+    "weighted_score": 1.0,
+    "paraphrase_consistency": 1.0,
+    "neighbor_conflict_rate": 0.0
+  },
+  "elapsed_seconds": 245.02,
+  "timestamp": "2026-03-15T16:22:53Z",
+  "model": null,
+  "result_count": 12
+}

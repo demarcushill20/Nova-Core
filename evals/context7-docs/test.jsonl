@@ -1,0 +1,6 @@
+{"query": "show me how to use the httpx async client for parallel requests", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
+{"query": "what are the typing module generics for Python 3.12", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "get the redis-py docs for pub/sub subscriptions", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "run the test suite for the planner module", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "what's on my calendar today", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "deploy the latest version to the staging server", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}

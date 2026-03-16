@@ -8,7 +8,7 @@
 {"query": "save this decision to Fusion Memory", "should_trigger": true, "skill": "memory-store", "category": "smoke"}
 {"query": "list all n8n workflows and their status", "should_trigger": true, "skill": "n8n-workflows", "category": "smoke"}
 {"query": "scrape the entire documentation site at docs.astro.build", "should_trigger": true, "skill": "firecrawl-site-crawl", "category": "smoke"}
-{"query": "extract structured pricing data from the pricing page", "should_trigger": true, "skill": "firecrawl-extract", "category": "smoke"}
+{"query": "extract structured pricing data from https://example.com/pricing", "should_trigger": true, "skill": "firecrawl-extract", "category": "smoke"}
 {"query": "fill out the login form on the staging site", "should_trigger": true, "skill": "browser-automation", "category": "smoke"}
 {"query": "look up the fastapi library docs for the latest version", "should_trigger": true, "skill": "context7-docs", "category": "smoke"}
 {"query": "what's on my calendar for today", "should_trigger": true, "skill": "google-calendar", "category": "smoke"}

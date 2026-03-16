@@ -1,0 +1,6 @@
+{
+  "candidate_id": 0,
+  "description": "Use this skill when the user needs to pull specific data fields from a web page and return them as structured output \u2014 JSON, a table, a schema, or comparable records. Invoke for any targeted web extra",
+  "train_score": 0.7262,
+  "rank": 2
+}

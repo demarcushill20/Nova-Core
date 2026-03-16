@@ -1,0 +1,18 @@
+{"timestamp": "2026-03-16T03:49:13Z", "skill": "context7-docs", "message": "Starting optimization"}
+{"timestamp": "2026-03-16T03:49:13Z", "skill": "context7-docs", "message": "Running baseline evaluation"}
+{"timestamp": "2026-03-16T03:52:50Z", "skill": "context7-docs", "message": "Baseline: P=1.000 R=0.857 F1=0.923 score=0.9555"}
+{"timestamp": "2026-03-16T03:52:50Z", "skill": "context7-docs", "message": "Generating candidates"}
+{"timestamp": "2026-03-16T03:54:32Z", "skill": "context7-docs", "message": "Generated 3 candidates, 3 valid"}
+{"timestamp": "2026-03-16T03:54:32Z", "skill": "context7-docs", "message": "Ranking candidates on train set"}
+{"timestamp": "2026-03-16T04:06:04Z", "skill": "context7-docs", "message": "Candidate 0: score=1.0000 (rank=1)"}
+{"timestamp": "2026-03-16T04:06:04Z", "skill": "context7-docs", "message": "Candidate 1: score=1.0000 (rank=2)"}
+{"timestamp": "2026-03-16T04:06:04Z", "skill": "context7-docs", "message": "Candidate 2: score=1.0000 (rank=3)"}
+{"timestamp": "2026-03-16T04:06:04Z", "skill": "context7-docs", "message": "Best candidate: 0 (score=1.0000)"}
+{"timestamp": "2026-03-16T04:06:04Z", "skill": "context7-docs", "message": "Running holdout test evaluation"}
+{"timestamp": "2026-03-16T04:08:23Z", "skill": "context7-docs", "message": "Test: P=1.000 R=0.333 F1=0.500 score=0.7500"}
+{"timestamp": "2026-03-16T04:11:53Z", "skill": "context7-docs", "message": "Running interference check"}
+{"timestamp": "2026-03-16T04:42:52Z", "skill": "context7-docs", "message": "Interference: 0/42 conflicts (rate=0.000)"}
+{"timestamp": "2026-03-16T04:42:52Z", "skill": "context7-docs", "message": "Running smoke test"}
+{"timestamp": "2026-03-16T04:43:05Z", "skill": "context7-docs", "message": "Smoke: 1/1 passed"}
+{"timestamp": "2026-03-16T04:43:05Z", "skill": "context7-docs", "message": "Evaluating decision gates"}
+{"timestamp": "2026-03-16T04:43:05Z", "skill": "context7-docs", "message": "Decision: REJECT_GAIN \u2014 Score improvement -0.2055 below minimum 0.02"}

@@ -1,0 +1,17 @@
+{"timestamp": "2026-03-16T02:57:47Z", "skill": "firecrawl-site-crawl", "message": "Starting optimization"}
+{"timestamp": "2026-03-16T02:57:47Z", "skill": "firecrawl-site-crawl", "message": "Running baseline evaluation"}
+{"timestamp": "2026-03-16T03:01:47Z", "skill": "firecrawl-site-crawl", "message": "Baseline: P=1.000 R=0.857 F1=0.923 score=0.9555"}
+{"timestamp": "2026-03-16T03:01:47Z", "skill": "firecrawl-site-crawl", "message": "Generating candidates"}
+{"timestamp": "2026-03-16T03:03:06Z", "skill": "firecrawl-site-crawl", "message": "Generated 3 candidates, 2 valid"}
+{"timestamp": "2026-03-16T03:03:06Z", "skill": "firecrawl-site-crawl", "message": "Ranking candidates on train set"}
+{"timestamp": "2026-03-16T03:10:38Z", "skill": "firecrawl-site-crawl", "message": "Candidate 1: score=1.0000 (rank=1)"}
+{"timestamp": "2026-03-16T03:10:38Z", "skill": "firecrawl-site-crawl", "message": "Candidate 2: score=1.0000 (rank=2)"}
+{"timestamp": "2026-03-16T03:10:38Z", "skill": "firecrawl-site-crawl", "message": "Best candidate: 1 (score=1.0000)"}
+{"timestamp": "2026-03-16T03:10:38Z", "skill": "firecrawl-site-crawl", "message": "Running holdout test evaluation"}
+{"timestamp": "2026-03-16T03:12:35Z", "skill": "firecrawl-site-crawl", "message": "Test: P=1.000 R=1.000 F1=1.000 score=1.0000"}
+{"timestamp": "2026-03-16T03:15:57Z", "skill": "firecrawl-site-crawl", "message": "Running interference check"}
+{"timestamp": "2026-03-16T03:48:39Z", "skill": "firecrawl-site-crawl", "message": "Interference: 0/42 conflicts (rate=0.000)"}
+{"timestamp": "2026-03-16T03:48:39Z", "skill": "firecrawl-site-crawl", "message": "Running smoke test"}
+{"timestamp": "2026-03-16T03:48:53Z", "skill": "firecrawl-site-crawl", "message": "Smoke: 1/1 passed"}
+{"timestamp": "2026-03-16T03:48:53Z", "skill": "firecrawl-site-crawl", "message": "Evaluating decision gates"}
+{"timestamp": "2026-03-16T03:48:53Z", "skill": "firecrawl-site-crawl", "message": "Decision: ACCEPT \u2014 All gates passed. Score: 0.956 \u2192 1.000 (+0.0445)"}

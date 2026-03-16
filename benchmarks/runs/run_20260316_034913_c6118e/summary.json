@@ -1,0 +1,39 @@
+{
+  "run_id": "run_20260316_034913_c6118e",
+  "mode": "dry-run",
+  "total_skills": 3,
+  "processed": 3,
+  "accepted": 1,
+  "rejected": 1,
+  "skipped": 1,
+  "errors": 0,
+  "halted": false,
+  "halt_reason": "",
+  "completed": "2026-03-16T05:37:50Z",
+  "skills": [
+    {
+      "skill": "context7-docs",
+      "decision": "REJECT_GAIN",
+      "reason": "Score improvement -0.2055 below minimum 0.02",
+      "baseline_score": 0.9555,
+      "candidate_score": 0.75,
+      "delta": -0.20550000000000002
+    },
+    {
+      "skill": "firecrawl-extract",
+      "decision": "skipped",
+      "reason": "baseline_perfect",
+      "baseline_score": "",
+      "candidate_score": "",
+      "delta": ""
+    },
+    {
+      "skill": "firecrawl-site-crawl",
+      "decision": "ACCEPT",
+      "reason": "All gates passed. Score: 0.956 \u2192 1.000 (+0.0445)",
+      "baseline_score": 0.9555,
+      "candidate_score": 1.0,
+      "delta": 0.044499999999999984
+    }
+  ]
+}

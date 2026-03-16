@@ -1,0 +1,6 @@
+{
+  "candidate_id": 2,
+  "description": "Use when the user provides a literal URL and wants the content at that address fetched directly via HTTP \u2014 regardless of domain. Covers JSON API responses (GitHub REST API, PyPI registry, npm, any pub",
+  "train_score": 0.825,
+  "rank": 3
+}

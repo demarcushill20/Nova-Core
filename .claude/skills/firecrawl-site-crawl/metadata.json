@@ -1,7 +1,7 @@
 {
   "name": "firecrawl-site-crawl",
   "version": "0.1.0",
-  "description": ">-",
+  "description": "Crawl entire websites or documentation sites to index content. Discovers pages via sitemap and link following, then scrapes each as markdown. Auto-invoked when the user wants to learn a new framework, index docs, audit a site, or extract content from multiple pages on the same domain. Also use for 'crawl this site', 'index these docs', 'get all pages from'.",
   "skill_type": "prompt",
   "domains": [
     "research",

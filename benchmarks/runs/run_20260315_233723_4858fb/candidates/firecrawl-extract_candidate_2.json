@@ -1,0 +1,6 @@
+{
+  "candidate_id": 2,
+  "description": "Converts web pages into structured datasets. Use whenever the goal is populating a JSON schema, table, or named field set from a web page \u2014 regardless of whether the user provides an explicit URL or r",
+  "train_score": 0.7262,
+  "rank": 3
+}

@@ -1,0 +1,6 @@
+{"query": "extract the feature comparison matrix from https://supabase.com/pricing into JSON", "should_trigger": true, "difficulty": "medium", "category": "direct-intent"}
+{"query": "pull the speaker bios and talk titles from the conference schedule page", "should_trigger": true, "difficulty": "medium", "category": "paraphrase"}
+{"query": "parse this page to get all the API endpoint details as structured data", "should_trigger": true, "difficulty": "easy", "category": "direct-intent"}
+{"query": "save this research finding to Fusion Memory", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}
+{"query": "search for recent benchmarks comparing vector databases", "should_trigger": false, "difficulty": "medium", "category": "wrong-domain"}
+{"query": "read the CLAUDE.md file and check the operating rules", "should_trigger": false, "difficulty": "easy", "category": "wrong-domain"}

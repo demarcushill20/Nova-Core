@@ -1,0 +1,6 @@
+{
+  "candidate_id": 1,
+  "description": "Use when the user wants to turn a web page into structured data \u2014 extracting named fields as JSON, a table, or a typed schema. Applies whether the page is given as an explicit URL or described by name",
+  "train_score": 0.7262,
+  "rank": 2
+}

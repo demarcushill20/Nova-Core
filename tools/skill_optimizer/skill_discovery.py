@@ -111,11 +111,42 @@ DOMAIN_TAGS: dict[str, list[str]] = {
 # Manually curated neighbor pairs (symmetric).
 # These are skills that are likely to compete for the same queries.
 MANUAL_NEIGHBORS: dict[str, list[str]] = {
-    "web-research": ["firecrawl-deep-research", "http-fetch", "research-to-action", "context7-docs"],
-    "firecrawl-deep-research": ["web-research", "firecrawl-site-crawl", "research-to-action"],
-    "firecrawl-extract": ["firecrawl-site-crawl", "http-fetch"],
-    "firecrawl-site-crawl": ["firecrawl-deep-research", "firecrawl-extract"],
-    "http-fetch": ["web-research", "firecrawl-extract", "browser-automation"],
+    "web-research": [
+        "firecrawl-deep-research",
+        "http-fetch",
+        "research-to-action",
+        "context7-docs",
+        "firecrawl-site-crawl",
+    ],
+    "firecrawl-deep-research": [
+        "web-research",
+        "firecrawl-site-crawl",
+        "research-to-action",
+        "http-fetch",
+        "firecrawl-extract",
+    ],
+    "firecrawl-extract": [
+        "firecrawl-site-crawl",
+        "http-fetch",
+        "firecrawl-deep-research",
+        "web-research",
+        "context7-docs",
+    ],
+    "firecrawl-site-crawl": [
+        "firecrawl-deep-research",
+        "firecrawl-extract",
+        "context7-docs",
+        "http-fetch",
+        "web-research",
+    ],
+    "context7-docs": [
+        "web-research",
+        "http-fetch",
+        "firecrawl-site-crawl",
+        "firecrawl-deep-research",
+        "firecrawl-extract",
+    ],
+    "http-fetch": ["web-research", "firecrawl-extract", "browser-automation", "firecrawl-deep-research"],
     "browser-automation": ["http-fetch", "firecrawl-site-crawl"],
     "research-to-action": ["web-research", "firecrawl-deep-research"],
     "memory-recall": ["memory-unified-recall", "reading-obsidian-memory"],

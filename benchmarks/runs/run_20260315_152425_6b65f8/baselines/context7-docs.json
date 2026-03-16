@@ -1,0 +1,25 @@
+{
+  "skill_name": "context7-docs",
+  "description": "Retrieve version-specific library documentation via Context7 MCP to eliminate hallucinated API references. Use when writing code that imports any library, answering 'how do I use X?', debugging API errors, or generating setup/config steps \u2014 even if the user doesn't explicitly ask for docs. Prefer this over guessing API signatures.",
+  "split": "train",
+  "metrics": {
+    "true_positives": 6,
+    "true_negatives": 5,
+    "false_positives": 0,
+    "false_negatives": 1,
+    "precision": 1.0,
+    "recall": 0.8571,
+    "f1": 0.9231,
+    "fpr": 0.0,
+    "fnr": 0.1429,
+    "specificity": 1.0,
+    "accuracy": 0.9167,
+    "weighted_score": 0.9555,
+    "paraphrase_consistency": 1.0,
+    "neighbor_conflict_rate": 0.0
+  },
+  "elapsed_seconds": 221.94,
+  "timestamp": "2026-03-15T15:28:07Z",
+  "model": null,
+  "result_count": 12
+}

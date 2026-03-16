@@ -1,0 +1,18 @@
+{"timestamp": "2026-03-15T23:55:00Z", "skill": "firecrawl-extract", "message": "Starting optimization"}
+{"timestamp": "2026-03-15T23:55:00Z", "skill": "firecrawl-extract", "message": "Running baseline evaluation"}
+{"timestamp": "2026-03-15T23:58:55Z", "skill": "firecrawl-extract", "message": "Baseline: P=1.000 R=0.286 F1=0.444 score=0.7262"}
+{"timestamp": "2026-03-15T23:58:55Z", "skill": "firecrawl-extract", "message": "Generating candidates"}
+{"timestamp": "2026-03-16T00:01:02Z", "skill": "firecrawl-extract", "message": "Generated 3 candidates, 3 valid"}
+{"timestamp": "2026-03-16T00:01:02Z", "skill": "firecrawl-extract", "message": "Ranking candidates on train set"}
+{"timestamp": "2026-03-16T00:13:12Z", "skill": "firecrawl-extract", "message": "Candidate 1: score=0.7943 (rank=1)"}
+{"timestamp": "2026-03-16T00:13:12Z", "skill": "firecrawl-extract", "message": "Candidate 0: score=0.7262 (rank=2)"}
+{"timestamp": "2026-03-16T00:13:12Z", "skill": "firecrawl-extract", "message": "Candidate 2: score=0.7262 (rank=3)"}
+{"timestamp": "2026-03-16T00:13:12Z", "skill": "firecrawl-extract", "message": "Best candidate: 1 (score=0.7943)"}
+{"timestamp": "2026-03-16T00:13:12Z", "skill": "firecrawl-extract", "message": "Running holdout test evaluation"}
+{"timestamp": "2026-03-16T00:15:11Z", "skill": "firecrawl-extract", "message": "Test: P=1.000 R=0.333 F1=0.500 score=0.7500"}
+{"timestamp": "2026-03-16T00:18:37Z", "skill": "firecrawl-extract", "message": "Running interference check"}
+{"timestamp": "2026-03-16T00:53:24Z", "skill": "firecrawl-extract", "message": "Interference: 1/47 conflicts (rate=0.021)"}
+{"timestamp": "2026-03-16T00:53:24Z", "skill": "firecrawl-extract", "message": "Running smoke test"}
+{"timestamp": "2026-03-16T00:53:38Z", "skill": "firecrawl-extract", "message": "Smoke: 0/1 passed"}
+{"timestamp": "2026-03-16T00:53:38Z", "skill": "firecrawl-extract", "message": "Evaluating decision gates"}
+{"timestamp": "2026-03-16T00:53:38Z", "skill": "firecrawl-extract", "message": "Decision: REJECT_SMOKE \u2014 Global smoke regressions: 1 (tolerance: 0)"}

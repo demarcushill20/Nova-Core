@@ -1,0 +1,25 @@
+{
+  "skill_name": "firecrawl-extract",
+  "description": "Extract structured JSON data from web pages using LLM-powered extraction with schemas and prompts. Auto-invoked when the user needs specific data points from a page (pricing, specs, contacts, API parameters), wants to compare structured data across sites, or says 'extract', 'pull data from', 'get the pricing from', 'parse this page'.",
+  "split": "train",
+  "metrics": {
+    "true_positives": 2,
+    "true_negatives": 5,
+    "false_positives": 0,
+    "false_negatives": 5,
+    "precision": 1.0,
+    "recall": 0.2857,
+    "f1": 0.4444,
+    "fpr": 0.0,
+    "fnr": 0.7143,
+    "specificity": 1.0,
+    "accuracy": 0.5833,
+    "weighted_score": 0.7262,
+    "paraphrase_consistency": 1.0,
+    "neighbor_conflict_rate": 0.0
+  },
+  "elapsed_seconds": 227.65,
+  "timestamp": "2026-03-15T16:26:40Z",
+  "model": null,
+  "result_count": 12
+}

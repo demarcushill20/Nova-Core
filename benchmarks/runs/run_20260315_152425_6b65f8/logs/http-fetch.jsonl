@@ -1,0 +1,18 @@
+{"timestamp": "2026-03-15T16:44:04Z", "skill": "http-fetch", "message": "Starting optimization"}
+{"timestamp": "2026-03-15T16:44:04Z", "skill": "http-fetch", "message": "Running baseline evaluation"}
+{"timestamp": "2026-03-15T16:47:51Z", "skill": "http-fetch", "message": "Baseline: P=1.000 R=0.667 F1=0.800 score=0.8900"}
+{"timestamp": "2026-03-15T16:47:51Z", "skill": "http-fetch", "message": "Generating candidates"}
+{"timestamp": "2026-03-15T16:49:36Z", "skill": "http-fetch", "message": "Generated 3 candidates, 3 valid"}
+{"timestamp": "2026-03-15T16:49:36Z", "skill": "http-fetch", "message": "Ranking candidates on train set"}
+{"timestamp": "2026-03-15T17:00:35Z", "skill": "http-fetch", "message": "Candidate 1: score=0.9477 (rank=1)"}
+{"timestamp": "2026-03-15T17:00:35Z", "skill": "http-fetch", "message": "Candidate 0: score=0.8900 (rank=2)"}
+{"timestamp": "2026-03-15T17:00:35Z", "skill": "http-fetch", "message": "Candidate 2: score=0.8250 (rank=3)"}
+{"timestamp": "2026-03-15T17:00:35Z", "skill": "http-fetch", "message": "Best candidate: 1 (score=0.9477)"}
+{"timestamp": "2026-03-15T17:00:35Z", "skill": "http-fetch", "message": "Running holdout test evaluation"}
+{"timestamp": "2026-03-15T17:02:32Z", "skill": "http-fetch", "message": "Test: P=1.000 R=0.667 F1=0.800 score=0.8900"}
+{"timestamp": "2026-03-15T17:05:16Z", "skill": "http-fetch", "message": "Running interference check"}
+{"timestamp": "2026-03-15T17:41:50Z", "skill": "http-fetch", "message": "Interference: 1/48 conflicts (rate=0.021)"}
+{"timestamp": "2026-03-15T17:41:50Z", "skill": "http-fetch", "message": "Running smoke test"}
+{"timestamp": "2026-03-15T17:42:01Z", "skill": "http-fetch", "message": "Smoke: 0/1 passed"}
+{"timestamp": "2026-03-15T17:42:01Z", "skill": "http-fetch", "message": "Evaluating decision gates"}
+{"timestamp": "2026-03-15T17:42:01Z", "skill": "http-fetch", "message": "Decision: REJECT_SMOKE \u2014 Global smoke regressions: 1 (tolerance: 0)"}

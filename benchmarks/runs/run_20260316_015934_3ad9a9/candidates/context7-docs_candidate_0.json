@@ -1,0 +1,6 @@
+{
+  "candidate_id": 0,
+  "description": "Retrieve version-specific library documentation via Context7 MCP to eliminate hallucinated API references. Use when writing code that imports any library, answering questions about correct API usage, ",
+  "train_score": 1.0,
+  "rank": 1
+}

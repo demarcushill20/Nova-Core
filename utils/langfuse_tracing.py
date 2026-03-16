@@ -139,3 +139,62 @@ def flush():
     lf = get_langfuse()
     if lf is not None:
         lf.flush()
+
+
+def traced_cached_llm_call(
+    call_fn,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.0,
+    ttl: int | None = None,
+    cache_bypass: bool = False,
+    extract_response=None,
+    extract_tokens=None,
+    trace_name: str = "llm_call",
+    metadata: dict | None = None,
+):
+    """Convenience wrapper combining LLM caching with Langfuse tracing.
+
+    Delegates to cached_llm_call() for cache logic, then traces via Langfuse
+    on cache miss. On cache hit, traces with cache metadata.
+
+    Usage:
+        from utils.langfuse_tracing import traced_cached_llm_call
+        result = traced_cached_llm_call(
+            call_fn=lambda: client.chat(...),
+            model="claude-sonnet-4-20250514",
+            system_prompt="You are helpful.",
+            user_prompt="Explain caching.",
+            trace_name="qa_review",
+        )
+    """
+    from utils.llm_cache import cached_llm_call
+
+    result = cached_llm_call(
+        call_fn=call_fn,
+        model=model,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=temperature,
+        ttl=ttl,
+        cache_bypass=cache_bypass,
+        extract_response=extract_response,
+        extract_tokens=extract_tokens,
+    )
+
+    # Trace cache hits too (they won't be traced by cached_llm_call itself)
+    if result.get("cached"):
+        trace_llm_call(
+            name=trace_name,
+            input_text=user_prompt,
+            output_text=result.get("response", ""),
+            model=model,
+            metadata={
+                **(metadata or {}),
+                "cache": result.get("source", "exact"),
+                "tokens_used": result.get("tokens_used", 0),
+            },
+        )
+
+    return result

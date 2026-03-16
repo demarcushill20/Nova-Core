@@ -372,6 +372,47 @@ def check_pip_audit() -> dict:
         return {"name": "pip_audit", "ok": True, "detail": f"check failed: {e}"}
 
 
+def check_llm_cache() -> dict:
+    """Check LLM response cache health, hit rate, and memory usage."""
+    try:
+        from utils.llm_cache import llm_cache
+
+        if not llm_cache.available:
+            return {"name": "llm_cache", "ok": True, "detail": "Redis unavailable (cache inactive)"}
+
+        stats = llm_cache.stats()
+        memory_mb = stats.memory_bytes / (1024**2)
+        issues = []
+
+        # Alert: hit rate below 10% (only meaningful with enough traffic)
+        total_lookups = stats.hits + stats.misses
+        if total_lookups >= 20 and stats.hit_rate < 0.10:
+            issues.append(f"low hit rate ({stats.hit_rate:.1%})")
+
+        # Alert: cache memory above 500 MB
+        if memory_mb > 500:
+            issues.append(f"high memory ({memory_mb:.0f}MB)")
+
+        if issues:
+            detail = (
+                f"{'; '.join(issues)} | "
+                f"entries={stats.total_entries} "
+                f"hits={stats.hits} misses={stats.misses} "
+                f"rate={stats.hit_rate:.1%} mem={memory_mb:.1f}MB"
+            )
+            return {"name": "llm_cache", "ok": False, "detail": detail}
+
+        detail = (
+            f"entries={stats.total_entries} "
+            f"hits={stats.hits} misses={stats.misses} "
+            f"rate={stats.hit_rate:.1%} mem={memory_mb:.1f}MB"
+        )
+        return {"name": "llm_cache", "ok": True, "detail": detail}
+
+    except Exception as e:
+        return {"name": "llm_cache", "ok": True, "detail": f"check skipped: {e}"}
+
+
 # --- Output ------------------------------------------------------------------
 
 
@@ -1618,6 +1659,7 @@ def main() -> int:
     checks.append(check_log_sizes())
     checks.append(check_state_bloat())
     checks.append(check_pip_audit())
+    checks.append(check_llm_cache())
 
     # --- Drift detection (observability Phase 3) ---
     try:

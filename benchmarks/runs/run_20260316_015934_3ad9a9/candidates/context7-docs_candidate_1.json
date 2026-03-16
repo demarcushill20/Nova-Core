@@ -1,0 +1,6 @@
+{
+  "candidate_id": 1,
+  "description": "Use to retrieve authoritative library documentation whenever API accuracy is needed \u2014 even for common, well-known frameworks. Invoke when the user asks about correct API signatures, component creation",
+  "train_score": 1.0,
+  "rank": 2
+}

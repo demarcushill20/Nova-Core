@@ -52,5 +52,50 @@
       {"query": "good morning, what's on today", "expected": "daily-briefing"},
       {"query": "give me a summary of this week", "expected": "weekly-digest"}
     ]
+  },
+  {
+    "skill_a": "context7-docs",
+    "skill_b": "web-research",
+    "boundary": "context7-docs for specific library API lookups via Context7; web-research for general web searches even if library-related",
+    "test_queries": [
+      {"query": "how do I use the FastAPI Depends for dependency injection", "expected": "context7-docs"},
+      {"query": "search for best practices in FastAPI project structure", "expected": "web-research"}
+    ]
+  },
+  {
+    "skill_a": "context7-docs",
+    "skill_b": "firecrawl-site-crawl",
+    "boundary": "context7-docs for targeted API lookups for a library; firecrawl-site-crawl for crawling entire documentation sites",
+    "test_queries": [
+      {"query": "look up the pydantic v2 model_validator docs", "expected": "context7-docs"},
+      {"query": "crawl the entire pydantic documentation site and index it", "expected": "firecrawl-site-crawl"}
+    ]
+  },
+  {
+    "skill_a": "firecrawl-site-crawl",
+    "skill_b": "firecrawl-extract",
+    "boundary": "firecrawl-site-crawl for crawling/indexing whole sites; firecrawl-extract for structured data extraction from specific pages",
+    "test_queries": [
+      {"query": "crawl all pages on docs.astro.build", "expected": "firecrawl-site-crawl"},
+      {"query": "extract the pricing tiers from the Vercel pricing page as JSON", "expected": "firecrawl-extract"}
+    ]
+  },
+  {
+    "skill_a": "firecrawl-site-crawl",
+    "skill_b": "firecrawl-deep-research",
+    "boundary": "firecrawl-site-crawl for indexing pages on a single domain; firecrawl-deep-research for multi-source research with full article text",
+    "test_queries": [
+      {"query": "index the entire htmx.org documentation", "expected": "firecrawl-site-crawl"},
+      {"query": "research RAG vs fine-tuning across multiple full articles from different sites", "expected": "firecrawl-deep-research"}
+    ]
+  },
+  {
+    "skill_a": "firecrawl-extract",
+    "skill_b": "http-fetch",
+    "boundary": "firecrawl-extract for LLM-powered structured data extraction from pages; http-fetch for raw URL retrieval",
+    "test_queries": [
+      {"query": "extract all job listings from the careers page as structured JSON", "expected": "firecrawl-extract"},
+      {"query": "fetch the raw JSON from https://api.example.com/v1/prices", "expected": "http-fetch"}
+    ]
   }
 ]

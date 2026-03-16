@@ -1,0 +1,6 @@
+{
+  "candidate_id": 0,
+  "description": "Use this skill to retrieve content from a specific, known URL. Covers documentation pages, REST API endpoints, JSON responses, raw text files, and any web page where the URL is already known. Auto-inv",
+  "train_score": 0.89,
+  "rank": 2
+}
