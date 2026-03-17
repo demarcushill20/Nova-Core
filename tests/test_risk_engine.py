@@ -102,7 +102,7 @@ class TestPreTradeCheck:
         )
         assert decision.verdict == RiskVerdict.ALLOW
 
-    def test_deny_when_halted(self):
+    def test_halt_when_halted(self):
         engine = RiskEngine(_cfg())
         engine.initialize(_account())
         engine._halt("test halt")
@@ -111,10 +111,13 @@ class TestPreTradeCheck:
             _account(),
             [],
         )
-        assert decision.verdict == RiskVerdict.DENY
+        assert decision.verdict == RiskVerdict.HALT
+        assert decision.denied  # HALT is a form of denial
+        assert decision.halted
+        assert decision.policy_layer == 0
         assert "halted" in decision.reason.lower()
 
-    def test_deny_daily_drawdown_breach(self):
+    def test_halt_daily_drawdown_breach(self):
         cfg = _cfg()
         engine = RiskEngine(cfg)
         engine.initialize(_account(equity=100_000))
@@ -124,10 +127,11 @@ class TestPreTradeCheck:
             _account(equity=94_000, balance=100_000),
             [],
         )
-        # The standard drawdown check in PreTradeGate checks balance-equity
-        # The portfolio check uses daily start equity
         # With equity=94000, daily DD = (100000-94000)/100000 = 6% > 5%
-        assert decision.verdict == RiskVerdict.DENY
+        # Phase 6: drawdown breach returns HALT (not DENY)
+        assert decision.verdict == RiskVerdict.HALT
+        assert decision.denied
+        assert decision.policy_layer == 2
 
     def test_includes_portfolio_checks(self):
         engine = RiskEngine(_cfg())
@@ -307,6 +311,7 @@ class TestHaltAndResume:
         assert engine.halted is True
         decision = engine.pre_trade_check(_order(), _account(), [])
         assert decision.denied
+        assert decision.verdict == RiskVerdict.HALT
 
     def test_resume_allows_trades(self):
         engine = RiskEngine(_cfg())

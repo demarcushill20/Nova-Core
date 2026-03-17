@@ -74,6 +74,9 @@ class RiskConfig:
     news_blackout_minutes: int = 15
     require_stop_loss: bool = True
     max_drawdown_equity_pct: float = _DEFAULT_MAX_DAILY_DRAWDOWN_PCT
+    # Phase 6: IRB-specific risk hardening
+    check_forex_session: bool = False  # enforce 24/5 forex market hours
+    irb_max_open_positions: int = 0  # IRB exposure limit (0 = disabled)
 
     def validate(self) -> list[str]:
         errors: list[str] = []

@@ -36,6 +36,7 @@ from novatrade.models import (
     OrderResult,
     OrderSide,
     OrderType,
+    RiskVerdict,
 )
 from novatrade.risk.risk_engine import RiskEngine
 from novatrade.validation.evidence import EvidenceRecorder
@@ -398,6 +399,24 @@ class TradingAgent:
             )
 
     async def _process_inner(self, payload: dict, t0: float) -> AgentResult:
+        # 0. Fast-reject if risk engine is halted
+        if self._risk.halted:
+            elapsed = (time.monotonic() - t0) * 1000
+            log.info("alert rejected — risk engine halted: %s", self._risk.halt_reason)
+            self._record_event(
+                "RISK_HALT",
+                {
+                    "reason": self._risk.halt_reason,
+                    "payload_action": payload.get("action", ""),
+                },
+            )
+            return AgentResult(
+                success=False,
+                state_after=self._state,
+                rejected_reason=f"risk_halt: {self._risk.halt_reason}",
+                elapsed_ms=elapsed,
+            )
+
         # 1. Validate
         error, action = validate_alert(payload)
         if error:
@@ -536,20 +555,29 @@ class TradingAgent:
 
         if decision.denied:
             elapsed = (time.monotonic() - t0) * 1000
-            log.info("risk DENIED: %s — %s", decision.rule, decision.reason)
+            is_halt = decision.verdict == RiskVerdict.HALT
+            event_name = "RISK_HALT" if is_halt else "RISK_DENIED"
+            log.info(
+                "risk %s: %s — %s",
+                "HALT" if is_halt else "DENIED",
+                decision.rule,
+                decision.reason,
+            )
             self._record_event(
-                "RISK_DENIED",
+                event_name,
                 {
                     "intent": intent.to_dict(),
+                    "verdict": decision.verdict.value,
                     "rule": decision.rule,
                     "reason": decision.reason,
+                    "policy_layer": decision.policy_layer,
                 },
             )
             return AgentResult(
                 success=False,
                 intent=intent,
                 state_after=self._state,
-                rejected_reason=f"risk_denied: {decision.rule}",
+                rejected_reason=f"risk_{decision.verdict.value.lower()}: {decision.rule}",
                 elapsed_ms=elapsed,
             )
 

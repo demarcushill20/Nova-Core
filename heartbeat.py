@@ -47,6 +47,11 @@ SERVICES = [
     "novacore-telegram-notifier",
 ]
 
+# Telegram cooldown settings (seconds)
+TELEGRAM_COOLDOWN_DEFAULT = 1800  # 30 minutes for general agent alerts
+TELEGRAM_COOLDOWN_COST = 14400  # 4 hours for cost alerts
+TELEGRAM_COOLDOWN_FILE = STATE_DIR / "telegram_cooldown.json"
+
 
 # --- Health checks -----------------------------------------------------------
 
@@ -498,6 +503,94 @@ def _send_telegram(text: str) -> None:
         print(f"WARN: Telegram send failed: {e}")
 
 
+def _normalize_fingerprint(text: str) -> str:
+    """Strip volatile parts (timestamps, exact dollar amounts) to produce a stable fingerprint."""
+    import hashlib
+    import re
+
+    # Remove timestamps like 12:34 UTC, 2026-03-17T08:41:37Z
+    normalized = re.sub(r"\d{1,2}:\d{2}(?:\s*UTC)?", "", text)
+    normalized = re.sub(r"\d{4}-\d{2}-\d{2}T[\d:]+Z?", "", normalized)
+    # Collapse dollar amounts to just the integer part (so $22.50 and $22.51 match)
+    normalized = re.sub(r"\$(\d+)\.\d+", r"$\1", normalized)
+    # Collapse whitespace
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
+def _telegram_cooldown_gate(message: str, cooldown_secs: int | None = None) -> bool:
+    """Check if a message should be sent based on cooldown. Returns True if allowed.
+
+    Uses STATE/telegram_cooldown.json to persist fingerprint → timestamp mappings.
+    Cost-related messages get a longer cooldown automatically.
+    """
+    if cooldown_secs is None:
+        # Auto-detect: cost alerts get 4-hour cooldown, others 30 min
+        lower = message.lower()
+        if "cost" in lower or "budget" in lower or "spend" in lower:
+            cooldown_secs = TELEGRAM_COOLDOWN_COST
+        else:
+            cooldown_secs = TELEGRAM_COOLDOWN_DEFAULT
+
+    fingerprint = _normalize_fingerprint(message)
+    now = datetime.now(timezone.utc).timestamp()
+
+    # Load existing cooldowns
+    cooldowns: dict = {}
+    try:
+        if TELEGRAM_COOLDOWN_FILE.exists():
+            cooldowns = json.loads(TELEGRAM_COOLDOWN_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        cooldowns = {}
+
+    # Check if this fingerprint is still in cooldown
+    last_sent = cooldowns.get(fingerprint, 0)
+    if now - last_sent < cooldown_secs:
+        return False  # suppress
+
+    # Record this send
+    cooldowns[fingerprint] = now
+    # Prune entries older than 24 hours to prevent file growth
+    cutoff = now - 86400
+    cooldowns = {k: v for k, v in cooldowns.items() if v > cutoff}
+    try:
+        TELEGRAM_COOLDOWN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TELEGRAM_COOLDOWN_FILE.write_text(json.dumps(cooldowns), encoding="utf-8")
+    except OSError:
+        pass  # non-fatal: cooldown state lost, message still sends
+
+    return True  # allowed
+
+
+def _ground_service_alert(message: str, checks: list | None) -> bool:
+    """Validate service-down claims against actual structured check results.
+
+    Returns True if the message should be sent (claim is grounded or non-service).
+    Returns False if the message claims services are down but checks disagree.
+    """
+    if checks is None:
+        return True  # no check data available, allow message
+
+    lower = message.lower()
+    service_down_phrases = ["service", "down", "dead", "stopped", "failed", "inactive"]
+    # Only filter messages that appear to claim service problems
+    if sum(1 for p in service_down_phrases if p in lower) < 2:
+        return True  # not a service-down claim
+
+    # Check actual service health from structured checks
+    service_checks = [c for c in checks if c["name"].startswith("service:")]
+    if not service_checks:
+        return True  # no service check data, allow
+
+    failed_services = [c for c in service_checks if not c["ok"]]
+    if failed_services:
+        return True  # services genuinely failed, allow the alert
+
+    # LLM claims services are down but all service checks pass — suppress
+    print(f"[heartbeat] SUPPRESSED false service-down alert (all {len(service_checks)} service checks pass)")
+    return False
+
+
 def send_telegram_alert(checks: list) -> None:
     """Send Telegram message listing failed checks. Only called when unhealthy."""
     failed = [c for c in checks if not c["ok"]]
@@ -738,7 +831,7 @@ def _run_heartbeat_agent(checks: list) -> None:
         # Agent flagged something — parse and act
         _log_agent(f"ACTION: {response[:300]}")
         print(f"[heartbeat-agent] Action needed: {response[:200]}")
-        _handle_agent_actions(response)
+        _handle_agent_actions(response, checks=checks)
 
     except subprocess.TimeoutExpired:
         _log_agent("TIMEOUT")
@@ -751,8 +844,11 @@ def _run_heartbeat_agent(checks: list) -> None:
         print(f"[heartbeat-agent] Error: {e}")
 
 
-def _handle_agent_actions(response: str) -> None:
-    """Parse agent response and execute actions (notify or create task)."""
+def _handle_agent_actions(response: str, checks: list | None = None) -> None:
+    """Parse agent response and execute actions (notify or create task).
+
+    Applies cooldown dedupe and grounding filter to prevent spam.
+    """
     # Try to extract JSON actions from the response
     actions = _extract_json_actions(response)
 
@@ -762,14 +858,26 @@ def _handle_agent_actions(response: str) -> None:
             if action_type == "notify":
                 msg = action.get("message", "")
                 if msg:
-                    _send_telegram(f"🤖 Nova Heartbeat Agent:\n{msg}")
+                    full_msg = f"🤖 Nova Heartbeat Agent:\n{msg}"
+                    if not _ground_service_alert(msg, checks):
+                        continue
+                    if _telegram_cooldown_gate(full_msg):
+                        _send_telegram(full_msg)
+                    else:
+                        print(f"[heartbeat] Cooldown suppressed: {msg[:80]}")
             elif action_type == "task":
                 title = action.get("title", "heartbeat_proactive")
                 body = action.get("body", "")
                 _inject_proactive_task(title, body)
     else:
         # No structured JSON — treat the whole response as a notification
-        _send_telegram(f"🤖 Nova Heartbeat Agent:\n{response[:500]}")
+        full_msg = f"🤖 Nova Heartbeat Agent:\n{response[:500]}"
+        if not _ground_service_alert(response, checks):
+            return
+        if _telegram_cooldown_gate(full_msg):
+            _send_telegram(full_msg)
+        else:
+            print(f"[heartbeat] Cooldown suppressed: {response[:80]}")
 
 
 def _extract_json_actions(text: str) -> list | None:

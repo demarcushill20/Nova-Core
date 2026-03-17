@@ -534,7 +534,7 @@ class TestRiskGateIntegration:
         agent = _make_agent(cfg=cfg, adapter=adapter, risk_engine=engine)
         result = await agent.process_alert(_signal_payload())
         assert not result.success
-        assert "risk_denied" in result.rejected_reason
+        assert "risk_halt" in result.rejected_reason
 
         adapter.place_order.assert_not_called()
 

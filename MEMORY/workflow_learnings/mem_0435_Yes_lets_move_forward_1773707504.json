@@ -16,5 +16,7 @@
   "verification_outcome": "approved",
   "reusable_guidance": "Phase 1 restart complete \u2014 IRB StrategySpec v2.0.0 with all U1-U8 resolved, 25 test vectors, 95 validation checks (all PASS) (files: docs/demo_test_run/strategy_spec.yaml (rewritten), docs/demo_test_run/strategy_test_vectors.yaml (rewritten), docs/demo_test_run/strategy_validation_checklist.md (rewritten), docs/demo_test_run/phase1_assumptions.md (rewritten), docs/demo_test_run/phase1_open_issues.md (rewritten), docs/demo_test_run/phase1_summary.md (rewritten))",
   "created_at": "2026-03-17T00:31:44Z",
-  "confidence": "low"
+  "confidence": "low",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0435_Yes_lets_move_forward_1773725706"
 }

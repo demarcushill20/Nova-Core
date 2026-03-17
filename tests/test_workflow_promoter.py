@@ -577,11 +577,18 @@ class TestSafetyBoundaries:
 
 
 class TestOrchestratorIntegration:
-    def test_promotion_called_for_successful_governed_task(self, monkeypatch):
+    def test_promotion_called_for_successful_governed_task(self, monkeypatch, tmp_path):
         """Verify execute_via_orchestrator includes promotion result."""
         from pathlib import Path
 
         import tools.orchestrator_adapter as oa
+
+        # Isolate from production directories to prevent notifier spam
+        for d in ("output", "state", "logs"):
+            (tmp_path / d).mkdir()
+        monkeypatch.setattr(oa, "OUTPUT_DIR", tmp_path / "output")
+        monkeypatch.setattr(oa, "STATE_DIR", tmp_path / "state")
+        monkeypatch.setattr(oa, "LOGS_DIR", tmp_path / "logs")
 
         # Mock Orchestrator class so run_plan returns a successful summary
         class MockOrchestrator:
@@ -626,11 +633,18 @@ class TestOrchestratorIntegration:
         # Promotion was attempted for governed stage B task
         assert isinstance(result["promotion"], dict)
 
-    def test_no_promotion_for_non_governed_task(self, monkeypatch):
+    def test_no_promotion_for_non_governed_task(self, monkeypatch, tmp_path):
         """Tasks without stage B/C should not trigger promotion."""
         from pathlib import Path
 
         import tools.orchestrator_adapter as oa
+
+        # Isolate from production directories to prevent notifier spam
+        for d in ("output", "state", "logs"):
+            (tmp_path / d).mkdir()
+        monkeypatch.setattr(oa, "OUTPUT_DIR", tmp_path / "output")
+        monkeypatch.setattr(oa, "STATE_DIR", tmp_path / "state")
+        monkeypatch.setattr(oa, "LOGS_DIR", tmp_path / "logs")
 
         class MockOrchestrator:
             def __init__(self, **kw):

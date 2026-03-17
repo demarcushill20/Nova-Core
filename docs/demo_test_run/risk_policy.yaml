@@ -1,0 +1,292 @@
+# NovaTrade IRB Demo Run — Active Risk Policy
+# Phase 6: Risk Management Hardening
+# Strategy: Rob Hoffman IRB v2.0.0
+# Date: 2026-03-17
+
+# ---------------------------------------------------------------------------
+# Policy identity
+# ---------------------------------------------------------------------------
+policy_version: "1.0.0"
+strategy_id: "Rob Hoffman IRB"
+strategy_version: "2.0.0"
+campaign: "ftmo-free-trial-march-2026"
+account_type: "FTMO Free Trial"
+account_size: 100000
+currency: "USD"
+leverage: 100
+
+# ---------------------------------------------------------------------------
+# Risk boundary
+# ---------------------------------------------------------------------------
+# The risk engine governs:
+#   - Whether a new order may be placed (pre-trade)
+#   - Whether trading should halt (kill-switch)
+#   - Session timing constraints (24/5 forex hours)
+#   - Exposure limits (IRB-specific position/order caps)
+#   - Drawdown tracking and escalation
+#
+# The risk engine does NOT govern:
+#   - Signal generation (Pine/TradingView)
+#   - Order routing or execution (adapter layer)
+#   - Broker-side margin checks (delegated to broker)
+#   - P&L attribution (monitoring layer)
+#   - Fill detection (monitoring layer)
+
+# ---------------------------------------------------------------------------
+# Policy layer evaluation order
+# ---------------------------------------------------------------------------
+# Each layer runs in sequence. A DENY/HALT at any layer short-circuits
+# remaining layers. All checks within a layer run (no short-circuit within
+# a layer) so the caller sees all failing rules at once.
+
+policy_layers:
+  - layer: 0
+    name: "system_kill_switch"
+    description: "Risk engine halt state — blocks all trading when active"
+    checks:
+      - risk_engine_halt          # halted flag set by prior drawdown breach
+    on_fail: "HALT"
+    rationale: >
+      If the risk engine has been halted (by a drawdown breach or system kill
+      switch), no further evaluation is needed. All orders are rejected with
+      HALT verdict until an operator explicitly resumes.
+
+  - layer: 1
+    name: "session_policy"
+    description: "Forex market hours — no new orders during weekend close"
+    checks:
+      - forex_market_open         # 24/5: Sun 22:00 UTC to Fri 22:00 UTC
+    on_fail: "DENY"
+    rationale: >
+      The forex market closes Friday 22:00 UTC and reopens Sunday 22:00 UTC.
+      During this window, no new orders should be placed because spreads are
+      undefined and execution quality is unpredictable. Existing positions and
+      pending orders are held per strategy_spec §7.
+
+  - layer: 2
+    name: "drawdown_governance"
+    description: "FTMO daily and total drawdown limits with tiered escalation"
+    checks:
+      - ftmo_daily_drawdown       # 5% of daily start equity
+      - ftmo_total_drawdown       # 10% of initial equity
+    on_fail: "HALT"
+    rationale: >
+      FTMO enforces hard drawdown limits. Breaching either limit forfeits the
+      account. The risk engine halts all trading at 100% of the limit to
+      prevent further damage. Warning levels at 60% and 80% provide early
+      detection in evidence logs.
+
+  - layer: 3
+    name: "exposure_control"
+    description: "IRB-specific position and pending order limits"
+    checks:
+      - irb_max_open_positions    # max 1 open position
+      - irb_max_pending_orders    # max 1 pending order
+    on_fail: "DENY"
+    rationale: >
+      Strategy spec §4.4 constrains the IRB strategy to one position and one
+      pending order at a time. This is stricter than the general risk config
+      (max_positions=5) and is enforced as a strategy-specific policy layer.
+
+  - layer: 4
+    name: "pre_trade_gate"
+    description: "Standard 13-check pre-trade validation (PreTradeGate)"
+    checks:
+      - kill_switch               # NovaCore system mode
+      - dry_run                   # dry_run flag
+      - account_mode              # must be DEMO
+      - health                    # adapter health state
+      - symbol_allowed            # symbol in allowlist
+      - volume_bounds             # volume within [0.01, 1.0]
+      - stop_loss                 # SL required
+      - max_positions             # general position limit
+      - daily_trade_count         # max 20/day
+      - cooldown                  # 60s same-symbol cooldown
+      - duplicate_position        # no same-symbol-side duplicate
+      - drawdown                  # equity drawdown check
+      - spread                    # spread ceiling 30 points
+    on_fail: "DENY"
+    rationale: >
+      The 13-check pre-trade gate is the existing safety layer from Phase 2.
+      It provides symbol-level, volume-level, and health-level validation.
+      Preserved as-is from prior phases.
+
+  - layer: 5
+    name: "strategy_identity"
+    description: "Strategy version validation (handled by TradingAgent.validate_alert)"
+    checks:
+      - strategy_name_match       # "Rob Hoffman IRB"
+      - strategy_version_match    # "2.0.0"
+    on_fail: "DENY"
+    rationale: >
+      Validated in the Trading Agent's alert validation step (Phase 5). Not
+      duplicated in the risk engine. Documented here for policy completeness.
+
+# ---------------------------------------------------------------------------
+# Session policy
+# ---------------------------------------------------------------------------
+session_policy:
+  trading_hours: "24/5"
+  description: >
+    Trade any hour the forex market is open. No session-specific restrictions
+    within market hours (no London-only or NY-only filter).
+
+  forex_market:
+    # Forex market hours (standard): Sunday 22:00 UTC to Friday 22:00 UTC
+    open_day: "SUNDAY"
+    open_hour_utc: 22
+    close_day: "FRIDAY"
+    close_hour_utc: 22
+
+  weekend_policy:
+    new_orders: false             # do NOT place new orders during weekend
+    hold_positions: true          # hold existing positions over weekend
+    hold_pending_orders: true     # hold existing pending orders over weekend
+    friday_force_close: false     # no forced close on Friday
+
+  holiday_policy: null            # no holiday handling for demo run
+
+# ---------------------------------------------------------------------------
+# Exposure controls (IRB-specific)
+# ---------------------------------------------------------------------------
+exposure:
+  max_open_positions: 1           # one position at a time (strategy_spec §4.4)
+  max_pending_orders: 1           # one pending order at a time
+  max_total_exposure_lots: 1.0    # max combined lots across all positions
+  pyramiding: false               # no adding to existing positions
+  cross_direction_allowed: false  # no hedging/reversal while in position
+
+  rationale: >
+    The IRB strategy is a single-position strategy. Only one position OR one
+    pending order may be active at any time. IRB replacement (A4) cancels the
+    old pending before placing the new one, maintaining the 1-pending invariant.
+    The Trading Agent FSM enforces this in Phase 5; the risk engine provides
+    defense-in-depth in Phase 6.
+
+# ---------------------------------------------------------------------------
+# Drawdown governance
+# ---------------------------------------------------------------------------
+drawdown:
+  daily:
+    limit_pct: 5.0                # FTMO daily drawdown limit
+    reference: "daily_start_equity"
+    reset_time: "00:00 UTC"       # reset at midnight UTC
+    warning_thresholds:
+      - level: "ELEVATED"
+        trigger_pct: 3.0          # 60% of 5% limit
+        action: "log_warning"
+        evidence: true
+      - level: "CRITICAL"
+        trigger_pct: 4.0          # 80% of 5% limit
+        action: "log_critical"
+        evidence: true
+      - level: "BREACH"
+        trigger_pct: 5.0          # 100% of limit
+        action: "halt_trading"
+        evidence: true
+    on_breach: "HALT"
+
+  total:
+    limit_pct: 10.0               # FTMO total drawdown limit
+    reference: "initial_equity"
+    warning_thresholds:
+      - level: "ELEVATED"
+        trigger_pct: 6.0          # 60% of 10% limit
+        action: "log_warning"
+        evidence: true
+      - level: "CRITICAL"
+        trigger_pct: 8.0          # 80% of 10% limit
+        action: "log_critical"
+        evidence: true
+      - level: "BREACH"
+        trigger_pct: 10.0         # 100% of limit
+        action: "halt_trading"
+        evidence: true
+    on_breach: "HALT"
+
+# ---------------------------------------------------------------------------
+# Kill-switch governance
+# ---------------------------------------------------------------------------
+kill_switch:
+  trigger_conditions:
+    - id: "KS1"
+      name: "daily_drawdown_breach"
+      condition: "daily_drawdown_pct >= 5.0"
+      action: "HALT"
+    - id: "KS2"
+      name: "total_drawdown_breach"
+      condition: "total_drawdown_pct >= 10.0"
+      action: "HALT"
+    - id: "KS3"
+      name: "system_kill_switch"
+      condition: "novacore_mode != 'run'"
+      action: "HALT"
+    - id: "KS4"
+      name: "manual_halt"
+      condition: "operator requests halt"
+      action: "HALT"
+
+  resume_policy:
+    auto_resume: false            # no automatic resume after halt
+    requires: "operator_action"   # explicit RiskEngine.resume() call
+    daily_reset_resumes: false    # daily DD reset does NOT auto-resume
+    description: >
+      Once halted, the risk engine stays halted until an operator explicitly
+      calls resume(). This prevents automated recovery from masking real
+      problems. The daily drawdown reset at midnight UTC does NOT auto-resume.
+
+  evidence:
+    log_trigger: true             # log the condition that triggered halt
+    log_resume: true              # log when operator resumes
+    log_denied_during_halt: true  # log every denied trade during halt
+
+# ---------------------------------------------------------------------------
+# Risk decision model
+# ---------------------------------------------------------------------------
+decision_model:
+  verdicts:
+    ALLOW:
+      description: "Trade may proceed to execution"
+      halts_trading: false
+      blocks_trade: false
+    DENY:
+      description: "Trade rejected, but trading continues"
+      halts_trading: false
+      blocks_trade: true
+    HALT:
+      description: "Trade rejected AND all future trading halted"
+      halts_trading: true
+      blocks_trade: true
+
+  actions:
+    NONE:
+      description: "No portfolio-level action required"
+    HALT_TRADING:
+      description: "Halt all new order placement immediately"
+      triggered_by: ["daily_drawdown_breach", "total_drawdown_breach", "system_kill_switch"]
+    SUSPEND_STRATEGY:
+      description: "Pause this strategy only (reserved for multi-strategy future)"
+      triggered_by: ["strategy_specific_fault"]
+    FLATTEN_POSITIONS:
+      description: "Close all open positions immediately"
+      triggered_by: ["total_drawdown_critical"]
+      requires: "monitoring_layer"
+      note: "Cannot be executed by risk engine alone — needs adapter access"
+    CANCEL_PENDING:
+      description: "Cancel all pending orders"
+      triggered_by: ["daily_drawdown_breach", "session_closed"]
+      requires: "monitoring_layer"
+      note: "Cannot be executed by risk engine alone — needs adapter access"
+
+# ---------------------------------------------------------------------------
+# Evidence requirements
+# ---------------------------------------------------------------------------
+evidence:
+  log_all_risk_decisions: true
+  log_drawdown_warnings: true
+  log_drawdown_tier_transitions: true
+  log_kill_switch_events: true
+  log_session_policy_denials: true
+  log_exposure_denials: true
+  format: "JSONL"
+  path: "OUTPUT/novatrade/evidence.jsonl"

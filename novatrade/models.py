@@ -49,6 +49,17 @@ class AccountMode(Enum):
 class RiskVerdict(Enum):
     ALLOW = "ALLOW"
     DENY = "DENY"
+    HALT = "HALT"  # deny AND halt all future trading until operator resumes
+
+
+class RiskAction(Enum):
+    """Portfolio-level risk action — signals what the caller should do."""
+
+    NONE = "NONE"
+    HALT_TRADING = "HALT_TRADING"  # halt all new order placement
+    SUSPEND_STRATEGY = "SUSPEND_STRATEGY"  # pause this strategy only
+    FLATTEN_POSITIONS = "FLATTEN_POSITIONS"  # close all open positions
+    CANCEL_PENDING = "CANCEL_PENDING"  # cancel all pending orders
 
 
 class HealthState(Enum):
@@ -177,12 +188,18 @@ class RiskDecision:
     checks: list[RiskCheckResult] = field(default_factory=list)
     reason: str = ""
     rule: str = ""  # which rule triggered first denial
+    policy_layer: int = -1  # which layer produced the verdict (-1 = N/A)
+    actions: list[RiskAction] = field(default_factory=list)
     request: OrderRequest | None = None
     timestamp: float = field(default_factory=time.time)
 
     @property
     def denied(self) -> bool:
-        return self.verdict == RiskVerdict.DENY
+        return self.verdict in (RiskVerdict.DENY, RiskVerdict.HALT)
+
+    @property
+    def halted(self) -> bool:
+        return self.verdict == RiskVerdict.HALT
 
     @property
     def failed_checks(self) -> list[RiskCheckResult]:
@@ -290,6 +307,8 @@ class EvidenceType(Enum):
     HEALTH_SNAPSHOT = "HEALTH_SNAPSHOT"
     RECONCILIATION = "RECONCILIATION"
     RISK_DECISION = "RISK_DECISION"
+    RISK_HALT = "RISK_HALT"
+    RISK_WARNING = "RISK_WARNING"
     ADAPTER_ERROR = "ADAPTER_ERROR"
 
 

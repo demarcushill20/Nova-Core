@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NovaTrade Risk Decision",
+  "description": "Risk decision contract for the IRB demo run risk engine (Phase 6). Defines the structure returned by RiskEngine.pre_trade_check() and the expanded verdict/action model.",
+  "version": "1.0.0",
+  "type": "object",
+  "required": ["verdict", "checks", "timestamp"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["ALLOW", "DENY", "HALT"],
+      "description": "Risk engine verdict. ALLOW = trade may proceed. DENY = trade rejected, trading continues. HALT = trade rejected AND all future trading halted until operator resumes."
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RiskCheckResult"
+      },
+      "description": "All risk checks that were evaluated, including passed and failed."
+    },
+    "reason": {
+      "type": "string",
+      "default": "",
+      "description": "Human-readable reason for the verdict (empty for ALLOW)."
+    },
+    "rule": {
+      "type": "string",
+      "default": "",
+      "description": "Identifier of the first check that triggered denial/halt (empty for ALLOW)."
+    },
+    "policy_layer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "default": -1,
+      "description": "Which policy layer produced the verdict. -1 if not applicable (e.g. ALLOW passes all layers). 0=kill_switch, 1=session, 2=drawdown, 3=exposure, 4=pre_trade_gate, 5=strategy_identity."
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "NONE",
+          "HALT_TRADING",
+          "SUSPEND_STRATEGY",
+          "FLATTEN_POSITIONS",
+          "CANCEL_PENDING"
+        ]
+      },
+      "default": ["NONE"],
+      "description": "Portfolio-level actions the caller should take in response to this decision. HALT_TRADING is set when the risk engine halts. FLATTEN_POSITIONS and CANCEL_PENDING require monitoring layer support."
+    },
+    "drawdown_state": {
+      "$ref": "#/$defs/DrawdownSnapshot",
+      "description": "Current drawdown state at the time of the decision."
+    },
+    "request": {
+      "type": ["object", "null"],
+      "default": null,
+      "description": "The OrderRequest that was evaluated (null for portfolio-level checks)."
+    },
+    "timestamp": {
+      "type": "number",
+      "description": "Unix timestamp of the decision."
+    }
+  },
+  "$defs": {
+    "RiskCheckResult": {
+      "type": "object",
+      "required": ["name", "passed"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Check identifier (e.g. 'kill_switch', 'forex_session', 'irb_max_positions')."
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Whether this check passed."
+        },
+        "detail": {
+          "type": "string",
+          "default": "",
+          "description": "Human-readable detail about the check outcome."
+        }
+      }
+    },
+    "DrawdownSnapshot": {
+      "type": "object",
+      "properties": {
+        "daily_drawdown_pct": {
+          "type": "number",
+          "description": "Current daily drawdown as percentage of daily start equity."
+        },
+        "daily_limit_pct": {
+          "type": "number",
+          "description": "Daily drawdown limit (5.0 for FTMO)."
+        },
+        "daily_level": {
+          "type": "string",
+          "enum": ["NORMAL", "ELEVATED", "CRITICAL", "BREACH"],
+          "description": "Daily drawdown warning tier."
+        },
+        "total_drawdown_pct": {
+          "type": "number",
+          "description": "Current total drawdown as percentage of initial equity."
+        },
+        "total_limit_pct": {
+          "type": "number",
+          "description": "Total drawdown limit (10.0 for FTMO)."
+        },
+        "total_level": {
+          "type": "string",
+          "enum": ["NORMAL", "ELEVATED", "CRITICAL", "BREACH"],
+          "description": "Total drawdown warning tier."
+        }
+      }
+    },
+    "PolicyLayer": {
+      "type": "object",
+      "description": "Description of a policy evaluation layer.",
+      "properties": {
+        "layer": {
+          "type": "integer",
+          "description": "Layer number (0-5)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Layer name."
+        },
+        "on_fail": {
+          "type": "string",
+          "enum": ["DENY", "HALT"],
+          "description": "Verdict to return when this layer fails."
+        }
+      }
+    }
+  }
+}

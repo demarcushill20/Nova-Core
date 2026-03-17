@@ -16,5 +16,6 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Verified comprehensive completion of EMA\u2192IRB strategy change-control across all Phase 0 documents",
   "created_at": "2026-03-17T05:39:53Z",
-  "confidence": "high"
+  "confidence": "high",
+  "supersedes": "mem_0439_-_do_not_add_extra_agents_1773714530"
 }
