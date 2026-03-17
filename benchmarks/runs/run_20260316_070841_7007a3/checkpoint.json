@@ -1,9 +1,9 @@
 {
   "run_id": "run_20260316_070841_7007a3",
   "accepted": 0,
-  "rejected": 2,
-  "skipped": 1,
+  "rejected": 3,
+  "skipped": 3,
   "errors": 0,
-  "skill_index": 2,
-  "timestamp": "2026-03-16T09:01:12Z"
+  "skill_index": 5,
+  "timestamp": "2026-03-16T10:07:18Z"
 }

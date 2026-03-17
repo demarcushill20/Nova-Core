@@ -1,0 +1,25 @@
+{
+  "skill_name": "firecrawl-site-crawl",
+  "description": "Crawl entire websites or documentation sites to index content. Discovers pages via sitemap and link following, then scrapes each as markdown. Auto-invoked when the user wants to learn a new framework, index docs, audit a site, or extract content from multiple pages on the same domain. Also use for 'crawl this site', 'index these docs', 'get all pages from'.",
+  "split": "train",
+  "metrics": {
+    "true_positives": 6,
+    "true_negatives": 5,
+    "false_positives": 0,
+    "false_negatives": 1,
+    "precision": 1.0,
+    "recall": 0.8571,
+    "f1": 0.9231,
+    "fpr": 0.0,
+    "fnr": 0.1429,
+    "specificity": 1.0,
+    "accuracy": 0.9167,
+    "weighted_score": 0.9555,
+    "paraphrase_consistency": 1.0,
+    "neighbor_conflict_rate": 0.0
+  },
+  "elapsed_seconds": 236.65,
+  "timestamp": "2026-03-16T10:01:37Z",
+  "model": null,
+  "result_count": 12
+}

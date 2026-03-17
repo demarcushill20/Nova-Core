@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0433_Update_the_demo-run_strategy_selection_from_EMA_to_Rob_Hoffman_IRB___retry1_1773729034",
+  "workflow_id": "0433_Update_the_demo-run_strategy_selection_from_EMA_to_Rob_Hoffman_IRB___retry1",
+  "task_summary": "Repaired contract validation failure for task 0433 by fixing CONTRACT block format in original output file",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Repaired contract validation failure for task 0433 by fixing CONTRACT block format in original output file"
+  ],
+  "successful_patterns": [
+    "task_completed: 0433_Update_the_demo-run_strategy_selection_from_EMA_to_Rob_Hoffman_IRB___retry1"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Repaired contract validation failure for task 0433 by fixing CONTRACT block format in original output file",
+  "created_at": "2026-03-17T06:30:34Z",
+  "confidence": "high"
+}

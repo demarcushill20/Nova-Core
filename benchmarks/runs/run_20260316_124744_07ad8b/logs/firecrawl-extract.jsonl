@@ -1,0 +1,6 @@
+{"timestamp": "2026-03-16T14:08:54Z", "skill": "firecrawl-extract", "message": "Starting optimization"}
+{"timestamp": "2026-03-16T14:08:54Z", "skill": "firecrawl-extract", "message": "Running baseline evaluation"}
+{"timestamp": "2026-03-16T14:12:18Z", "skill": "firecrawl-extract", "message": "Baseline: P=1.000 R=0.000 F1=0.000 score=0.5500"}
+{"timestamp": "2026-03-16T14:12:18Z", "skill": "firecrawl-extract", "message": "Generating candidates"}
+{"timestamp": "2026-03-16T14:12:49Z", "skill": "firecrawl-extract", "message": "Generated 3 candidates, 0 valid"}
+{"timestamp": "2026-03-16T14:12:49Z", "skill": "firecrawl-extract", "message": "No valid candidates generated"}

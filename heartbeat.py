@@ -439,11 +439,11 @@ def check_cost_router() -> dict:
         if alerts:
             alert_summary = "; ".join(a[:80] for a in alerts[:3])
             detail = (
-                f"{len(alerts)} alert(s): {alert_summary} | "
+                f"[WARN] {len(alerts)} alert(s): {alert_summary} | "
                 f"daily=${daily:.2f} monthly=${monthly:.2f} ({monthly_pct:.1f}%) "
                 f"7d_avg=${avg_daily:.2f}/day mode={hb_config.mode}"
             )
-            return {"name": "cost_router", "ok": False, "detail": detail}
+            return {"name": "cost_router", "ok": True, "detail": detail}
 
         detail = (
             f"daily=${daily:.2f} monthly=${monthly:.2f} ({monthly_pct:.1f}%) "

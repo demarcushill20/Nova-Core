@@ -1,0 +1,7 @@
+skill	decision	reason	baseline_score	candidate_score	delta
+web-research	REJECT_SMOKE	Global smoke regressions: 1 (tolerance: 0)	0.9071	1.0	0.09289999999999998
+firecrawl-deep-research	no_candidates	all candidates failed policy check			
+http-fetch	no_candidates	all candidates failed policy check			
+context7-docs	no_candidates	all candidates failed policy check			
+firecrawl-site-crawl	no_candidates	all candidates failed policy check			
+firecrawl-extract	no_candidates	all candidates failed policy check			

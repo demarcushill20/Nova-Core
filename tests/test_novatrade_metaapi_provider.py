@@ -331,10 +331,10 @@ class TestTranslateTradeResponse:
 class TestAdapterNotConnected:
     def test_operations_fail_before_connect(self, adapter):
         with pytest.raises(ConnectionError, match="not connected"):
-            asyncio.get_event_loop().run_until_complete(adapter.get_account())
+            asyncio.new_event_loop().run_until_complete(adapter.get_account())
 
     def test_health_check_when_disconnected(self, adapter):
-        h = asyncio.get_event_loop().run_until_complete(adapter.health_check())
+        h = asyncio.new_event_loop().run_until_complete(adapter.health_check())
         assert h.state == HealthState.DOWN
         assert not h.connected
 
@@ -342,7 +342,7 @@ class TestAdapterNotConnected:
 class TestAdapterGetAccount:
     def test_returns_account_state(self, adapter):
         _wire_adapter(adapter)
-        acct = asyncio.get_event_loop().run_until_complete(adapter.get_account())
+        acct = asyncio.new_event_loop().run_until_complete(adapter.get_account())
         assert acct.balance == 10000.0
         assert acct.equity == 10050.0
         assert acct.mode == AccountMode.DEMO
@@ -351,7 +351,7 @@ class TestAdapterGetAccount:
 class TestAdapterGetPositions:
     def test_returns_positions(self, adapter):
         _wire_adapter(adapter)
-        positions = asyncio.get_event_loop().run_until_complete(adapter.get_positions())
+        positions = asyncio.new_event_loop().run_until_complete(adapter.get_positions())
         assert len(positions) == 1
         assert positions[0].symbol == "EURUSD"
         assert positions[0].side == OrderSide.BUY
@@ -359,14 +359,14 @@ class TestAdapterGetPositions:
     def test_empty_positions(self, adapter):
         _wire_adapter(adapter)
         adapter._connection.get_positions = AsyncMock(return_value=[])
-        positions = asyncio.get_event_loop().run_until_complete(adapter.get_positions())
+        positions = asyncio.new_event_loop().run_until_complete(adapter.get_positions())
         assert positions == []
 
 
 class TestAdapterGetSymbolPrice:
     def test_returns_price(self, adapter):
         _wire_adapter(adapter)
-        sp = asyncio.get_event_loop().run_until_complete(
+        sp = asyncio.new_event_loop().run_until_complete(
             adapter.get_symbol_price("EURUSD"),
         )
         assert sp.symbol == "EURUSD"
@@ -376,7 +376,7 @@ class TestAdapterGetSymbolPrice:
 class TestAdapterGetCandles:
     def test_returns_candles(self, adapter):
         _wire_adapter(adapter)
-        candles = asyncio.get_event_loop().run_until_complete(
+        candles = asyncio.new_event_loop().run_until_complete(
             adapter.get_candles("EURUSD", "H1", count=2),
         )
         assert len(candles) == 2
@@ -385,7 +385,7 @@ class TestAdapterGetCandles:
 
     def test_timeframe_translation(self, adapter):
         _wire_adapter(adapter)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.new_event_loop().run_until_complete(
             adapter.get_candles("EURUSD", "M15", count=10),
         )
         adapter._account.get_historical_candles.assert_called_once_with(
@@ -404,7 +404,7 @@ class TestAdapterPlaceOrder:
             order_type=OrderType.MARKET,
             volume=0.1,
         )
-        result = asyncio.get_event_loop().run_until_complete(adapter.place_order(req))
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         assert result.ok
         assert result.order_id == "99001"
         adapter._connection.create_market_buy_order.assert_called_once()
@@ -417,7 +417,7 @@ class TestAdapterPlaceOrder:
             order_type=OrderType.MARKET,
             volume=0.05,
         )
-        result = asyncio.get_event_loop().run_until_complete(adapter.place_order(req))
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         assert result.ok
         adapter._connection.create_market_sell_order.assert_called_once()
 
@@ -430,7 +430,7 @@ class TestAdapterPlaceOrder:
             volume=0.2,
             price=1.2500,
         )
-        result = asyncio.get_event_loop().run_until_complete(adapter.place_order(req))
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         assert result.ok
         adapter._connection.create_limit_buy_order.assert_called_once()
 
@@ -443,7 +443,7 @@ class TestAdapterPlaceOrder:
             volume=0.2,
             price=1.2600,
         )
-        result = asyncio.get_event_loop().run_until_complete(adapter.place_order(req))
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         assert result.ok
 
     def test_stop_buy(self, adapter):
@@ -455,7 +455,7 @@ class TestAdapterPlaceOrder:
             volume=0.1,
             price=1.1100,
         )
-        result = asyncio.get_event_loop().run_until_complete(adapter.place_order(req))
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         assert result.ok
 
     def test_idempotency_key_in_comment(self, adapter):
@@ -467,7 +467,7 @@ class TestAdapterPlaceOrder:
             volume=0.1,
             idempotency_key="abc-123",
         )
-        asyncio.get_event_loop().run_until_complete(adapter.place_order(req))
+        asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         call_args = adapter._connection.create_market_buy_order.call_args
         # Options dict is the last positional arg passed to the SDK method
         all_args = call_args[0]
@@ -486,7 +486,7 @@ class TestAdapterPlaceOrder:
             order_type=OrderType.MARKET,
             volume=100.0,
         )
-        result = asyncio.get_event_loop().run_until_complete(adapter.place_order(req))
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         assert not result.ok
         assert "insufficient margin" in result.error
 
@@ -494,7 +494,7 @@ class TestAdapterPlaceOrder:
 class TestAdapterModifyOrder:
     def test_modify_sl_tp(self, adapter):
         _wire_adapter(adapter)
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.new_event_loop().run_until_complete(
             adapter.modify_order("12345", stop_loss=1.0900, take_profit=1.1200),
         )
         assert result.ok
@@ -508,7 +508,7 @@ class TestAdapterModifyOrder:
 class TestAdapterClosePosition:
     def test_full_close(self, adapter):
         _wire_adapter(adapter)
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.new_event_loop().run_until_complete(
             adapter.close_position("12345"),
         )
         assert result.ok
@@ -516,7 +516,7 @@ class TestAdapterClosePosition:
 
     def test_partial_close(self, adapter):
         _wire_adapter(adapter)
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.new_event_loop().run_until_complete(
             adapter.close_position("12345", volume=0.05),
         )
         assert result.ok
@@ -526,7 +526,7 @@ class TestAdapterClosePosition:
 class TestAdapterHealthCheck:
     def test_ok_when_connected(self, adapter):
         _wire_adapter(adapter)
-        h = asyncio.get_event_loop().run_until_complete(adapter.health_check())
+        h = asyncio.new_event_loop().run_until_complete(adapter.health_check())
         assert h.state == HealthState.OK
         assert h.connected
         assert h.latency_ms is not None
@@ -536,7 +536,7 @@ class TestAdapterHealthCheck:
         adapter._connection.get_account_information = AsyncMock(
             side_effect=Exception("timeout"),
         )
-        h = asyncio.get_event_loop().run_until_complete(adapter.health_check())
+        h = asyncio.new_event_loop().run_until_complete(adapter.health_check())
         assert h.state == HealthState.DOWN
         assert not adapter._connected
 
@@ -544,7 +544,7 @@ class TestAdapterHealthCheck:
 class TestAdapterDisconnect:
     def test_disconnect_clears_state(self, adapter):
         _wire_adapter(adapter)
-        asyncio.get_event_loop().run_until_complete(adapter.disconnect())
+        asyncio.new_event_loop().run_until_complete(adapter.disconnect())
         assert not adapter._connected
         assert adapter._connection is None
         assert adapter._account is None

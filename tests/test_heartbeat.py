@@ -418,7 +418,7 @@ class TestCheckCostRouter:
     @mock.patch("utils.cost_router.get_rolling_average_cost")
     @mock.patch("utils.cost_router.get_cost_summary")
     def test_alerts_present(self, m_cost, m_avg, m_alerts, m_hb_config, m_write):
-        """Budget alerts → ok=False with alert count and summary."""
+        """Budget alerts → ok=True (informational) with [WARN] prefix."""
         m_cost.return_value = {"daily_cost_usd": 25.0, "monthly_cost_usd": 150.0, "monthly_pct": 75.0}
         m_avg.return_value = 8.0
         m_alerts.return_value = ["Daily cost $25 exceeds threshold", "2x rolling average spike"]
@@ -428,8 +428,9 @@ class TestCheckCostRouter:
 
         result = heartbeat.check_cost_router()
 
-        assert result["ok"] is False
+        assert result["ok"] is True
         assert result["name"] == "cost_router"
+        assert "[WARN]" in result["detail"]
         assert "2 alert(s)" in result["detail"]
         assert "Daily cost" in result["detail"]
         assert "mode=budget_constrained" in result["detail"]

@@ -1,0 +1,7 @@
+skill	decision	reason	baseline_score	candidate_score	delta
+web-research	ACCEPT	All gates passed. Score: 0.907 → 1.000 (+0.0929)	0.9071	1.0	0.09289999999999998
+firecrawl-deep-research	skipped	baseline_perfect			
+http-fetch	REJECT_SMOKE	Global smoke regressions: 1 (tolerance: 0)	0.89	1.0	0.10999999999999999
+context7-docs	REJECT_GAIN	Score improvement -0.2055 below minimum 0.02	0.9555	0.75	-0.20550000000000002
+firecrawl-site-crawl	REJECT_SMOKE	Global smoke regressions: 1 (tolerance: 0)	0.9555	0.55	-0.40549999999999997
+firecrawl-extract	no_candidates	all candidates failed policy check			

@@ -1,0 +1,548 @@
+// @version=5
+// =============================================================================
+// NovaTrade Rob Hoffman IRB — Pine Implementation
+// =============================================================================
+// Strategy Contract:  strategy_spec.yaml v2.0.0
+// Spec SHA-256:       (to be computed after final lock)
+// Phase:              2 (Pine Implementation)
+// Date:               2026-03-17
+// Replaces:           EMA Crossover 9/21 v1.0.0 (2026-03-16)
+// Purpose:            Systems test — deterministic signal generation for
+//                     NovaTrade demo test run on EURUSD H1 (FTMO Free Trial).
+//
+// This script is a 1:1 translation of the approved Phase 1 IRB strategy
+// specification. It MUST NOT be modified without re-entering Phase 1.
+//
+// Anti-repaint design:
+//   - calc_on_every_tick = false  → bar-close-only evaluation            [AR1]
+//   - Indicators use close only  → closed bar data only                  [AR2]
+//   - Signals final once bar closes                                      [AR3]
+//   - request.security() with lookahead=barmerge.lookahead_off           [AR4]
+//
+// Scope boundary:
+//   Pine: IRB signal generation, stop order placement, trailing stop
+//         management, time stop, alert payloads for Trading Agent.
+//   NOT Pine: risk gate (13 checks), drawdown limits, cooldown, kill
+//         switch, spread filter, position reconciliation, evidence JSONL.
+// =============================================================================
+
+strategy(
+     "NovaTrade IRB v2.0.0",                   // [Spec §1]
+     overlay            = true,
+     default_qty_type   = strategy.fixed,
+     default_qty_value  = 10000,               // fallback 0.10 lots; overridden per-trade
+     initial_capital    = 100000,              // [Spec §1.account.size]
+     currency           = currency.USD,        // [Spec §1.account.currency]
+     pyramiding         = 0,                   // [Spec §4.4] max 1 position
+     process_orders_on_close = false,          // fill at next bar open (realistic)
+     calc_on_every_tick = false,               // [AR1][AR2]
+     max_bars_back      = 500)
+
+// =============================================================================
+// SECTION 1: CONSTANTS  [Spec §2, §3, §4, §5, §6]
+// =============================================================================
+
+// --- IRB Geometry [A1] ---
+IRB_PCT            = 0.45                      // 45% threshold
+
+// --- Indicator Periods [Spec §2] ---
+EMA_PERIOD         = 20                        // [Spec §2.ema_20_h1]
+ATR_PERIOD         = 14                        // [Spec §2.atr_14]
+ADX_PERIOD         = 14                        // [Spec §2.adx_14]
+
+// --- Trend Filter [U1] ---
+SLOPE_LOOKBACK     = 20                        // 20-bar EMA displacement
+SLOPE_THRESH       = 0.4                       // [Spec §3.2.quantification.threshold]
+
+// --- MTF Alignment [A8] ---
+// 5 H4 bars ≈ 20 H1 bars  [Spec §3.3.conditions.MTF1_LONG description]
+MTF_H1_LOOKBACK    = 20
+
+// --- Sideways Filter [U4] ---
+ADX_THRESH         = 20                        // [Spec §3.4.conditions.SW1]
+
+// --- Overextension Filter [U2] ---
+OE_THRESH          = 2.0                       // [Spec §3.5.quantification.threshold_k]
+
+// --- Entry / SL Buffer ---
+PIP_BUF            = 0.0001                    // 1 pip [Spec §4.1]
+
+// --- Trigger Window [U5] ---
+TRIGGER_WIN        = 20                        // [Spec §4.3.max_bars]
+
+// --- Trailing Stop [U3] ---
+TRAIL_MULT         = 1.5                       // [Spec §5.3.atr_multiplier]
+
+// --- Time Stop [U3] ---
+TIME_STOP          = 40                        // [Spec §5.4.max_bars]
+
+// --- Position Sizing [A5][U7] ---
+RISK_PCT           = 0.01                      // [Spec §5.6.risk_fraction]
+MIN_LOTS           = 0.01                      // [Spec §5.6.min_volume]
+MAX_LOTS           = 1.00                      // [Spec §5.6.max_volume]
+PIP_VAL_LOT        = 10.0                      // $10/pip/lot EURUSD [Spec §1.symbol]
+
+// --- Warmup [Spec §6.warmup] ---
+WARMUP             = 34                        // [Spec §6.warmup.bars_required]
+
+// --- Metadata ---
+STRAT_NAME         = "Rob Hoffman IRB"
+STRAT_VER          = "2.0.0"
+CAMPAIGN           = "ftmo-free-trial-march-2026"
+
+// =============================================================================
+// SECTION 2: DERIVED CONSTANTS
+// =============================================================================
+
+pip_size       = syminfo.mintick * 10          // 0.0001 for 5-digit EURUSD
+units_per_lot  = 100000                        // 1 standard lot
+
+// =============================================================================
+// SECTION 3: INDICATORS  [Spec §2]
+// =============================================================================
+
+// [Spec §2.ema_20_h1] EMA(20) on H1 close  [AR2]
+ema_h1 = ta.ema(close, EMA_PERIOD)
+
+// [Spec §2.atr_14] ATR(14) on H1
+atr_val = ta.atr(ATR_PERIOD)
+
+// [Spec §2.adx_14] ADX(14) on H1
+[dp, dm, adx_val] = ta.dmi(ADX_PERIOD, ADX_PERIOD)
+
+// [Spec §2.ema_20_h4] EMA(20) on H4  [AR4]
+ema_h4 = request.security(syminfo.tickerid, "240",
+     ta.ema(close, EMA_PERIOD),
+     lookahead = barmerge.lookahead_off)
+
+// Visual: EMA lines
+plot(ema_h1, "EMA 20 H1", color.new(color.blue, 0), 2)
+
+// =============================================================================
+// SECTION 4: WARMUP GUARD  [Spec §6.warmup, IC1]
+// =============================================================================
+
+warmup_ok = bar_index >= WARMUP
+
+// =============================================================================
+// SECTION 5: IRB GEOMETRY DETECTION  [Spec §3.1, A1]
+// =============================================================================
+
+bar_rng   = high - low
+valid_rng = bar_rng > 0                        // [IRB_UP_2 / IRB_DN_2]
+
+// Uptrend IRB: O and C both <= high - 45% × range  [Spec §3.1.uptrend_irb]
+up_thresh     = high - IRB_PCT * bar_rng
+is_up_irb     = valid_rng and (open <= up_thresh) and (close <= up_thresh)
+
+// Downtrend IRB: O and C both >= low + 45% × range  [Spec §3.1.downtrend_irb]
+dn_thresh     = low + IRB_PCT * bar_rng
+is_dn_irb     = valid_rng and (open >= dn_thresh) and (close >= dn_thresh)
+
+// =============================================================================
+// SECTION 6: TREND FILTER  [Spec §3.2, A7, U1]
+// =============================================================================
+
+// ATR-normalized EMA slope  [Spec §3.2.quantification]
+ema_slope = nz(atr_val) > 0 ?
+     (ema_h1 - nz(ema_h1[SLOPE_LOOKBACK])) / atr_val : 0.0
+
+trend_up = ema_slope >= SLOPE_THRESH           // [TF2_LONG]
+trend_dn = ema_slope <= -SLOPE_THRESH          // [TF2_SHORT]
+
+// =============================================================================
+// SECTION 7: MTF ALIGNMENT  [Spec §3.3, A8]
+// Pine boundary: Spec says "ema_20_h4[current - 5]" (5 H4 bars). Pine reads
+// H4 EMA via request.security() which returns one value per H1 bar. We use a
+// 20-H1-bar lookback (≈ 5 H4 bars) to achieve the same temporal window.
+// The na() guards are a conservative addition not in spec.  [PA-IRB-1]
+// =============================================================================
+
+// H4 EMA direction via 20-H1-bar lookback (≈ 5 H4 bars)  [MTF1_LONG/SHORT]
+h4_up  = not na(ema_h4) and not na(ema_h4[MTF_H1_LOOKBACK]) and (ema_h4 > ema_h4[MTF_H1_LOOKBACK])
+h4_dn  = not na(ema_h4) and not na(ema_h4[MTF_H1_LOOKBACK]) and (ema_h4 < ema_h4[MTF_H1_LOOKBACK])
+
+// =============================================================================
+// SECTION 8: SIDEWAYS FILTER  [Spec §3.4, A6, U4]
+// =============================================================================
+
+sw_pass = adx_val >= ADX_THRESH                // [SW1]
+
+// =============================================================================
+// SECTION 9: OVEREXTENSION FILTER  [Spec §3.5, A10, U2]
+// =============================================================================
+
+oe_ratio = nz(atr_val) > 0 ? bar_rng / atr_val : 0.0
+oe_pass  = oe_ratio <= OE_THRESH               // [OE1]
+
+// =============================================================================
+// SECTION 10: COMBINED SIGNAL  [Spec §3.6]
+// =============================================================================
+
+sig_long  = warmup_ok and is_up_irb and trend_up and h4_up and sw_pass and oe_pass
+sig_short = warmup_ok and is_dn_irb and trend_dn and h4_dn and sw_pass and oe_pass
+
+// =============================================================================
+// SECTION 11: STATE MACHINE  [Spec §6]
+// Pine boundary: Pending-order state is represented via var int + saved IRB
+// levels. Pine has no native "pending order" object — strategy.entry(stop=)
+// creates an internal order, and we track state/levels separately.  [PA-IRB-3]
+// Exclusivity: pyramiding=0 (engine-level) + state machine (logic-level)
+// jointly enforce one-position / one-active-order constraint.  [PA-IRB-4]
+// =============================================================================
+
+// States
+int S_FLAT    = 0
+int S_PLONG   = 1
+int S_PSHORT  = 2
+int S_LONG    = 3
+int S_SHORT   = 4
+
+// Persistent variables
+var int    state         = S_FLAT
+var float  irb_hi        = na              // saved IRB high for pending order
+var float  irb_lo        = na              // saved IRB low for pending order
+var int    pend_bars     = 0               // bars since pending order placed
+var int    pos_bars      = 0               // bars since position opened
+var float  best_cl       = na              // highest/lowest close since entry
+var float  cur_stop      = na              // current SL/trail level
+var float  pend_qty      = na              // saved qty for pending order
+
+// =============================================================================
+// SECTION 12: POSITION SIZING  [Spec §5.6, A5, U7]
+// Pine boundary: f_qty() returns units (lot × 100,000) because Pine's
+// strategy.entry(qty=) expects units, not lots. The alert payload separately
+// computes volume in lots for the Trading Agent.  [PA-IRB-6]
+// =============================================================================
+
+f_qty(float ep, float sp) =>
+    float sd  = math.abs(ep - sp) / pip_size       // stop distance in pips
+    float rd  = strategy.equity * RISK_PCT          // dollar risk (1% equity)
+    float raw = sd > 0 ? rd / (sd * PIP_VAL_LOT) : MIN_LOTS  // lot size
+    float cl  = math.max(MIN_LOTS, math.min(MAX_LOTS, raw))   // clamp [0.01,1.00]
+    float rnd = math.round(cl * 100.0) / 100.0     // round to 0.01
+    rnd * units_per_lot                              // convert lots → units for Pine
+
+// =============================================================================
+// SECTION 13: STATE TRANSITIONS  [Spec §6 transitions]
+// =============================================================================
+
+// Detect position changes
+bool was_flat  = strategy.position_size[1] == 0
+bool now_long  = strategy.position_size > 0
+bool now_short = strategy.position_size < 0
+bool now_flat  = strategy.position_size == 0
+
+bool fill_long  = now_long  and was_flat
+bool fill_short = now_short and was_flat
+bool pos_closed = now_flat  and not was_flat
+
+// Event flags (local, reset each bar)
+bool evt_signal   = false
+bool evt_replace  = false
+bool evt_cancel   = false
+bool evt_tstop    = false
+string evt_side   = ""
+
+// --- Position closed → FLAT ---
+if pos_closed
+    state     := S_FLAT
+    irb_hi    := na
+    irb_lo    := na
+    pend_bars := 0
+    pos_bars  := 0
+    best_cl   := na
+    cur_stop  := na
+    pend_qty  := na
+
+// --- Fill detected → LONG ---
+if fill_long and state == S_PLONG
+    state    := S_LONG
+    pos_bars := 0
+    best_cl  := close
+    cur_stop := irb_lo - PIP_BUF              // initial SL [A3]
+
+// --- Fill detected → SHORT ---
+if fill_short and state == S_PSHORT
+    state    := S_SHORT
+    pos_bars := 0
+    best_cl  := close
+    cur_stop := irb_hi + PIP_BUF              // initial SL [A3]
+
+// --- Increment counters ---
+if state == S_PLONG or state == S_PSHORT
+    pend_bars += 1
+if state == S_LONG or state == S_SHORT
+    pos_bars += 1
+
+// =============================================================================
+// SECTION 14: PENDING ORDER MANAGEMENT  [Spec §4.2, §4.3, A4, U5]
+// =============================================================================
+
+// --- Trigger window expiry [U5] ---
+if state == S_PLONG and pend_bars >= TRIGGER_WIN
+    strategy.cancel("Long")
+    state     := S_FLAT
+    irb_hi    := na
+    irb_lo    := na
+    pend_bars := 0
+    pend_qty  := na
+    evt_cancel := true
+    evt_side   := "BUY"
+
+if state == S_PSHORT and pend_bars >= TRIGGER_WIN
+    strategy.cancel("Short")
+    state     := S_FLAT
+    irb_hi    := na
+    irb_lo    := na
+    pend_bars := 0
+    pend_qty  := na
+    evt_cancel := true
+    evt_side   := "SELL"
+
+// --- New signal from FLAT [Spec §6 FLAT transitions] ---
+if state == S_FLAT and sig_long
+    float ep = high + PIP_BUF                  // [Spec §4.1.long_entry]
+    float sp = low  - PIP_BUF                  // [Spec §5.1.placement.long]
+    float qv = f_qty(ep, sp)
+    strategy.entry("Long", strategy.long, stop = ep, qty = qv)
+    irb_hi    := high
+    irb_lo    := low
+    pend_qty  := qv
+    state     := S_PLONG
+    pend_bars := 0
+    evt_signal := true
+    evt_side   := "BUY"
+
+else if state == S_FLAT and sig_short
+    float ep = low  - PIP_BUF                  // [Spec §4.1.short_entry]
+    float sp = high + PIP_BUF                  // [Spec §5.1.placement.short]
+    float qv = f_qty(ep, sp)
+    strategy.entry("Short", strategy.short, stop = ep, qty = qv)
+    irb_hi    := high
+    irb_lo    := low
+    pend_qty  := qv
+    state     := S_PSHORT
+    pend_bars := 0
+    evt_signal := true
+    evt_side   := "SELL"
+
+// --- IRB Replacement [A4]: same-direction replaces pending ---
+else if state == S_PLONG and sig_long
+    float ep = high + PIP_BUF
+    float sp = low  - PIP_BUF
+    float qv = f_qty(ep, sp)
+    strategy.entry("Long", strategy.long, stop = ep, qty = qv)
+    irb_hi    := high
+    irb_lo    := low
+    pend_qty  := qv
+    pend_bars := 0                             // window resets [Spec §4.2]
+    evt_replace := true
+    evt_side    := "BUY"
+
+else if state == S_PSHORT and sig_short
+    float ep = low  - PIP_BUF
+    float sp = high + PIP_BUF
+    float qv = f_qty(ep, sp)
+    strategy.entry("Short", strategy.short, stop = ep, qty = qv)
+    irb_hi    := high
+    irb_lo    := low
+    pend_qty  := qv
+    pend_bars := 0
+    evt_replace := true
+    evt_side    := "SELL"
+
+// Opposite-direction while pending → IGNORE  [Spec §6 PENDING transitions, IC9]
+// Signals while in position → IGNORE          [Spec §6.key_difference_from_ema, IC8]
+// Pine-specific: no explicit else-branch needed. The if/else-if chain above
+// only matches S_FLAT and same-direction S_PLONG/S_PSHORT. All other state
+// combinations (opposite pending, in-position) fall through with no action.
+
+// =============================================================================
+// SECTION 15: EXIT MANAGEMENT  [Spec §5]
+// Pine boundary: Spec lists exit priority SL > trail > time (§5.5). In Pine,
+// the initial SL and trailing stop are merged into a single cur_stop value
+// passed to strategy.exit(stop=). The Pine engine resolves intra-bar priority.
+// Time stop uses a separate strategy.close() call.  [PA-IRB-8]
+// =============================================================================
+
+// --- LONG trailing stop + time stop ---
+if state == S_LONG
+    // Track highest close  [Spec §5.3.mechanics.long]
+    best_cl := math.max(nz(best_cl, close), close)
+
+    // Trail level  [Spec §5.3.mechanics.long.formula]
+    float tl = best_cl - TRAIL_MULT * nz(atr_val)
+
+    // Only tighten (move up)  [Spec §5.1.modification]
+    cur_stop := math.max(nz(cur_stop), tl)
+
+    // Apply exit  [Spec §5.5 priority 1+2]
+    strategy.exit("Long Exit", "Long", stop = cur_stop)
+
+    // Time stop  [Spec §5.4, priority 3]
+    if pos_bars >= TIME_STOP
+        strategy.close("Long", comment = "TIME_STOP")
+        evt_tstop := true
+        evt_side  := "BUY"
+
+// --- SHORT trailing stop + time stop ---
+if state == S_SHORT
+    // Track lowest close  [Spec §5.3.mechanics.short]
+    best_cl := math.min(nz(best_cl, close), close)
+
+    // Trail level  [Spec §5.3.mechanics.short.formula]
+    float tl = best_cl + TRAIL_MULT * nz(atr_val)
+
+    // Only tighten (move down)
+    cur_stop := math.min(nz(cur_stop), tl)
+
+    // Apply exit
+    strategy.exit("Short Exit", "Short", stop = cur_stop)
+
+    // Time stop
+    if pos_bars >= TIME_STOP
+        strategy.close("Short", comment = "TIME_STOP")
+        evt_tstop := true
+        evt_side  := "SELL"
+
+// =============================================================================
+// SECTION 16: ALERT PAYLOADS  [Spec §9]
+// =============================================================================
+// Contract: alert JSON is the interface between Pine (signal generation)
+// and the Trading Agent (order execution).
+//
+// Authoritative fields (Trading Agent MUST use these for order placement):
+//   entry_price, stop_loss, volume, side, order_type
+//
+// Reference fields (for logging/evidence; NOT used for order construction):
+//   close_price, bar_ohlc_*, indicator values
+//
+// Signal identifiers are constructed from state:
+//   signal_type: "LONG_IRB" / "SHORT_IRB" — derived from evt_side
+//   irb_type: "UPTREND_IRB" / "DOWNTREND_IRB" — same mapping
+//   action: PLACE_STOP_ORDER / REPLACE_STOP_ORDER — derived from evt_replace
+//
+// Pine-broker boundary: Pine computes entry/SL/volume from bar-close data.
+// The Trading Agent receives these via webhook and places the actual
+// MetaApi pending order. Any fill-price slippage, spread, or re-quote
+// is a broker-side reality that Pine cannot model.
+// =============================================================================
+
+// --- Signal / Replace alert ---
+if evt_signal or evt_replace
+    string at   = evt_replace ? "REPLACE_STOP_ORDER" : "PLACE_STOP_ORDER"
+    string it   = evt_side == "BUY" ? "UPTREND_IRB" : "DOWNTREND_IRB"
+    string st   = evt_side == "BUY" ? "LONG_IRB" : "SHORT_IRB"
+    string ot   = evt_side == "BUY" ? "BUY_STOP" : "SELL_STOP"
+    float  ep   = evt_side == "BUY" ? irb_hi + PIP_BUF : irb_lo - PIP_BUF
+    float  sp   = evt_side == "BUY" ? irb_lo - PIP_BUF : irb_hi + PIP_BUF
+    float  sd   = math.abs(ep - sp) / pip_size
+    float  rd   = strategy.equity * RISK_PCT
+    float  vol  = math.max(MIN_LOTS, math.min(MAX_LOTS, sd > 0 ? rd / (sd * PIP_VAL_LOT) : MIN_LOTS))
+    vol        := math.round(vol * 100.0) / 100.0
+
+    string p = '{' +
+         '"strategy_name":"'    + STRAT_NAME   + '"' +
+         ',"strategy_version":"'+ STRAT_VER    + '"' +
+         ',"action":"'          + at           + '"' +
+         ',"signal_type":"'     + st           + '"' +
+         ',"irb_type":"'        + it           + '"' +
+         ',"symbol":"EURUSD"' +
+         ',"broker_symbol":"EURUSD.sim"' +
+         ',"timeframe":"H1"' +
+         ',"side":"'            + evt_side     + '"' +
+         ',"order_type":"'      + ot           + '"' +
+         ',"entry_price":'      + str.tostring(ep,  "#.#####") +
+         ',"stop_loss":'        + str.tostring(sp,  "#.#####") +
+         ',"stop_distance_pips":'+ str.tostring(sd, "#.#") +
+         ',"volume":'           + str.tostring(vol, "#.##") +
+         ',"risk_dollars":'     + str.tostring(rd,  "#.##") +
+         ',"bar_close_time":'   + str.tostring(time_close) +
+         ',"bar_ohlc_o":'       + str.tostring(open,  "#.#####") +
+         ',"bar_ohlc_h":'       + str.tostring(high,  "#.#####") +
+         ',"bar_ohlc_l":'       + str.tostring(low,   "#.#####") +
+         ',"bar_ohlc_c":'       + str.tostring(close, "#.#####") +
+         ',"irb_range":'        + str.tostring(bar_rng, "#.#####") +
+         ',"ema_20_h1":'        + str.tostring(ema_h1,  "#.#####") +
+         ',"ema_slope":'        + str.tostring(ema_slope,"#.###") +
+         ',"ema_20_h4":'        + str.tostring(ema_h4,  "#.#####") +
+         ',"ema_20_h4_dir":"'   + (h4_up ? "RISING" : h4_dn ? "FALLING" : "FLAT") + '"' +
+         ',"adx_14":'           + str.tostring(adx_val,  "#.##") +
+         ',"atr_14":'           + str.tostring(atr_val,  "#.#####") +
+         ',"overextension_ratio":'+ str.tostring(oe_ratio,"#.###") +
+         ',"trigger_window_bars":'+ str.tostring(TRIGGER_WIN) +
+         ',"strategy_state":"'  + (state == S_PLONG ? "PENDING_LONG" : "PENDING_SHORT") + '"' +
+         ',"campaign":"'        + CAMPAIGN     + '"' +
+         '}'
+    alert(p, alert.freq_once_per_bar_close)
+
+// --- Trail update alert (fires only when SL actually tightens) [PA-IRB-11] ---
+var float prev_stop = na
+if (state == S_LONG or state == S_SHORT) and not na(cur_stop) and cur_stop != nz(prev_stop)
+    string tp = '{' +
+         '"strategy_name":"'    + STRAT_NAME   + '"' +
+         ',"strategy_version":"'+ STRAT_VER    + '"' +
+         ',"action":"MODIFY_SL"' +
+         ',"symbol":"EURUSD"' +
+         ',"side":"'            + (state == S_LONG ? "BUY" : "SELL") + '"' +
+         ',"old_stop":'         + str.tostring(nz(prev_stop), "#.#####") +
+         ',"new_stop":'         + str.tostring(cur_stop,      "#.#####") +
+         ',"best_close":'       + str.tostring(best_cl,       "#.#####") +
+         ',"atr_14":'           + str.tostring(atr_val,       "#.#####") +
+         ',"bars_since_entry":' + str.tostring(pos_bars) +
+         ',"campaign":"'        + CAMPAIGN     + '"' +
+         '}'
+    alert(tp, alert.freq_once_per_bar_close)
+
+prev_stop := cur_stop
+
+// --- Cancel alert ---
+if evt_cancel
+    string cp = '{' +
+         '"strategy_name":"'    + STRAT_NAME   + '"' +
+         ',"strategy_version":"'+ STRAT_VER    + '"' +
+         ',"action":"CANCEL_ORDER"' +
+         ',"symbol":"EURUSD"' +
+         ',"side":"'            + evt_side     + '"' +
+         ',"cancel_reason":"TRIGGER_WINDOW_EXPIRED"' +
+         ',"bars_elapsed":'     + str.tostring(TRIGGER_WIN) +
+         ',"campaign":"'        + CAMPAIGN     + '"' +
+         '}'
+    alert(cp, alert.freq_once_per_bar_close)
+
+// --- Time stop alert ---
+if evt_tstop
+    string xp = '{' +
+         '"strategy_name":"'    + STRAT_NAME   + '"' +
+         ',"strategy_version":"'+ STRAT_VER    + '"' +
+         ',"action":"CLOSE_POSITION"' +
+         ',"symbol":"EURUSD"' +
+         ',"side":"'            + evt_side     + '"' +
+         ',"close_reason":"TIME_STOP"' +
+         ',"bars_held":'        + str.tostring(pos_bars) +
+         ',"close_price":'      + str.tostring(close, "#.#####") +
+         ',"campaign":"'        + CAMPAIGN     + '"' +
+         '}'
+    alert(xp, alert.freq_once_per_bar_close)
+
+// =============================================================================
+// SECTION 17: VISUAL ANNOTATIONS
+// =============================================================================
+
+// IRB signal markers
+plotshape(sig_long,  "LONG IRB",  shape.triangleup,   location.belowbar,
+     color.new(color.green, 0), size = size.small)
+plotshape(sig_short, "SHORT IRB", shape.triangledown,  location.abovebar,
+     color.new(color.red, 0),   size = size.small)
+
+// Trailing stop level (when in position)
+plot(state == S_LONG or state == S_SHORT ? cur_stop : na,
+     "Trail Stop", color.new(color.orange, 0), 1, plot.style_stepline)
+
+// Warmup zone
+bgcolor(not warmup_ok ? color.new(color.gray, 90) : na, title = "Warmup Zone")
+
+// =============================================================================
+// END OF STRATEGY
+// =============================================================================

@@ -1,0 +1,16 @@
+{"timestamp": "2026-03-16T13:00:15Z", "skill": "firecrawl-site-crawl", "message": "Starting optimization"}
+{"timestamp": "2026-03-16T13:00:15Z", "skill": "firecrawl-site-crawl", "message": "Running baseline evaluation"}
+{"timestamp": "2026-03-16T13:08:19Z", "skill": "firecrawl-site-crawl", "message": "Baseline: P=1.000 R=0.857 F1=0.923 score=0.9555"}
+{"timestamp": "2026-03-16T13:08:19Z", "skill": "firecrawl-site-crawl", "message": "Generating candidates"}
+{"timestamp": "2026-03-16T13:10:40Z", "skill": "firecrawl-site-crawl", "message": "Generated 3 candidates, 1 valid"}
+{"timestamp": "2026-03-16T13:10:40Z", "skill": "firecrawl-site-crawl", "message": "Ranking candidates on train set"}
+{"timestamp": "2026-03-16T13:18:33Z", "skill": "firecrawl-site-crawl", "message": "Candidate 1: score=1.0000 (rank=1)"}
+{"timestamp": "2026-03-16T13:18:33Z", "skill": "firecrawl-site-crawl", "message": "Best candidate: 1 (score=1.0000)"}
+{"timestamp": "2026-03-16T13:18:33Z", "skill": "firecrawl-site-crawl", "message": "Running holdout test evaluation"}
+{"timestamp": "2026-03-16T13:21:14Z", "skill": "firecrawl-site-crawl", "message": "Test: P=1.000 R=0.000 F1=0.000 score=0.5500"}
+{"timestamp": "2026-03-16T13:24:44Z", "skill": "firecrawl-site-crawl", "message": "Running interference check"}
+{"timestamp": "2026-03-16T13:51:50Z", "skill": "firecrawl-site-crawl", "message": "Interference: 0/42 conflicts (rate=0.000)"}
+{"timestamp": "2026-03-16T13:51:51Z", "skill": "firecrawl-site-crawl", "message": "Running smoke test"}
+{"timestamp": "2026-03-16T13:52:03Z", "skill": "firecrawl-site-crawl", "message": "Smoke: 0/1 passed"}
+{"timestamp": "2026-03-16T13:52:03Z", "skill": "firecrawl-site-crawl", "message": "Evaluating decision gates"}
+{"timestamp": "2026-03-16T13:52:03Z", "skill": "firecrawl-site-crawl", "message": "Decision: REJECT_SMOKE \u2014 Global smoke regressions: 1 (tolerance: 0)"}

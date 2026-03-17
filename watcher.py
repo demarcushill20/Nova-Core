@@ -712,6 +712,7 @@ async def _dispatch_inner(task_path: Path):
     ks_mode = check_kill_switch()
     if ks_mode != MODE_RUN:
         logger.info("KILL_SWITCH: mode=%s — skipping task %s", ks_mode, stem)
+        _dispatched.discard(task_name)  # Allow retry on next poll cycle
         return
 
     # --- Phase 2.2: Budget check before spawning worker ---
@@ -721,13 +722,15 @@ async def _dispatch_inner(task_path: Path):
         can_go, budget_msg = budget.can_proceed()
         if not can_go:
             logger.warning("BUDGET_EXCEEDED: %s — deferring task %s", budget_msg, stem)
+            _dispatched.discard(task_name)  # Allow retry on next poll cycle
             return
     except ImportError:
         pass
 
-    # --- Guard: skip if already dispatched or in-progress ---
-    if task_name in _dispatched:
-        return
+    # --- Guard: skip if already in-progress ---
+    # NOTE: _dispatched check removed — scan_and_enqueue() already adds to
+    # _dispatched before pool.submit(), so checking here would always skip.
+    # The .inprogress file check is the authoritative filesystem-level guard.
     if inprogress_path.exists():
         logger.info("Skipping %s — .inprogress file exists.", task_name)
         return
@@ -866,6 +869,10 @@ async def _dispatch_inner(task_path: Path):
 
     if routing["use_orchestrator"]:
         logger.info("ORCHESTRATOR PATH: %s (class=%s, stage=%s)", stem, routing["task_class"], stage or "default")
+        # Create PID file so production_hardening won't requeue this task
+        orch_pid_file = RUNNING_DIR / f"{stem}.pid"
+        RUNNING_DIR.mkdir(parents=True, exist_ok=True)
+        orch_pid_file.write_text(str(os.getpid()), encoding="utf-8")
         try:
             from tools.orchestrator_adapter import execute_via_orchestrator
 
@@ -902,6 +909,8 @@ async def _dispatch_inner(task_path: Path):
                 logger.error("TASK FAILED (no fallback): %s", stem)
                 _session_mgr.record_task_completion(stem, success=False)
                 return
+        finally:
+            orch_pid_file.unlink(missing_ok=True)
 
     # --- Skill activation ---
     all_skills = load_skills()

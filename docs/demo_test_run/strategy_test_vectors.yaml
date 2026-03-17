@@ -1,0 +1,740 @@
+# =============================================================================
+# NovaTrade Demo Test Run — Strategy Test Vectors (IRB)
+# =============================================================================
+# Phase:    1 (Formal Strategy Specification) — RESTARTED for IRB
+# Date:     2026-03-17
+# Status:   LOCKED
+# Replaces: EMA Crossover test vectors (2026-03-16)
+# Purpose:  Deterministic test cases to validate IRB strategy implementation
+#           against the strategy_spec.yaml contract.
+# =============================================================================
+#
+# Each test vector defines:
+#   - Market state (bars, indicators)
+#   - Expected IRB detection result
+#   - Expected signal output
+#   - Expected action (order placement, fill, trail, exit)
+#
+# All prices are synthetic for deterministic verification.
+# These vectors do NOT represent real market data.
+# =============================================================================
+
+test_vectors:
+
+  # =========================================================================
+  # TV1: Valid uptrend IRB — LONG signal, buy-stop placed
+  # =========================================================================
+  - id: "TV1"
+    name: "Valid uptrend IRB — LONG signal"
+    source_tags: "[A1][A2][A7][A8][U1][U4]"
+    description: >
+      H1 bar closes with uptrend IRB geometry (O and C >= 45% below high).
+      Trend is up (slope >= 0.4), H4 aligned, ADX >= 20, ATR filter passes.
+      Expected: LONG_IRB_SIGNAL, buy-stop order placed.
+    precondition:
+      state: "FLAT"
+      available_bars: 50
+    bar:
+      high: 1.08600
+      low: 1.08000
+      open: 1.08250
+      close: 1.08200
+      range: 0.00600              # 60 pips
+    irb_check:
+      threshold_from_high: 1.08330  # 1.08600 - 0.45 * 0.00600 = 1.08330
+      open_below_threshold: true    # 1.08250 <= 1.08330
+      close_below_threshold: true   # 1.08200 <= 1.08330
+      is_uptrend_irb: true
+    indicators:
+      ema_20_h1_current: 1.08100
+      ema_20_h1_20_bars_ago: 1.07700
+      atr_14: 0.00400              # 40 pips
+      ema_slope: 1.0               # (1.08100-1.07700)/0.00400 = 1.0
+      ema_20_h4_current: 1.08050
+      ema_20_h4_5_bars_ago: 1.07800
+      adx_14: 28
+    filter_results:
+      trend_filter: "PASS (1.0 >= 0.4)"
+      mtf_alignment: "PASS (H4 rising)"
+      sideways_filter: "PASS (ADX 28 >= 20)"
+      overextension: "PASS (60/40 = 1.5 <= 2.0)"
+    expected_signal: "LONG_IRB"
+    expected_action: "place_buy_stop"
+    expected_order:
+      type: "BUY_STOP"
+      entry_price: 1.08610        # IRB high + 1 pip
+      stop_loss: 1.07990          # IRB low - 1 pip
+      stop_distance_pips: 62      # (1.08610 - 1.07990) / 0.0001
+      risk_dollars: 1000          # 1% of 100,000
+      volume: 1.61                # 1000 / (62 * 10) = 1.61 → clamped to 1.0
+      volume_clamped: 1.00        # max per risk gate
+    expected_state_after: "PENDING_LONG"
+
+  # =========================================================================
+  # TV2: Valid downtrend IRB — SHORT signal, sell-stop placed
+  # =========================================================================
+  - id: "TV2"
+    name: "Valid downtrend IRB — SHORT signal"
+    source_tags: "[A1][A2][A7][A8][U1][U4]"
+    description: >
+      H1 bar closes with downtrend IRB geometry (O and C >= 45% above low).
+      Trend is down, H4 aligned, ADX >= 20, ATR filter passes.
+    precondition:
+      state: "FLAT"
+      available_bars: 50
+    bar:
+      high: 1.10000
+      low: 1.09400
+      open: 1.09750
+      close: 1.09800
+      range: 0.00600              # 60 pips
+    irb_check:
+      threshold_from_low: 1.09670  # 1.09400 + 0.45 * 0.00600 = 1.09670
+      open_above_threshold: true   # 1.09750 >= 1.09670
+      close_above_threshold: true  # 1.09800 >= 1.09670
+      is_downtrend_irb: true
+    indicators:
+      ema_20_h1_current: 1.09900
+      ema_20_h1_20_bars_ago: 1.10300
+      atr_14: 0.00500             # 50 pips
+      ema_slope: -0.8             # (1.09900-1.10300)/0.00500 = -0.8
+      ema_20_h4_current: 1.10000
+      ema_20_h4_5_bars_ago: 1.10200
+      adx_14: 32
+    filter_results:
+      trend_filter: "PASS (-0.8 <= -0.4)"
+      mtf_alignment: "PASS (H4 falling)"
+      sideways_filter: "PASS (ADX 32 >= 20)"
+      overextension: "PASS (60/50 = 1.2 <= 2.0)"
+    expected_signal: "SHORT_IRB"
+    expected_action: "place_sell_stop"
+    expected_order:
+      type: "SELL_STOP"
+      entry_price: 1.09390        # IRB low - 1 pip
+      stop_loss: 1.10010          # IRB high + 1 pip
+      stop_distance_pips: 62
+      volume: 1.00                # clamped
+    expected_state_after: "PENDING_SHORT"
+
+  # =========================================================================
+  # TV3: IRB geometry detected but trend filter fails
+  # =========================================================================
+  - id: "TV3"
+    name: "IRB geometry valid but trend too weak"
+    source_tags: "[A1][U1]"
+    description: >
+      Valid uptrend IRB geometry, but EMA slope is only 0.2 (below 0.4
+      threshold). Expected: signal suppressed.
+    precondition:
+      state: "FLAT"
+    bar:
+      high: 1.08600
+      low: 1.08000
+      open: 1.08250
+      close: 1.08200
+    irb_check:
+      is_uptrend_irb: true
+    indicators:
+      ema_slope: 0.2              # below 0.4 threshold
+      adx_14: 25
+      atr_14: 0.00400
+      overextension_ratio: 1.5
+    filter_results:
+      trend_filter: "FAIL (0.2 < 0.4)"
+    expected_signal: "NONE"
+    expected_action: "do_nothing"
+    reason: "trend_filter_fails — slope 0.2 < threshold 0.4 [IC4]"
+
+  # =========================================================================
+  # TV4: IRB geometry detected but H4 MTF misaligned
+  # =========================================================================
+  - id: "TV4"
+    name: "IRB valid but H4 trending opposite"
+    source_tags: "[A1][A8]"
+    description: >
+      Valid uptrend IRB on H1, H1 trend filter passes, but H4 EMA(20) is
+      falling (opposite direction). Expected: signal suppressed.
+    precondition:
+      state: "FLAT"
+    bar:
+      high: 1.08600
+      low: 1.08000
+      open: 1.08250
+      close: 1.08200
+    irb_check:
+      is_uptrend_irb: true
+    indicators:
+      ema_slope: 0.6
+      ema_20_h4_current: 1.08000
+      ema_20_h4_5_bars_ago: 1.08200  # falling
+      adx_14: 25
+    filter_results:
+      trend_filter: "PASS"
+      mtf_alignment: "FAIL (H4 falling, need rising for longs)"
+    expected_signal: "NONE"
+    expected_action: "do_nothing"
+    reason: "mtf_misaligned — H4 trending opposite [IC5]"
+
+  # =========================================================================
+  # TV5: IRB geometry detected but ADX too low (sideways)
+  # =========================================================================
+  - id: "TV5"
+    name: "IRB valid but sideways market (ADX < 20)"
+    source_tags: "[A6][U4]"
+    description: >
+      Valid IRB geometry and trend filter passes, but ADX(14) = 15,
+      indicating a ranging/choppy market. Expected: signal suppressed.
+    precondition:
+      state: "FLAT"
+    bar:
+      high: 1.08600
+      low: 1.08000
+      open: 1.08250
+      close: 1.08200
+    irb_check:
+      is_uptrend_irb: true
+    indicators:
+      ema_slope: 0.5
+      ema_20_h4_current: 1.08050
+      ema_20_h4_5_bars_ago: 1.07900
+      adx_14: 15                  # below 20 threshold
+    filter_results:
+      sideways_filter: "FAIL (ADX 15 < 20)"
+    expected_signal: "NONE"
+    expected_action: "do_nothing"
+    reason: "sideways_market — ADX 15 < 20 [IC6]"
+
+  # =========================================================================
+  # TV6: IRB overextended (range > 2.0 * ATR)
+  # =========================================================================
+  - id: "TV6"
+    name: "IRB overextended — ATR filter rejects"
+    source_tags: "[A10][U2]"
+    description: >
+      Valid IRB geometry in a valid trend, but the IRB candle's range is
+      105 pips while ATR(14) is 40 pips (ratio 2.625 > 2.0 threshold).
+      Expected: signal suppressed.
+    precondition:
+      state: "FLAT"
+    bar:
+      high: 1.09050
+      low: 1.08000
+      open: 1.08400
+      close: 1.08350
+      range: 0.01050              # 105 pips
+    irb_check:
+      is_uptrend_irb: true
+    indicators:
+      ema_slope: 0.8
+      adx_14: 30
+      atr_14: 0.00400             # 40 pips
+      overextension_ratio: 2.625  # 105/40 = 2.625
+    filter_results:
+      overextension: "FAIL (2.625 > 2.0)"
+    expected_signal: "NONE"
+    expected_action: "do_nothing"
+    reason: "overextended_irb — ratio 2.625 > threshold 2.0 [IC7]"
+
+  # =========================================================================
+  # TV7: Not an IRB — geometry test fails
+  # =========================================================================
+  - id: "TV7"
+    name: "Normal candle — not an IRB"
+    source_tags: "[A1]"
+    description: >
+      The candle has open=1.08100, close=1.08500 on a range of
+      1.08000-1.08600. Close is at 1.08500, threshold is 1.08330.
+      Close (1.08500) is ABOVE threshold — fails uptrend IRB check.
+      In an uptrend, open and close must both be BELOW the threshold.
+    bar:
+      high: 1.08600
+      low: 1.08000
+      open: 1.08100
+      close: 1.08500
+      range: 0.00600
+    irb_check:
+      threshold_from_high: 1.08330
+      open_below_threshold: true   # 1.08100 <= 1.08330
+      close_below_threshold: false # 1.08500 > 1.08330 — FAILS
+      is_uptrend_irb: false
+      threshold_from_low: 1.08270
+      open_above_threshold: false  # 1.08100 < 1.08270 — FAILS
+      is_downtrend_irb: false
+    expected_signal: "NONE"
+    expected_action: "do_nothing"
+    reason: "no_irb_geometry [IC2][IC3]"
+
+  # =========================================================================
+  # TV8: Zero-range candle (doji) — not an IRB
+  # =========================================================================
+  - id: "TV8"
+    name: "Doji candle — zero range, not an IRB"
+    source_tags: "[A1]"
+    description: >
+      A doji with high == low (range = 0). Division by zero protection:
+      range must be > 0 for IRB detection.
+    bar:
+      high: 1.08300
+      low: 1.08300
+      open: 1.08300
+      close: 1.08300
+      range: 0.00000
+    irb_check:
+      is_uptrend_irb: false
+      is_downtrend_irb: false
+    expected_signal: "NONE"
+    reason: "zero_range — cannot compute 45% threshold [IRB_UP_2]"
+
+  # =========================================================================
+  # TV9: Buy-stop triggered — transition to LONG
+  # =========================================================================
+  - id: "TV9"
+    name: "Buy-stop triggered — enter LONG position"
+    source_tags: "[A2][A3][U7]"
+    description: >
+      A pending buy-stop at 1.08610 is active. The next bar's high reaches
+      1.08650, triggering the fill. Position opens with SL at 1.07990.
+    precondition:
+      state: "PENDING_LONG"
+      pending_order:
+        type: "BUY_STOP"
+        entry_price: 1.08610
+        stop_loss: 1.07990
+        volume: 1.00
+        bars_elapsed: 3
+    trigger_bar:
+      high: 1.08650               # exceeds 1.08610 — triggered
+      low: 1.08500
+      open: 1.08550
+      close: 1.08620
+    expected_fill:
+      fill_price: 1.08610         # filled at stop price (ideal)
+      position_side: "BUY"
+      stop_loss: 1.07990
+      volume: 1.00
+    expected_state_after: "LONG"
+
+  # =========================================================================
+  # TV10: Sell-stop NOT triggered — bar doesn't reach entry
+  # =========================================================================
+  - id: "TV10"
+    name: "Sell-stop not triggered — order remains pending"
+    source_tags: "[A2][U5]"
+    description: >
+      A pending sell-stop at 1.09390 is active. The next bar's low is
+      1.09420 — does not reach the stop price. Order remains pending.
+    precondition:
+      state: "PENDING_SHORT"
+      pending_order:
+        type: "SELL_STOP"
+        entry_price: 1.09390
+        bars_elapsed: 5
+    next_bar:
+      high: 1.09600
+      low: 1.09420                # does not reach 1.09390
+      close: 1.09550
+    expected_action: "do_nothing"
+    expected_state_after: "PENDING_SHORT"
+    pending_bars_after: 6
+
+  # =========================================================================
+  # TV11: Trigger window expires — cancel pending order
+  # =========================================================================
+  - id: "TV11"
+    name: "Trigger window expired — cancel pending order"
+    source_tags: "[U5]"
+    description: >
+      A pending buy-stop has been waiting for 20 bars without triggering.
+      The trigger window expires. Expected: cancel order, return to FLAT.
+    precondition:
+      state: "PENDING_LONG"
+      pending_order:
+        type: "BUY_STOP"
+        entry_price: 1.08610
+        bars_elapsed: 20          # window expired
+    expected_action: "cancel_pending_order"
+    expected_cancel_reason: "TRIGGER_WINDOW_EXPIRED"
+    expected_state_after: "FLAT"
+
+  # =========================================================================
+  # TV12: IRB replacement — new IRB replaces old pending order
+  # =========================================================================
+  - id: "TV12"
+    name: "IRB replacement — new IRB in same direction"
+    source_tags: "[A4]"
+    description: >
+      A pending buy-stop exists from a previous IRB. A new qualifying
+      uptrend IRB forms with different levels. The new IRB replaces the
+      old one — cancel old order, place new at new IRB levels.
+    precondition:
+      state: "PENDING_LONG"
+      pending_order:
+        type: "BUY_STOP"
+        entry_price: 1.08610
+        stop_loss: 1.07990
+        bars_elapsed: 8
+    new_irb_bar:
+      high: 1.08500
+      low: 1.08100
+      open: 1.08200
+      close: 1.08180
+      range: 0.00400
+    irb_check:
+      threshold_from_high: 1.08320  # 1.08500 - 0.45*0.00400
+      is_uptrend_irb: true          # 1.08200 <= 1.08320 AND 1.08180 <= 1.08320
+    indicators:
+      ema_slope: 0.6
+      adx_14: 26
+      atr_14: 0.00350
+      overextension_ratio: 1.14
+      mtf_aligned: true
+    expected_action: "replace_pending_order"
+    expected_cancel: "old order at 1.08610"
+    expected_new_order:
+      type: "BUY_STOP"
+      entry_price: 1.08510       # new IRB high + 1 pip
+      stop_loss: 1.08090         # new IRB low - 1 pip
+    expected_state_after: "PENDING_LONG"
+    trigger_window_reset: true    # window restarts at 0
+
+  # =========================================================================
+  # TV13: Trailing stop updates — LONG position
+  # =========================================================================
+  - id: "TV13"
+    name: "Trailing stop tightens on favorable move"
+    source_tags: "[A9][U3]"
+    description: >
+      A LONG position was entered at 1.08610. Over subsequent bars, the
+      highest close reaches 1.09100. ATR(14) = 0.00400. The trailing stop
+      moves from the initial SL to the trail level.
+    precondition:
+      state: "LONG"
+      position:
+        side: "BUY"
+        entry_price: 1.08610
+        initial_stop: 1.07990
+        volume: 1.00
+    bar_sequence:
+      - bar: 1
+        close: 1.08700
+        highest_close: 1.08700
+        atr_14: 0.00400
+        trail_level: 1.08100      # 1.08700 - 1.5*0.00400 = 1.08100
+        new_stop: 1.08100         # max(1.08100, 1.07990) = 1.08100
+        stop_moved: true
+      - bar: 2
+        close: 1.08900
+        highest_close: 1.08900
+        atr_14: 0.00400
+        trail_level: 1.08300      # 1.08900 - 0.00600 = 1.08300
+        new_stop: 1.08300
+        stop_moved: true
+      - bar: 3
+        close: 1.09100
+        highest_close: 1.09100
+        atr_14: 0.00400
+        trail_level: 1.08500
+        new_stop: 1.08500
+        stop_moved: true
+      - bar: 4
+        close: 1.08800            # pullback — but close is lower
+        highest_close: 1.09100    # unchanged
+        atr_14: 0.00420
+        trail_level: 1.08470      # 1.09100 - 1.5*0.00420 = 1.08470
+        new_stop: 1.08500         # max(1.08470, 1.08500) = 1.08500 (no change)
+        stop_moved: false         # stop only tightens, never widens
+    expected_state_after: "LONG"
+
+  # =========================================================================
+  # TV14: Trailing stop hit — exit LONG
+  # =========================================================================
+  - id: "TV14"
+    name: "Trailing stop hit — close LONG position"
+    source_tags: "[A9][U3]"
+    description: >
+      LONG position with trailing stop at 1.08500. Next bar's low drops
+      to 1.08450, hitting the stop. Position closes.
+    precondition:
+      state: "LONG"
+      position:
+        side: "BUY"
+        entry_price: 1.08610
+        current_stop: 1.08500
+    bar:
+      high: 1.08900
+      low: 1.08450               # hits stop at 1.08500
+      close: 1.08600
+    expected_action: "close_position"
+    expected_close:
+      close_price: 1.08500       # closed at stop level
+      close_reason: "TRAILING_STOP"
+      pnl_pips: -11              # (1.08500 - 1.08610) / 0.0001
+    expected_state_after: "FLAT"
+
+  # =========================================================================
+  # TV15: Stop-loss hit — exit SHORT
+  # =========================================================================
+  - id: "TV15"
+    name: "Stop-loss hit — close SHORT position"
+    source_tags: "[A3]"
+    description: >
+      SHORT position entered at 1.09390 with SL at 1.10010 (IRB high + 1pip).
+      Bar high reaches 1.10050, hitting the stop.
+    precondition:
+      state: "SHORT"
+      position:
+        side: "SELL"
+        entry_price: 1.09390
+        initial_stop: 1.10010
+        current_stop: 1.10010     # not yet trailed
+    bar:
+      high: 1.10050              # exceeds stop at 1.10010
+      low: 1.09800
+      close: 1.09950
+    expected_action: "close_position"
+    expected_close:
+      close_price: 1.10010
+      close_reason: "SL"
+      pnl_pips: -62              # (1.09390 - 1.10010) / 0.0001
+    expected_state_after: "FLAT"
+
+  # =========================================================================
+  # TV16: Time stop — exit after 40 bars
+  # =========================================================================
+  - id: "TV16"
+    name: "Time stop — close position after 40 bars"
+    source_tags: "[U3]"
+    description: >
+      LONG position has been held for 40 bars without SL or trailing stop
+      exit. Time stop fires — close at market.
+    precondition:
+      state: "LONG"
+      position:
+        side: "BUY"
+        entry_price: 1.08610
+        current_stop: 1.08500
+        bars_held: 40
+    bar:
+      close: 1.08900
+    expected_action: "close_position"
+    expected_close:
+      close_price: 1.08900       # market close
+      close_reason: "TIME_STOP"
+      pnl_pips: 29               # (1.08900 - 1.08610) / 0.0001
+      hold_duration_bars: 40
+    expected_state_after: "FLAT"
+
+  # =========================================================================
+  # TV17: LONG signal while already in SHORT — ignored (no reversal)
+  # =========================================================================
+  - id: "TV17"
+    name: "LONG IRB signal while SHORT — suppressed"
+    source_tags: "[A1]"
+    description: >
+      A valid LONG IRB signal fires while a SHORT position is open.
+      Unlike EMA crossover, IRB does NOT reverse. Signal is ignored.
+    precondition:
+      state: "SHORT"
+      position:
+        side: "SELL"
+        entry_price: 1.09390
+    irb_check:
+      is_uptrend_irb: true
+    filter_results:
+      all_filters: "PASS"
+    expected_signal: "LONG_IRB"
+    expected_action: "do_nothing"
+    reason: "existing_position — no reversal in IRB strategy [IC8]"
+    expected_state_after: "SHORT"
+
+  # =========================================================================
+  # TV18: SHORT IRB signal while PENDING_LONG — ignored
+  # =========================================================================
+  - id: "TV18"
+    name: "SHORT IRB signal while pending LONG — ignored"
+    source_tags: "[A4]"
+    description: >
+      A SHORT IRB signal fires while a buy-stop order is pending.
+      Cross-direction signals do not replace opposite-direction orders.
+    precondition:
+      state: "PENDING_LONG"
+      pending_order:
+        type: "BUY_STOP"
+    irb_check:
+      is_downtrend_irb: true
+    expected_action: "do_nothing"
+    reason: "existing_pending_order_opposite [IC9]"
+    expected_state_after: "PENDING_LONG"
+
+  # =========================================================================
+  # TV19: Warmup insufficient — signal suppressed
+  # =========================================================================
+  - id: "TV19"
+    name: "Warmup period — insufficient bars"
+    source_tags: "[A1]"
+    description: >
+      Only 25 bars available (less than 34 required for full indicator
+      convergence). Even if IRB geometry matches, no signal generated.
+    precondition:
+      state: "FLAT"
+      available_bars: 25
+    bar:
+      high: 1.08600
+      low: 1.08000
+      open: 1.08250
+      close: 1.08200
+    irb_check:
+      is_uptrend_irb: true       # geometry matches but warmup fails
+    expected_signal: "NONE"
+    expected_action: "do_nothing"
+    reason: "insufficient_warmup — bar_count 25 < 34 [IC1]"
+
+  # =========================================================================
+  # TV20: Risk gate denial — spread too wide
+  # =========================================================================
+  - id: "TV20"
+    name: "Risk gate denial — spread exceeds ceiling"
+    source_tags: "[A2]"
+    description: >
+      A valid LONG IRB signal fires, but the current spread is 45 points
+      (4.5 pips), exceeding the 30-point ceiling. Risk gate denies.
+    precondition:
+      state: "FLAT"
+      current_spread_points: 45.0
+    irb_check:
+      is_uptrend_irb: true
+    filter_results:
+      all_filters: "PASS"
+    expected_signal: "LONG_IRB"
+    expected_risk_decision: "DENY"
+    expected_risk_rule: "spread"
+    expected_action: "do_nothing"
+    reason: "risk_gate_denial — spread 45.0 > ceiling 30.0 [IC10]"
+    expected_state_after: "FLAT"
+
+  # =========================================================================
+  # TV21: Risk gate denial — drawdown breach
+  # =========================================================================
+  - id: "TV21"
+    name: "Risk gate denial — daily drawdown exceeded"
+    description: >
+      A valid SHORT IRB signal fires, but account has drawn down 5.2%
+      today. Risk gate denies.
+    precondition:
+      state: "FLAT"
+      account_balance: 100000
+      account_equity: 94800       # 5.2% drawdown
+    irb_check:
+      is_downtrend_irb: true
+    expected_signal: "SHORT_IRB"
+    expected_risk_decision: "DENY"
+    expected_risk_rule: "drawdown"
+    expected_action: "do_nothing"
+    expected_state_after: "FLAT"
+
+  # =========================================================================
+  # TV22: SL/TP placement verification — LONG
+  # =========================================================================
+  - id: "TV22"
+    name: "SL placement verification — LONG IRB"
+    source_tags: "[A2][A3][U7]"
+    description: >
+      Verify stop-loss placement and position sizing for a LONG IRB trade.
+    irb_bar:
+      high: 1.08600
+      low: 1.08200
+      range_pips: 40
+    expected_entry: 1.08610       # high + 1 pip
+    expected_stop: 1.08190        # low - 1 pip
+    expected_stop_distance_pips: 42  # (1.08610 - 1.08190) / 0.0001
+    position_sizing:
+      equity: 100000
+      risk_fraction: 0.01
+      risk_dollars: 1000
+      lot_size: 2.38              # 1000 / (42 * 10)
+      lot_clamped: 1.00           # max 1.0
+
+  # =========================================================================
+  # TV23: SL placement verification — SHORT IRB
+  # =========================================================================
+  - id: "TV23"
+    name: "SL placement verification — SHORT IRB"
+    source_tags: "[A2][A3][U7]"
+    description: >
+      Verify stop-loss placement and position sizing for a SHORT IRB trade.
+    irb_bar:
+      high: 1.10000
+      low: 1.09400
+      range_pips: 60
+    expected_entry: 1.09390       # low - 1 pip
+    expected_stop: 1.10010        # high + 1 pip
+    expected_stop_distance_pips: 62
+    position_sizing:
+      equity: 100000
+      risk_fraction: 0.01
+      risk_dollars: 1000
+      lot_size: 1.61              # 1000 / (62 * 10)
+      lot_clamped: 1.00
+
+  # =========================================================================
+  # TV24: Edge case — candle is both uptrend and downtrend IRB
+  # =========================================================================
+  - id: "TV24"
+    name: "Edge case — small body, qualifies as both IRB types"
+    source_tags: "[A1][A7]"
+    description: >
+      A candle with very small body where O and C are both near the middle
+      could satisfy both uptrend and downtrend IRB geometry. The trend
+      filter determines which direction to trade.
+    bar:
+      high: 1.08600
+      low: 1.08000
+      open: 1.08310
+      close: 1.08290
+      range: 0.00600
+    irb_check:
+      threshold_from_high: 1.08330
+      open_below_threshold: true   # 1.08310 <= 1.08330
+      close_below_threshold: true  # 1.08290 <= 1.08330
+      is_uptrend_irb: true
+      threshold_from_low: 1.08270
+      open_above_threshold: true   # 1.08310 >= 1.08270
+      close_above_threshold: true  # 1.08290 >= 1.08270
+      is_downtrend_irb: true
+    resolution: >
+      When a candle qualifies as both uptrend and downtrend IRB, the trend
+      filter (TF2) determines which signal to generate. If trend is up,
+      generate LONG_IRB. If trend is down, generate SHORT_IRB. If trend
+      fails both directions, no signal. Both directions cannot fire
+      simultaneously (ema_slope cannot be both >= 0.4 and <= -0.4).
+
+  # =========================================================================
+  # TV25: Trailing stop — SHORT position
+  # =========================================================================
+  - id: "TV25"
+    name: "Trailing stop tightens on SHORT favorable move"
+    source_tags: "[A9][U3]"
+    description: >
+      SHORT position entered at 1.09390. Lowest close reaches 1.08800.
+      ATR(14) = 0.00400. Trailing stop tightens.
+    precondition:
+      state: "SHORT"
+      position:
+        side: "SELL"
+        entry_price: 1.09390
+        initial_stop: 1.10010
+    bar_sequence:
+      - bar: 1
+        close: 1.09200
+        lowest_close: 1.09200
+        atr_14: 0.00400
+        trail_level: 1.09800      # 1.09200 + 1.5*0.00400 = 1.09800
+        new_stop: 1.09800         # min(1.09800, 1.10010) = 1.09800
+        stop_moved: true
+      - bar: 2
+        close: 1.08800
+        lowest_close: 1.08800
+        atr_14: 0.00400
+        trail_level: 1.09400
+        new_stop: 1.09400         # tightened further
+        stop_moved: true

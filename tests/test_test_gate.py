@@ -6,13 +6,16 @@ Validates that _run_test_gate() and _apply_test_gate_result() work correctly:
 - Timeout: skip gate, continue delivery
 """
 
-import subprocess
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from watcher import _apply_test_gate_result, _run_test_gate
 
 # --- Helpers -----------------------------------------------------------------
+
 
 def _write_output(tmp_path: Path, stem: str, content: str) -> Path:
     """Write an output file and return its path."""
@@ -48,55 +51,89 @@ files_changed: foo.py
 """
 
 
+# --- Helpers for async subprocess mocking -----------------------------------
+
+
+def _make_mock_process(returncode: int, stdout: str = "", stderr: str = ""):
+    """Create a mock asyncio subprocess process."""
+    proc = MagicMock()
+    proc.returncode = returncode
+    proc.communicate = AsyncMock(
+        return_value=(
+            stdout.encode("utf-8"),
+            stderr.encode("utf-8"),
+        )
+    )
+    proc.kill = MagicMock()
+    return proc
+
+
 # --- Tests for _run_test_gate ------------------------------------------------
 
-def test_run_test_gate_pass():
-    """When pytest returns 0, status should be 'pass'."""
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = "10 passed in 1.5s"
-    mock_result.stderr = ""
 
-    with patch("watcher.subprocess.run", return_value=mock_result):
-        result = _run_test_gate("0500_test")
+@pytest.mark.asyncio
+async def test_run_test_gate_pass():
+    """When pytest returns 0, status should be 'pass'."""
+    mock_proc = _make_mock_process(0, stdout="10 passed in 1.5s")
+
+    with patch("watcher.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        result = await _run_test_gate("0500_test")
 
     assert result["status"] == "pass"
     assert "passed" in result["summary"].lower()
 
 
-def test_run_test_gate_fail():
+@pytest.mark.asyncio
+async def test_run_test_gate_fail():
     """When pytest returns non-zero, status should be 'fail'."""
-    mock_result = MagicMock()
-    mock_result.returncode = 1
-    mock_result.stdout = "FAILED tests/test_foo.py::test_bar\n1 failed"
-    mock_result.stderr = ""
+    mock_proc = _make_mock_process(1, stdout="FAILED tests/test_foo.py::test_bar\n1 failed")
 
-    with patch("watcher.subprocess.run", return_value=mock_result):
-        result = _run_test_gate("0500_test")
+    with patch("watcher.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        result = await _run_test_gate("0500_test")
 
     assert result["status"] == "fail"
     assert "1" in result["summary"]
 
 
-def test_run_test_gate_timeout():
+@pytest.mark.asyncio
+async def test_run_test_gate_timeout():
     """When pytest times out, status should be 'timeout'."""
-    with patch("watcher.subprocess.run", side_effect=subprocess.TimeoutExpired("pytest", 120)):
-        result = _run_test_gate("0500_test")
+    mock_proc = _make_mock_process(1)
+    # The second communicate() call (after kill) must succeed
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+    mock_proc.kill = MagicMock()
+
+    async def _fake_wait_for(coro, *, timeout=None):
+        # Consume the coroutine to avoid warnings
+        coro.close()
+        raise asyncio.TimeoutError()
+
+    with (
+        patch("watcher.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc),
+        patch("watcher.asyncio.wait_for", side_effect=_fake_wait_for),
+    ):
+        result = await _run_test_gate("0500_test")
 
     assert result["status"] == "timeout"
     assert "timed out" in result["summary"].lower()
 
 
-def test_run_test_gate_error():
+@pytest.mark.asyncio
+async def test_run_test_gate_error():
     """When an exception occurs, status should be 'error'."""
-    with patch("watcher.subprocess.run", side_effect=FileNotFoundError("pytest not found")):
-        result = _run_test_gate("0500_test")
+    with patch(
+        "watcher.asyncio.create_subprocess_exec",
+        new_callable=AsyncMock,
+        side_effect=FileNotFoundError("pytest not found"),
+    ):
+        result = await _run_test_gate("0500_test")
 
     assert result["status"] == "error"
     assert "error" in result["summary"].lower()
 
 
 # --- Tests for _apply_test_gate_result ---------------------------------------
+
 
 def test_apply_pass_returns_true(tmp_path):
     """On pass, delivery should proceed."""
@@ -122,8 +159,7 @@ def test_apply_error_returns_true(tmp_path):
 def test_apply_fail_downgrades_confidence(tmp_path):
     """On failure, confidence should be downgraded to 'low'."""
     out_file = _write_output(tmp_path, "0500_test", VALID_OUTPUT)
-    gate = {"status": "fail", "summary": "pytest exited with code 1",
-            "output": "FAILED test_foo.py::test_bar"}
+    gate = {"status": "fail", "summary": "pytest exited with code 1", "output": "FAILED test_foo.py::test_bar"}
 
     with patch("watcher._find_recent_output", return_value=out_file):
         result = _apply_test_gate_result("0500_test", gate)
@@ -138,8 +174,7 @@ def test_apply_fail_downgrades_confidence(tmp_path):
 def test_apply_fail_downgrades_medium_confidence(tmp_path):
     """On failure, medium confidence should also be downgraded to 'low'."""
     out_file = _write_output(tmp_path, "0501_test", VALID_OUTPUT_MEDIUM)
-    gate = {"status": "fail", "summary": "pytest exited with code 1",
-            "output": "FAILED test_foo.py::test_bar"}
+    gate = {"status": "fail", "summary": "pytest exited with code 1", "output": "FAILED test_foo.py::test_bar"}
 
     with patch("watcher._find_recent_output", return_value=out_file):
         result = _apply_test_gate_result("0501_test", gate)
@@ -153,8 +188,11 @@ def test_apply_fail_downgrades_medium_confidence(tmp_path):
 def test_apply_fail_appends_summary(tmp_path):
     """On failure, test failure summary should be appended to output."""
     out_file = _write_output(tmp_path, "0500_test", VALID_OUTPUT)
-    gate = {"status": "fail", "summary": "pytest exited with code 1",
-            "output": "FAILED test_foo.py::test_bar\n1 failed, 9 passed"}
+    gate = {
+        "status": "fail",
+        "summary": "pytest exited with code 1",
+        "output": "FAILED test_foo.py::test_bar\n1 failed, 9 passed",
+    }
 
     with patch("watcher._find_recent_output", return_value=out_file):
         _apply_test_gate_result("0500_test", gate)

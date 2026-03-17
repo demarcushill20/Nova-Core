@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0441_I_want_to_diagnose_and_fix_this_problem_1773728712",
+  "workflow_id": "0441_I_want_to_diagnose_and_fix_this_problem",
+  "task_summary": "Fixed lifecycle race condition where production_hardening requeued orchestrator-dispatched tasks by adding PID file creation to orchestrator path",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed lifecycle race condition where production_hardening requeued orchestrator-dispatched tasks by adding PID file creation to orchestrator path"
+  ],
+  "successful_patterns": [
+    "task_failed: 0441_I_want_to_diagnose_and_fix_this_problem"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed lifecycle race condition where production_hardening requeued orchestrator-dispatched tasks by adding PID file creation to orchestrator path",
+  "created_at": "2026-03-17T06:25:12Z",
+  "confidence": "high"
+}

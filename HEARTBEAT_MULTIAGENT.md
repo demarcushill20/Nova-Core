@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-16T08:54:07Z
+Generated: 2026-03-17T08:40:39Z
 
 ## Overall: HEALTHY
 
@@ -8,8 +8,8 @@ Generated: 2026-03-16T08:54:07Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 5 |
-| Failed workflows | 1 |
+| Completed workflows | 14 |
+| Failed workflows | 3 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
 | Completed delegations | 0 |
@@ -21,9 +21,9 @@ Generated: 2026-03-16T08:54:07Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 180 |
-| Contract failures | 0 |
-| Contract failure rate | 0.0% |
+| Contract successes | 218 |
+| Contract failures | 4 |
+| Contract failure rate | 1.8% |
 | Budget exhaustions | 0 |
 | Policy violations | 2 |
 | Orphaned agents | 0 |
@@ -37,10 +37,21 @@ Generated: 2026-03-16T08:54:07Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| hb_proactive_20260315_160902_research_agent_reliability_self_healing_patterns | ? | failed | - |
-| hb_proactive_20260315_203923_research_claude_code_custom_slash_commands_and_hoo | ? | completed | - |
-| hb_proactive_20260316_041103_research_llm_eval_frameworks_2026 | ? | completed | - |
-| hb_proactive_20260316_064140_research_python_async_agent_patterns | ? | completed | - |
+| 0429_Can_you_make_sure_this_promp_is_100__completed______You_are_Claude_Code_working_ | ? | completed | - |
+| 0430_Document_the_exact_test_environment_used_or_assumed_ | ? | completed | - |
+| 0432_You_are_Claude_Code_working_inside_the_NovaTrade_codebase_and_documents_ | ? | completed | - |
+| 0437_You_are_Claude_Code_working_inside_the_NovaTrade_codebase_and_documents_ | ? | completed | - |
+| 0440_Can_you_diagnose_and_fix_this_issue____Nova___Mar_16__2026_at_9_27_PM_ | ? | failed | - |
+| 0442_You_are_Claude_Code_working_inside_the_NovaTrade_codebase_and_documents_ | ? | completed | - |
+| 0443_-_one-position___one-active-order_constraints_if_required_by_spec | ? | completed | - |
+| 0444_Create_full_spec-to-code_traceability | ? | completed | - |
+| 0446_You_are_Claude_Code_working_inside_the_NovaTrade_codebase_and_documents_ | ? | completed | - |
+| 0447_You_must_verify_at_minimum_ | ? | completed | - |
+| 0448_-_timestamps_bar_references_are_clearly_defined | ? | completed | - |
+| 0450_You_are_Claude_Code_working_inside_the_NovaTrade_codebase_and_documents_ | ? | failed | - |
+| 0452_-_whether_the_approved_filters_make_the_system_too_restrictive | ? | completed | - |
+| hb_proactive_20260316_091138_research_mcp_ecosystem_2026_new_servers | ? | completed | - |
+| research_structured_output_validation_patterns | ? | failed | - |
 | test_integration | ? | completed | - |
 | test_no_promo | ? | completed | - |
 

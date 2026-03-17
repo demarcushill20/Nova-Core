@@ -1,0 +1,6 @@
+{
+  "candidate_id": 1,
+  "description": "Use this skill whenever the user's message contains a specific URL and they want to retrieve, fetch, pull, get, read, or download what's at that address. Covers JSON API endpoints, documentation pages",
+  "train_score": 1.0,
+  "rank": 1
+}

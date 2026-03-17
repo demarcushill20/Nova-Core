@@ -51,53 +51,88 @@ WORK_DIR = BASE_DIR / "WORK"
 LOGS_DIR = BASE_DIR / "LOGS"
 STATE_DIR = BASE_DIR / "STATE"
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
-TASK_TIMEOUT = 300
+TASK_TIMEOUT = 14400  # 4 hours
 
 # Stage B: skills allowed for the research-only path
-_STAGE_B_ALLOWED_SKILLS = frozenset({
-    "web-research", "file-ops", "self-verification", "research-to-action",
-    "http-fetch",
-})
+_STAGE_B_ALLOWED_SKILLS = frozenset(
+    {
+        "web-research",
+        "file-ops",
+        "self-verification",
+        "research-to-action",
+        "http-fetch",
+    }
+)
 
 # Stage B: skills that are blocked (mutation-capable)
-_STAGE_B_BLOCKED_SKILLS = frozenset({
-    "shell-ops", "git-ops", "task-execution",
-})
+_STAGE_B_BLOCKED_SKILLS = frozenset(
+    {
+        "shell-ops",
+        "git-ops",
+        "task-execution",
+    }
+)
 
 # Stage C: skills allowed for low-risk coding path
 # Same as Stage B plus file-ops is used for bounded code edits
-_STAGE_C_ALLOWED_SKILLS = frozenset({
-    "web-research", "file-ops", "self-verification", "research-to-action",
-    "http-fetch",
-})
+_STAGE_C_ALLOWED_SKILLS = frozenset(
+    {
+        "web-research",
+        "file-ops",
+        "self-verification",
+        "research-to-action",
+        "http-fetch",
+    }
+)
 
 # Stage C: skills that are blocked (dangerous execution)
-_STAGE_C_BLOCKED_SKILLS = frozenset({
-    "shell-ops", "git-ops", "task-execution",
-})
+_STAGE_C_BLOCKED_SKILLS = frozenset(
+    {
+        "shell-ops",
+        "git-ops",
+        "task-execution",
+    }
+)
 
 # Stage D: skills allowed for system_inspect (read-only path)
-_STAGE_D_ALLOWED_SKILLS = frozenset({
-    "web-research", "file-ops", "self-verification",
-    "http-fetch", "reading-obsidian-memory",
-})
+_STAGE_D_ALLOWED_SKILLS = frozenset(
+    {
+        "web-research",
+        "file-ops",
+        "self-verification",
+        "http-fetch",
+        "reading-obsidian-memory",
+    }
+)
 
 # Stage D: skills that are blocked for system tasks (mutation-capable)
-_STAGE_D_BLOCKED_SKILLS = frozenset({
-    "shell-ops", "git-ops", "task-execution",
-})
+_STAGE_D_BLOCKED_SKILLS = frozenset(
+    {
+        "shell-ops",
+        "git-ops",
+        "task-execution",
+    }
+)
 
 # Stage D system_report: skills allowed (superset of inspect — adds shell-ops)
-_STAGE_D_REPORT_ALLOWED_SKILLS = frozenset({
-    "web-research", "file-ops", "self-verification",
-    "http-fetch", "reading-obsidian-memory",
-    "shell-ops",  # bounded by system_shell_allowlist
-})
+_STAGE_D_REPORT_ALLOWED_SKILLS = frozenset(
+    {
+        "web-research",
+        "file-ops",
+        "self-verification",
+        "http-fetch",
+        "reading-obsidian-memory",
+        "shell-ops",  # bounded by system_shell_allowlist
+    }
+)
 
 # Stage D system_report: skills that remain blocked
-_STAGE_D_REPORT_BLOCKED_SKILLS = frozenset({
-    "git-ops", "task-execution",
-})
+_STAGE_D_REPORT_BLOCKED_SKILLS = frozenset(
+    {
+        "git-ops",
+        "task-execution",
+    }
+)
 
 
 def build_plan_from_task(
@@ -162,30 +197,32 @@ def build_plan_from_task(
         steps[0].inputs["vault_note_paths"] = vault_ctx.get("vault_note_paths", [])
         logger.info(
             "VAULT CONTEXT INJECTED: %s — %d notes, reason=%s",
-            stem, vault_ctx.get("vault_notes_found", 0),
+            stem,
+            vault_ctx.get("vault_notes_found", 0),
             vault_ctx.get("vault_eligibility_reason", "?"),
         )
     elif not vault_ctx.get("vault_context_injected", False):
         logger.debug(
             "VAULT CONTEXT SKIPPED: %s — reason=%s",
-            stem, vault_ctx.get("vault_eligibility_reason", "?"),
+            stem,
+            vault_ctx.get("vault_eligibility_reason", "?"),
         )
 
     # Phase 7: inject pattern guidance into first step's inputs
     if pattern_guidance and steps:
         steps[0].inputs["pattern_guidance"] = pattern_guidance
-        steps[0].inputs["pattern_paths"] = [
-            p["path"] for p in pattern_ctx.get("selected_patterns", [])
-        ]
+        steps[0].inputs["pattern_paths"] = [p["path"] for p in pattern_ctx.get("selected_patterns", [])]
         logger.info(
             "PATTERN GUIDANCE INJECTED: %s — %d patterns, reason=%s",
-            stem, len(pattern_ctx.get("selected_patterns", [])),
+            stem,
+            len(pattern_ctx.get("selected_patterns", [])),
             pattern_ctx.get("retrieval_reason", "?"),
         )
     elif not pattern_ctx.get("pattern_retrieval_activated", False):
         logger.debug(
             "PATTERN GUIDANCE SKIPPED: %s — reason=%s",
-            stem, pattern_ctx.get("retrieval_reason", "?"),
+            stem,
+            pattern_ctx.get("retrieval_reason", "?"),
         )
 
     return ExecutionPlan(
@@ -201,9 +238,7 @@ def build_plan_from_task(
     )
 
 
-def _build_stageB_research_steps(
-    stem: str, task_text: str
-) -> list[PlanStep]:
+def _build_stageB_research_steps(stem: str, task_text: str) -> list[PlanStep]:
     """Build research-only plan steps for Stage B rollout.
 
     These steps use only read-only skills: web-research, file-ops
@@ -232,9 +267,7 @@ def _build_stageB_research_steps(
     ]
 
 
-def _build_stageC_coding_steps(
-    stem: str, task_class: str, task_text: str
-) -> list[PlanStep]:
+def _build_stageC_coding_steps(stem: str, task_class: str, task_text: str) -> list[PlanStep]:
     """Build coding plan steps for Stage C rollout.
 
     These steps use file-ops for bounded code inspection/edits with a
@@ -297,15 +330,14 @@ def _get_system_scope(routing: dict | None) -> str:
     # Fallback: read from disk
     try:
         from tools.task_classifier import load_feature_flags
+
         flags = load_feature_flags()
         return flags.get("system_scope", "inspect_only")
     except Exception:
         return "inspect_only"
 
 
-def _build_stageD_inspect_steps(
-    stem: str, task_text: str
-) -> list[PlanStep]:
+def _build_stageD_inspect_steps(stem: str, task_text: str) -> list[PlanStep]:
     """Build read-only inspection plan steps for Stage D system_inspect.
 
     These steps use only inspect-safe skills: file-ops (for reading),
@@ -334,9 +366,7 @@ def _build_stageD_inspect_steps(
     ]
 
 
-def _build_stageD_report_steps(
-    stem: str, task_text: str
-) -> list[PlanStep]:
+def _build_stageD_report_steps(stem: str, task_text: str) -> list[PlanStep]:
     """Build system_report plan steps for Stage D.
 
     Extends inspect with bounded shell-ops for read-only diagnostics.
@@ -376,9 +406,7 @@ def _build_stageD_report_steps(
     ]
 
 
-def _build_steps_for_class(
-    stem: str, task_class: str, task_text: str
-) -> list[PlanStep]:
+def _build_steps_for_class(stem: str, task_class: str, task_text: str) -> list[PlanStep]:
     """Create plan steps appropriate for the task class.
 
     Each class gets a tailored sequence of steps that leverages
@@ -594,8 +622,7 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
         f"confidence: <high|medium|low>\n"
     )
 
-    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions",
-           "--model", "claude-opus-4-6", prompt]
+    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", "--model", "claude-opus-4-6", prompt]
 
     try:
         child_env = os.environ.copy()
@@ -700,7 +727,9 @@ def execute_via_orchestrator(
     plan = build_plan_from_task(stem, task_text, routing)
     logger.info(
         "Plan built: %s (%d steps, strategy=%s)",
-        plan.plan_id, len(plan.steps), plan.strategy,
+        plan.plan_id,
+        len(plan.steps),
+        plan.strategy,
     )
 
     # Phase 7.5: initialize pattern feedback trace
@@ -711,8 +740,7 @@ def execute_via_orchestrator(
         valid, reason = validate_stageB_plan(plan)
         if not valid:
             logger.error("STAGE B PLAN REJECTED: %s — %s", stem, reason)
-            _persist_workflow_state(stem, "rejected", task_class, stage,
-                                   halt_reason=f"plan_validation: {reason}")
+            _persist_workflow_state(stem, "rejected", task_class, stage, halt_reason=f"plan_validation: {reason}")
             return {
                 "success": False,
                 "output_path": None,
@@ -735,8 +763,7 @@ def execute_via_orchestrator(
                 valid, reason = validate_stageD_plan(plan)
             if not valid:
                 logger.error("STAGE D PLAN REJECTED: %s — %s", stem, reason)
-                _persist_workflow_state(stem, "rejected", task_class, stage,
-                                       halt_reason=f"plan_validation: {reason}")
+                _persist_workflow_state(stem, "rejected", task_class, stage, halt_reason=f"plan_validation: {reason}")
                 return {
                     "success": False,
                     "output_path": None,
@@ -753,8 +780,7 @@ def execute_via_orchestrator(
             valid, reason = validate_stageC_plan(plan)
             if not valid:
                 logger.error("STAGE D (C-rules) PLAN REJECTED: %s — %s", stem, reason)
-                _persist_workflow_state(stem, "rejected", task_class, stage,
-                                       halt_reason=f"plan_validation: {reason}")
+                _persist_workflow_state(stem, "rejected", task_class, stage, halt_reason=f"plan_validation: {reason}")
                 return {
                     "success": False,
                     "output_path": None,
@@ -772,8 +798,7 @@ def execute_via_orchestrator(
         valid, reason = validate_stageC_plan(plan)
         if not valid:
             logger.error("STAGE C PLAN REJECTED: %s — %s", stem, reason)
-            _persist_workflow_state(stem, "rejected", task_class, stage,
-                                   halt_reason=f"plan_validation: {reason}")
+            _persist_workflow_state(stem, "rejected", task_class, stage, halt_reason=f"plan_validation: {reason}")
             return {
                 "success": False,
                 "output_path": None,
@@ -806,10 +831,7 @@ def execute_via_orchestrator(
 
     # Stage C/D verifier enforcement: check verification step result
     if stage in ("C", "D") and (routing or {}).get("verifier_required", False):
-        verify_steps = [
-            s for s in summary.get("steps", [])
-            if "verify" in s.get("step_id", "")
-        ]
+        verify_steps = [s for s in summary.get("steps", []) if "verify" in s.get("step_id", "")]
         if not verify_steps:
             logger.warning(
                 "STAGE C VERIFIER MISSING: %s — no verification step in results",
@@ -822,7 +844,8 @@ def execute_via_orchestrator(
             if last_verify.get("status") not in ("done", "success"):
                 logger.warning(
                     "STAGE C VERIFIER REJECTED: %s — verification step status=%s",
-                    stem, last_verify.get("status"),
+                    stem,
+                    last_verify.get("status"),
                 )
                 summary["status"] = "rejected"
                 summary["verifier_rejected"] = True
@@ -863,12 +886,14 @@ def execute_via_orchestrator(
         if promotion_result.get("promoted"):
             logger.info(
                 "WORKFLOW PROMOTED: %s → %s",
-                stem, promotion_result.get("note_path"),
+                stem,
+                promotion_result.get("note_path"),
             )
         else:
             logger.debug(
                 "PROMOTION SKIPPED: %s — %s",
-                stem, promotion_result.get("reason", "?"),
+                stem,
+                promotion_result.get("reason", "?"),
             )
 
     # Phase 6.5: controlled agent-pattern promotion from converging learnings
@@ -896,7 +921,8 @@ def execute_via_orchestrator(
             else:
                 logger.debug(
                     "PATTERN DEFERRED: %s — %s",
-                    stem, pattern_result.get("reason", "?"),
+                    stem,
+                    pattern_result.get("reason", "?"),
                 )
         except Exception as exc:
             logger.warning("PATTERN PROMOTION ERROR: %s — %s", stem, exc)
@@ -1005,9 +1031,7 @@ def _build_orchestrator_report(
     return report
 
 
-def _log_routing_decision(
-    stem: str, plan: ExecutionPlan, summary: dict, stage: str = ""
-):
+def _log_routing_decision(stem: str, plan: ExecutionPlan, summary: dict, stage: str = ""):
     """Append a routing audit entry to LOGS/routing_audit.log."""
     log_path = LOGS_DIR / "routing_audit.log"
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")

@@ -1,0 +1,895 @@
+# =============================================================================
+# NovaTrade Demo Test Run — Strategy Specification Contract
+# =============================================================================
+# Phase:    1 (Formal Strategy Specification) — RESTARTED for IRB
+# Date:     2026-03-17
+# Status:   APPROVED
+# Schema:   WP2 §5.1 Strategy Contract
+# Replaces: EMA Crossover 9/21 spec (2026-03-16)
+# Checksum: (to be computed after final lock)
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. METADATA
+# ---------------------------------------------------------------------------
+metadata:
+  spec_version: "2.0.0"
+  strategy_name: "Rob Hoffman IRB (Inventory Retracement Bar)"
+  strategy_type: "trend_continuation"
+  strategy_family: "price_action_retracement"
+  author: "NovaTrade Strategy Spec Agent (Phase 1 — IRB restart)"
+  created: "2026-03-17"
+  status: "APPROVED"
+  replaces: "EMA Crossover 9/21 v1.0.0 (2026-03-16)"
+  description: >
+    Rob Hoffman Inventory Retracement Bar (IRB) strategy on EURUSD H1 with
+    H4 multi-timeframe confirmation. Identifies single-candle retracement
+    patterns where open and close sit >=45% away from the candle's trend-
+    direction extreme — interpreted as institutional counter-trend inventory
+    clearing. Entry via stop order beyond IRB extreme, stop loss on opposite
+    side, ATR-based trailing stop. Designed as a systems test of the NovaTrade
+    pipeline under a mechanically complex, source-grounded strategy.
+  purpose: "systems_test"
+  expected_profitability: "not_a_goal"
+  campaign_label: "ftmo-free-trial-march-2026"
+
+  source_documents:
+    - id: "S1"
+      title: "Rob Hoffman IRB Strategy (comprehensive breakdown)"
+      location: "OUTPUT/rob_hoffman_irb_strategy.pdf"
+      authority: "primary"
+    - id: "S2"
+      title: "Rob Hoffman IRB Strategy for Forex (full analysis)"
+      location: "OUTPUT/rob_hoffman_irb_forex_full.pdf"
+      authority: "primary"
+
+  source_boundary: "docs/demo_test_run/irb_source_boundary.md"
+
+  symbol:
+    display: "EURUSD"
+    broker: "EURUSD.sim"
+    digits: 5                    # 5-digit pricing (e.g., 1.14316)
+    pip_value: 0.0001            # 1 pip = 0.0001 for EURUSD
+    point_value: 0.00001         # 1 point = 0.00001 (1/10 pip)
+    pip_value_per_standard_lot: 10.0  # $10 per pip per 1.0 lot
+
+  timeframe:
+    primary: "H1"
+    bar_count_10_days: 240       # approximate H1 bars in 10 calendar days
+    secondary: "H4"              # multi-timeframe confirmation (required by IRB)
+
+  account:
+    type: "FTMO Free Trial 2-Step"
+    mode: "DEMO"
+    size: 100000
+    currency: "USD"
+    leverage: "1:100"
+    broker: "OANDA Corporation"
+    server: "OANDA-Demo-1"
+    metaapi_account_id: "4c121f03-836f-4fb1-8799-736e53699a66"
+    metaapi_region: "london"
+
+# ---------------------------------------------------------------------------
+# 2. INDICATORS
+# ---------------------------------------------------------------------------
+indicators:
+  ema_20_h1:
+    type: "EMA"
+    period: 20
+    source: "close"
+    timeframe: "H1"
+    description: "20-period EMA on H1 for trend direction [A7]"
+
+  ema_20_h4:
+    type: "EMA"
+    period: 20
+    source: "close"
+    timeframe: "H4"
+    description: "20-period EMA on H4 for multi-timeframe trend alignment [A8]"
+
+  atr_14:
+    type: "ATR"
+    period: 14
+    timeframe: "H1"
+    description: "14-period Average True Range on H1 for overextension filter [A10], trailing stop [U3], and trend slope normalization [U1]"
+
+  adx_14:
+    type: "ADX"
+    period: 14
+    timeframe: "H1"
+    description: "14-period Average Directional Index on H1 for sideways market detection [U4]"
+
+# ---------------------------------------------------------------------------
+# 3. SIGNAL RULES (atomic, deterministic)
+# ---------------------------------------------------------------------------
+signal_rules:
+  description: >
+    IRB signals are evaluated ONCE per H1 bar close. An IRB is detected on a
+    closed bar; a pending stop order is then placed for the next bar(s). No
+    intra-bar evaluation. Signals require: (1) IRB geometry detection, (2)
+    trend confirmation, (3) MTF alignment, (4) sideways filter pass, (5) ATR
+    overextension filter pass.
+
+  # 3.1 IRB Geometry Detection [A1]
+  irb_detection:
+    name: "IRB_GEOMETRY"
+    source_tag: "[A1]"
+    description: >
+      Detect Inventory Retracement Bar on the most recently closed H1 candle.
+      Candle color (bullish/bearish) is irrelevant.
+
+    uptrend_irb:
+      description: >
+        In an uptrend, the candle's open AND close must be >= 45% below the
+        high, relative to the candle's total range. This means the upper
+        wick/tail occupies >= 45% of the range.
+      conditions:
+        - id: "IRB_UP_1"
+          rule: "range = high - low"
+          description: "Compute candle range"
+        - id: "IRB_UP_2"
+          rule: "range > 0"
+          description: "Zero-range (doji) candles cannot be IRBs"
+        - id: "IRB_UP_3"
+          rule: "threshold = high - (0.45 * range)"
+          description: "45% threshold from high"
+        - id: "IRB_UP_4"
+          rule: "open <= threshold AND close <= threshold"
+          description: "Both open and close must be at or below the threshold"
+      formula: "is_uptrend_irb = (range > 0) AND (open <= high - 0.45 * range) AND (close <= high - 0.45 * range)"
+
+    downtrend_irb:
+      description: >
+        In a downtrend, the candle's open AND close must be >= 45% above the
+        low, relative to the candle's total range. The lower wick/tail
+        occupies >= 45% of the range.
+      conditions:
+        - id: "IRB_DN_1"
+          rule: "range = high - low"
+        - id: "IRB_DN_2"
+          rule: "range > 0"
+        - id: "IRB_DN_3"
+          rule: "threshold = low + (0.45 * range)"
+          description: "45% threshold from low"
+        - id: "IRB_DN_4"
+          rule: "open >= threshold AND close >= threshold"
+          description: "Both open and close must be at or above the threshold"
+      formula: "is_downtrend_irb = (range > 0) AND (open >= low + 0.45 * range) AND (close >= low + 0.45 * range)"
+
+  # 3.2 Trend Filter [A7] + [U1]
+  trend_filter:
+    name: "TREND_DIRECTION"
+    source_tag: "[A7][U1]"
+    description: >
+      The 20 EMA on H1 must be sloping in the trade direction. The source
+      describes "approximately 45 degrees" — this is operationalized as a
+      quantified slope using ATR normalization per S2 p8-9 (TF-B variant).
+
+    quantification:
+      method: "TF-B (quantified slope)"
+      formula_long: "(ema_20_h1[t] - ema_20_h1[t-20]) / atr_14[t] >= 0.4"
+      formula_short: "(ema_20_h1[t] - ema_20_h1[t-20]) / atr_14[t] <= -0.4"
+      threshold: 0.4
+      threshold_range: "0.2-0.8 (sweepable in robustness testing)"
+      rationale: >
+        TF-A (simple rising/falling) is too permissive — any uptick qualifies.
+        TF-B normalizes the 20-bar EMA displacement by ATR to produce a
+        dimensionless slope metric. Threshold s=0.4 is mid-low in the
+        recommended 0.2-0.8 range, balancing signal frequency against trend
+        strength. On H1 EURUSD, this filters genuine directional moves from
+        minor drift while avoiding over-filtering during moderate trends.
+
+    conditions:
+      - id: "TF1"
+        rule: "ema_slope = (ema_20_h1[current] - ema_20_h1[current - 20]) / atr_14[current]"
+        description: "Compute normalized EMA slope"
+      - id: "TF2_LONG"
+        rule: "ema_slope >= 0.4"
+        description: "Uptrend confirmed: slope above threshold [U1]"
+      - id: "TF2_SHORT"
+        rule: "ema_slope <= -0.4"
+        description: "Downtrend confirmed: slope below negative threshold [U1]"
+
+  # 3.3 Multi-Timeframe Alignment [A8]
+  mtf_alignment:
+    name: "MTF_TREND_ALIGNMENT"
+    source_tag: "[A8]"
+    description: >
+      The next-higher timeframe (H4) must be trending in the same direction
+      as the H1 trend. Source states this is "critical" — if H4 is sideways
+      or opposite, "significantly higher probability of failure."
+
+    conditions:
+      - id: "MTF1_LONG"
+        rule: "ema_20_h4[current] > ema_20_h4[current - 5]"
+        description: >
+          H4 EMA(20) must be rising for long trades. Uses 5-bar lookback
+          on H4 (equivalent to ~20 H1 bars = same temporal window).
+      - id: "MTF1_SHORT"
+        rule: "ema_20_h4[current] < ema_20_h4[current - 5]"
+        description: >
+          H4 EMA(20) must be falling for short trades.
+
+  # 3.4 Sideways Market Filter [A6] + [U4]
+  sideways_filter:
+    name: "SIDEWAYS_REJECTION"
+    source_tag: "[A6][U4]"
+    description: >
+      The strategy must not trade in sideways/ranging/choppy markets. Two
+      independent filters provide protection: the trend slope threshold (U1)
+      already rejects flat markets, and ADX(14) >= 20 adds a secondary guard.
+
+    conditions:
+      - id: "SW1"
+        rule: "adx_14[current] >= 20"
+        description: "ADX must indicate directional movement [U4]"
+      - id: "SW2"
+        rule: "abs(ema_slope) >= 0.4"
+        description: "Already enforced by trend filter TF2 [U1]"
+
+  # 3.5 ATR Overextension Filter [A10] + [U2]
+  overextension_filter:
+    name: "ATR_OVEREXTENSION"
+    source_tag: "[A10][U2]"
+    description: >
+      If the IRB candle has an abnormally large range compared to ATR(14),
+      skip the trade. An overextended IRB means most move energy is consumed,
+      leaving a large stop and small profit potential.
+
+    conditions:
+      - id: "OE1"
+        rule: "(high - low) / atr_14[current] <= 2.0"
+        description: "IRB range must not exceed 2.0x ATR(14) [U2]"
+
+    quantification:
+      threshold_k: 2.0
+      threshold_range: "1.5-3.0 (sweepable per S2 p9)"
+      rationale: >
+        S2 p6 recommends tuning k in 1.5-3.0. Starting at 2.0 (midpoint)
+        provides meaningful filtering of outsized candles without being
+        over-restrictive. On H1 EURUSD, ATR(14) is typically 15-40 pips;
+        k=2.0 rejects IRBs with range > 30-80 pips — very large candles
+        that consume most directional energy.
+
+  # 3.6 Combined Signal Logic
+  signal_generation:
+    long_irb:
+      name: "LONG_IRB_SIGNAL"
+      logic: "IRB_UP_4 AND TF2_LONG AND MTF1_LONG AND SW1 AND OE1"
+      timing: "on_bar_close"
+      action: "place_buy_stop_order"
+      description: >
+        A LONG IRB signal fires when: (1) the closed H1 bar is an uptrend
+        IRB, (2) H1 EMA(20) slope >= 0.4, (3) H4 EMA(20) is rising, (4)
+        ADX(14) >= 20, (5) IRB range <= 2.0 * ATR(14). The signal does NOT
+        immediately enter a position — it places a buy-stop order.
+
+    short_irb:
+      name: "SHORT_IRB_SIGNAL"
+      logic: "IRB_DN_4 AND TF2_SHORT AND MTF1_SHORT AND SW1 AND OE1"
+      timing: "on_bar_close"
+      action: "place_sell_stop_order"
+      description: >
+        A SHORT IRB signal fires when: (1) the closed H1 bar is a downtrend
+        IRB, (2) H1 EMA(20) slope <= -0.4, (3) H4 EMA(20) is falling, (4)
+        ADX(14) >= 20, (5) IRB range <= 2.0 * ATR(14).
+
+    no_signal:
+      conditions:
+        - "No valid IRB geometry detected on current closed bar"
+        - "IRB detected but trend filter, MTF, sideways, or overextension filter fails"
+      action: "do_nothing"
+
+  # 3.7 Anti-repaint rules
+  anti_repaint:
+    - id: "AR1"
+      rule: "IRB geometry is evaluated only on confirmed (closed) H1 bars"
+      description: "Never detect IRBs on the current forming bar"
+    - id: "AR2"
+      rule: "EMA and ATR values are computed from closed bar data only"
+      description: "No real-time tick recalculation during bar formation"
+    - id: "AR3"
+      rule: "Once a bar closes and an IRB is evaluated, the detection is final"
+      description: "No retroactive IRB changes"
+    - id: "AR4"
+      rule: "H4 EMA uses request.security() with lookahead=barmerge.lookahead_off"
+      description: "MTF data must not look ahead into future bars"
+
+# ---------------------------------------------------------------------------
+# 4. EXECUTION RULES
+# ---------------------------------------------------------------------------
+execution_rules:
+  order_type: "STOP"              # stop orders (buy-stop / sell-stop) [A2]
+  execution_timing: "on_bar_close_detection"
+  max_slippage_pips: null         # no slippage control on demo (accept fill)
+
+  # 4.1 Entry execution [A2]
+  entry:
+    source_tag: "[A2]"
+    description: >
+      When a LONG or SHORT IRB signal fires, place a pending stop order
+      beyond the IRB candle's extreme. The order triggers only when price
+      breaks the IRB level, confirming trend resumption.
+
+    long_entry:
+      order_type: "BUY_STOP"
+      entry_price: "irb_high + 1 pip (0.0001)"
+      description: >
+        Buy-stop at IRB high + 1 pip. Triggered when price breaks above
+        the IRB candle's high, confirming the uptrend is resuming. [A2]
+
+    short_entry:
+      order_type: "SELL_STOP"
+      entry_price: "irb_low - 1 pip (0.0001)"
+      description: >
+        Sell-stop at IRB low - 1 pip. Triggered when price breaks below
+        the IRB candle's low, confirming the downtrend is resuming. [A2]
+
+    volume_sizing: "risk_based"   # [U7]
+    volume_formula: >
+      lot_size = (equity * 0.01) / (stop_distance_pips * pip_value_per_standard_lot)
+      where pip_value_per_standard_lot = $10 for EURUSD
+      Clamped to [0.01, 1.0] per risk gate bounds.
+    volume_rationale: >
+      Source states "<1% risk per trade" [A5]. With dynamic stop distances
+      (opposite side of IRB), risk-based sizing ensures consistent 1% risk
+      regardless of IRB candle size. [U7]
+
+  # 4.2 IRB Replacement [A4]
+  irb_replacement:
+    source_tag: "[A4]"
+    enabled: true
+    description: >
+      If a new qualifying IRB forms (in the same trend direction) before
+      the previous IRB's stop order is triggered, the new IRB replaces
+      the old one. Cancel the existing pending order and place a new one
+      at the new IRB's levels. The trigger window resets.
+
+  # 4.3 Trigger Window [U5]
+  trigger_window:
+    source_tag: "[U5]"
+    max_bars: 20
+    enforcement: "hard_cancel"
+    description: >
+      If the stop order is not triggered within 20 H1 bars after IRB
+      detection, cancel the pending order. Source states breakout should
+      ideally occur "within the next 20 bars" — implemented as hard
+      cancellation to prevent stale pending orders. [U5]
+    sweepable_range: "10-40 bars"
+    rationale: >
+      S2 p8 recommends hard window (default N=20, sweepable 10-40).
+      For H1, 20 bars = 20 hours ≈ ~1 trading day. Longer windows risk
+      stale signals where the IRB thesis has expired.
+
+  # 4.4 One position at a time
+  duplicate_prevention:
+    enabled: true
+    description: >
+      Only one position (or one pending order) may be active at a time.
+      If a position is already open, new IRB signals are ignored until
+      the position is closed. If a pending order exists, only IRB
+      replacement (A4) can modify it — not a second concurrent order.
+      No position reversal (unlike EMA crossover). A LONG IRB signal
+      while SHORT is open is suppressed.
+
+# ---------------------------------------------------------------------------
+# 5. RISK RULES
+# ---------------------------------------------------------------------------
+risk_rules:
+  description: >
+    Risk rules are enforced by both the strategy contract AND the runtime
+    pre-trade risk gate (13 checks). Stop loss is dynamic (opposite side
+    of IRB), no fixed take-profit (trailing stop instead).
+
+  # 5.1 Stop-loss [A3] + [U8]
+  stop_loss:
+    source_tag: "[A3][U8]"
+    type: "dynamic_irb_opposite"
+    placement:
+      long: "irb_low - 1 pip (0.0001)"
+      short: "irb_high + 1 pip (0.0001)"
+    modification: "only_tighten"   # trailing stop may tighten, never widen
+    description: >
+      Stop loss is placed on the opposite side of the IRB candle ± 1 pip.
+      This is a thesis stop: the IRB defines a local structure, and if
+      price crosses through the opposite side, the continuation thesis is
+      invalidated. [A3]
+
+      Resolution of U8: The "trade invalidation" rule (S1 p3: "if price
+      crosses through to the opposite side of the IRB after entry, exit
+      immediately") is functionally identical to the stop loss being hit.
+      For longs, entry is at IRB_high + 1 pip and stop is at IRB_low - 1 pip;
+      if price crosses below IRB_low, the stop is already there. No separate
+      invalidation exit is needed — U8 is the stop loss. [U8]
+
+  # 5.2 No fixed take-profit [A9]
+  take_profit:
+    source_tag: "[A9]"
+    type: "none"
+    description: >
+      Hoffman does NOT use fixed take-profit targets. Exits are managed
+      exclusively via trailing stop. [A9]
+
+  # 5.3 Trailing Stop [A9] + [U3]
+  trailing_stop:
+    source_tag: "[A9][U3]"
+    type: "atr_trailing"
+    variant: "Exit-2 (ATR trail)"
+    description: >
+      ATR-based trailing stop that approximates "don't give back profits."
+      Evaluated on every H1 bar close while a position is open.
+
+    mechanics:
+      long:
+        formula: "new_stop = max(highest_close_since_entry - 1.5 * atr_14[current], current_stop)"
+        description: >
+          Track the highest close since entry. Trail the stop at
+          highest_close minus 1.5 × ATR(14). The stop can only move
+          upward (tighten), never downward (widen).
+      short:
+        formula: "new_stop = min(lowest_close_since_entry + 1.5 * atr_14[current], current_stop)"
+        description: >
+          Track the lowest close since entry. Trail the stop at
+          lowest_close plus 1.5 × ATR(14). The stop can only move
+          downward (tighten), never upward (widen).
+
+    atr_multiplier: 1.5
+    atr_multiplier_range: "1.0-3.0 (sweepable)"
+    rationale: >
+      Exit-1 (S/R proxy trailing) requires deterministic S/R identification
+      which adds significant complexity and introduces semi-discretionary
+      decisions (which pivot level? which prior high?). Exit-2 is fully
+      deterministic, requires only ATR(14) already computed for the
+      overextension filter, and approximates "don't give back profits"
+      by tracking the best close and trailing at 1.5 ATR distance.
+      Multiplier 1.5 provides room for normal H1 pullbacks (~1 ATR)
+      while protecting profits when the move stalls. [U3]
+
+  # 5.4 Time Stop [U3 supplement]
+  time_stop:
+    source_tag: "[U3]"
+    enabled: true
+    max_bars: 40
+    description: >
+      Exit after 40 H1 bars (~2 trading days) if neither stop loss nor
+      trailing stop exit has been hit. Prevents infinite holds in slowly
+      drifting markets where neither the thesis-invalidation stop nor
+      the trailing stop fires. [U3]
+    rationale: >
+      S2 p9 lists Exit-3 (time stop) as a recommended safety net.
+      40 bars on H1 = ~40 hours = ~2 trading days. If the trade has
+      not resolved by then, the IRB thesis has likely expired.
+
+  # 5.5 Exit conditions (ordered by priority)
+  exit_conditions:
+    - priority: 1
+      type: "stop_loss"
+      description: "Price hits the stop-loss level (IRB opposite side) [A3]"
+    - priority: 2
+      type: "trailing_stop"
+      description: "Price retraces to trailing stop level [A9][U3]"
+    - priority: 3
+      type: "time_stop"
+      description: "Position held for >= 40 bars without resolution [U3]"
+
+  # 5.6 Position sizing [A5] + [U7]
+  position_sizing:
+    source_tag: "[A5][U7]"
+    method: "risk_based"
+    risk_fraction: 0.01           # 1% of equity per trade
+    formula: >
+      stop_distance_pips = abs(entry_price - stop_loss_price) / pip_value
+      risk_dollars = equity * 0.01
+      lot_size = risk_dollars / (stop_distance_pips * pip_value_per_standard_lot)
+      lot_size = clamp(lot_size, 0.01, 1.0)
+    min_volume: 0.01              # risk gate minimum
+    max_volume: 1.00              # risk gate maximum
+    description: >
+      Risk-based position sizing per source: "<1% of account per trade" [A5].
+      With dynamic stop distances (IRB opposite side), lot size varies per
+      trade to maintain consistent 1% risk. [U7]
+    rationale: >
+      Fixed lots (e.g., 0.10) would either over-risk on wide-stop IRBs
+      (large candles) or under-utilize capital on tight-stop IRBs (small
+      candles). Risk-based sizing is faithful to the source and makes
+      efficient use of the dynamic stop distance information. [U7]
+
+  # 5.7 Position limits (aligned with runtime risk gate)
+  position_limits:
+    max_simultaneous: 1           # one position at a time
+    max_per_symbol: 1
+    runtime_max_positions: 5      # risk gate hard limit
+
+  # 5.8 Drawdown limits (enforced by runtime risk gate)
+  drawdown_limits:
+    max_daily_drawdown_pct: 5.0   # FTMO rule + risk gate default
+    max_total_drawdown_pct: 10.0  # FTMO rule + risk gate default
+    strategy_action_on_breach: "halt"
+
+  # 5.9 Trade frequency (aligned with runtime risk gate)
+  trade_frequency:
+    max_trades_per_day: 20        # risk gate default
+    cooldown_seconds: 60          # risk gate default
+    expected_trades_per_day: "0-2"
+    description: >
+      IRB signals on H1 EURUSD are less frequent than EMA crossover signals.
+      Expected 0-2 signals per day with all filters active. The risk gate's
+      20/day limit and 60-second cooldown are unlikely to be hit.
+
+# ---------------------------------------------------------------------------
+# 6. STATE RULES
+# ---------------------------------------------------------------------------
+state_rules:
+  description: >
+    The strategy operates as a finite state machine with 5 states.
+    State transitions are driven by IRB signal evaluation at bar close,
+    stop order triggers, and exit events.
+
+  states:
+    - name: "FLAT"
+      description: "No open position and no pending order. Scanning for IRB signals."
+      transitions:
+        - trigger: "LONG_IRB_SIGNAL"
+          target: "PENDING_LONG"
+          action: "Place buy-stop order at IRB high + 1 pip [A2]"
+        - trigger: "SHORT_IRB_SIGNAL"
+          target: "PENDING_SHORT"
+          action: "Place sell-stop order at IRB low - 1 pip [A2]"
+
+    - name: "PENDING_LONG"
+      description: "Buy-stop order is pending. Waiting for price to trigger entry."
+      transitions:
+        - trigger: "Buy-stop triggered (price >= entry_price)"
+          target: "LONG"
+          action: "Position opened, set SL at IRB low - 1 pip [A3]"
+        - trigger: "Trigger window expired (20 bars) [U5]"
+          target: "FLAT"
+          action: "Cancel pending buy-stop order"
+        - trigger: "New LONG_IRB_SIGNAL (replacement) [A4]"
+          target: "PENDING_LONG"
+          action: "Cancel old order, place new buy-stop at new IRB levels"
+        - trigger: "SHORT_IRB_SIGNAL while pending long"
+          target: "PENDING_LONG"
+          action: "Ignore — only same-direction replacement allowed"
+        - trigger: "Trend filter or MTF fails on bar evaluation"
+          target: "PENDING_LONG"
+          action: "No change — order stays until window expires or replacement"
+
+    - name: "PENDING_SHORT"
+      description: "Sell-stop order is pending. Waiting for price to trigger entry."
+      transitions:
+        - trigger: "Sell-stop triggered (price <= entry_price)"
+          target: "SHORT"
+          action: "Position opened, set SL at IRB high + 1 pip [A3]"
+        - trigger: "Trigger window expired (20 bars) [U5]"
+          target: "FLAT"
+          action: "Cancel pending sell-stop order"
+        - trigger: "New SHORT_IRB_SIGNAL (replacement) [A4]"
+          target: "PENDING_SHORT"
+          action: "Cancel old order, place new sell-stop at new IRB levels"
+        - trigger: "LONG_IRB_SIGNAL while pending short"
+          target: "PENDING_SHORT"
+          action: "Ignore — only same-direction replacement allowed"
+
+    - name: "LONG"
+      description: "Buy position open. Managing trailing stop."
+      transitions:
+        - trigger: "Stop-loss hit"
+          target: "FLAT"
+          action: "Position closed by SL [A3]"
+        - trigger: "Trailing stop hit"
+          target: "FLAT"
+          action: "Position closed by trailing stop [A9][U3]"
+        - trigger: "Time stop (40 bars) [U3]"
+          target: "FLAT"
+          action: "Position closed at market — time expiry"
+        - trigger: "LONG_IRB_SIGNAL (while LONG)"
+          target: "LONG"
+          action: "Ignore — already in position"
+        - trigger: "SHORT_IRB_SIGNAL (while LONG)"
+          target: "LONG"
+          action: "Ignore — no reversal in IRB strategy"
+
+    - name: "SHORT"
+      description: "Sell position open. Managing trailing stop."
+      transitions:
+        - trigger: "Stop-loss hit"
+          target: "FLAT"
+          action: "Position closed by SL [A3]"
+        - trigger: "Trailing stop hit"
+          target: "FLAT"
+          action: "Position closed by trailing stop [A9][U3]"
+        - trigger: "Time stop (40 bars) [U3]"
+          target: "FLAT"
+          action: "Position closed at market — time expiry"
+        - trigger: "SHORT_IRB_SIGNAL (while SHORT)"
+          target: "SHORT"
+          action: "Ignore — already in position"
+        - trigger: "LONG_IRB_SIGNAL (while SHORT)"
+          target: "SHORT"
+          action: "Ignore — no reversal in IRB strategy"
+
+  initial_state: "FLAT"
+
+  warmup:
+    bars_required: 34
+    description: >
+      The strategy must not evaluate signals until at least 34 H1 bars
+      of data are available. This ensures: (1) EMA(20) has sufficient
+      convergence (20 bars), (2) the 20-bar slope lookback has data
+      (20 + 20 = 40 bars ideal, but EMA is usable earlier), (3) ATR(14)
+      has converged. 34 bars = max(20+14, 20+20) with some overlap.
+      Conservative but ensures all indicators are stable.
+
+  key_difference_from_ema: >
+    Unlike the EMA Crossover strategy which uses opposing-signal reversal,
+    the IRB strategy does NOT reverse. A LONG signal while SHORT (or vice
+    versa) is ignored. The position must close via stop, trail, or time
+    stop before a new signal in the opposite direction can be acted upon.
+    This is because IRB is a retracement-continuation setup, not a
+    directional-switching setup.
+
+# ---------------------------------------------------------------------------
+# 7. SESSION POLICY
+# ---------------------------------------------------------------------------
+session_policy:
+  trading_hours: "24/5"           # trade any hour forex is open
+  session_filter: null            # no session-specific restrictions
+  weekend_handling: "hold"        # positions may be held over weekend
+  friday_close: false             # no forced close on Friday
+  pending_order_weekend: "hold"   # pending stop orders remain active over weekend
+  description: >
+    The strategy trades during all forex market hours with no session
+    filter. Positions and pending orders are held over weekends.
+
+# ---------------------------------------------------------------------------
+# 8. INVALID TRADE CONDITIONS
+# ---------------------------------------------------------------------------
+invalid_conditions:
+  description: >
+    Conditions under which the strategy must NOT generate an IRB signal,
+    place a pending order, or allow a fill.
+
+  conditions:
+    - id: "IC1"
+      name: "insufficient_warmup"
+      rule: "bar_count < 34"
+      action: "suppress_signal"
+      description: "Not enough bars for indicator convergence"
+
+    - id: "IC2"
+      name: "no_uptrend_irb_geometry"
+      rule: "NOT is_uptrend_irb (for long signals)"
+      action: "suppress_signal"
+      description: "Candle does not meet 45% geometry rule [A1]"
+
+    - id: "IC3"
+      name: "no_downtrend_irb_geometry"
+      rule: "NOT is_downtrend_irb (for short signals)"
+      action: "suppress_signal"
+      description: "Candle does not meet 45% geometry rule [A1]"
+
+    - id: "IC4"
+      name: "trend_filter_fails"
+      rule: "abs(ema_slope) < 0.4"
+      action: "suppress_signal"
+      description: "Trend not strong enough [A7][U1]"
+
+    - id: "IC5"
+      name: "mtf_misaligned"
+      rule: "H4 EMA(20) direction opposes H1 trade direction"
+      action: "suppress_signal"
+      description: "Multi-timeframe alignment failure [A8]"
+
+    - id: "IC6"
+      name: "sideways_market"
+      rule: "adx_14 < 20"
+      action: "suppress_signal"
+      description: "Market is ranging/choppy [A6][U4]"
+
+    - id: "IC7"
+      name: "overextended_irb"
+      rule: "(high - low) / atr_14 > 2.0"
+      action: "suppress_signal"
+      description: "IRB candle range too large relative to ATR [A10][U2]"
+
+    - id: "IC8"
+      name: "existing_position"
+      rule: "open_position_count > 0"
+      action: "suppress_signal"
+      description: "Already in a position — no new signals"
+
+    - id: "IC9"
+      name: "existing_pending_order_opposite"
+      rule: "pending_order exists in opposite direction"
+      action: "suppress_signal"
+      description: "Pending order in other direction — no cross-replacement"
+
+    - id: "IC10"
+      name: "spread_too_wide"
+      rule: "spread_points > 30.0"
+      enforced_by: "risk_gate"
+      action: "deny_order"
+      description: "Risk gate denies if spread exceeds 30 points (3 pips)"
+
+    - id: "IC11"
+      name: "drawdown_breach"
+      rule: "daily_drawdown_pct >= 5.0 OR total_drawdown_pct >= 10.0"
+      enforced_by: "risk_gate"
+      action: "deny_order"
+      description: "Risk gate denies if drawdown limits are breached"
+
+    - id: "IC12"
+      name: "kill_switch_active"
+      rule: "novacore_mode != 'run'"
+      enforced_by: "risk_gate"
+      action: "deny_order"
+      description: "Kill switch prevents all trading"
+
+    - id: "IC13"
+      name: "dry_run_enabled"
+      rule: "dry_run == true"
+      enforced_by: "risk_gate"
+      action: "deny_order"
+      description: "Dry run mode prevents real order submission"
+
+    - id: "IC14"
+      name: "adapter_health_down"
+      rule: "health_state == 'DOWN'"
+      enforced_by: "risk_gate"
+      action: "deny_order"
+      description: "Unhealthy adapter prevents order submission"
+
+    - id: "IC15"
+      name: "cooldown_active"
+      rule: "last_trade_age < 60 seconds AND same symbol+side"
+      enforced_by: "risk_gate"
+      action: "deny_order"
+      description: "60-second cooldown between same symbol+side trades"
+
+# ---------------------------------------------------------------------------
+# 9. TELEMETRY REQUIREMENTS
+# ---------------------------------------------------------------------------
+telemetry:
+  description: >
+    Every trade action must produce evidence records for the observability
+    pipeline. IRB-specific fields supplement the standard evidence schema.
+
+  required_fields:
+    signal:
+      - "timestamp"
+      - "bar_close_time"
+      - "bar_ohlc"                # full OHLC needed for IRB geometry
+      - "irb_type"                # UPTREND_IRB | DOWNTREND_IRB | NONE
+      - "irb_threshold"           # computed 45% threshold value
+      - "irb_range"               # high - low of IRB candle
+      - "ema_20_h1_value"
+      - "ema_20_h1_slope"         # normalized slope value
+      - "ema_20_h4_value"
+      - "ema_20_h4_direction"     # RISING | FALLING | FLAT
+      - "adx_14_value"
+      - "atr_14_value"
+      - "overextension_ratio"     # (H-L) / ATR(14)
+      - "signal_type"             # LONG_IRB | SHORT_IRB | NONE
+      - "filter_results"          # which filters passed/failed
+      - "strategy_state"          # FLAT | PENDING_LONG | PENDING_SHORT | LONG | SHORT
+
+    pending_order:
+      - "timestamp"
+      - "signal_ref"
+      - "order_type"              # BUY_STOP | SELL_STOP
+      - "side"                    # BUY | SELL
+      - "symbol"                  # EURUSD.sim
+      - "entry_price"             # IRB extreme + buffer
+      - "stop_loss"               # IRB opposite side - buffer
+      - "computed_volume"         # risk-based lot size
+      - "stop_distance_pips"
+      - "risk_dollars"
+      - "trigger_window_bars"     # remaining bars before cancel
+      - "irb_bar_index"           # which bar was the IRB
+      - "risk_decision"           # ALLOW | DENY
+      - "risk_checks"             # full 13-check array
+
+    fill:
+      - "timestamp"
+      - "order_ref"
+      - "fill_price"
+      - "slippage_pips"
+      - "position_id"
+      - "actual_volume"
+
+    trail_update:
+      - "timestamp"
+      - "position_id"
+      - "bar_index_since_entry"
+      - "highest_close_since_entry"  # or lowest for shorts
+      - "current_atr_14"
+      - "old_stop"
+      - "new_stop"
+      - "trail_distance_pips"
+
+    close:
+      - "timestamp"
+      - "position_id"
+      - "close_price"
+      - "close_reason"            # SL | TRAILING_STOP | TIME_STOP
+      - "pnl_pips"
+      - "pnl_usd"
+      - "hold_duration_bars"
+      - "hold_duration_seconds"
+      - "max_favorable_excursion_pips"
+      - "max_adverse_excursion_pips"
+
+    order_cancel:
+      - "timestamp"
+      - "order_ref"
+      - "cancel_reason"           # TRIGGER_WINDOW_EXPIRED | IRB_REPLACEMENT
+      - "bars_elapsed"
+
+  campaign_tag: "ftmo-free-trial-march-2026"
+  format: "JSONL"
+  storage: "OUTPUT/novatrade/"
+
+# ---------------------------------------------------------------------------
+# 10. CONTRACT INTEGRITY
+# ---------------------------------------------------------------------------
+contract_integrity:
+  immutable_during_run: true
+  hash_algorithm: "SHA-256"
+  hash_value: "(to be computed after final lock)"
+  modification_policy: >
+    This contract must not be modified after the demo run begins.
+    Any required modification constitutes a run failure (failure
+    condition F6) and requires returning to Phase 1.
+  version_control: >
+    This file is tracked in git. The commit hash at run start serves
+    as the version anchor. The SHA-256 hash of this file is recorded
+    in the run start evidence record.
+
+# ---------------------------------------------------------------------------
+# 11. UNRESOLVED ITEM RESOLUTION SUMMARY
+# ---------------------------------------------------------------------------
+# This section documents the quantification choices made for items U1-U8
+# from irb_source_boundary.md. Every choice includes rationale and source tag.
+#
+# U1 (Trend Filter): TF-B quantified slope, s=0.4
+#   - (EMA20[t] - EMA20[t-20]) / ATR14[t] >= 0.4 for longs, <= -0.4 for shorts
+#   - Sweepable range: 0.2-0.8 per S2 p8-9
+#   - Rationale: TF-A too permissive; TF-B with ATR normalization produces
+#     dimensionless metric; s=0.4 is conservative midpoint
+#
+# U2 (ATR Overextension): k=2.0
+#   - (H-L) / ATR(14) <= 2.0
+#   - Sweepable range: 1.5-3.0 per S2 p9
+#   - Rationale: midpoint of recommended range; meaningful filter without
+#     over-restriction
+#
+# U3 (Trailing Stop): Exit-2 ATR trailing + 40-bar time stop
+#   - Trail: max(highest_close - 1.5*ATR14, stop) for longs
+#   - Time stop: exit at market after 40 bars
+#   - Rationale: Exit-1 requires discretionary S/R (out of scope); Exit-2
+#     is fully deterministic; time stop prevents infinite holds
+#
+# U4 (Sideways Filter): Unified with U1 + ADX(14) >= 20
+#   - TF-B slope threshold already rejects flat markets
+#   - ADX(14) >= 20 adds secondary confirmation
+#   - Rationale: double guard; both are cheap to compute
+#
+# U5 (Trigger Window): Hard cancel at N=20 bars
+#   - Per S2 p8 recommendation
+#   - Sweepable range: 10-40 bars
+#   - Rationale: prevents stale orders; aligns with IRB replacement rule
+#
+# U6 (Body-Size Filter): Excluded
+#   - Community variant only per S2 p2; not canonical
+#   - Rationale: stick to authored description; test as variant later
+#
+# U7 (Position Sizing): Risk-based, r=0.01 (1%)
+#   - lot_size = (equity * 0.01) / (stop_distance_pips * $10)
+#   - Rationale: faithful to source "<1% per trade"; dynamic stop requires
+#     dynamic sizing; fixed lots would violate risk constraint on wide IRBs
+#
+# U8 (Invalidation vs SL): Redundant with A3
+#   - Stop at IRB opposite side ± 1 pip IS the invalidation
+#   - Rationale: source describes same mechanism from two perspectives
+#     (mechanical stop and thesis invalidation); they converge at same level

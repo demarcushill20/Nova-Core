@@ -1,0 +1,6 @@
+{
+  "candidate_id": 0,
+  "description": "Use this skill to retrieve content from a specific, known URL. Invoke when the user provides a URL and wants to fetch, read, pull, get, or download what's at that address \u2014 whether it's a JSON API end",
+  "train_score": 0.9477,
+  "rank": 3
+}

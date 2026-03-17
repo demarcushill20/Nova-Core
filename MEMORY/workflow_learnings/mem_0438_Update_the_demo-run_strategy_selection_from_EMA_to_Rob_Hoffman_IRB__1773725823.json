@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0438_Update_the_demo-run_strategy_selection_from_EMA_to_Rob_Hoffman_IRB__1773725823",
+  "workflow_id": "0438_Update_the_demo-run_strategy_selection_from_EMA_to_Rob_Hoffman_IRB_",
+  "task_summary": "Verified all EMA\u2192IRB strategy change deliverables already complete from tasks 0433/0434/0435 \u2014 duplicate task, no new work required",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Verified all EMA\u2192IRB strategy change deliverables already complete from tasks 0433/0434/0435 \u2014 duplicate task, no new work required"
+  ],
+  "successful_patterns": [
+    "task_completed: 0438_Update_the_demo-run_strategy_selection_from_EMA_to_Rob_Hoffman_IRB_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Verified all EMA\u2192IRB strategy change deliverables already complete from tasks 0433/0434/0435 \u2014 duplicate task, no new work required",
+  "created_at": "2026-03-17T05:37:03Z",
+  "confidence": "high"
+}
