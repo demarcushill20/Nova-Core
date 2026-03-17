@@ -990,6 +990,30 @@ class TradingAgent:
             },
         )
 
+    def force_flat(self, reason: str = "reconciliation") -> None:
+        """Force-reset the agent to FLAT state.
+
+        Called by the monitoring layer when reconciliation detects a stale
+        pending order (broker has no matching order or position).  This is
+        the only non-alert-driven state transition and must always be
+        accompanied by evidence recording.
+        """
+        old_state = self._state
+        self._state = AgentState.FLAT
+        self._pending_order_id = None
+        self._pending_side = None
+        self._position_id = None
+        self._position_side = None
+
+        log.info("force_flat: %s -> FLAT reason=%s", old_state.value, reason)
+        self._record_event(
+            "FORCE_FLAT",
+            {
+                "reason": reason,
+                "state_before": old_state.value,
+            },
+        )
+
     # -- Internal helpers --------------------------------------------------
 
     def _resolve_symbol(self, payload: dict) -> str:

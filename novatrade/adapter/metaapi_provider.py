@@ -26,6 +26,7 @@ from novatrade.models import (
     OrderSide,
     OrderStatus,
     OrderType,
+    PendingOrder,
     Position,
     SymbolPrice,
 )
@@ -291,6 +292,25 @@ class MetaApiAdapter(MT5Adapter):
             log.error("metaapi close_position failed: %s", msg)
             return OrderResult(ok=False, error=msg)
 
+    async def cancel_order(self, order_id: str) -> OrderResult:
+        """Cancel a pending order via MetaApi."""
+        self._ensure_connected()
+        log.info("metaapi cancel_order: id=%s", order_id)
+        try:
+            raw = await self._connection.cancel_order(order_id)
+            return _translate_trade_response(raw)
+        except Exception as exc:
+            msg = _safe_error(exc)
+            log.error("metaapi cancel_order failed: %s", msg)
+            return OrderResult(ok=False, error=msg)
+
+    async def get_orders(self) -> list[PendingOrder]:
+        """Fetch all pending orders from MetaApi."""
+        self._ensure_connected()
+        raw_orders = await self._connection.get_orders()
+        log.debug("metaapi get_orders: count=%d", len(raw_orders))
+        return [_translate_pending_order(o) for o in raw_orders]
+
     # --- internal ------------------------------------------------------------
 
     def _ensure_connected(self) -> None:
@@ -378,6 +398,41 @@ def _translate_candle(c: dict, symbol: str, timeframe: str) -> Candle:
         volume=c.get("tickVolume", c.get("volume", 0.0)),
         symbol=symbol,
         timeframe=timeframe,
+    )
+
+
+def _translate_pending_order(o: dict) -> PendingOrder:
+    """Convert MetaApi order dict to PendingOrder."""
+    otype_raw = o.get("type", "")
+    if "BUY" in otype_raw.upper():
+        side = OrderSide.BUY
+    else:
+        side = OrderSide.SELL
+
+    if "STOP_LIMIT" in otype_raw.upper():
+        otype = OrderType.STOP_LIMIT
+    elif "STOP" in otype_raw.upper():
+        otype = OrderType.STOP
+    elif "LIMIT" in otype_raw.upper():
+        otype = OrderType.LIMIT
+    else:
+        otype = OrderType.MARKET
+
+    created = 0.0
+    if "time" in o and isinstance(o["time"], datetime):
+        created = o["time"].timestamp()
+
+    return PendingOrder(
+        order_id=str(o.get("id", "")),
+        symbol=o.get("symbol", ""),
+        side=side,
+        order_type=otype,
+        volume=o.get("volume", 0.0),
+        open_price=o.get("openPrice", 0.0),
+        stop_loss=o.get("stopLoss"),
+        take_profit=o.get("takeProfit"),
+        comment=o.get("comment", ""),
+        created_time=created,
     )
 
 

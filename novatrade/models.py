@@ -310,6 +310,7 @@ class EvidenceType(Enum):
     RISK_HALT = "RISK_HALT"
     RISK_WARNING = "RISK_WARNING"
     ADAPTER_ERROR = "ADAPTER_ERROR"
+    MONITORING = "MONITORING"  # Phase 7: operational monitoring events
 
 
 @dataclass
@@ -467,6 +468,27 @@ class MigrationAuditResult:
     @property
     def ready_count(self) -> int:
         return sum(1 for f in self.findings if f.severity == AuditSeverity.READY)
+
+
+# ---------------------------------------------------------------------------
+# Pending orders
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PendingOrder:
+    """A pending (unfilled) order at the broker."""
+
+    order_id: str
+    symbol: str
+    side: OrderSide
+    order_type: OrderType
+    volume: float
+    open_price: float  # trigger / limit price
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    comment: str = ""
+    created_time: float = 0.0
 
 
 # ---------------------------------------------------------------------------

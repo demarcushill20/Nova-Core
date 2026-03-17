@@ -16,6 +16,7 @@ from novatrade.models import (
     OrderRequest,
     OrderResult,
     OrderStatus,
+    PendingOrder,
     Position,
     SymbolPrice,
 )
@@ -95,6 +96,14 @@ class MT5Adapter(ABC):
         volume: float | None = None,
     ) -> OrderResult:
         """Close (fully or partially) an open position."""
+
+    async def get_orders(self) -> list[PendingOrder]:
+        """Return all pending (unfilled) orders.
+
+        Non-abstract default returns an empty list.  Adapters that support
+        pending-order queries should override this.
+        """
+        return []
 
     async def cancel_order(self, order_id: str) -> OrderResult:
         """Cancel a pending order.
