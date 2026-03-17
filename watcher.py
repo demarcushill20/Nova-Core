@@ -35,6 +35,9 @@ from utils.cost_router import route_task as cost_route_task
 from utils.dlp_gate import dlp
 from utils.file_watcher import TaskFileWatcher
 from utils.langfuse_tracing import trace_llm_call
+from utils.max_plan_guard import record_invocation as _mpg_record
+from utils.self_healing import record_error as _sh_record_error
+from utils.self_healing import touch_dead_man_switch as _sh_touch
 from utils.structured_log import slog
 from utils.task_validator import audit_task_execution, validate_task_content
 from utils.trace_context import TraceContext
@@ -612,6 +615,15 @@ async def _execute_worker(
         child_env = os.environ.copy()
         child_env.pop("CLAUDECODE", None)
 
+    # Max-plan guard: extract model from cmd for ledger
+    _mpg_model = ""
+    for _i, _a in enumerate(cmd):
+        if _a == "--model" and _i + 1 < len(cmd):
+            _mpg_model = cmd[_i + 1]
+            break
+    _mpg_t0 = datetime.now(timezone.utc)
+    _mpg_record(caller="watcher", component="watcher._execute_worker", task_id=stem, model=_mpg_model)
+
     proc: asyncio.subprocess.Process | None = None
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -637,6 +649,7 @@ async def _execute_worker(
             await proc.communicate()
             end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
             logger.error("EXECUTION TIMEOUT: %s (exceeded %ds)", stem, TASK_TIMEOUT)
+            _sh_record_error("watcher._execute_worker", f"timeout after {TASK_TIMEOUT}s", task_id=stem)
             with open(worker_log, "a") as wf:
                 wf.write(f"=== TIMEOUT after {TASK_TIMEOUT}s ===\n")
                 wf.write("\n=== EXIT CODE: -1 (timeout) ===\n")
@@ -676,6 +689,7 @@ async def _execute_worker(
     except Exception as exc:
         end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         logger.exception("EXECUTION ERROR: %s", stem)
+        _sh_record_error("watcher._execute_worker", exc, task_id=stem)
         with open(worker_log, "a") as wf:
             wf.write(f"\n=== EXCEPTION: {exc} ===\n")
             wf.write("=== EXIT CODE: -1 (error) ===\n")
@@ -684,6 +698,16 @@ async def _execute_worker(
     finally:
         pid_file.unlink(missing_ok=True)
         logger.info("PID file removed: %s", pid_file)
+        # Max-plan guard: record completion
+        _mpg_dur = (datetime.now(timezone.utc) - _mpg_t0).total_seconds()
+        _mpg_record(
+            caller="watcher",
+            component="watcher._execute_worker",
+            task_id=stem,
+            model=_mpg_model,
+            success=exit_code == 0,
+            duration_secs=_mpg_dur,
+        )
 
     return exit_code
 
@@ -1439,10 +1463,14 @@ async def run() -> None:
 
     try:
         while _running:
+            # Phase 6A: touch dead man's switch every scan cycle
+            _sh_touch(component="watcher")
+
             try:
                 await scan_and_enqueue(pool)
-            except Exception:
+            except Exception as _scan_exc:
                 logger.exception("Error during scan cycle.")
+                _sh_record_error("watcher.scan_cycle", _scan_exc)
 
             # Wait for watchdog trigger OR poll timeout — whichever comes first
             await _async_wait_for_wake(POLL_INTERVAL)

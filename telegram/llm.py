@@ -20,6 +20,11 @@ except ImportError:
     TraceContext = None  # type: ignore[assignment,misc]
     trace_llm_call = None  # type: ignore[assignment]
 
+try:
+    from utils.max_plan_guard import record_invocation as _mpg_record
+except ImportError:
+    _mpg_record = None  # type: ignore[assignment]
+
 _log = logging.getLogger("telegram_bot.llm")
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
@@ -106,6 +111,13 @@ async def generate_response(
     if slog and llm_ctx:
         slog.event("telegram.llm_call_start", llm_ctx, prompt_len=len(prompt), timeout=CONVERSATION_TIMEOUT)
 
+    # Max-plan guard: record invocation (operator-initiated via Telegram)
+    import time as _time
+
+    _tg_t0 = _time.monotonic()
+    if _mpg_record is not None:
+        _mpg_record(caller="telegram", component="telegram.llm.generate_response", model=MODEL, automated=False)
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -135,6 +147,17 @@ async def generate_response(
             )
         except ImportError:
             pass
+
+        # Max-plan guard: record completion
+        if _mpg_record is not None:
+            _mpg_record(
+                caller="telegram",
+                component="telegram.llm.generate_response",
+                model=MODEL,
+                success=True,
+                duration_secs=_time.monotonic() - _tg_t0,
+                automated=False,
+            )
 
         # Phase 2.4: Redact secrets from LLM response before sending
         try:
@@ -190,7 +213,7 @@ async def generate_response(
             slog.event("telegram.llm_call_timeout", llm_ctx, level="error", timeout=CONVERSATION_TIMEOUT)
         try:
             proc.kill()  # type: ignore[possibly-undefined]
-        except Exception:
+        except Exception:  # noqa: S110
             pass
         return "That took too long — let me try a simpler approach. What did you need?"
 

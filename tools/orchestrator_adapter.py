@@ -43,6 +43,11 @@ from planner.workflow_promoter import attempt_promotion
 from tools.task_classifier import classify_task
 from tools.vault_sync import check_sync_after_write
 
+try:
+    from utils.max_plan_guard import record_invocation as _mpg_record
+except ImportError:
+    _mpg_record = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(os.environ.get("NOVACORE_ROOT", "/home/nova/nova-core"))
@@ -624,6 +629,10 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
 
     cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", "--model", "claude-opus-4-6", prompt]
 
+    _oa_t0 = time.monotonic()
+    if _mpg_record is not None:
+        _mpg_record(caller="orchestrator", component="orchestrator_adapter.run_classifier", model="claude-opus-4-6")
+
     try:
         child_env = os.environ.copy()
         child_env.pop("CLAUDECODE", None)
@@ -641,9 +650,26 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
         success = result.returncode == 0
         error = result.stderr if result.returncode != 0 else ""
 
+        if _mpg_record is not None:
+            _mpg_record(
+                caller="orchestrator",
+                component="orchestrator_adapter.run_classifier",
+                model="claude-opus-4-6",
+                success=success,
+                duration_secs=time.monotonic() - _oa_t0,
+            )
+
         return output, success, error
 
     except subprocess.TimeoutExpired:
+        if _mpg_record is not None:
+            _mpg_record(
+                caller="orchestrator",
+                component="orchestrator_adapter.run_classifier",
+                model="claude-opus-4-6",
+                success=False,
+                duration_secs=time.monotonic() - _oa_t0,
+            )
         return "", False, f"Step timed out after {TASK_TIMEOUT}s"
     except Exception as exc:
         return "", False, str(exc)

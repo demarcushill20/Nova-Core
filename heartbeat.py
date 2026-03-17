@@ -23,6 +23,13 @@ except ImportError:
     slog = None  # type: ignore[assignment]
     TraceContext = None  # type: ignore[assignment,misc]
 
+try:
+    from utils.max_plan_guard import record_invocation as _mpg_record
+    from utils.max_plan_guard import should_allow_task as _mpg_allow
+except ImportError:
+    _mpg_record = None  # type: ignore[assignment]
+    _mpg_allow = None  # type: ignore[assignment]
+
 # --- Configuration -----------------------------------------------------------
 
 BASE = Path("/home/nova/nova-core")
@@ -799,6 +806,17 @@ def _run_heartbeat_agent(checks: list) -> None:
 
     claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
 
+    # Max-plan guard: check if heartbeat agent should run
+    if _mpg_allow is not None:
+        allowed, reason = _mpg_allow("heartbeat_agent", is_essential=True)
+        if not allowed:
+            print(f"[heartbeat-agent] Blocked by max-plan guard: {reason}")
+            return
+
+    _hb_t0 = datetime.now(timezone.utc)
+    if _mpg_record is not None:
+        _mpg_record(caller="heartbeat_agent", component="heartbeat._run_heartbeat_agent", model=HEARTBEAT_MODEL)
+
     try:
         child_env = os.environ.copy()
         child_env.pop("CLAUDECODE", None)
@@ -812,7 +830,17 @@ def _run_heartbeat_agent(checks: list) -> None:
             cwd=str(BASE),
             env=child_env,
         )
+        _hb_dur = (datetime.now(timezone.utc) - _hb_t0).total_seconds()
         response = result.stdout.strip()
+
+        if _mpg_record is not None:
+            _mpg_record(
+                caller="heartbeat_agent",
+                component="heartbeat._run_heartbeat_agent",
+                model=HEARTBEAT_MODEL,
+                success=result.returncode == 0,
+                duration_secs=_hb_dur,
+            )
 
         if not response:
             stderr_hint = result.stderr.strip()[:200] if result.stderr else ""
@@ -835,6 +863,14 @@ def _run_heartbeat_agent(checks: list) -> None:
 
     except subprocess.TimeoutExpired:
         _log_agent("TIMEOUT")
+        if _mpg_record is not None:
+            _mpg_record(
+                caller="heartbeat_agent",
+                component="heartbeat._run_heartbeat_agent",
+                model=HEARTBEAT_MODEL,
+                success=False,
+                duration_secs=(datetime.now(timezone.utc) - _hb_t0).total_seconds(),
+            )
         print(f"[heartbeat-agent] Timed out after {HEARTBEAT_TIMEOUT}s")
     except FileNotFoundError:
         _log_agent(f"CLAUDE_NOT_FOUND: {claude_bin}")
@@ -1349,10 +1385,20 @@ def _run_research_cycle() -> None:
         print("[research-cycle] Cooldown active — skipping (ran recently)")
         return
 
+    # Max-plan guard: check if research should run
+    if _mpg_allow is not None:
+        allowed, reason = _mpg_allow("research_cycle")
+        if not allowed:
+            print(f"[research-cycle] Blocked by max-plan guard: {reason}")
+            return
+
     print("[research-cycle] Starting autonomous research cycle...")
     prompt = _build_research_prompt()
 
     claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
+    _rc_t0 = datetime.now(timezone.utc)
+    if _mpg_record is not None:
+        _mpg_record(caller="research_cycle", component="heartbeat._run_research_cycle", model=HEARTBEAT_MODEL)
 
     try:
         child_env = os.environ.copy()
@@ -1674,10 +1720,20 @@ def _run_planning_cycle() -> None:
         print("[planning-cycle] Cooldown active — skipping (ran recently)")
         return
 
+    # Max-plan guard: check if planning should run
+    if _mpg_allow is not None:
+        allowed, reason = _mpg_allow("planning_cycle")
+        if not allowed:
+            print(f"[planning-cycle] Blocked by max-plan guard: {reason}")
+            return
+
     print("[planning-cycle] Starting autonomous planning cycle...")
     prompt = _build_planning_prompt()
 
     claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
+    _pc_t0 = datetime.now(timezone.utc)
+    if _mpg_record is not None:
+        _mpg_record(caller="planning_cycle", component="heartbeat._run_planning_cycle", model=HEARTBEAT_MODEL)
 
     try:
         child_env = os.environ.copy()
@@ -1811,6 +1867,39 @@ def main() -> int:
     checks.append(check_pip_audit())
     checks.append(check_llm_cache())
     checks.append(check_cost_router())
+
+    # --- Self-healing runtime (Phase 6A) ---
+    try:
+        from utils.self_healing import check_self_healing, touch_dead_man_switch
+
+        touch_dead_man_switch(component="heartbeat")
+        sh_result = check_self_healing()
+        checks.append(sh_result)
+        # Send Telegram alert for self-healing issues
+        sh_alerts = sh_result.get("alerts", [])
+        for alert in sh_alerts:
+            if alert.get("severity") in ("warning", "critical"):
+                alert_msg = f"🛡️ Self-Healing [{alert['severity'].upper()}]: {alert['title']}\n{alert['detail']}"
+                if _telegram_cooldown_gate(alert_msg):
+                    _send_telegram(alert_msg)
+    except Exception as e:
+        checks.append({"name": "self_healing", "ok": True, "detail": f"check skipped: {e}"})
+
+    # --- Max-plan usage monitoring ---
+    try:
+        from utils.max_plan_guard import check_max_plan_usage
+
+        mpg_result = check_max_plan_usage()
+        checks.append(mpg_result)
+        # Send Telegram alert for critical max-plan issues
+        mpg_alerts = mpg_result.get("alerts", [])
+        for alert in mpg_alerts:
+            if alert.get("severity") in ("warning", "critical"):
+                alert_msg = f"⚡ Max-Plan Guard [{alert['severity'].upper()}]: {alert['title']}\n{alert['detail']}"
+                if _telegram_cooldown_gate(alert_msg):
+                    _send_telegram(alert_msg)
+    except Exception as e:
+        checks.append({"name": "max_plan_usage", "ok": True, "detail": f"check skipped: {e}"})
 
     # --- Drift detection (observability Phase 3) ---
     try:
