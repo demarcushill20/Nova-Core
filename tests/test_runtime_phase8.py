@@ -363,7 +363,7 @@ class TestWebhookServer:
         resp = client.get("/status")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["runtime_mode"] == "dry-run"
+        assert data["runtime_mode"] == "dry_run"
         assert data["trading_agent"]["state"] == "FLAT"
         assert data["risk_engine"]["halted"] is False
 
@@ -895,7 +895,7 @@ class TestBuildStatus:
         assert "risk_engine" in status
         assert "ops_monitor" in status
         assert "webhook" in status
-        assert status["runtime_mode"] == "dry-run"
+        assert status["runtime_mode"] == "dry_run"
 
     def test_status_with_no_components(self):
         ws = WebhookState(dry_run=True)
@@ -903,10 +903,13 @@ class TestBuildStatus:
         assert status["trading_agent"]["state"] == "not_initialized"
 
     def test_status_active_mode(self, tmp_path):
+        from novatrade.runtime.launch_gate import LaunchMode
+
         ws, *_ = _build_stack(tmp_path)
         ws.dry_run = False
+        ws.launch_mode = LaunchMode.ACTIVE_READY
         status = build_status(ws)
-        assert status["runtime_mode"] == "active-ready"
+        assert status["runtime_mode"] == "active_ready"
 
 
 # ===========================================================================
@@ -918,10 +921,11 @@ class TestRunnerBuildStack:
     """Tests for the runner.build_stack() factory."""
 
     def test_build_stack_dry_run(self):
+        from novatrade.runtime.launch_gate import LaunchMode
         from novatrade.runtime.runner import build_stack
 
         cfg = _cfg(dry_run=True)
-        ws, loop = build_stack(cfg)
+        ws, loop, readiness = build_stack(cfg, mode=LaunchMode.DRY_RUN)
         assert ws.dry_run is True
         assert ws.agent is not None
         assert ws.risk_engine is not None
@@ -930,10 +934,11 @@ class TestRunnerBuildStack:
         assert loop is not None
 
     def test_build_stack_forces_dry_run(self):
-        """Even with dry_run=False, Phase 8 enforces DryRunAdapter."""
+        """In dry_run mode, adapter is always DryRunAdapter."""
+        from novatrade.runtime.launch_gate import LaunchMode
         from novatrade.runtime.runner import build_stack
 
-        cfg = _cfg(dry_run=False)
-        ws, loop = build_stack(cfg)
+        cfg = _cfg(dry_run=True)
+        ws, loop, readiness = build_stack(cfg, mode=LaunchMode.DRY_RUN)
         # The adapter used by the agent should be DryRunAdapter
         assert isinstance(ws.agent._adapter, DryRunAdapter)

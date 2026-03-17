@@ -1,9 +1,11 @@
-"""NovaTrade runtime caller layer — Phase 8.
+"""NovaTrade runtime caller layer — Phases 8-9.
 
-Provides the minimal operational shell around the IRB demo-run stack:
+Provides the operational shell around the IRB demo-run stack:
   - Webhook ingress for TradingView-style alerts
   - Monitoring loop caller (resolves B-P7-1)
   - Dry-run adapter stub and gating
-  - Operator health/status endpoint
+  - Launch gate with dry_run / active_ready / active_demo modes
+  - Operator health/status/readiness endpoints
+  - Rollback to dry-run capability
   - Runner entrypoint wiring everything together
 """

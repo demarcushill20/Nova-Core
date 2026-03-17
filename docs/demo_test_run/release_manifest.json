@@ -1,0 +1,88 @@
+{
+  "release": {
+    "name": "NovaTrade IRB Demo Launch",
+    "version": "9.0.0",
+    "phase": "Final Demo Launch (Phase 9)",
+    "date": "2026-03-17",
+    "status": "CONDITIONALLY_READY"
+  },
+  "strategy": {
+    "name": "Rob Hoffman IRB",
+    "version": "2.0.0",
+    "spec_file": "docs/demo_test_run/strategy_spec.yaml",
+    "symbol": "EURUSD",
+    "timeframe": "H1",
+    "secondary_timeframe": "H4"
+  },
+  "launch_modes": {
+    "supported": ["dry_run", "active_ready", "active_demo"],
+    "default": "dry_run",
+    "env_var": "NOVATRADE_LAUNCH_MODE",
+    "description": {
+      "dry_run": "DryRunAdapter — safe simulated mode, no broker connection",
+      "active_ready": "MetaApiAdapter connected, pending operator confirmation",
+      "active_demo": "Full active FTMO demo routing, all gates passed"
+    }
+  },
+  "adapter_support": {
+    "dry_run": "DryRunAdapter (novatrade/runtime/dry_run.py)",
+    "active": "MetaApiAdapter (novatrade/adapter/metaapi_provider.py)"
+  },
+  "runtime_components": {
+    "trading_agent": "novatrade/execution/trading_agent.py",
+    "risk_engine": "novatrade/risk/risk_engine.py",
+    "ops_monitor": "novatrade/monitor/ops_monitor.py",
+    "webhook_server": "novatrade/runtime/webhook_server.py",
+    "monitor_loop": "novatrade/runtime/monitor_loop.py",
+    "dry_run_adapter": "novatrade/runtime/dry_run.py",
+    "launch_gate": "novatrade/runtime/launch_gate.py",
+    "runner": "novatrade/runtime/runner.py",
+    "config": "novatrade/config.py",
+    "models": "novatrade/models.py",
+    "adapter_base": "novatrade/adapter/base.py",
+    "metaapi_adapter": "novatrade/adapter/metaapi_provider.py",
+    "evidence_recorder": "novatrade/validation/evidence.py"
+  },
+  "endpoints": {
+    "POST /webhook/alert": "TradingView alert ingress",
+    "GET /health": "Quick health check",
+    "GET /status": "Detailed runtime status",
+    "GET /readiness": "Launch gate readiness assessment",
+    "POST /control/summary": "Trigger daily summary",
+    "POST /control/rollback": "Emergency rollback to DryRunAdapter"
+  },
+  "documentation": {
+    "strategy_spec": "docs/demo_test_run/strategy_spec.yaml",
+    "alerts_schema": "docs/demo_test_run/alerts_schema.json",
+    "risk_policy": "docs/demo_test_run/risk_policy.yaml",
+    "launch_runbook": "docs/demo_test_run/demo_launch_runbook.md",
+    "rollback_plan": "docs/demo_test_run/rollback_plan.md",
+    "launch_readiness": "docs/demo_test_run/final_launch_readiness.md",
+    "phase9_summary": "docs/demo_test_run/phase9_summary.md",
+    "phase9_assumptions": "docs/demo_test_run/phase9_assumptions.md",
+    "phase9_open_issues": "docs/demo_test_run/phase9_open_issues.md",
+    "dry_run_results": "docs/demo_test_run/dry_run_results.md",
+    "failure_injection": "docs/demo_test_run/failure_injection_report.md"
+  },
+  "tests": {
+    "phase8_runtime": "tests/test_runtime_phase8.py (53 tests)",
+    "phase9_launch_gate": "tests/test_launch_gate_phase9.py (42 tests)",
+    "novatrade_total": "213+ NovaTrade tests"
+  },
+  "external_confirmations_required": {
+    "NOVATRADE_CONFIRM_PINE_COMPILED": "TradingView Pine compilation verified",
+    "NOVATRADE_CONFIRM_TV_BACKTEST": "TradingView backtest verified — IRB signals fire",
+    "NOVATRADE_CONFIRM_WEBHOOK_URL": "TradingView webhook URL configured",
+    "NOVATRADE_CONFIRM_ACTIVE_DEMO": "Operator acknowledges active demo start"
+  },
+  "credentials_required": {
+    "METAAPI_TOKEN": "MetaApi API authentication token",
+    "METAAPI_ACCOUNT_ID": "MetaApi account identifier",
+    "NOVATRADE_WEBHOOK_SECRET": "Shared secret for webhook authentication"
+  },
+  "build_metadata": {
+    "phases_complete": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    "total_phases": 9,
+    "readiness": "CONDITIONALLY_READY — pending operator external confirmations"
+  }
+}

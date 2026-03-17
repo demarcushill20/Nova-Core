@@ -30,6 +30,7 @@ from novatrade.execution.trading_agent import TradingAgent
 from novatrade.models import EvidenceRecord, EvidenceType
 from novatrade.monitor.ops_monitor import OpsMonitor
 from novatrade.risk.risk_engine import RiskEngine
+from novatrade.runtime.launch_gate import LaunchMode
 from novatrade.validation.evidence import EvidenceRecorder
 
 log = logging.getLogger("novatrade.runtime.webhook")
@@ -48,6 +49,8 @@ class WebhookState:
     monitor: OpsMonitor | None = None
     recorder: EvidenceRecorder | None = None
     dry_run: bool = True
+    launch_mode: LaunchMode = LaunchMode.DRY_RUN
+    adapter_type: str = "DryRunAdapter"
     webhook_secret: str = ""
     started_at: float = 0.0
     alerts_received: int = 0
@@ -80,15 +83,7 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
         ws: WebhookState = request.app.state.ws
         ws.alerts_received += 1
 
-        # --- Basic auth (optional shared secret) ---
-        if ws.webhook_secret:
-            token = request.headers.get("X-Webhook-Secret", "")
-            if token != ws.webhook_secret:
-                ws.alerts_rejected += 1
-                _record_event(ws, "WEBHOOK_AUTH_FAILED", {"reason": "bad_secret"})
-                raise HTTPException(status_code=403, detail="invalid webhook secret")
-
-        # --- Parse body ---
+        # --- Parse body first (needed for body-based secret check) ---
         try:
             body = await request.body()
             if not body:
@@ -100,6 +95,16 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
             ws.alerts_rejected += 1
             _record_event(ws, "WEBHOOK_MALFORMED_JSON", {"error": str(exc)[:200]})
             raise HTTPException(status_code=400, detail=f"malformed JSON: {exc}") from exc
+
+        # --- Auth: check header first, fall back to body field ---
+        if ws.webhook_secret:
+            token = request.headers.get("X-Webhook-Secret", "")
+            if not token and isinstance(payload, dict):
+                token = payload.pop("webhook_secret", "")
+            if token != ws.webhook_secret:
+                ws.alerts_rejected += 1
+                _record_event(ws, "WEBHOOK_AUTH_FAILED", {"reason": "bad_secret"})
+                raise HTTPException(status_code=403, detail="invalid webhook secret")
 
         if not isinstance(payload, dict):
             ws.alerts_rejected += 1
@@ -159,6 +164,8 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
         return {
             "status": "ok" if ws.agent else "degraded",
             "dry_run": ws.dry_run,
+            "launch_mode": ws.launch_mode.value,
+            "adapter_type": ws.adapter_type,
             "agent_state": agent_state,
             "risk_halted": halted,
             "uptime_seconds": time.time() - ws.started_at if ws.started_at else 0,
@@ -185,6 +192,47 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
         _record_event(ws, "DAILY_SUMMARY_TRIGGERED", {"path": str(path)})
         return {"ok": True, "path": str(path), "summary": summary.to_dict()}
 
+    # -- Readiness endpoint ----------------------------------------------------
+
+    @app.get("/readiness")
+    async def readiness(request: Request) -> dict:
+        """Return current launch-gate readiness assessment."""
+        from novatrade.runtime.launch_gate import evaluate_launch_gate
+
+        ws: WebhookState = request.app.state.ws
+        r = evaluate_launch_gate(
+            ws.agent._cfg if ws.agent else None,  # type: ignore[arg-type]
+            ws.launch_mode,
+            risk_engine_initialized=ws.risk_engine is not None,
+            risk_engine_halted=ws.risk_engine.halted if ws.risk_engine else False,
+            agent_initialized=ws.agent is not None,
+            monitor_initialized=ws.monitor is not None,
+            adapter_connected=True,
+            adapter_type=ws.adapter_type,
+        )
+        return r.to_dict()
+
+    # -- Rollback to dry-run ---------------------------------------------------
+
+    @app.post("/control/rollback")
+    async def rollback(request: Request) -> dict:
+        """Emergency rollback to DryRunAdapter."""
+        from novatrade.runtime.runner import rollback_to_dry_run
+
+        ws: WebhookState = request.app.state.ws
+        rollback_to_dry_run(ws)
+        _record_event(
+            ws,
+            "ROLLBACK_TRIGGERED",
+            {"launch_mode": ws.launch_mode.value, "adapter_type": ws.adapter_type},
+        )
+        return {
+            "ok": True,
+            "launch_mode": ws.launch_mode.value,
+            "adapter_type": ws.adapter_type,
+            "dry_run": ws.dry_run,
+        }
+
     return app
 
 
@@ -203,7 +251,8 @@ def build_status(ws: WebhookState) -> dict:
     halt_reason = ws.risk_engine.halt_reason if ws.risk_engine else ""
 
     return {
-        "runtime_mode": "dry-run" if ws.dry_run else "active-ready",
+        "runtime_mode": ws.launch_mode.value,
+        "adapter_type": ws.adapter_type,
         "started_at": ws.started_at,
         "uptime_seconds": time.time() - ws.started_at if ws.started_at else 0,
         "trading_agent": {

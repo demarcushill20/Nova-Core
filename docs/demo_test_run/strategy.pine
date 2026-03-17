@@ -89,6 +89,7 @@ WARMUP             = 34                        // [Spec §6.warmup.bars_required
 STRAT_NAME         = "Rob Hoffman IRB"
 STRAT_VER          = "2.0.0"
 CAMPAIGN           = "ftmo-free-trial-march-2026"
+WH_SECRET          = "d69eadb4a7ca9fc6c32c3551783dc3145eab812fac8b4a7c67a9753e87e4cc67"
 
 // =============================================================================
 // SECTION 2: DERIVED CONSTANTS
@@ -443,7 +444,8 @@ if evt_signal or evt_replace
     vol        := math.round(vol * 100.0) / 100.0
 
     string p = '{' +
-         '"strategy_name":"'    + STRAT_NAME   + '"' +
+         '"webhook_secret":"'   + WH_SECRET    + '"' +
+         ',"strategy_name":"'   + STRAT_NAME   + '"' +
          ',"strategy_version":"'+ STRAT_VER    + '"' +
          ',"action":"'          + at           + '"' +
          ',"signal_type":"'     + st           + '"' +
@@ -481,7 +483,8 @@ if evt_signal or evt_replace
 var float prev_stop = na
 if (state == S_LONG or state == S_SHORT) and not na(cur_stop) and cur_stop != nz(prev_stop)
     string tp = '{' +
-         '"strategy_name":"'    + STRAT_NAME   + '"' +
+         '"webhook_secret":"'   + WH_SECRET    + '"' +
+         ',"strategy_name":"'   + STRAT_NAME   + '"' +
          ',"strategy_version":"'+ STRAT_VER    + '"' +
          ',"action":"MODIFY_SL"' +
          ',"symbol":"EURUSD"' +
@@ -500,7 +503,8 @@ prev_stop := cur_stop
 // --- Cancel alert ---
 if evt_cancel
     string cp = '{' +
-         '"strategy_name":"'    + STRAT_NAME   + '"' +
+         '"webhook_secret":"'   + WH_SECRET    + '"' +
+         ',"strategy_name":"'   + STRAT_NAME   + '"' +
          ',"strategy_version":"'+ STRAT_VER    + '"' +
          ',"action":"CANCEL_ORDER"' +
          ',"symbol":"EURUSD"' +
@@ -514,7 +518,8 @@ if evt_cancel
 // --- Time stop alert ---
 if evt_tstop
     string xp = '{' +
-         '"strategy_name":"'    + STRAT_NAME   + '"' +
+         '"webhook_secret":"'   + WH_SECRET    + '"' +
+         ',"strategy_name":"'   + STRAT_NAME   + '"' +
          ',"strategy_version":"'+ STRAT_VER    + '"' +
          ',"action":"CLOSE_POSITION"' +
          ',"symbol":"EURUSD"' +
