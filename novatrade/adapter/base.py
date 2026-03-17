@@ -15,6 +15,7 @@ from novatrade.models import (
     HealthStatus,
     OrderRequest,
     OrderResult,
+    OrderStatus,
     Position,
     SymbolPrice,
 )
@@ -94,3 +95,16 @@ class MT5Adapter(ABC):
         volume: float | None = None,
     ) -> OrderResult:
         """Close (fully or partially) an open position."""
+
+    async def cancel_order(self, order_id: str) -> OrderResult:
+        """Cancel a pending order.
+
+        Non-abstract default returns an error result.  Adapters that support
+        pending-order lifecycles (required by IRB stop-order workflow) should
+        override this with a real implementation.
+        """
+        return OrderResult(
+            ok=False,
+            error="cancel_order not implemented by this adapter",
+            status=OrderStatus.REJECTED,
+        )

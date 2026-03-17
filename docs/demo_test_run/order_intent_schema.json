@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "novatrade-irb-order-intent-v2.0.0",
+  "title": "NovaTrade IRB — Order Intent Contract",
+  "description": "Internal schema for the governed order intents created by the Trading Agent from validated IRB alert payloads. This is the intermediate representation between alert ingestion and broker execution.",
+  "phase": "5 (Trading Agent Runtime)",
+  "date": "2026-03-17",
+  "strategy_spec_version": "2.0.0",
+
+  "type": "object",
+  "required": [
+    "intent_type",
+    "idempotency_key",
+    "broker_symbol",
+    "side",
+    "strategy_id",
+    "strategy_version",
+    "campaign",
+    "source_bar_time",
+    "created_at"
+  ],
+  "properties": {
+    "intent_type": {
+      "type": "string",
+      "enum": ["PLACE_ORDER", "REPLACE_ORDER", "MODIFY_SL", "CANCEL_ORDER", "CLOSE_POSITION"],
+      "description": "The governed action to perform. Derived from alert action: PLACE_STOP_ORDER->PLACE_ORDER, REPLACE_STOP_ORDER->REPLACE_ORDER, MODIFY_SL->MODIFY_SL, CANCEL_ORDER->CANCEL_ORDER, CLOSE_POSITION->CLOSE_POSITION"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "description": "Deterministic key: irb_{action}_{bar_close_time}_{side}. Prevents duplicate submission of the same alert.",
+      "pattern": "^irb_.+$"
+    },
+    "broker_symbol": {
+      "type": "string",
+      "description": "Broker-resolved symbol (e.g. EURUSD.sim). Resolved via FtmoProfile.resolve_symbol() from the display symbol.",
+      "examples": ["EURUSD.sim", "EURUSD"]
+    },
+    "side": {
+      "type": "string",
+      "enum": ["BUY", "SELL"],
+      "description": "Trade direction. Passed through from alert payload."
+    },
+    "strategy_id": {
+      "type": "string",
+      "const": "Rob Hoffman IRB",
+      "description": "Strategy identifier. Must match strategy_spec.yaml."
+    },
+    "strategy_version": {
+      "type": "string",
+      "const": "2.0.0",
+      "description": "Strategy version. Must match strategy_spec.yaml v2.0.0."
+    },
+    "campaign": {
+      "type": "string",
+      "description": "Campaign label for evidence tagging (e.g. ftmo-free-trial-march-2026)."
+    },
+    "source_bar_time": {
+      "type": "integer",
+      "description": "Unix ms timestamp of the source bar that triggered the alert. 0 if not available."
+    },
+    "created_at": {
+      "type": "number",
+      "description": "Unix timestamp (seconds) when the intent was created by the Trading Agent."
+    },
+
+    "order_type": {
+      "type": "string",
+      "enum": ["STOP"],
+      "description": "Order type. Always STOP for IRB (BUY_STOP or SELL_STOP, determined by side). Only present for PLACE_ORDER/REPLACE_ORDER intents."
+    },
+    "entry_price": {
+      "type": "number",
+      "description": "Stop order trigger price: IRB extreme +/- 1 pip. Only present for PLACE_ORDER/REPLACE_ORDER."
+    },
+    "stop_loss": {
+      "type": "number",
+      "description": "Stop loss price: IRB opposite side +/- 1 pip. Authoritative — passed directly to broker. Only present for PLACE_ORDER/REPLACE_ORDER."
+    },
+    "volume": {
+      "type": "number",
+      "description": "Lot size from Pine risk-based sizing, clamped [0.01, 1.00]. Only present for PLACE_ORDER/REPLACE_ORDER.",
+      "minimum": 0.01,
+      "maximum": 1.00
+    },
+
+    "new_stop_loss": {
+      "type": "number",
+      "description": "New trailing stop level. Only present for MODIFY_SL intents. Authoritative."
+    },
+    "old_stop_loss": {
+      "type": "number",
+      "description": "Previous stop loss level (informational). Only present for MODIFY_SL intents."
+    },
+
+    "cancel_reason": {
+      "type": "string",
+      "description": "Reason for cancellation. Only present for CANCEL_ORDER intents.",
+      "enum": ["TRIGGER_WINDOW_EXPIRED"]
+    },
+
+    "close_reason": {
+      "type": "string",
+      "description": "Reason for position close. Only present for CLOSE_POSITION intents.",
+      "enum": ["TIME_STOP"]
+    }
+  },
+  "additionalProperties": false,
+
+  "_intent_type_required_fields": {
+    "PLACE_ORDER":    ["order_type", "entry_price", "stop_loss", "volume"],
+    "REPLACE_ORDER":  ["order_type", "entry_price", "stop_loss", "volume"],
+    "MODIFY_SL":      ["new_stop_loss"],
+    "CANCEL_ORDER":   ["cancel_reason"],
+    "CLOSE_POSITION": ["close_reason"]
+  },
+
+  "_fsm_valid_transitions": {
+    "PLACE_ORDER":    {"from": ["FLAT"], "to": ["PENDING_LONG", "PENDING_SHORT"]},
+    "REPLACE_ORDER":  {"from": ["PENDING_LONG", "PENDING_SHORT"], "to": ["PENDING_LONG", "PENDING_SHORT"]},
+    "MODIFY_SL":      {"from": ["LONG", "SHORT"], "to": ["LONG", "SHORT"]},
+    "CANCEL_ORDER":   {"from": ["PENDING_LONG", "PENDING_SHORT"], "to": ["FLAT"]},
+    "CLOSE_POSITION": {"from": ["LONG", "SHORT"], "to": ["FLAT"]}
+  },
+
+  "_implementation_notes": {
+    "idempotency": "Keys are generated deterministically from alert fields. A bounded set (max 1000) is maintained in memory. Duplicate keys are rejected immediately.",
+    "symbol_resolution": "broker_symbol is resolved from display symbol via FtmoProfile.resolve_symbol(). Alert-provided broker_symbol is validated against resolution — mismatches are logged but resolved value takes precedence.",
+    "risk_gate": "PLACE_ORDER and REPLACE_ORDER intents pass through RiskEngine.pre_trade_check() before execution. MODIFY_SL, CANCEL_ORDER, and CLOSE_POSITION bypass risk checks (they reduce or close exposure).",
+    "evidence": "Every intent is recorded to the append-only JSONL evidence trail regardless of outcome."
+  }
+}
