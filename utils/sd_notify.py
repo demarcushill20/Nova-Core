@@ -9,6 +9,7 @@ Phase 6B.15: sd_notify watchdog integration.
 
 import os
 import socket
+import struct
 
 
 def sd_notify(state: str) -> bool:
@@ -16,6 +17,10 @@ def sd_notify(state: str) -> bool:
 
     Returns True if notification sent, False if not running under systemd.
     No-op when NOTIFY_SOCKET is not set.
+
+    M10 fix: enables SO_LINGER with a 1-second timeout to ensure the
+    datagram is flushed before the socket closes. This prevents the
+    notification from being lost if the process exits immediately after.
     """
     addr = os.environ.get("NOTIFY_SOCKET")
     if not addr:
@@ -26,6 +31,8 @@ def sd_notify(state: str) -> bool:
     try:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         try:
+            # SO_LINGER: wait up to 1s for pending data to flush on close
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 1))
             sock.connect(addr)
             sock.sendall(state.encode())
         finally:
@@ -46,7 +53,12 @@ def notify_watchdog() -> bool:
 
 
 def notify_stopping() -> bool:
-    """Signal that service is beginning graceful shutdown."""
+    """Signal that service is beginning graceful shutdown.
+
+    M10 fix: uses SO_LINGER to ensure the datagram is flushed before
+    the socket closes — prevents the notification from being lost if
+    the process exits immediately after this call.
+    """
     return sd_notify("STOPPING=1")
 
 

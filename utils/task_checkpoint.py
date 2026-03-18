@@ -51,6 +51,30 @@ def _checkpoint_path(task_id: str) -> Path:
     return CHECKPOINT_DIR / f"{task_id}.json"
 
 
+def _save_checkpoint_unlocked(checkpoint: TaskCheckpoint) -> Path:
+    """Write checkpoint — caller MUST hold _lock."""
+    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    target = _checkpoint_path(checkpoint.task_id)
+    data = asdict(checkpoint)
+    data["last_updated"] = _now_iso()
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(CHECKPOINT_DIR), suffix=".tmp", prefix=f"{checkpoint.task_id}_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, str(target))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    logger.info("Checkpoint saved: %s (status=%s)", checkpoint.task_id, checkpoint.status)
+    return target
+
+
 def save_checkpoint(checkpoint: TaskCheckpoint) -> Path:
     """Write checkpoint to STATE/checkpoints/{task_id}.json.
 
@@ -58,50 +82,34 @@ def save_checkpoint(checkpoint: TaskCheckpoint) -> Path:
     Thread-safe via _lock.
     """
     with _lock:
-        CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-        target = _checkpoint_path(checkpoint.task_id)
-        data = asdict(checkpoint)
-        data["last_updated"] = _now_iso()
+        return _save_checkpoint_unlocked(checkpoint)
 
-        # Atomic write: write to temp file in same directory, then rename
-        fd, tmp_path = tempfile.mkstemp(dir=str(CHECKPOINT_DIR), suffix=".tmp", prefix=f"{checkpoint.task_id}_")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-                f.write("\n")
-            os.replace(tmp_path, str(target))
-        except Exception:
-            # Clean up temp file on failure
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
 
-        logger.info("Checkpoint saved: %s (status=%s)", checkpoint.task_id, checkpoint.status)
-        return target
+def _load_checkpoint_unlocked(task_id: str) -> TaskCheckpoint | None:
+    """Load checkpoint — caller MUST hold _lock."""
+    path = _checkpoint_path(task_id)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return TaskCheckpoint(
+            task_id=data["task_id"],
+            task_file=data["task_file"],
+            status=data["status"],
+            started_at=data["started_at"],
+            last_updated=data["last_updated"],
+            partial_output=data.get("partial_output"),
+            retry_count=data.get("retry_count", 0),
+        )
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning("Malformed checkpoint for %s: %s", task_id, exc)
+        return None
 
 
 def load_checkpoint(task_id: str) -> TaskCheckpoint | None:
     """Load checkpoint for a task, or None if not found or malformed."""
     with _lock:
-        path = _checkpoint_path(task_id)
-        if not path.exists():
-            return None
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return TaskCheckpoint(
-                task_id=data["task_id"],
-                task_file=data["task_file"],
-                status=data["status"],
-                started_at=data["started_at"],
-                last_updated=data["last_updated"],
-                partial_output=data.get("partial_output"),
-                retry_count=data.get("retry_count", 0),
-            )
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
-            logger.warning("Malformed checkpoint for %s: %s", task_id, exc)
-            return None
+        return _load_checkpoint_unlocked(task_id)
 
 
 def clear_checkpoint(task_id: str) -> None:
@@ -117,35 +125,41 @@ def list_incomplete_checkpoints() -> list[TaskCheckpoint]:
 
     Returns only checkpoints with retry_count < MAX_TASK_RETRIES.
     Skips malformed files gracefully.
-    """
-    results: list[TaskCheckpoint] = []
-    if not CHECKPOINT_DIR.exists():
-        return results
 
+    M6 fix: collects file paths under lock, parses outside to reduce lock
+    hold time when the checkpoint directory contains many files.
+    """
+    if not CHECKPOINT_DIR.exists():
+        return []
+
+    # Collect paths under lock (fast), then parse without holding it
     with _lock:
-        for path in sorted(CHECKPOINT_DIR.glob("*.json")):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                cp = TaskCheckpoint(
-                    task_id=data["task_id"],
-                    task_file=data["task_file"],
-                    status=data["status"],
-                    started_at=data["started_at"],
-                    last_updated=data["last_updated"],
-                    partial_output=data.get("partial_output"),
-                    retry_count=data.get("retry_count", 0),
+        paths = sorted(CHECKPOINT_DIR.glob("*.json"))
+
+    results: list[TaskCheckpoint] = []
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            cp = TaskCheckpoint(
+                task_id=data["task_id"],
+                task_file=data["task_file"],
+                status=data["status"],
+                started_at=data["started_at"],
+                last_updated=data["last_updated"],
+                partial_output=data.get("partial_output"),
+                retry_count=data.get("retry_count", 0),
+            )
+            if cp.retry_count < MAX_TASK_RETRIES:
+                results.append(cp)
+            else:
+                logger.warning(
+                    "Checkpoint %s exceeded max retries (%d/%d) — skipping",
+                    cp.task_id,
+                    cp.retry_count,
+                    MAX_TASK_RETRIES,
                 )
-                if cp.retry_count < MAX_TASK_RETRIES:
-                    results.append(cp)
-                else:
-                    logger.warning(
-                        "Checkpoint %s exceeded max retries (%d/%d) — skipping",
-                        cp.task_id,
-                        cp.retry_count,
-                        MAX_TASK_RETRIES,
-                    )
-            except (json.JSONDecodeError, KeyError, TypeError) as exc:
-                logger.warning("Skipping malformed checkpoint %s: %s", path.name, exc)
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            logger.warning("Skipping malformed checkpoint %s: %s", path.name, exc)
 
     return results
 
@@ -154,24 +168,29 @@ def update_status(task_id: str, status: str, partial_output: str | None = None) 
     """Update the status of an existing checkpoint.
 
     Returns the checkpoint path, or None if no checkpoint exists.
+    Thread-safe: holds _lock across the full load+modify+save to prevent
+    race conditions (H1 fix — prior version used separate lock acquisitions).
     """
-    cp = load_checkpoint(task_id)
-    if cp is None:
-        return None
-    cp.status = status
-    if partial_output is not None:
-        cp.partial_output = partial_output
-    return save_checkpoint(cp)
+    with _lock:
+        cp = _load_checkpoint_unlocked(task_id)
+        if cp is None:
+            return None
+        cp.status = status
+        if partial_output is not None:
+            cp.partial_output = partial_output
+        return _save_checkpoint_unlocked(cp)
 
 
 def increment_retry(task_id: str) -> TaskCheckpoint | None:
     """Increment retry count for a task checkpoint.
 
     Returns the updated checkpoint, or None if not found.
+    Thread-safe: holds _lock across the full load+modify+save (H1 fix).
     """
-    cp = load_checkpoint(task_id)
-    if cp is None:
-        return None
-    cp.retry_count += 1
-    save_checkpoint(cp)
-    return cp
+    with _lock:
+        cp = _load_checkpoint_unlocked(task_id)
+        if cp is None:
+            return None
+        cp.retry_count += 1
+        _save_checkpoint_unlocked(cp)
+        return cp

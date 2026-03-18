@@ -20,9 +20,12 @@ from pathlib import Path
 _log = logging.getLogger("nova.kill_switch")
 
 # --- File-based kill switch paths ---
-KILL_FILE = Path("/tmp/nova-kill")
-PAUSE_FILE = Path("/tmp/nova-pause")
-READONLY_FILE = Path("/tmp/nova-readonly")
+# M9 fix: moved from /tmp (world-writable, clears on reboot) to STATE/
+# for persistence across reboots and tighter filesystem permissions.
+_STATE_DIR = Path(__file__).resolve().parent / "STATE"
+KILL_FILE = _STATE_DIR / "nova-kill"
+PAUSE_FILE = _STATE_DIR / "nova-pause"
+READONLY_FILE = _STATE_DIR / "nova-readonly"
 
 # --- Modes ---
 MODE_RUN = "run"
@@ -149,6 +152,7 @@ def set_mode_file(mode: str) -> bool:
 
     if target:
         try:
+            target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(CONFIRM_CONTENT, encoding="utf-8")
             _log.info("KILL_SWITCH set to '%s' via file %s", mode, target)
             return True
@@ -190,7 +194,11 @@ def check_dead_man_switch() -> bool:
     """Check if the dead man's switch has expired.
 
     Returns True if the system is alive (heartbeat recent).
-    Returns False if no heartbeat in HEARTBEAT_TTL seconds.
+    Returns False if no heartbeat in HEARTBEAT_TTL seconds OR if Redis
+    is unreachable (fail-closed: assume unhealthy when we can't verify).
+
+    H3 fix: previously returned True on Redis failure (fail-open), which
+    masked dead heartbeats when Redis was down.
     """
     try:
         import redis
@@ -199,8 +207,9 @@ def check_dead_man_switch() -> bool:
         val = r.get(HEARTBEAT_KEY)
         return val is not None
     except Exception:
-        # If Redis is down, don't trigger dead man's switch
-        return True
+        # Fail closed: if Redis is unreachable, assume system is unhealthy
+        _log.warning("Dead man's switch: Redis unreachable — failing closed")
+        return False
 
 
 def should_accept_work() -> bool:
@@ -243,28 +252,40 @@ def format_status() -> str:
 
 _DEFAULT_RISK_STATE = Path(__file__).resolve().parent / "STATE" / "novatrade_risk_state.json"
 
-# Keywords that identify a NovaTrade-related task
-_NOVATRADE_KEYWORDS = frozenset(
+# H7 fix: Explicit NovaTrade identifiers (any single match is conclusive)
+_NOVATRADE_EXPLICIT = frozenset(
     {
         "novatrade",
         "nova-trade",
-        "trade",
-        "trading",
-        "forex",
         "ftmo",
         "metatrader",
         "mt5",
         "metaapi",
-        "webhook",
-        "signal",
-        "backtest",
-        "strategy",
-        "prop-firm",
         "propfirm",
+        "prop-firm",
+    }
+)
+
+# Domain terms — specific enough to match alone
+_NOVATRADE_DOMAIN = frozenset(
+    {
+        "forex",
         "drawdown",
+        "backtest",
+        "trading",  # "trading" is domain-specific (unlike "trade")
+    }
+)
+
+# Generic terms that only count when 2+ appear together
+_NOVATRADE_GENERIC = frozenset(
+    {
+        "trade",
+        "signal",
+        "strategy",
         "equity",
         "position",
         "order",
+        "webhook",
         "irb",
     }
 )
@@ -297,8 +318,26 @@ def check_equity_kill_switch(state_file: str | Path | None = None) -> bool:
 def is_novatrade_task(task_name: str, task_content: str = "") -> bool:
     """Classify whether a task is NovaTrade-related by keywords.
 
-    Checks the task name and optional content against a fixed keyword set.
-    Case-insensitive. Returns ``True`` if any keyword matches.
+    H7 fix: Uses a three-tier keyword strategy to reduce false positives:
+    1. Explicit identifiers (e.g. "novatrade", "ftmo") → immediate match
+    2. Domain terms (e.g. "forex", "drawdown") → match alone
+    3. Generic terms (e.g. "trade", "order") → require at least TWO generic
+       terms OR one generic + one domain term to match.
+
+    This prevents "Position paper at 2pm" or "signal handler cleanup" from
+    triggering equity kill switch checks.
     """
     haystack = f"{task_name} {task_content}".lower()
-    return any(kw in haystack for kw in _NOVATRADE_KEYWORDS)
+
+    # Tier 1: Explicit identifiers — single match is conclusive
+    if any(kw in haystack for kw in _NOVATRADE_EXPLICIT):
+        return True
+
+    # Tier 2: Domain terms — single match is sufficient
+    domain_hits = sum(1 for kw in _NOVATRADE_DOMAIN if kw in haystack)
+    if domain_hits > 0:
+        return True
+
+    # Tier 3: Generic terms — need 2+ hits to classify as NovaTrade
+    generic_hits = sum(1 for kw in _NOVATRADE_GENERIC if kw in haystack)
+    return generic_hits >= 2

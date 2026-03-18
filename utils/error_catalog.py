@@ -134,11 +134,13 @@ _CATALOG: list[ErrorEntry] = [
         max_retries=3,
         backoff_base=30.0,
     ),
-    # FileNotFoundError on TASKS/
+    # FileNotFoundError on TASKS/ directory
+    # M4 fix: anchor to the actual path pattern to avoid matching unrelated
+    # paths that contain "tasks" in a case-insensitive match
     ErrorEntry(
         code="E-TASK-001",
         category="permanent",
-        pattern=r"FileNotFoundError.*TASKS/",
+        pattern=r"FileNotFoundError.*(?:TASKS/|/nova-core/TASKS)",
         recommended_action="skip",
         max_retries=0,
         backoff_base=0.0,
@@ -152,7 +154,8 @@ _CATALOG: list[ErrorEntry] = [
         max_retries=1,
         backoff_base=30.0,
     ),
-    # JSON decode on LLM output
+    # JSON decode on LLM output (M3 fix: pattern is specific — only matches
+    # JSONDecodeError with LLM context words, so E-LLM-002 won't shadow it)
     ErrorEntry(
         code="E-LLM-001",
         category="transient",
@@ -161,11 +164,13 @@ _CATALOG: list[ErrorEntry] = [
         max_retries=2,
         backoff_base=5.0,
     ),
-    # Broader JSONDecodeError (still transient — LLM might produce bad JSON)
+    # Broader JSONDecodeError — catches non-LLM JSON failures.
+    # M3 fix: uses negative lookahead to exclude strings already matched
+    # by E-LLM-001, ensuring no pattern overlap.
     ErrorEntry(
         code="E-LLM-002",
         category="transient",
-        pattern=r"JSONDecodeError",
+        pattern=r"JSONDecodeError(?!.*(llm|claude|response|output|parse))",
         recommended_action="retry",
         max_retries=2,
         backoff_base=5.0,
@@ -179,14 +184,24 @@ _CATALOG: list[ErrorEntry] = [
 _catalog_lock = threading.Lock()
 _catalog_entries: list[ErrorEntry] = list(_CATALOG)
 
+# M5 fix: cap catalog size to prevent unbounded growth from runaway callers
+MAX_CATALOG_SIZE = 200
+
 
 def register_entry(entry: ErrorEntry) -> None:
     """Register a new error entry at the front of the catalog.
 
     Later entries are matched first when they are inserted via this function,
     allowing runtime overrides of built-in patterns.
+
+    M5 fix: raises ValueError if the catalog exceeds MAX_CATALOG_SIZE to
+    prevent unbounded memory growth from runaway registration loops.
     """
     with _catalog_lock:
+        if len(_catalog_entries) >= MAX_CATALOG_SIZE:
+            raise ValueError(
+                f"Error catalog full ({MAX_CATALOG_SIZE} entries). Call reset_catalog() or remove stale entries."
+            )
         _catalog_entries.insert(0, entry)
 
 

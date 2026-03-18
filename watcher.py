@@ -1435,8 +1435,17 @@ def _resume_checkpointed_tasks() -> None:
                 continue
 
             # If .inprogress exists, rename back to .md for re-dispatch
+            # M7 fix: wrap rename in try/except to handle TOCTOU race where
+            # another process deletes the file between exists() and rename()
             if inprogress.exists():
-                inprogress.rename(task_file)
+                try:
+                    inprogress.rename(task_file)
+                except FileNotFoundError:
+                    logger.warning(
+                        "CHECKPOINT RESUME: %s — .inprogress vanished (race), skipping",
+                        stem,
+                    )
+                    continue
                 logger.info(
                     "CHECKPOINT RESUME: %s restored from .inprogress (retry %d)",
                     stem,

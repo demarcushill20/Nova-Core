@@ -85,6 +85,7 @@ class SimpleCircuitBreaker:
         self._window: collections.deque[tuple[float, bool]] = collections.deque(maxlen=window_size)
         self._trip_count = 0
         self._last_failure_time: float = 0.0
+        self._half_open_permitted = False
 
         # Legacy compat: kept for Redis persistence and __repr__
         self._consecutive_failures = 0
@@ -108,6 +109,15 @@ class SimpleCircuitBreaker:
     # -- Redis helpers --------------------------------------------------------
 
     def _restore_from_redis(self) -> None:
+        """Restore breaker state from Redis.
+
+        On restore, synthetic failure entries are seeded into the rolling
+        window to match the persisted failure count. This prevents data
+        loss where ``_failure_count_unlocked()`` would return 0 after a
+        restart (since the window deque itself is not persisted). The
+        synthetic entries use ``_last_failure_time`` as their timestamp,
+        so they age out naturally after ``window_seconds``.
+        """
         if self._redis is None:
             return
         try:
@@ -119,6 +129,12 @@ class SimpleCircuitBreaker:
             self._last_failure_time = float(data.get(b"last_failure", 0.0))
             state_str = (data.get(b"state", b"CLOSED")).decode()
             self._state = _State(state_str)
+
+            # Seed window with synthetic failures to match persisted count.
+            # Uses last_failure_time so entries age out naturally.
+            if self._consecutive_failures > 0 and self._last_failure_time > 0:
+                for _ in range(self._consecutive_failures):
+                    self._window.append((self._last_failure_time, False))
         except Exception:  # noqa: S110 — intentional: degrade to in-memory
             pass
 
@@ -150,6 +166,16 @@ class SimpleCircuitBreaker:
             return self._state.value
 
     @property
+    def is_open(self) -> bool:
+        """Return True if breaker is currently OPEN.
+
+        Lock-free snapshot read for use in contexts where the caller already
+        holds a lock that would deadlock with ``state`` (H5 fix). The read
+        of an enum attribute is atomic on CPython due to the GIL.
+        """
+        return self._state == _State.OPEN
+
+    @property
     def trip_count(self) -> int:
         """Number of times this breaker has tripped."""
         with self._lock:
@@ -168,7 +194,12 @@ class SimpleCircuitBreaker:
         return sum(1 for ts, ok in self._window if not ok and ts >= cutoff)
 
     def record_failure(self) -> None:
-        """Record a failure and potentially trip the breaker."""
+        """Record a failure and potentially trip the breaker.
+
+        H4 fix: on_open callback is fired AFTER releasing the lock to avoid
+        holding the breaker lock during disk I/O (set_degradation_tier).
+        """
+        fire_callback = False
         with self._lock:
             now = time.monotonic()
             self._window.append((now, False))
@@ -181,14 +212,16 @@ class SimpleCircuitBreaker:
                 was_open = self._state == _State.OPEN
                 if not was_open:
                     self._trip_count += 1
-                    # Fire on_open callback on transition to OPEN
-                    if self.on_open is not None:
-                        try:
-                            self.on_open(self.name)
-                        except Exception:  # noqa: S110 — intentional: callback must not break breaker
-                            pass
+                    fire_callback = True
                 self._state = _State.OPEN
             self._persist_to_redis()
+
+        # Fire on_open callback outside the lock to avoid blocking
+        if fire_callback and self.on_open is not None:
+            try:
+                self.on_open(self.name)
+            except Exception:  # noqa: S110 — intentional: callback must not break breaker
+                pass
 
     def record_success(self) -> None:
         """Record a success. In HALF_OPEN this closes the breaker.
@@ -215,11 +248,22 @@ class SimpleCircuitBreaker:
             self._persist_to_redis()
 
     def _check_state_or_raise(self) -> None:
-        """Check state under lock; raise if OPEN. Shared by call/acall."""
+        """Check state under lock; raise if OPEN or HALF_OPEN without token.
+
+        In HALF_OPEN state, only one trial call is permitted. The first
+        caller claims the ``_half_open_permitted`` token; subsequent
+        callers are rejected until the trial completes.
+        """
         with self._lock:
             self._maybe_transition()
             if self._state == _State.OPEN:
                 raise CircuitBreakerError(self.name, self._state.value, self._trip_count)
+            if self._state == _State.HALF_OPEN:
+                if self._half_open_permitted:
+                    self._half_open_permitted = False  # Claim the trial token
+                else:
+                    # Another thread already claimed the trial — reject
+                    raise CircuitBreakerError(self.name, self._state.value, self._trip_count)
 
     def _is_excluded(self, exc: Exception) -> bool:
         """Return True if *exc* is an excluded exception type."""
@@ -269,12 +313,14 @@ class SimpleCircuitBreaker:
     def _maybe_transition(self) -> None:
         """Transition OPEN -> HALF_OPEN when reset timeout elapses.
 
-        Must be called while holding self._lock.
+        Must be called while holding self._lock. Sets the half-open trial
+        token so that exactly one call is permitted through.
         """
         if self._state == _State.OPEN and self._last_failure_time > 0:
             elapsed = time.monotonic() - self._last_failure_time
             if elapsed >= self.reset_timeout_seconds:
                 self._state = _State.HALF_OPEN
+                self._half_open_permitted = True
 
     def __repr__(self) -> str:
         return (

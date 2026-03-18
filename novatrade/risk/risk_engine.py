@@ -95,12 +95,20 @@ class DrawdownState:
     drawdown_type: DrawdownType = DrawdownType.DAILY
 
     def update(self, equity: float) -> None:
-        """Update drawdown state with new equity reading."""
+        """Update drawdown state with new equity reading.
+
+        M8 fix: drawdown is calculated from *reference_equity* (start-of-day
+        or initial balance), matching FTMO's definition and consistent with
+        ``_check_drawdown_governance()``.  Peak equity is still tracked for
+        informational purposes (high-water mark), but drawdown metrics use
+        reference as both numerator base and denominator.
+        """
         self.current_equity = equity
         if equity > self.peak_equity:
             self.peak_equity = equity
 
-        self.current_drawdown_usd = self.peak_equity - equity
+        # Drawdown from reference equity (FTMO definition), not from peak
+        self.current_drawdown_usd = max(self.reference_equity - equity, 0.0)
         self.current_drawdown_pct = (
             (self.current_drawdown_usd / self.reference_equity) * 100 if self.reference_equity > 0 else 0.0
         )
@@ -277,8 +285,27 @@ class RiskEngine:
     # Initialization
     # ------------------------------------------------------------------
 
-    def initialize(self, account: AccountState) -> None:
-        """Set initial equity from account state. Call once at session start."""
+    def initialize(
+        self,
+        account: AccountState,
+        *,
+        state_file: str | Path | None = None,
+    ) -> None:
+        """Set initial equity from account state. Call once at session start.
+
+        RC1 fix: reads persisted halt state from disk *before* resetting
+        drawdown tracking.  If the previous session halted, the engine
+        restores ``_halted`` and ``_halt_reason`` so trading cannot resume
+        without an explicit ``resume()`` call by the operator.
+
+        Args:
+            account: Current account state with equity.
+            state_file: Optional path to risk state JSON (for testing).
+                        Defaults to ``STATE/novatrade_risk_state.json``.
+        """
+        # --- RC1: restore persisted halt state before anything else ---
+        restored = self._restore_halt_state(state_file=state_file)
+
         self._initial_equity = account.equity
         self._current_equity = account.equity
         self._daily_start_equity = account.equity
@@ -297,7 +324,14 @@ class RiskEngine:
         )
         self._last_day_reset = time.time()
 
-        log.info("Risk engine initialized — equity=$%.2f", account.equity)
+        if restored:
+            log.info(
+                "Risk engine initialized — equity=$%.2f (HALTED from prior session: %s)",
+                account.equity,
+                self._halt_reason,
+            )
+        else:
+            log.info("Risk engine initialized — equity=$%.2f", account.equity)
 
     # ------------------------------------------------------------------
     # Pre-trade evaluation (Phase 6: 5-layer policy model)
@@ -449,12 +483,27 @@ class RiskEngine:
 
         Returns ``(checks, should_halt)``.  Warning-tier transitions are
         logged but do not deny trades — only BREACH triggers a halt.
+
+        RC2 fix: zero or negative equity is now an immediate emergency halt
+        instead of silently skipping all drawdown checks.
         """
         checks: list[RiskCheckResult] = []
         should_halt = False
 
+        # RC2: Zero or negative equity — emergency halt
+        if account.equity <= 0:
+            checks.append(
+                RiskCheckResult(
+                    name="equity_zero_or_negative",
+                    passed=False,
+                    detail=f"Equity at or below zero (${account.equity:.2f}) — emergency halt",
+                )
+            )
+            self._halt(f"Equity at or below zero: ${account.equity:.2f}")
+            return checks, True
+
         # Daily drawdown
-        if account.equity > 0 and self._daily_start_equity > 0:
+        if self._daily_start_equity > 0:
             daily_dd = max(
                 ((self._daily_start_equity - account.equity) / self._daily_start_equity) * 100,
                 0.0,
@@ -490,7 +539,7 @@ class RiskEngine:
                 )
 
         # Total drawdown
-        if account.equity > 0 and self._initial_equity > 0:
+        if self._initial_equity > 0:
             total_dd = max(
                 ((self._initial_equity - account.equity) / self._initial_equity) * 100,
                 0.0,
@@ -830,16 +879,25 @@ class RiskEngine:
             "max_daily_drawdown_pct": self._risk.max_daily_drawdown_pct,
             "breached": breached,
             "halted": self._halted,
+            "halt_reason": self._halt_reason,
             "last_updated": dt.datetime.now(dt.timezone.utc).isoformat(),
         }
 
-        with self._state_lock:
-            state_file.parent.mkdir(parents=True, exist_ok=True)
-            tmp = state_file.with_suffix(".tmp")
-            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            tmp.replace(state_file)
-
-        log.debug("Wrote risk state to %s", state_file)
+        try:
+            with self._state_lock:
+                state_file.parent.mkdir(parents=True, exist_ok=True)
+                tmp = state_file.with_suffix(".tmp")
+                tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                tmp.replace(state_file)
+            log.debug("Wrote risk state to %s", state_file)
+        except OSError as exc:
+            # H8 fix: surface write failures instead of silently losing state
+            log.error(
+                "CRITICAL: Failed to write risk state to %s: %s — risk state will not be visible to kill switch",
+                state_file,
+                exc,
+            )
+            raise
 
     @property
     def halted(self) -> bool:
@@ -860,6 +918,49 @@ class RiskEngine:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _restore_halt_state(
+        self,
+        state_file: str | Path | None = None,
+    ) -> bool:
+        """Read persisted risk state and restore halt flag if set.
+
+        Returns True if a halted state was restored from disk, False otherwise.
+        Tolerates missing or malformed files (logs warning, returns False).
+        """
+        if state_file is None:
+            state_file = Path(__file__).resolve().parents[2] / "STATE" / "novatrade_risk_state.json"
+        else:
+            state_file = Path(state_file)
+
+        if not state_file.exists():
+            return False
+
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            log.warning(
+                "Could not read persisted risk state from %s: %s — starting clean",
+                state_file,
+                exc,
+            )
+            return False
+
+        if not isinstance(data, dict):
+            log.warning("Persisted risk state is not a dict — starting clean")
+            return False
+
+        if data.get("halted"):
+            self._halted = True
+            self._halt_reason = data.get("halt_reason", "halt restored from prior session")
+            log.warning(
+                "Restored HALT state from disk: %s (file: %s)",
+                self._halt_reason,
+                state_file,
+            )
+            return True
+
+        return False
 
     def _halt(self, reason: str) -> None:
         """Halt all trading."""

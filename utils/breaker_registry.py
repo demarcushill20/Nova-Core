@@ -15,6 +15,7 @@ Stdlib only.  Thread-safe (each breaker has its own internal lock).
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 
 from agents.circuit_breakers import SimpleCircuitBreaker
@@ -37,12 +38,11 @@ def _on_breaker_open(name: str) -> None:
     Evaluates all open breakers and escalates the degradation tier if
     the suggested tier is worse than the current one.
 
-    NOTE: We read ``b._state.value`` directly instead of ``b.state``
-    because the calling breaker's ``record_failure`` still holds its
-    lock when it fires this callback, and ``b.state`` would re-acquire
-    the same (non-reentrant) lock, causing a deadlock.
+    H4+H5 fix: The callback now fires outside the breaker's lock (H4),
+    and we use the public ``b.is_open`` property (H5) which is a lock-free
+    snapshot read, instead of accessing the private ``b._state.value``.
     """
-    open_breakers = [bname for bname, b in BREAKERS.items() if b._state.value == "OPEN"]
+    open_breakers = [bname for bname, b in BREAKERS.items() if b.is_open]
     suggested = evaluate_circuit_breakers(open_breakers)
     current = get_degradation_tier()
     if suggested.value > current.tier.value:
@@ -68,68 +68,84 @@ def _make_on_open(name: str) -> Callable[[str], None]:
 
 _EXCLUDED: tuple[type[Exception], ...] = (ValueError, KeyError, TypeError)
 
+
+# ---------------------------------------------------------------------------
+# M1 fix: configurable thresholds via environment variables
+# ---------------------------------------------------------------------------
+
+# Defaults per breaker: (failure_threshold, reset_timeout_seconds, window_seconds)
+_DEFAULTS: dict[str, tuple[int, float, float]] = {
+    "mcp": (5, 30.0, 60.0),
+    "claude_api": (3, 60.0, 120.0),
+    "metaapi": (3, 120.0, 60.0),
+    "webhook": (10, 30.0, 60.0),
+    "redis": (5, 30.0, 60.0),
+    "pinecone": (3, 60.0, 60.0),
+    "neo4j": (3, 60.0, 60.0),
+}
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read int from env, fall back to default."""
+    val = os.environ.get(name)
+    if val is not None:
+        try:
+            return int(val)
+        except ValueError:
+            log.warning("Invalid env %s=%r — using default %d", name, val, default)
+    return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read float from env, fall back to default."""
+    val = os.environ.get(name)
+    if val is not None:
+        try:
+            return float(val)
+        except ValueError:
+            log.warning("Invalid env %s=%r — using default %s", name, val, default)
+    return default
+
+
+def _breaker_cfg(name: str) -> tuple[int, float, float]:
+    """Return (failure_threshold, reset_timeout, window) for *name*.
+
+    Environment variable overrides:
+        BREAKER_{NAME}_THRESHOLD   — failure threshold (int)
+        BREAKER_{NAME}_RESET_SEC   — reset timeout in seconds (float)
+        BREAKER_{NAME}_WINDOW_SEC  — rolling window in seconds (float)
+    """
+    ft, rt, ws = _DEFAULTS.get(name, (5, 60.0, 60.0))
+    prefix = f"BREAKER_{name.upper()}"
+    return (
+        _env_int(f"{prefix}_THRESHOLD", ft),
+        _env_float(f"{prefix}_RESET_SEC", rt),
+        _env_float(f"{prefix}_WINDOW_SEC", ws),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Central breaker registry
 # ---------------------------------------------------------------------------
 
-BREAKERS: dict[str, SimpleCircuitBreaker] = {
-    "mcp": SimpleCircuitBreaker(
-        name="mcp",
-        failure_threshold=5,
-        reset_timeout_seconds=30.0,
-        window_seconds=60.0,
-        excluded_exceptions=_EXCLUDED,
-        on_open=_make_on_open("mcp"),
-    ),
-    "claude_api": SimpleCircuitBreaker(
-        name="claude_api",
-        failure_threshold=3,
-        reset_timeout_seconds=60.0,
-        window_seconds=120.0,
-        excluded_exceptions=_EXCLUDED,
-        on_open=_make_on_open("claude_api"),
-    ),
-    "metaapi": SimpleCircuitBreaker(
-        name="metaapi",
-        failure_threshold=3,
-        reset_timeout_seconds=120.0,
-        window_seconds=60.0,
-        excluded_exceptions=_EXCLUDED,
-        on_open=_make_on_open("metaapi"),
-    ),
-    "webhook": SimpleCircuitBreaker(
-        name="webhook",
-        failure_threshold=10,
-        reset_timeout_seconds=30.0,
-        window_seconds=60.0,
-        excluded_exceptions=_EXCLUDED,
-        on_open=_make_on_open("webhook"),
-    ),
-    "redis": SimpleCircuitBreaker(
-        name="redis",
-        failure_threshold=5,
-        reset_timeout_seconds=30.0,
-        window_seconds=60.0,
-        excluded_exceptions=_EXCLUDED,
-        on_open=_make_on_open("redis"),
-    ),
-    "pinecone": SimpleCircuitBreaker(
-        name="pinecone",
-        failure_threshold=3,
-        reset_timeout_seconds=60.0,
-        window_seconds=60.0,
-        excluded_exceptions=_EXCLUDED,
-        on_open=_make_on_open("pinecone"),
-    ),
-    "neo4j": SimpleCircuitBreaker(
-        name="neo4j",
-        failure_threshold=3,
-        reset_timeout_seconds=60.0,
-        window_seconds=60.0,
-        excluded_exceptions=_EXCLUDED,
-        on_open=_make_on_open("neo4j"),
-    ),
-}
+
+def _build_breakers() -> dict[str, SimpleCircuitBreaker]:
+    """Construct breakers with env-overridable thresholds (M1)."""
+    result: dict[str, SimpleCircuitBreaker] = {}
+    for name in _DEFAULTS:
+        ft, rt, ws = _breaker_cfg(name)
+        result[name] = SimpleCircuitBreaker(
+            name=name,
+            failure_threshold=ft,
+            reset_timeout_seconds=rt,
+            window_seconds=ws,
+            excluded_exceptions=_EXCLUDED,
+            on_open=_make_on_open(name),
+        )
+    return result
+
+
+BREAKERS: dict[str, SimpleCircuitBreaker] = _build_breakers()
 
 
 # ---------------------------------------------------------------------------
