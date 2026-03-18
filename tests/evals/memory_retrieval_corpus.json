@@ -1,0 +1,429 @@
+[
+  {
+    "id": "ret_temporal_001",
+    "query": "what did we do last session",
+    "expected_routing": "TEMPORAL",
+    "expected_ids": ["checkpoint-session-latest", "event-last-session-1", "event-last-session-2"],
+    "relevance_grades": {
+      "checkpoint-session-latest": 3,
+      "event-last-session-1": 3,
+      "event-last-session-2": 3,
+      "event-old-session-1": 0,
+      "random-research-note": 0
+    },
+    "category": "temporal",
+    "description": "Pure temporal query — should route to TEMPORAL mode and return most recent events"
+  },
+  {
+    "id": "ret_temporal_002",
+    "query": "what happened recently with the deployment",
+    "expected_routing": "TEMPORAL_SEMANTIC",
+    "expected_ids": ["deploy-event-1", "deploy-event-2", "deploy-rollback-1"],
+    "relevance_grades": {
+      "deploy-event-1": 3,
+      "deploy-event-2": 3,
+      "deploy-rollback-1": 2,
+      "deploy-plan-old": 1,
+      "unrelated-research": 0
+    },
+    "category": "temporal",
+    "description": "Temporal-semantic: recent + deployment keyword filtering"
+  },
+  {
+    "id": "ret_temporal_003",
+    "query": "pick up where we left off",
+    "expected_routing": "TEMPORAL",
+    "expected_ids": ["checkpoint-session-latest"],
+    "relevance_grades": {
+      "checkpoint-session-latest": 3,
+      "checkpoint-session-old": 1,
+      "random-context": 0
+    },
+    "category": "temporal",
+    "description": "Session resumption query — should find latest checkpoint"
+  },
+  {
+    "id": "ret_temporal_004",
+    "query": "resume from last checkpoint",
+    "expected_routing": "TEMPORAL",
+    "expected_ids": ["checkpoint-session-latest"],
+    "relevance_grades": {
+      "checkpoint-session-latest": 3,
+      "checkpoint-session-old": 1
+    },
+    "category": "temporal",
+    "description": "Explicit checkpoint resume request"
+  },
+  {
+    "id": "ret_decision_001",
+    "query": "why did we choose Pinecone over Weaviate",
+    "expected_routing": "DECISION",
+    "expected_ids": ["decision-vector-db-selection", "research-vector-db-comparison"],
+    "relevance_grades": {
+      "decision-vector-db-selection": 3,
+      "research-vector-db-comparison": 2,
+      "decision-embedding-model": 1,
+      "unrelated-pattern": 0
+    },
+    "category": "decision",
+    "description": "Decision recall — should prioritize graph traversal for decision chain"
+  },
+  {
+    "id": "ret_decision_002",
+    "query": "what was the rationale for the async architecture",
+    "expected_routing": "DECISION",
+    "expected_ids": ["decision-async-arch", "decision-task-queue-design"],
+    "relevance_grades": {
+      "decision-async-arch": 3,
+      "decision-task-queue-design": 2,
+      "context-performance-requirements": 1,
+      "pattern-error-handling": 0
+    },
+    "category": "decision",
+    "description": "Architecture decision recall with rationale"
+  },
+  {
+    "id": "ret_decision_003",
+    "query": "what approach did we decide on for error handling",
+    "expected_routing": "DECISION",
+    "expected_ids": ["decision-error-strategy", "decision-circuit-breaker-design"],
+    "relevance_grades": {
+      "decision-error-strategy": 3,
+      "decision-circuit-breaker-design": 2,
+      "pattern-retry-logic": 1,
+      "debug-error-fix-123": 0
+    },
+    "category": "decision",
+    "description": "Error handling decision — should not confuse with debug notes"
+  },
+  {
+    "id": "ret_decision_004",
+    "query": "why did we pick FTMO over FundedNext",
+    "expected_routing": "DECISION",
+    "expected_ids": ["decision-prop-firm-selection", "research-prop-firm-comparison"],
+    "relevance_grades": {
+      "decision-prop-firm-selection": 3,
+      "research-prop-firm-comparison": 2,
+      "context-trading-requirements": 1,
+      "decision-async-arch": 0
+    },
+    "category": "decision",
+    "description": "Domain-specific decision recall (NovaTrade)"
+  },
+  {
+    "id": "ret_pattern_001",
+    "query": "how do we handle error recovery in this project",
+    "expected_routing": "PATTERN",
+    "expected_ids": ["pattern-error-recovery", "pattern-circuit-breaker-usage"],
+    "relevance_grades": {
+      "pattern-error-recovery": 3,
+      "pattern-circuit-breaker-usage": 2,
+      "decision-error-strategy": 1,
+      "debug-error-fix-456": 0
+    },
+    "category": "pattern",
+    "description": "Pattern recall — established workflow for error recovery"
+  },
+  {
+    "id": "ret_pattern_002",
+    "query": "what is our standard workflow for deploying changes",
+    "expected_routing": "PATTERN",
+    "expected_ids": ["pattern-deployment-workflow", "pattern-ci-cd-pipeline"],
+    "relevance_grades": {
+      "pattern-deployment-workflow": 3,
+      "pattern-ci-cd-pipeline": 2,
+      "context-deploy-event-1": 1,
+      "research-deployment-tools": 0
+    },
+    "category": "pattern",
+    "description": "Deployment pattern — established convention"
+  },
+  {
+    "id": "ret_pattern_003",
+    "query": "what is the typical convention for writing tests here",
+    "expected_routing": "PATTERN",
+    "expected_ids": ["pattern-testing-conventions", "pattern-pytest-fixtures"],
+    "relevance_grades": {
+      "pattern-testing-conventions": 3,
+      "pattern-pytest-fixtures": 2,
+      "decision-test-framework": 1,
+      "debug-test-fix-789": 0
+    },
+    "category": "pattern",
+    "description": "Testing convention pattern recall"
+  },
+  {
+    "id": "ret_semantic_001",
+    "query": "what is the Fusion Memory architecture",
+    "expected_routing": "VECTOR",
+    "expected_ids": ["research-fusion-memory-arch", "decision-memory-system-design"],
+    "relevance_grades": {
+      "research-fusion-memory-arch": 3,
+      "decision-memory-system-design": 2,
+      "context-pinecone-setup": 1,
+      "pattern-deployment-workflow": 0
+    },
+    "category": "semantic",
+    "description": "Pure semantic retrieval — factual knowledge question"
+  },
+  {
+    "id": "ret_semantic_002",
+    "query": "explain how the heartbeat system works",
+    "expected_routing": "VECTOR",
+    "expected_ids": ["research-heartbeat-design", "context-heartbeat-metrics"],
+    "relevance_grades": {
+      "research-heartbeat-design": 3,
+      "context-heartbeat-metrics": 2,
+      "decision-monitoring-approach": 1,
+      "debug-heartbeat-fix": 0
+    },
+    "category": "semantic",
+    "description": "Explanatory query — should surface design docs and context"
+  },
+  {
+    "id": "ret_semantic_003",
+    "query": "list all the services running in NovaCore",
+    "expected_routing": "VECTOR",
+    "expected_ids": ["context-service-inventory", "research-infra-overview"],
+    "relevance_grades": {
+      "context-service-inventory": 3,
+      "research-infra-overview": 2,
+      "pattern-service-management": 1,
+      "decision-async-arch": 0
+    },
+    "category": "semantic",
+    "description": "Inventory-style factual query"
+  },
+  {
+    "id": "ret_semantic_004",
+    "query": "summarize the NovaTrade strategy specification",
+    "expected_routing": "VECTOR",
+    "expected_ids": ["research-strategy-spec", "context-trading-parameters"],
+    "relevance_grades": {
+      "research-strategy-spec": 3,
+      "context-trading-parameters": 2,
+      "decision-prop-firm-selection": 1,
+      "pattern-testing-conventions": 0
+    },
+    "category": "semantic",
+    "description": "Domain knowledge summarization"
+  },
+  {
+    "id": "ret_graph_001",
+    "query": "what is related to the circuit breaker implementation",
+    "expected_routing": "GRAPH",
+    "expected_ids": ["decision-circuit-breaker-design", "pattern-error-recovery", "context-resilience-requirements"],
+    "relevance_grades": {
+      "decision-circuit-breaker-design": 3,
+      "pattern-error-recovery": 2,
+      "context-resilience-requirements": 2,
+      "research-fusion-memory-arch": 0
+    },
+    "category": "graph",
+    "description": "Relationship query — should leverage graph traversal"
+  },
+  {
+    "id": "ret_graph_002",
+    "query": "how does the monitoring system connect to alerting",
+    "expected_routing": "GRAPH",
+    "expected_ids": ["context-monitoring-alerting-link", "decision-monitoring-approach", "pattern-alert-handling"],
+    "relevance_grades": {
+      "context-monitoring-alerting-link": 3,
+      "decision-monitoring-approach": 2,
+      "pattern-alert-handling": 2,
+      "research-strategy-spec": 0
+    },
+    "category": "graph",
+    "description": "Multi-hop relationship query"
+  },
+  {
+    "id": "ret_graph_003",
+    "query": "what depends on the Redis service",
+    "expected_routing": "GRAPH",
+    "expected_ids": ["context-redis-dependents", "context-timeline-service", "context-sequence-service"],
+    "relevance_grades": {
+      "context-redis-dependents": 3,
+      "context-timeline-service": 2,
+      "context-sequence-service": 2,
+      "decision-vector-db-selection": 0
+    },
+    "category": "graph",
+    "description": "Dependency graph traversal query"
+  },
+  {
+    "id": "ret_session_001",
+    "query": "continue from the previous session",
+    "expected_routing": "TEMPORAL",
+    "expected_ids": ["checkpoint-session-latest"],
+    "relevance_grades": {
+      "checkpoint-session-latest": 3,
+      "checkpoint-session-prev": 1,
+      "event-old-session-1": 0
+    },
+    "category": "session",
+    "description": "Session continuation — retrieve latest checkpoint"
+  },
+  {
+    "id": "ret_session_002",
+    "query": "what was the last session about",
+    "expected_routing": "TEMPORAL",
+    "expected_ids": ["checkpoint-session-latest", "event-last-session-1"],
+    "relevance_grades": {
+      "checkpoint-session-latest": 3,
+      "event-last-session-1": 2,
+      "event-last-session-2": 2,
+      "event-old-session-1": 0
+    },
+    "category": "session",
+    "description": "Session summary query"
+  },
+  {
+    "id": "ret_dedup_001",
+    "query": "what is the embedding model we use",
+    "expected_routing": "VECTOR",
+    "expected_ids": ["decision-embedding-model"],
+    "relevance_grades": {
+      "decision-embedding-model": 3,
+      "decision-embedding-model-v2": 2,
+      "context-pinecone-setup": 1
+    },
+    "category": "dedup",
+    "description": "Should return unique results — near-duplicate decisions should be deduped"
+  },
+  {
+    "id": "ret_dedup_002",
+    "query": "NovaCore project structure",
+    "expected_routing": "HYBRID",
+    "expected_ids": ["context-project-structure", "research-infra-overview"],
+    "relevance_grades": {
+      "context-project-structure": 3,
+      "research-infra-overview": 2,
+      "context-project-structure-v2": 1
+    },
+    "category": "dedup",
+    "description": "Multiple versions of same context note should be deduped"
+  },
+  {
+    "id": "ret_mixed_001",
+    "query": "what did we decide about auth and what is the current implementation",
+    "expected_routing": "HYBRID",
+    "expected_ids": ["decision-auth-approach", "context-auth-implementation", "pattern-auth-middleware"],
+    "relevance_grades": {
+      "decision-auth-approach": 3,
+      "context-auth-implementation": 3,
+      "pattern-auth-middleware": 2,
+      "research-auth-libraries": 1
+    },
+    "category": "mixed",
+    "description": "Complex query spanning decision + context + pattern"
+  },
+  {
+    "id": "ret_mixed_002",
+    "query": "recent changes to the trading system and why we made them",
+    "expected_routing": "TEMPORAL_SEMANTIC",
+    "expected_ids": ["event-trading-update-1", "decision-trading-refactor", "context-trading-parameters"],
+    "relevance_grades": {
+      "event-trading-update-1": 3,
+      "decision-trading-refactor": 3,
+      "context-trading-parameters": 2,
+      "research-strategy-spec": 1
+    },
+    "category": "mixed",
+    "description": "Temporal + decision hybrid query"
+  },
+  {
+    "id": "ret_mixed_003",
+    "query": "how has the monitoring approach evolved over time",
+    "expected_routing": "TEMPORAL_SEMANTIC",
+    "expected_ids": ["decision-monitoring-v1", "decision-monitoring-v2", "context-monitoring-alerting-link"],
+    "relevance_grades": {
+      "decision-monitoring-v2": 3,
+      "decision-monitoring-v1": 2,
+      "context-monitoring-alerting-link": 2,
+      "pattern-alert-handling": 1
+    },
+    "category": "mixed",
+    "description": "Evolution query — needs temporal ordering of related decisions"
+  },
+  {
+    "id": "ret_edge_001",
+    "query": "",
+    "expected_routing": "HYBRID",
+    "expected_ids": [],
+    "relevance_grades": {},
+    "category": "edge",
+    "description": "Empty query — should handle gracefully"
+  },
+  {
+    "id": "ret_edge_002",
+    "query": "asdfghjkl random nonsense query with no matching content",
+    "expected_routing": "HYBRID",
+    "expected_ids": [],
+    "relevance_grades": {},
+    "category": "edge",
+    "description": "Gibberish query — should return low-confidence or empty results"
+  },
+  {
+    "id": "ret_edge_003",
+    "query": "what is the meaning of life",
+    "expected_routing": "VECTOR",
+    "expected_ids": [],
+    "relevance_grades": {},
+    "category": "edge",
+    "description": "Out-of-domain query — no relevant memories exist"
+  },
+  {
+    "id": "ret_recency_001",
+    "query": "what debug issues did we fix today",
+    "expected_routing": "TEMPORAL_SEMANTIC",
+    "expected_ids": ["debug-fix-today-1", "debug-fix-today-2"],
+    "relevance_grades": {
+      "debug-fix-today-1": 3,
+      "debug-fix-today-2": 3,
+      "debug-fix-last-week": 0,
+      "debug-fix-old": 0
+    },
+    "category": "temporal",
+    "description": "Recency-weighted debug query — old fixes should score low"
+  },
+  {
+    "id": "ret_recency_002",
+    "query": "latest research findings on RAG optimization",
+    "expected_routing": "TEMPORAL_SEMANTIC",
+    "expected_ids": ["research-rag-optimization-latest", "research-rag-optimization-v2"],
+    "relevance_grades": {
+      "research-rag-optimization-latest": 3,
+      "research-rag-optimization-v2": 2,
+      "research-rag-optimization-v1": 1,
+      "research-unrelated": 0
+    },
+    "category": "temporal",
+    "description": "Latest research query — temporal decay should prefer recent"
+  },
+  {
+    "id": "ret_conflict_001",
+    "query": "what database did we decide to use for caching",
+    "expected_routing": "DECISION",
+    "expected_ids": ["decision-cache-redis-final"],
+    "relevance_grades": {
+      "decision-cache-redis-final": 3,
+      "decision-cache-memcached-superseded": 0
+    },
+    "category": "decision",
+    "description": "Conflicting decisions — superseded decision should rank low"
+  },
+  {
+    "id": "ret_specificity_001",
+    "query": "Pinecone serverless index configuration for nova-ai-memory",
+    "expected_routing": "VECTOR",
+    "expected_ids": ["context-pinecone-setup", "decision-vector-db-selection"],
+    "relevance_grades": {
+      "context-pinecone-setup": 3,
+      "decision-vector-db-selection": 2,
+      "research-fusion-memory-arch": 1,
+      "context-redis-dependents": 0
+    },
+    "category": "semantic",
+    "description": "Highly specific technical query — precision matters"
+  }
+]
