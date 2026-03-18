@@ -608,6 +608,66 @@ def _build_degradation_reason(
     return " | ".join(parts)
 
 
+def set_degradation_tier(tier: DegradationTier, reason: str = "") -> DegradationState:
+    """Set degradation tier directly (e.g. from circuit breaker callback).
+
+    Thread-safe.  Records the transition in history.
+    """
+    with _degradation_lock:
+        state = _load_degradation_state()
+        old_tier = state.tier
+        if tier == old_tier:
+            return state
+        now_iso = datetime.now(timezone.utc).isoformat()
+        direction = "ESCALATED" if tier > old_tier else "DE-ESCALATED"
+        state.transition_history.append(
+            {
+                "from": old_tier.name,
+                "to": tier.name,
+                "direction": direction,
+                "reason": reason,
+                "ts": now_iso,
+            }
+        )
+        state.tier = tier
+        state.reason = reason
+        state.since = now_iso
+        _save_degradation_state(state)
+        return state
+
+
+# ---------------------------------------------------------------------------
+# Circuit Breaker → Degradation Mapping
+# ---------------------------------------------------------------------------
+
+_CRITICAL_BREAKERS = frozenset({"claude_api", "metaapi", "mcp"})
+
+
+def evaluate_circuit_breakers(open_breakers: list[str]) -> DegradationTier:
+    """Suggest degradation tier based on which circuit breakers are open.
+
+    Rules:
+        - No breakers open                    → FULL
+        - 1 critical breaker (mcp/claude_api) → REDUCED
+        - 1 critical breaker (metaapi)        → MINIMAL
+        - 2+ critical breakers open           → EMERGENCY
+        - Only non-critical breakers open      → FULL
+    """
+    critical_open = [b for b in open_breakers if b in _CRITICAL_BREAKERS]
+
+    if len(critical_open) >= 2:
+        return DegradationTier.EMERGENCY
+
+    if len(critical_open) == 1:
+        name = critical_open[0]
+        if name == "metaapi":
+            return DegradationTier.MINIMAL
+        # mcp or claude_api
+        return DegradationTier.REDUCED
+
+    return DegradationTier.FULL
+
+
 def should_allow_feature(feature: str) -> bool:
     """Check if a feature is allowed under current degradation tier.
 

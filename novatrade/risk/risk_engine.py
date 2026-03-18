@@ -27,10 +27,13 @@ Design:
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 from novatrade.config import NovaTradeCfg
 from novatrade.models import (
@@ -780,6 +783,63 @@ class RiskEngine:
                 actions.append(RiskAction.CANCEL_PENDING)
 
         return actions if actions else [RiskAction.NONE]
+
+    # ------------------------------------------------------------------
+    # Equity kill switch (Phase 6B Step 6.16)
+    # ------------------------------------------------------------------
+
+    _state_lock = threading.Lock()
+
+    def should_kill_switch(self) -> bool:
+        """Return True if equity drawdown exceeds FTMO limits.
+
+        Checks both daily and total drawdown against configured limits.
+        Uses the internal drawdown tracking state (no external I/O).
+        """
+        daily_pct = self._daily_dd.current_drawdown_pct
+        total_pct = self._total_dd.current_drawdown_pct
+        daily_limit = self._risk.max_daily_drawdown_pct
+        total_limit = self._risk.max_total_drawdown_pct
+
+        if daily_pct >= daily_limit:
+            return True
+        return total_pct >= total_limit
+
+    def write_risk_state(
+        self,
+        state_file: str | Path | None = None,
+    ) -> None:
+        """Write current drawdown state to JSON for cross-process consumption.
+
+        Defaults to ``STATE/novatrade_risk_state.json`` relative to the
+        project root (``~/nova-core``).  Thread-safe via ``_state_lock``.
+        """
+        if state_file is None:
+            state_file = Path(__file__).resolve().parents[2] / "STATE" / "novatrade_risk_state.json"
+        else:
+            state_file = Path(state_file)
+
+        total_pct = self._total_dd.current_drawdown_pct
+        total_limit = self._risk.max_total_drawdown_pct
+        breached = total_pct >= total_limit
+
+        payload = {
+            "equity_drawdown_pct": round(total_pct, 4),
+            "daily_drawdown_pct": round(self._daily_dd.current_drawdown_pct, 4),
+            "max_allowed_drawdown_pct": total_limit,
+            "max_daily_drawdown_pct": self._risk.max_daily_drawdown_pct,
+            "breached": breached,
+            "halted": self._halted,
+            "last_updated": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }
+
+        with self._state_lock:
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = state_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            tmp.replace(state_file)
+
+        log.debug("Wrote risk state to %s", state_file)
 
     @property
     def halted(self) -> bool:

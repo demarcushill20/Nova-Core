@@ -10,6 +10,7 @@ Stdlib only — no pip installs required.
 
 import json
 import os
+import signal
 import subprocess
 import time
 import urllib.parse
@@ -17,6 +18,26 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Phase 6B.13: Graceful shutdown flag for heartbeat oneshot
+# ---------------------------------------------------------------------------
+_heartbeat_shutdown_requested = False
+
+
+def _heartbeat_signal_handler(signum, _frame):
+    """Signal handler for heartbeat — set flag, no I/O."""
+    global _heartbeat_shutdown_requested
+    _heartbeat_shutdown_requested = True
+
+
+signal.signal(signal.SIGTERM, _heartbeat_signal_handler)
+signal.signal(signal.SIGINT, _heartbeat_signal_handler)
+
+try:
+    from utils.sd_notify import notify_status as _sd_notify_status
+except ImportError:
+    _sd_notify_status = None  # type: ignore[assignment]
 
 try:
     from utils.structured_log import slog
@@ -32,7 +53,31 @@ except ImportError:
     _mpg_record = None  # type: ignore[assignment]
     _mpg_allow = None  # type: ignore[assignment]
 
-from prompts.heartbeat_prompts import (  # noqa: F401
+try:
+    from utils.self_healing import (
+        DegradationTier as _DegradationTier,
+    )
+    from utils.self_healing import (
+        get_degradation_tier as _sh_get_tier,
+    )
+    from utils.self_healing import (
+        record_error as _sh_record_error,
+    )
+    from utils.self_healing import (
+        record_memory_snapshot as _sh_record_mem,
+    )
+except ImportError:
+    _DegradationTier = None  # type: ignore[assignment,misc]
+    _sh_get_tier = None  # type: ignore[assignment]
+    _sh_record_error = None  # type: ignore[assignment]
+    _sh_record_mem = None  # type: ignore[assignment]
+
+try:
+    from agents.budget_enforcer import budget as _budget_enforcer
+except ImportError:
+    _budget_enforcer = None  # type: ignore[assignment]
+
+from prompts.heartbeat_prompts import (  # noqa: E402, F401
     _build_planning_prompt,
     _build_research_prompt,
     _gather_extended_state,
@@ -1424,6 +1469,13 @@ def main() -> int:
     _t0 = time.monotonic()
     print(f"[heartbeat] Starting health check at {datetime.now(timezone.utc).isoformat()}")
 
+    # Phase 6B.15: Informational sd_notify status for oneshot service
+    if _sd_notify_status is not None:
+        try:
+            _sd_notify_status("Heartbeat cycle starting")
+        except Exception:
+            pass  # sd_notify is best-effort
+
     # Structured tracing for this heartbeat cycle
     hb_ctx = TraceContext.new("heartbeat") if TraceContext is not None else None
     if slog and hb_ctx:
@@ -1442,6 +1494,29 @@ def main() -> int:
             print(f"[heartbeat] Kill switch mode={ks_mode} — running health checks only")
     except Exception as e:
         print(f"[heartbeat] Kill switch check failed (non-fatal): {e}")
+
+    # --- Phase 6B: Degradation tier gating ---
+    _degradation_tier = 0  # FULL by default
+    if _sh_get_tier is not None:
+        try:
+            _deg_state = _sh_get_tier()
+            _degradation_tier = int(_deg_state.tier)
+            if _degradation_tier > 0:
+                print(f"[heartbeat] Degradation tier: {_deg_state.tier.name} — {_deg_state.reason}")
+        except Exception as e:
+            print(f"[heartbeat] Degradation tier check failed (non-fatal): {e}")
+
+    # --- Phase 6B: Budget enforcement at cycle start ---
+    if _budget_enforcer is not None:
+        try:
+            _budget_ok, _budget_msg = _budget_enforcer.can_proceed(scope="daily")
+            if not _budget_ok:
+                print(f"[heartbeat] Budget exceeded: {_budget_msg} — downgrading to REDUCED")
+                # Escalate to at least REDUCED if not already worse
+                if _degradation_tier < 1:
+                    _degradation_tier = 1  # REDUCED
+        except Exception as e:
+            print(f"[heartbeat] Budget check failed (non-fatal): {e}")
 
     checks = []
 
@@ -1640,53 +1715,95 @@ def main() -> int:
     except Exception as exc:
         print(f"[heartbeat] Memory trigger failed (non-fatal): {exc}")
 
-    # --- LLM-driven proactive heartbeat ---
-    try:
-        _run_heartbeat_agent(checks)
-    except Exception as e:
-        print(f"[heartbeat-agent] Failed (non-fatal): {e}")
-
-    # --- Memory maintenance scheduler (Phase 8) ---
-    try:
-        _run_memory_maintenance()
-    except Exception as e:
-        print(f"[memory-maintenance] Failed (non-fatal): {e}")
-
-    # --- Autonomous cycles: research (hourly) + planning (every 3 hours) ---
-    # Phase 4.4: Gate expensive cycles on adaptive heartbeat config (budget-aware).
-    _skip_research = False
-    _skip_planning = False
-    try:
-        from utils.cost_router import read_heartbeat_config
-
-        _hb_cfg = read_heartbeat_config()
-        if _hb_cfg:
-            _skip_research = _hb_cfg.skip_research
-            _skip_planning = _hb_cfg.skip_planning
-            if _skip_research or _skip_planning:
-                print(
-                    f"[cost-router] Adaptive config: mode={_hb_cfg.mode} "
-                    f"skip_research={_skip_research} skip_planning={_skip_planning} "
-                    f"reason={_hb_cfg.reason}"
-                )
-    except Exception:
-        pass  # cost router unavailable — run everything
-
-    if _skip_research:
-        print("[research-cycle] Skipped (budget-constrained mode)")
+    # --- Phase 6B.13: Check shutdown flag before expensive operations ---
+    if _heartbeat_shutdown_requested:
+        print("[heartbeat] Shutdown requested — skipping LLM agent, maintenance, and autonomous cycles")
     else:
-        try:
-            _run_research_cycle()
-        except Exception as e:
-            print(f"[research-cycle] Failed (non-fatal): {e}")
+        # --- LLM-driven proactive heartbeat ---
+        # Phase 6B: Skip LLM-driven agent in EMERGENCY (tier 3)
+        if _degradation_tier >= 3:
+            print("[heartbeat-agent] Skipped (EMERGENCY degradation tier — no LLM calls)")
+        else:
+            try:
+                _run_heartbeat_agent(checks)
+            except Exception as e:
+                print(f"[heartbeat-agent] Failed (non-fatal): {e}")
+                if _sh_record_error is not None:
+                    _sh_record_error("heartbeat.heartbeat_agent", e)
 
-    if _skip_planning:
-        print("[planning-cycle] Skipped (budget-constrained mode)")
-    else:
+        # --- Memory maintenance scheduler (Phase 8) ---
+        # Phase 6B: Skip memory maintenance in MINIMAL+ (tier >= 2)
+        if _heartbeat_shutdown_requested:
+            print("[memory-maintenance] Skipped (shutdown requested)")
+        elif _degradation_tier >= 2:
+            print("[memory-maintenance] Skipped (degradation tier >= MINIMAL)")
+        else:
+            try:
+                _run_memory_maintenance()
+            except Exception as e:
+                print(f"[memory-maintenance] Failed (non-fatal): {e}")
+
+        # --- Autonomous cycles: research (hourly) + planning (every 3 hours) ---
+        # Phase 4.4: Gate expensive cycles on adaptive heartbeat config (budget-aware).
+        # Phase 6B: Gate on degradation tier (research=optional, planning=optional).
+        _skip_research = _degradation_tier >= 1 or _heartbeat_shutdown_requested
+        _skip_planning = _degradation_tier >= 2 or _heartbeat_shutdown_requested
         try:
-            _run_planning_cycle()
+            from utils.cost_router import read_heartbeat_config
+
+            _hb_cfg = read_heartbeat_config()
+            if _hb_cfg:
+                _skip_research = _skip_research or _hb_cfg.skip_research
+                _skip_planning = _skip_planning or _hb_cfg.skip_planning
+                if _hb_cfg.skip_research or _hb_cfg.skip_planning:
+                    print(
+                        f"[cost-router] Adaptive config: mode={_hb_cfg.mode} "
+                        f"skip_research={_hb_cfg.skip_research} skip_planning={_hb_cfg.skip_planning} "
+                        f"reason={_hb_cfg.reason}"
+                    )
+        except Exception:
+            pass  # cost router unavailable — run everything
+
+        if _skip_research:
+            _skip_reason = (
+                "shutdown requested"
+                if _heartbeat_shutdown_requested
+                else "degradation tier >= REDUCED"
+                if _degradation_tier >= 1
+                else "budget-constrained mode"
+            )
+            print(f"[research-cycle] Skipped ({_skip_reason})")
+        else:
+            try:
+                _run_research_cycle()
+            except Exception as e:
+                print(f"[research-cycle] Failed (non-fatal): {e}")
+                if _sh_record_error is not None:
+                    _sh_record_error("heartbeat.research_cycle", e)
+
+        if _skip_planning:
+            _skip_reason = (
+                "shutdown requested"
+                if _heartbeat_shutdown_requested
+                else "degradation tier >= MINIMAL"
+                if _degradation_tier >= 2
+                else "budget-constrained mode"
+            )
+            print(f"[planning-cycle] Skipped ({_skip_reason})")
+        else:
+            try:
+                _run_planning_cycle()
+            except Exception as e:
+                print(f"[planning-cycle] Failed (non-fatal): {e}")
+                if _sh_record_error is not None:
+                    _sh_record_error("heartbeat.planning_cycle", e)
+
+    # --- Phase 6B: Record memory snapshot for RSS trend tracking ---
+    if _sh_record_mem is not None:
+        try:
+            _sh_record_mem()
         except Exception as e:
-            print(f"[planning-cycle] Failed (non-fatal): {e}")
+            print(f"[heartbeat] Memory snapshot recording failed (non-fatal): {e}")
 
     # Append to heartbeat log
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1696,6 +1813,14 @@ def main() -> int:
     )
     with open(LOGS_DIR / "heartbeat.log", "a") as f:
         f.write(log_line)
+
+    # Phase 6B.15: Informational sd_notify status for oneshot service
+    if _sd_notify_status is not None:
+        try:
+            _elapsed = time.monotonic() - _t0
+            _sd_notify_status(f"Heartbeat cycle complete ({'HEALTHY' if all_ok else 'UNHEALTHY'}, {_elapsed:.1f}s)")
+        except Exception:
+            pass  # sd_notify is best-effort
 
     return 0 if all_ok else 1
 

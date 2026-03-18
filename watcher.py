@@ -36,9 +36,24 @@ from utils.dlp_gate import dlp
 from utils.file_watcher import TaskFileWatcher
 from utils.langfuse_tracing import trace_llm_call
 from utils.max_plan_guard import record_invocation as _mpg_record
+from utils.sd_notify import notify_ready, notify_status, notify_stopping, notify_watchdog
+from utils.self_healing import DegradationTier as _DegradationTier
+from utils.self_healing import get_degradation_tier as _sh_get_tier
 from utils.self_healing import record_error as _sh_record_error
 from utils.self_healing import touch_dead_man_switch as _sh_touch
 from utils.structured_log import slog
+from utils.task_checkpoint import (
+    TaskCheckpoint,
+    clear_checkpoint,
+    increment_retry,
+    list_incomplete_checkpoints,
+    load_checkpoint,
+    save_checkpoint,
+)
+from utils.task_checkpoint import _now_iso as _cp_now_iso
+from utils.task_checkpoint import (
+    update_status as update_checkpoint_status,
+)
 from utils.task_validator import audit_task_execution, validate_task_content
 from utils.trace_context import TraceContext
 
@@ -763,6 +778,17 @@ async def _dispatch_inner(task_path: Path):
     task_path.rename(inprogress_path)
     logger.info("TASK DETECTED: %s → renamed to %s", task_name, inprogress_path.name)
 
+    # --- Phase 6B.14: Create checkpoint on dispatch ---
+    save_checkpoint(
+        TaskCheckpoint(
+            task_id=stem,
+            task_file=task_name,
+            status="dispatched",
+            started_at=_cp_now_iso(),
+            last_updated=_cp_now_iso(),
+        )
+    )
+
     # --- Trace context + audit: task pickup ---
     task_correlation_id = f"task_{stem}"
     trace_ctx = TraceContext.new("watcher", task=stem)
@@ -1029,6 +1055,9 @@ async def _dispatch_inner(task_path: Path):
 
     slog.event("task.worker_start", trace_ctx, cmd=cmd[0], stem=stem)
 
+    # Phase 6B.14: Update checkpoint to in_progress before subprocess starts
+    update_checkpoint_status(stem, "in_progress")
+
     exit_code = await _execute_worker(
         stem=stem,
         cmd=cmd,
@@ -1148,6 +1177,8 @@ async def _dispatch_inner(task_path: Path):
                 "task.completed", {"task_stem": stem, "exit_code": exit_code}, correlation_id=task_correlation_id
             )
             slog.event("task.completed", trace_ctx, stem=stem, exit_code=exit_code, duration_ms=trace_ctx.elapsed_ms())
+            # Phase 6B.14: Clear checkpoint on success
+            clear_checkpoint(stem)
         else:
             failed_path = inprogress_path.with_name(f"{stem}.md.failed")
             inprogress_path.rename(failed_path)
@@ -1161,6 +1192,8 @@ async def _dispatch_inner(task_path: Path):
                 exit_code=exit_code,
                 duration_ms=trace_ctx.elapsed_ms(),
             )
+            # Phase 6B.14: Increment retry count on failure
+            increment_retry(stem)
     except FileNotFoundError:
         logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
 
@@ -1336,6 +1369,56 @@ def _check_partial_tasks() -> None:
         slog.event("task.partial_found", stem=stem, path=str(p))
 
 
+def _resume_checkpointed_tasks() -> None:
+    """Phase 6B.14: Re-queue incomplete tasks from checkpoint files on startup.
+
+    Finds all checkpoints with retry_count < MAX_TASK_RETRIES, restores the
+    task file to TASKS/ if possible (from .inprogress), and marks them ready
+    for the next scan cycle to pick up.
+    """
+    try:
+        incomplete = list_incomplete_checkpoints()
+        if not incomplete:
+            return
+
+        logger.info("CHECKPOINT RESUME: found %d incomplete task(s) from prior run", len(incomplete))
+        for cp in incomplete:
+            stem = cp.task_id
+            inprogress = TASKS_DIR / f"{stem}.md.inprogress"
+            task_file = TASKS_DIR / f"{stem}.md"
+
+            # If the task file is already pending, just log and skip
+            if task_file.exists():
+                logger.info("CHECKPOINT RESUME: %s already pending in TASKS/ — skipping", stem)
+                slog.event("checkpoint.resume_skip", stem=stem, reason="already_pending")
+                continue
+
+            # If .inprogress exists, rename back to .md for re-dispatch
+            if inprogress.exists():
+                inprogress.rename(task_file)
+                logger.info(
+                    "CHECKPOINT RESUME: %s restored from .inprogress (retry %d)",
+                    stem,
+                    cp.retry_count,
+                )
+                slog.event(
+                    "checkpoint.resumed",
+                    stem=stem,
+                    retry_count=cp.retry_count,
+                    prior_status=cp.status,
+                )
+            else:
+                # No task file found — checkpoint is orphaned, log and clear
+                logger.warning(
+                    "CHECKPOINT RESUME: %s — no task file found (.md or .inprogress), clearing orphan checkpoint",
+                    stem,
+                )
+                clear_checkpoint(stem)
+                slog.event("checkpoint.orphan_cleared", stem=stem)
+    except Exception as exc:
+        logger.warning("Checkpoint resume failed (non-fatal): %s", exc)
+
+
 def _save_partial_progress(stem: str, inprogress_path: Path) -> None:
     """Save partial progress when a task is cancelled mid-execution."""
     try:
@@ -1354,6 +1437,48 @@ def _save_partial_progress(stem: str, inprogress_path: Path) -> None:
         slog.event("task.partial_saved", stem=stem, report=str(report_path))
     except Exception as exc:
         logger.warning("Failed to save partial progress for %s: %s", stem, exc)
+
+
+def _write_shutdown_state(pool_status: dict | None = None) -> None:
+    """Write current state to STATE/shutdown_state.json for clean shutdown.
+
+    Phase 6B.13: Persists in-flight task IDs and degradation tier so
+    the next startup can detect whether the previous exit was clean.
+    Never throws — shutdown must not fail on state persistence errors.
+    """
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        tier_name = "FULL"
+        try:
+            tier_name = _sh_get_tier().tier.name
+        except Exception:
+            pass
+        active_tasks = []
+        if pool_status and isinstance(pool_status.get("active_tasks"), list):
+            active_tasks = pool_status["active_tasks"]
+        state = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "reason": "graceful_shutdown",
+            "in_flight_task_ids": active_tasks,
+            "degradation_tier": tier_name,
+            "pid": os.getpid(),
+        }
+        shutdown_file = STATE_DIR / "shutdown_state.json"
+        shutdown_file.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        logger.info("Shutdown state written: %s", shutdown_file)
+
+        # Phase 6B.14: Save checkpoints for all in-flight tasks during shutdown
+        for task_id in active_tasks:
+            try:
+                cp = load_checkpoint(task_id)
+                if cp is not None:
+                    cp.status = "partial_output"
+                    save_checkpoint(cp)
+                    logger.info("Shutdown checkpoint saved for in-flight task: %s", task_id)
+            except Exception as cp_exc:
+                logger.warning("Failed to save shutdown checkpoint for %s: %s", task_id, cp_exc)
+    except Exception as exc:
+        logger.warning("Failed to write shutdown state (non-fatal): %s", exc)
 
 
 async def scan_and_enqueue(pool: AsyncWorkerPool) -> None:
@@ -1432,6 +1557,9 @@ async def run() -> None:
     # Phase 4.3 — check for partial tasks from previous interrupted runs
     _check_partial_tasks()
 
+    # Phase 6B.14 — re-queue incomplete checkpointed tasks from prior run
+    _resume_checkpointed_tasks()
+
     # Phase 4.3 — start async worker pool
     pool = AsyncWorkerPool(max_workers=MAX_CONCURRENT_TASKS, worker_fn=dispatch)
     pool.start()
@@ -1460,20 +1588,35 @@ async def run() -> None:
         logger.info("Phase 4.1: watchdog unavailable — polling every %ds.", POLL_INTERVAL)
         slog.event("task.watchdog_fallback", mode="polling", poll_interval_s=POLL_INTERVAL)
 
+    # Phase 6B.15: Signal systemd that startup is complete
+    notify_ready()
+    notify_status("Polling TASKS/")
+
     try:
         while _running:
             # Phase 6A: touch dead man's switch every scan cycle
             _sh_touch(component="watcher")
 
-            try:
-                await scan_and_enqueue(pool)
-            except Exception as _scan_exc:
-                logger.exception("Error during scan cycle.")
-                _sh_record_error("watcher.scan_cycle", _scan_exc)
+            # Phase 6B: check degradation tier — skip dispatch in EMERGENCY
+            _watcher_tier = _sh_get_tier().tier
+            if _watcher_tier >= _DegradationTier.EMERGENCY:
+                logger.warning("EMERGENCY degradation — skipping task dispatch (DMS still alive)")
+            else:
+                try:
+                    await scan_and_enqueue(pool)
+                except Exception as _scan_exc:
+                    logger.exception("Error during scan cycle.")
+                    _sh_record_error("watcher.scan_cycle", _scan_exc)
+
+            # Phase 6B.15: Tell systemd we're still alive
+            notify_watchdog()
 
             # Wait for watchdog trigger OR poll timeout — whichever comes first
             await _async_wait_for_wake(POLL_INTERVAL)
     finally:
+        # Phase 6B.15: Signal systemd that shutdown has begun
+        notify_stopping()
+        notify_status("Shutting down...")
         logger.info("Shutting down worker pool...")
         await pool.shutdown(timeout=30)
         file_watcher.stop()
@@ -1482,6 +1625,11 @@ async def run() -> None:
             "pool.final_status",
             **pool_st,
         )
+
+        # Phase 6B.13: Write shutdown state and touch dead man's switch
+        _write_shutdown_state(pool_st)
+        _sh_touch(component="watcher_clean_shutdown")
+        logger.info("Clean shutdown state saved, dead man's switch touched.")
 
     logger.info("Dispatcher stopped.")
 

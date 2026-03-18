@@ -4,17 +4,21 @@ Provides fault-tolerant execution with automatic degradation and
 per-task action budgets to limit blast radius.
 
 Phase 2.3 — Security Hardening.
+Phase 6B Step 6.10 — Rolling window, excluded exceptions, async, on_open.
 
 Stdlib only with optional Redis persistence. Thread-safe.
 """
 
+import collections
 import threading
 import time
+from collections.abc import Callable
 from enum import Enum
 
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
+
 
 class CircuitBreakerError(Exception):
     """Raised when a circuit breaker is open and rejects a call."""
@@ -23,15 +27,13 @@ class CircuitBreakerError(Exception):
         self.name = name
         self.breaker_state = state
         self.trip_count = trip_count
-        super().__init__(
-            f"Circuit breaker '{name}' is {state} "
-            f"(tripped {trip_count} time(s)) — call rejected"
-        )
+        super().__init__(f"Circuit breaker '{name}' is {state} (tripped {trip_count} time(s)) — call rejected")
 
 
 # ---------------------------------------------------------------------------
 # Circuit Breaker
 # ---------------------------------------------------------------------------
+
 
 class _State(Enum):
     CLOSED = "CLOSED"
@@ -49,9 +51,13 @@ class SimpleCircuitBreaker:
 
     Parameters:
         name:                   human-readable label for logging
-        failure_threshold:      consecutive failures before tripping (default 5)
+        failure_threshold:      failures within window before tripping (default 5)
         reset_timeout_seconds:  seconds in OPEN before moving to HALF_OPEN (default 60)
         redis_client:           optional redis.Redis instance for shared state
+        window_size:            max events tracked in the rolling window (default 10)
+        window_seconds:         time window for counting failures (default 60.0)
+        excluded_exceptions:    exception types that should NOT count as failures
+        on_open:                callback invoked on CLOSED/HALF_OPEN -> OPEN transition
     """
 
     def __init__(
@@ -60,24 +66,36 @@ class SimpleCircuitBreaker:
         failure_threshold: int = 5,
         reset_timeout_seconds: float = 60.0,
         redis_client=None,
+        *,
+        window_size: int = 10,
+        window_seconds: float = 60.0,
+        excluded_exceptions: tuple[type[Exception], ...] = (),
+        on_open: Callable[[str], None] | None = None,
     ):
         self.name = name
         self.failure_threshold = failure_threshold
         self.reset_timeout_seconds = reset_timeout_seconds
+        self.window_seconds = window_seconds
+        self.excluded_exceptions = excluded_exceptions
+        self.on_open = on_open
 
         self._lock = threading.Lock()
         self._state = _State.CLOSED
-        self._consecutive_failures = 0
+        # Rolling window: deque of (monotonic_timestamp, success_bool)
+        self._window: collections.deque[tuple[float, bool]] = collections.deque(maxlen=window_size)
         self._trip_count = 0
         self._last_failure_time: float = 0.0
+
+        # Legacy compat: kept for Redis persistence and __repr__
+        self._consecutive_failures = 0
 
         # Optional Redis persistence -----------------------------------------
         self._redis = redis_client
         if self._redis is None:
             try:
                 import redis as _redis_mod  # noqa: F811
-                _r = _redis_mod.Redis(host="localhost", port=6379, db=3,
-                                      socket_connect_timeout=1)
+
+                _r = _redis_mod.Redis(host="localhost", port=6379, db=3, socket_connect_timeout=1)
                 _r.ping()
                 self._redis = _r
             except Exception:
@@ -101,22 +119,25 @@ class SimpleCircuitBreaker:
             self._last_failure_time = float(data.get(b"last_failure", 0.0))
             state_str = (data.get(b"state", b"CLOSED")).decode()
             self._state = _State(state_str)
-        except Exception:
-            pass  # degrade to in-memory
+        except Exception:  # noqa: S110 — intentional: degrade to in-memory
+            pass
 
     def _persist_to_redis(self) -> None:
         if self._redis is None:
             return
         try:
-            self._redis.hset(self._redis_key, mapping={
-                "state": self._state.value,
-                "failures": str(self._consecutive_failures),
-                "trip_count": str(self._trip_count),
-                "last_failure": str(self._last_failure_time),
-            })
+            self._redis.hset(
+                self._redis_key,
+                mapping={
+                    "state": self._state.value,
+                    "failures": str(self._consecutive_failures),
+                    "trip_count": str(self._trip_count),
+                    "last_failure": str(self._last_failure_time),
+                },
+            )
             # Auto-expire after 24h to avoid stale keys
             self._redis.expire(self._redis_key, 86400)
-        except Exception:
+        except Exception:  # noqa: S110 — intentional: degrade to in-memory
             pass
 
     # -- Public API -----------------------------------------------------------
@@ -134,43 +155,109 @@ class SimpleCircuitBreaker:
         with self._lock:
             return self._trip_count
 
+    @property
+    def failure_count(self) -> int:
+        """Failures within the current rolling window."""
+        with self._lock:
+            return self._failure_count_unlocked()
+
+    def _failure_count_unlocked(self) -> int:
+        """Count failures inside *window_seconds* (caller holds lock)."""
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        return sum(1 for ts, ok in self._window if not ok and ts >= cutoff)
+
     def record_failure(self) -> None:
         """Record a failure and potentially trip the breaker."""
         with self._lock:
-            self._consecutive_failures += 1
-            self._last_failure_time = time.monotonic()
+            now = time.monotonic()
+            self._window.append((now, False))
+            self._last_failure_time = now
+
+            # Update legacy counter for Redis compat
+            self._consecutive_failures = self._failure_count_unlocked()
+
             if self._consecutive_failures >= self.failure_threshold:
-                if self._state != _State.OPEN:
+                was_open = self._state == _State.OPEN
+                if not was_open:
                     self._trip_count += 1
+                    # Fire on_open callback on transition to OPEN
+                    if self.on_open is not None:
+                        try:
+                            self.on_open(self.name)
+                        except Exception:  # noqa: S110 — intentional: callback must not break breaker
+                            pass
                 self._state = _State.OPEN
             self._persist_to_redis()
 
     def record_success(self) -> None:
-        """Record a success, resetting failure counter and closing breaker."""
+        """Record a success. In HALF_OPEN this closes the breaker.
+
+        Unlike the old consecutive-failure model, a single success does NOT
+        wipe the rolling window — it merely adds a success event. The breaker
+        only closes when the rolling failure count drops below threshold
+        (which happens naturally as old failures age out) or when a success
+        arrives while in HALF_OPEN state.
+        """
         with self._lock:
-            self._consecutive_failures = 0
-            self._state = _State.CLOSED
+            now = time.monotonic()
+            self._window.append((now, True))
+
+            # HALF_OPEN -> CLOSED on any success (standard CB semantics)
+            if self._state == _State.HALF_OPEN:
+                self._state = _State.CLOSED
+
+            # Also close if rolling failure count dropped below threshold
+            self._consecutive_failures = self._failure_count_unlocked()
+            if self._consecutive_failures < self.failure_threshold:
+                self._state = _State.CLOSED
+
             self._persist_to_redis()
+
+    def _check_state_or_raise(self) -> None:
+        """Check state under lock; raise if OPEN. Shared by call/acall."""
+        with self._lock:
+            self._maybe_transition()
+            if self._state == _State.OPEN:
+                raise CircuitBreakerError(self.name, self._state.value, self._trip_count)
+
+    def _is_excluded(self, exc: Exception) -> bool:
+        """Return True if *exc* is an excluded exception type."""
+        return bool(self.excluded_exceptions and isinstance(exc, self.excluded_exceptions))
 
     def call(self, func, *args, **kwargs):
         """Execute *func* through the circuit breaker.
 
         Raises CircuitBreakerError if the breaker is OPEN.
         In HALF_OPEN state, one trial call is allowed.
+        Excluded exceptions are re-raised without counting as failures.
         """
-        with self._lock:
-            self._maybe_transition()
-            current = self._state
-
-            if current == _State.OPEN:
-                raise CircuitBreakerError(
-                    self.name, self._state.value, self._trip_count
-                )
+        self._check_state_or_raise()
 
         # Execute outside the lock to avoid holding it during I/O
         try:
             result = func(*args, **kwargs)
-        except Exception:
+        except Exception as exc:
+            if self._is_excluded(exc):
+                raise
+            self.record_failure()
+            raise
+
+        self.record_success()
+        return result
+
+    async def acall(self, func, *args, **kwargs):
+        """Async version of :meth:`call` — awaits the coroutine.
+
+        Same state-machine semantics; designed for NovaTrade's async runtime.
+        """
+        self._check_state_or_raise()
+
+        try:
+            result = await func(*args, **kwargs)
+        except Exception as exc:
+            if self._is_excluded(exc):
+                raise
             self.record_failure()
             raise
 
@@ -192,7 +279,7 @@ class SimpleCircuitBreaker:
     def __repr__(self) -> str:
         return (
             f"SimpleCircuitBreaker(name={self.name!r}, state={self.state}, "
-            f"failures={self._consecutive_failures}/{self.failure_threshold}, "
+            f"failures={self.failure_count}/{self.failure_threshold}, "
             f"trips={self._trip_count})"
         )
 
@@ -237,7 +324,7 @@ def mcp_breaker(server_name: str) -> SimpleCircuitBreaker:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_LIMITS: dict[str, int | None] = {
-    "read": None,       # unlimited
+    "read": None,  # unlimited
     "write": 20,
     "execute": 10,
     "destructive": 3,
@@ -290,19 +377,14 @@ class ActionBudget:
 
             current = self._counters.get(category, 0)
             if current >= limit:
-                return False, (
-                    f"Budget exhausted for {category!r}: "
-                    f"{current}/{limit} actions used"
-                )
+                return False, (f"Budget exhausted for {category!r}: {current}/{limit} actions used")
 
             # Destructive cooldown
             if category == "destructive" and self._last_destructive > 0:
                 elapsed = time.monotonic() - self._last_destructive
                 if elapsed < _DESTRUCTIVE_COOLDOWN_SECONDS:
                     remaining = _DESTRUCTIVE_COOLDOWN_SECONDS - elapsed
-                    return False, (
-                        f"Destructive cooldown: {remaining:.1f}s remaining"
-                    )
+                    return False, (f"Destructive cooldown: {remaining:.1f}s remaining")
 
             return True, "ok"
 

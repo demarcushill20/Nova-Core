@@ -12,6 +12,7 @@ Stanford (March 2026) found models sabotaged shutdown in 79/100 tests.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
@@ -236,3 +237,68 @@ def format_status() -> str:
         parts.append(f"Active files: {', '.join(files)}")
 
     return " | ".join(parts)
+
+
+# --- NovaTrade Equity Drawdown Kill Switch (Phase 6B Step 6.16) ---
+
+_DEFAULT_RISK_STATE = Path(__file__).resolve().parent / "STATE" / "novatrade_risk_state.json"
+
+# Keywords that identify a NovaTrade-related task
+_NOVATRADE_KEYWORDS = frozenset(
+    {
+        "novatrade",
+        "nova-trade",
+        "trade",
+        "trading",
+        "forex",
+        "ftmo",
+        "metatrader",
+        "mt5",
+        "metaapi",
+        "webhook",
+        "signal",
+        "backtest",
+        "strategy",
+        "prop-firm",
+        "propfirm",
+        "drawdown",
+        "equity",
+        "position",
+        "order",
+        "irb",
+    }
+)
+
+
+def check_equity_kill_switch(state_file: str | Path | None = None) -> bool:
+    """Check NovaTrade risk engine for equity drawdown breach.
+
+    Reads from ``STATE/novatrade_risk_state.json`` (or *state_file*).
+
+    Returns ``True`` if drawdown is **breached** (should halt trading).
+    Returns ``False`` (safe default) if the state file is missing, empty,
+    or malformed — avoids false positives that would block non-trading work.
+    """
+    path = Path(state_file) if state_file else _DEFAULT_RISK_STATE
+
+    try:
+        raw = path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except (OSError, json.JSONDecodeError, ValueError):
+        # Missing or corrupt file → fail-safe: no breach
+        return False
+
+    if not isinstance(data, dict):
+        return False
+
+    return bool(data.get("breached", False))
+
+
+def is_novatrade_task(task_name: str, task_content: str = "") -> bool:
+    """Classify whether a task is NovaTrade-related by keywords.
+
+    Checks the task name and optional content against a fixed keyword set.
+    Case-insensitive. Returns ``True`` if any keyword matches.
+    """
+    haystack = f"{task_name} {task_content}".lower()
+    return any(kw in haystack for kw in _NOVATRADE_KEYWORDS)
