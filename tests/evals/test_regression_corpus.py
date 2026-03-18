@@ -59,8 +59,8 @@ def golden_cases(raw_corpus: list[dict]) -> list[GoldenTestCase]:
 class TestCorpusIntegrity:
     """Ensure the corpus file is well-formed and complete."""
 
-    def test_corpus_has_20_cases(self, golden_cases: list[GoldenTestCase]) -> None:
-        assert len(golden_cases) == 20, f"Expected 20 cases, got {len(golden_cases)}"
+    def test_corpus_has_23_cases(self, golden_cases: list[GoldenTestCase]) -> None:
+        assert len(golden_cases) == 23, f"Expected 23 cases, got {len(golden_cases)}"
 
     def test_ids_are_unique(self, golden_cases: list[GoldenTestCase]) -> None:
         ids = [c.id for c in golden_cases]
@@ -71,20 +71,22 @@ class TestCorpusIntegrity:
         assert categories == VALID_CATEGORIES, f"Missing categories: {VALID_CATEGORIES - categories}"
 
     def test_category_distribution(self, golden_cases: list[GoldenTestCase]) -> None:
-        """Each category should have at least 2 cases; heartbeat/codegen/research/plan have 4."""
+        """Each category should have at least 2 cases; heartbeat/codegen/research have 5, plan has 4."""
         counts = Counter(c.category for c in golden_cases)
         for cat in VALID_CATEGORIES:
             assert counts[cat] >= 2, f"Category '{cat}' has only {counts[cat]} case(s), need >= 2"
-        # The four main categories should have 4 each
-        for cat in ("heartbeat", "codegen", "research", "plan"):
-            assert counts[cat] == 4, f"Category '{cat}' expected 4 cases, got {counts[cat]}"
+        # heartbeat, codegen, research have 5 each (4 base + 1 adversarial)
+        for cat in ("heartbeat", "codegen", "research"):
+            assert counts[cat] == 5, f"Category '{cat}' expected 5 cases, got {counts[cat]}"
+        # plan has 4
+        assert counts["plan"] == 4, f"Category 'plan' expected 4 cases, got {counts['plan']}"
         # Bugfix and novatrade have 2 each
         for cat in ("bugfix", "novatrade"):
             assert counts[cat] == 2, f"Category '{cat}' expected 2 cases, got {counts[cat]}"
 
-    def test_total_distribution_sums_to_20(self, golden_cases: list[GoldenTestCase]) -> None:
+    def test_total_distribution_sums_to_23(self, golden_cases: list[GoldenTestCase]) -> None:
         counts = Counter(c.category for c in golden_cases)
-        assert sum(counts.values()) == 20
+        assert sum(counts.values()) == 23
 
 
 # ---------------------------------------------------------------------------
@@ -125,13 +127,24 @@ def _case_ids() -> list[str]:
     return [entry["id"] for entry in data]
 
 
+_CORPUS_CACHE: dict[str, GoldenTestCase] | None = None
+
+
+def _get_corpus() -> dict[str, GoldenTestCase]:
+    """Load and cache the entire corpus, returning a dict keyed by case ID."""
+    global _CORPUS_CACHE
+    if _CORPUS_CACHE is None:
+        with open(CORPUS_PATH) as f:
+            data = json.load(f)
+        _CORPUS_CACHE = {entry["id"]: GoldenTestCase.model_validate(entry) for entry in data}
+    return _CORPUS_CACHE
+
+
 def _load_case(case_id: str) -> GoldenTestCase:
-    with open(CORPUS_PATH) as f:
-        data = json.load(f)
-    for entry in data:
-        if entry["id"] == case_id:
-            return GoldenTestCase.model_validate(entry)
-    raise ValueError(f"Case {case_id} not found")
+    corpus = _get_corpus()
+    if case_id not in corpus:
+        raise ValueError(f"Case {case_id} not found")
+    return corpus[case_id]
 
 
 @pytest.mark.parametrize("case_id", _case_ids())

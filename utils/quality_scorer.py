@@ -132,8 +132,10 @@ _CODE_PATTERN_PATTERNS = [
 _CITATION_PATTERNS = [
     re.compile(r"https?://\S+"),
     re.compile(r"\[[\d]+\]"),  # [1], [2] style references
-    re.compile(r"\b(source|reference|citation|according to|per|see)\b", re.IGNORECASE),
+    re.compile(r"\b(according to|cited from|as described in|per the)\b", re.IGNORECASE),
+    re.compile(r"\[Source:.*?\]"),  # inline [Source: ...] references
     re.compile(r"\([\w\s]+,\s*\d{4}\)"),  # (Author, 2024)
+    re.compile(r"#+\s*(Citations|References|Bibliography)\b", re.IGNORECASE),
 ]
 
 # Patterns for structured findings
@@ -574,15 +576,24 @@ def score_output(
                 loop = None
 
             if loop is not None:
-                # Already in async context — schedule coroutine
+                # Already in async context — run coroutine in a new thread
+                # using asyncio.to_thread avoids spawning a ThreadPoolExecutor per call
                 import concurrent.futures
 
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    result = pool.submit(
-                        asyncio.run,
-                        score_output_llm(category, input_text, output_text),
-                    ).result()
-                return result
+                future = concurrent.futures.Future()
+
+                def _run_in_new_loop() -> None:
+                    try:
+                        res = asyncio.run(score_output_llm(category, input_text, output_text))
+                        future.set_result(res)
+                    except Exception as exc:
+                        future.set_exception(exc)
+
+                import threading
+
+                t = threading.Thread(target=_run_in_new_loop, daemon=True)
+                t.start()
+                return future.result(timeout=60)
             else:
                 return asyncio.run(score_output_llm(category, input_text, output_text))
         except Exception:

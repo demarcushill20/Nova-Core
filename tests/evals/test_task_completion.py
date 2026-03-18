@@ -276,14 +276,14 @@ class TestDeepEvalPatternCompletion:
         from deepeval.metrics import PatternMatchMetric
         from deepeval.test_case import LLMTestCase
 
-        # PatternMatchMetric uses fullmatch, so we wrap with .*
+        # Use [\s\S]* for cross-line matching to preserve original structure
         metric = PatternMatchMetric(
-            pattern=r".*Heartbeat Report.*System Metrics.*Service Status.*",
+            pattern=r"[\s\S]*Heartbeat Report[\s\S]*System Metrics[\s\S]*Service Status[\s\S]*",
             ignore_case=True,
         )
         test_case = LLMTestCase(
             input="Generate a heartbeat report",
-            actual_output=heartbeat_output.replace("\n", " "),
+            actual_output=heartbeat_output,
         )
         metric.measure(test_case)
         assert metric.is_successful(), f"Heartbeat did not match report pattern (score={metric.score})"
@@ -293,13 +293,14 @@ class TestDeepEvalPatternCompletion:
         from deepeval.metrics import PatternMatchMetric
         from deepeval.test_case import LLMTestCase
 
+        # Use [\s\S]* for cross-line matching to preserve original structure
         metric = PatternMatchMetric(
-            pattern=r".*Implementation.*```python.*```.*Tests.*```python.*```.*",
+            pattern=r"[\s\S]*Implementation[\s\S]*```python[\s\S]*```[\s\S]*Tests[\s\S]*```python[\s\S]*```[\s\S]*",
             ignore_case=True,
         )
         test_case = LLMTestCase(
             input="Generate code with tests",
-            actual_output=codegen_output.replace("\n", " "),
+            actual_output=codegen_output,
         )
         metric.measure(test_case)
         assert metric.is_successful(), f"Codegen did not match expected pattern (score={metric.score})"
@@ -309,13 +310,14 @@ class TestDeepEvalPatternCompletion:
         from deepeval.metrics import PatternMatchMetric
         from deepeval.test_case import LLMTestCase
 
+        # Use [\s\S]* for cross-line matching to preserve original structure
         metric = PatternMatchMetric(
-            pattern=r".*Key Findings.*Recommendations.*Citations.*",
+            pattern=r"[\s\S]*Key Findings[\s\S]*Recommendations[\s\S]*Citations[\s\S]*",
             ignore_case=True,
         )
         test_case = LLMTestCase(
             input="Research circuit breaker patterns",
-            actual_output=research_output.replace("\n", " "),
+            actual_output=research_output,
         )
         metric.measure(test_case)
         assert metric.is_successful(), f"Research did not match academic pattern (score={metric.score})"

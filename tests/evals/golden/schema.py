@@ -79,6 +79,10 @@ VALID_PROPERTIES = frozenset(
         "drawdown_limits",
         "position_sizing",
         "ftmo_compliance",
+        # Adversarial / edge-case
+        "input_sanitized",
+        "injection_rejected",
+        "handles_malformed_input",
     }
 )
 

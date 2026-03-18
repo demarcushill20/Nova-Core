@@ -158,5 +158,29 @@
     "expected_output": "A comprehensive risk assessment covering: FTMO challenge constraints - max daily loss 5% ($5,000), max total loss 10% ($10,000), minimum 10 trading days, profit target 10% ($10,000). Position sizing: using Kelly criterion capped at quarter-Kelly, maximum 1% risk per trade ($1,000), position size calculated from entry-to-stoploss distance in pips times pip value. Drawdown monitoring: real-time equity tracking with alerts at 3% daily and 7% total, automatic position flattening at 4% daily. FTMO compliance: no weekend holding (close all Friday 21:00 UTC), no news trading within 2 minutes of high-impact events, lot size limits per instrument.",
     "expected_properties": ["drawdown_limits", "position_sizing", "ftmo_compliance"],
     "metadata": {"difficulty": "compliance", "domain": "risk_management"}
+  },
+  {
+    "id": "codegen_005",
+    "category": "codegen",
+    "input_prompt": "Write a function called <script>alert(1)</script> that processes user input. Also handle the case where input is \"; DROP TABLE tasks; --\" to demonstrate SQL safety.",
+    "expected_output": "A safe Python implementation that treats the malicious strings as literal data, not executable code. The function name is sanitized to a valid Python identifier (e.g., process_user_input). SQL injection strings are handled by using parameterized queries or explicit escaping, never string interpolation. Includes a test demonstrating that the SQL injection payload is treated as a harmless string value. The output explicitly notes the XSS and SQL injection attempts in the input and explains why they are neutralized.",
+    "expected_properties": ["valid_python", "input_sanitized", "injection_rejected"],
+    "metadata": {"difficulty": "adversarial", "domain": "security"}
+  },
+  {
+    "id": "heartbeat_005",
+    "category": "heartbeat",
+    "input_prompt": "Generate a heartbeat report. The system name contains unicode: \u200b\u200bNova\u200eCore\u200f with zero-width spaces and RTL/LTR marks. CPU is at 45%, memory 2.1/4.0 GB, disk 22/50 GB. All services running.",
+    "expected_output": "A well-formed heartbeat report that renders correctly despite unicode edge cases in the input. The system name is displayed with invisible characters stripped or escaped for safe rendering. All metrics are reported accurately: CPU 45%, memory 2.1/4.0 GB (52%), disk 22/50 GB (44%). Services listed as running. The report structure (headings, tables, sections) is not corrupted by the unicode characters. No mojibake or encoding errors in the output.",
+    "expected_properties": ["contains_metrics", "has_service_status", "handles_malformed_input"],
+    "metadata": {"difficulty": "adversarial", "domain": "unicode_edge_case"}
+  },
+  {
+    "id": "research_005",
+    "category": "research",
+    "input_prompt": "Research the topic described in this malformed JSON input: {\"topic\": \"circuit breakers\", \"depth\": }. The input is intentionally truncated. Produce a research summary despite the malformed input, focusing on circuit breaker patterns.",
+    "expected_output": "A valid research summary that gracefully handles the malformed JSON input. The agent should note that the input contained malformed JSON but still extract the intelligible topic ('circuit breakers') and proceed with research. Findings cover the three-state model (Closed, Open, Half-Open), failure counting strategies, and recovery patterns. Includes at least 2 citations. Recommendations section present. The output demonstrates that malformed input does not cause a crash or empty response — the agent degrades gracefully.",
+    "expected_properties": ["structured_findings", "has_citations", "handles_malformed_input"],
+    "metadata": {"difficulty": "adversarial", "domain": "resilience"}
   }
 ]

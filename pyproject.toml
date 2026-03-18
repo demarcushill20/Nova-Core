@@ -52,19 +52,60 @@ ignore = [
     "TC003",  # typing-only-standard-library-import — same
     "PT006",  # parametrize-names-wrong-type — string format "a,b" is standard
     "PT018",  # composite-assertion — compound asserts are fine in tests
-    "C901",   # too-complex — tracked by radon/complexity_gate.py at CI level instead
-    "S110",   # try-except-pass — intentional in many fault-tolerant paths
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S105", "S106", "S108", "PT009", "PT019", "PT017", "PT015", "PT011", "PT027"]  # assert, test tokens, /tmp paths, and pytest style rules are standard in tests
 "scripts/**/*.py" = ["S108"]  # temp file usage acceptable in scripts
 "nova_kill_switch.py" = ["S108"]  # /tmp sentinel files are the intended kill-switch mechanism
-"utils/security_monitor.py" = ["S105"]  # secret_status variable names are false positives
+"utils/security_monitor.py" = ["S105", "C901"]  # secret_status variable names are false positives; complex auth failure collection
 "tools/runner.py" = ["S105", "E731", "C901", "TRY301", "TRY004", "RUF005"]  # intentional patterns: confirm token, lambda dispatch, complex dispatch, raise-in-try, ValueError for args, list concat
 "tools/adapters/system_service.py" = ["S105"]  # _CONFIRM_TOKEN is a confirmation string
-"heartbeat.py" = ["S110", "S310"]  # try-except-pass and urlopen are intentional in heartbeat checks
-"watcher.py" = ["S110"]  # try-except-pass is intentional for non-fatal ops
+"heartbeat.py" = ["C901", "S110", "S310"]  # complex main loop, try-except-pass, urlopen are intentional
+"watcher.py" = ["C901", "S110"]  # complex dispatch, try-except-pass for non-fatal ops
+"telegram_bot.py" = ["C901", "S110"]  # complex message handler and parse_message
+"telegram/parse.py" = ["C901"]  # complex message parsing
+"telegram/llm.py" = ["C901"]  # complex response generation
+"prompts/heartbeat_prompts.py" = ["C901", "S110"]  # complex state gathering, try-except-pass for resilience
+"agents/circuit_breakers.py" = ["S110"]  # try-except-pass for Redis degradation
+"agents/observability.py" = ["C901"]  # complex metrics collection
+"agents/memory_compactor.py" = ["C901"]  # complex dedup and compaction
+"agents/memory_router.py" = ["C901"]  # complex recall routing
+"agents/memory_triggers.py" = ["C901"]  # complex anomaly detection
+"agents/memory_metrics.py" = ["C901"]  # complex metrics aggregation
+"agents/rollout_gate.py" = ["C901"]  # complex evaluation logic
+"agents/critic.py" = ["C901"]  # complex review and verification
+"agents/workflow_graph.py" = ["C901"]  # complex graph rendering
+"agents/policy_engine.py" = ["C901"]  # complex policy fire logic
+"agents/production_hardening.py" = ["C901"]  # complex sweep/reconcile logic
+"agents/verifier.py" = ["C901"]  # complex validation chains
+"tools/mcp_vault_server.py" = ["C901"]  # complex vault write/update validation
+"tools/adapters/git_repo.py" = ["C901"]  # complex diff/patch/search
+"tools/adapters/repo_files.py" = ["C901"]  # complex repo write
+"tools/adapters/repo_search.py" = ["C901"]  # complex search with scoring
+"tools/adapters/repo_diff.py" = ["C901"]  # complex diff rendering
+"tools/adapters/pdf_generate.py" = ["C901"]  # complex markdown-to-PDF
+"tools/contracts.py" = ["C901"]  # complex contract parsing
+"tools/orchestrator_adapter.py" = ["C901"]  # complex orchestrator dispatch
+"tools/registry.py" = ["C901"]  # complex registry validation
+"tools/skill_optimizer/*.py" = ["C901"]  # complex optimization and validation pipelines
+"utils/max_plan_guard.py" = ["C901"]  # complex runaway detection
+"utils/structured_output.py" = ["C901"]  # complex JSON extraction
+"utils/self_healing.py" = ["C901"]  # complex degradation evaluation
+"utils/mcp_sanitizer.py" = ["C901"]  # complex sanitization
+"utils/testing_mode.py" = ["C901"]  # complex testing cycle
+"utils/drift_detector.py" = ["S110"]  # try-except-pass for drift metrics
+"utils/langfuse_quality.py" = ["S110"]  # try-except-pass for optional Langfuse
+"utils/structured_log.py" = ["S110"]  # try-except-pass for non-critical logging
+"schemas/vault_note_schema.py" = ["C901"]  # complex frontmatter validation
+"planner/vault_context.py" = ["C901"]  # complex context retrieval
+"planner/pattern_promoter.py" = ["C901"]  # complex pattern assessment
+"nova-link/api.py" = ["C901"]  # complex dashboard endpoint
+"novatrade/**/*.py" = ["C901"]  # complex trading logic (backtest, signals, validation)
+"scripts/novatrade_ftmo.py" = ["C901", "S110"]  # complex FTMO review, try-except-pass
+"scripts/repair_vault_types.py" = ["C901"]  # complex vault repair
+"scripts/md_to_pdf_fpdf.py" = ["C901"]  # complex PDF rendering
+"docs/demo_test_run/*.py" = ["C901"]  # complex backtest code
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15
