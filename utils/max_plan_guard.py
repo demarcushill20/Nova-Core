@@ -467,9 +467,13 @@ def detect_runaway() -> RunawayDetection:
             severity = "critical"
 
     # 4. Heartbeat itself causing excessive Claude work
+    # Normal operation: heartbeat every 30m (2/hr) + planning_cycle (1-2) +
+    # orchestrator classifier (2-3) = 5-7 calls/hr is healthy.
+    # Threshold of 10 catches genuine runaway loops while avoiding false
+    # positives from normal heartbeat + planning cadence.
     hb_callers = {"heartbeat_agent", "research_cycle", "planning_cycle", "memory_maintenance"}
     hb_count = sum(1 for e in last_60m if e.get("caller", "") in hb_callers)
-    if hb_count >= 6:  # more than ~1 per 10 min from heartbeat family
+    if hb_count >= 10:  # genuine runaway — normal cadence peaks at ~7
         reasons.append(f"runaway_heartbeat_loop: {hb_count} heartbeat-family calls in 60m")
         severity = "warning" if severity != "critical" else severity
 

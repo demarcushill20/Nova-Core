@@ -369,13 +369,25 @@ class TestRunawayDetection:
         assert result.severity == "critical"
 
     def test_heartbeat_loop_detection(self, tmp_path):
-        """Excessive heartbeat-family calls triggers detection."""
-        for _ in range(7):
+        """Excessive heartbeat-family calls triggers detection (threshold=10)."""
+        for _ in range(11):
             record_invocation(caller="heartbeat_agent", component="h", task_id="", duration_secs=1.0)
 
         result = detect_runaway()
         assert result.detected is True
         assert any("runaway_heartbeat_loop" in r for r in result.reasons)
+
+    def test_heartbeat_normal_cadence_no_false_positive(self, tmp_path):
+        """Normal heartbeat cadence (7 calls/hr) does NOT trigger runaway."""
+        for _ in range(3):
+            record_invocation(caller="heartbeat_agent", component="h", task_id="", duration_secs=1.0)
+        for _ in range(2):
+            record_invocation(caller="planning_cycle", component="h", task_id="", duration_secs=1.0)
+        for _ in range(2):
+            record_invocation(caller="research_cycle", component="h", task_id="", duration_secs=1.0)
+
+        result = detect_runaway()
+        assert not any("runaway_heartbeat_loop" in r for r in result.reasons)
 
     def test_abnormal_spike_detection(self, tmp_path):
         """Large number of calls triggers abnormal spike."""

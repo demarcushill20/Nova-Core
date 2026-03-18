@@ -31,7 +31,11 @@ _BASELINE_FILE = _STATE_DIR / "drift_baseline.json"
 
 # Drift thresholds
 _SUCCESS_RATE_DROP = 0.15  # 15% drop from baseline triggers drift
-_DURATION_SPIKE = 1.5  # 50% increase in avg duration triggers drift
+_DURATION_SPIKE = 5.0  # 5x increase in avg duration triggers drift
+# Note: prior value of 1.5x caused constant false positives because task
+# durations are bimodal — quick file ops (~400ms) vs. agent tasks (30-300s).
+# A single heavy session (reviews, multi-agent work) would spike 1000x.
+# 5x catches genuine slowdowns while tolerating normal workload variation.
 _ERROR_RATE_SPIKE = 2.0  # 2x increase in error rate triggers drift
 _MIN_SAMPLES = 5  # need at least this many tasks to compute metrics
 
