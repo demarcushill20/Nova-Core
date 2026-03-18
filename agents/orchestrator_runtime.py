@@ -33,10 +33,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from agents.context_assembler import ContextAssembler
 from agents.message_bus import MessageBus
 from agents.messages import (
     task_assign_message,
 )
+from agents.runtime_policy import PolicyCheckResult, RuntimePolicyEnforcer
 from agents.spawner import (
     AgentProcess,
     AgentSpawner,
@@ -45,6 +47,7 @@ from agents.spawner import (
     ConcurrencyLimitReached,
     SpawnError,
 )
+from agents.timeout_manager import TimeoutManager
 from agents.validation import atomic_write, validate_id
 
 logger = logging.getLogger(__name__)
@@ -267,6 +270,9 @@ class OrchestratorRuntime:
         persist_dir: Path | None = None,
         max_workflow_runtime_s: float = 1800.0,
         bridge: Any | None = None,
+        timeout_mgr: TimeoutManager | None = None,
+        context_assembler: ContextAssembler | None = None,
+        policy_enforcer: RuntimePolicyEnforcer | None = None,
     ):
         self._spawner = spawner
         self._bus = bus
@@ -274,12 +280,40 @@ class OrchestratorRuntime:
         self._persist_dir = persist_dir or WORKFLOWS_DIR
         self._max_runtime_s = max_workflow_runtime_s
         self._bridge = bridge  # Optional RuntimeBridge for integration
+        self._timeout_mgr = timeout_mgr
+        self._context_assembler = context_assembler
+        self._policy_enforcer = policy_enforcer
         self._persist_dir.mkdir(parents=True, exist_ok=True)
 
     def _default_work_fn_factory(self, node: DAGNode, dag: WorkflowDAG) -> AgentWorkFn:
         """Create a default work function that sends/receives via the bus."""
 
         async def work(proc: AgentProcess) -> Any:
+            # Build available context from upstream results
+            available_context: dict[str, Any] = {
+                "query": node.goal,
+                "task_description": node.goal,
+                "spec": node.goal,
+            }
+            upstream_results = []
+            for dep_id in node.depends_on:
+                dep = dag.nodes.get(dep_id)
+                if dep and dep.result is not None:
+                    upstream_results.append(f"{dep.role}({dep.node_id}): {dep.result}")
+            if upstream_results:
+                summary = "\n".join(upstream_results)
+                available_context["upstream_summary"] = summary
+                available_context["existing_findings"] = summary
+                available_context["work_product"] = summary
+
+            # Scope context by role if assembler is available
+            context = available_context
+            if self._context_assembler is not None:
+                context = self._context_assembler.assemble(
+                    role=node.role,
+                    available_context=available_context,
+                )
+
             # Send task assignment
             msg = task_assign_message(
                 from_role="orchestrator",
@@ -287,6 +321,7 @@ class OrchestratorRuntime:
                 workflow_id=dag.workflow_id,
                 subtask_id=node.node_id,
                 goal=node.goal,
+                context=context,
             )
             await self._bus.send(msg)
 
@@ -304,6 +339,13 @@ class OrchestratorRuntime:
         """Find and spawn agents for all ready DAG nodes."""
         for node in dag.get_ready_nodes():
             try:
+                # Circuit breaker check — defer if role is failing too often
+                if self._timeout_mgr is not None:
+                    breaker = self._timeout_mgr.get_breaker(node.role)
+                    if breaker.is_open:
+                        logger.warning("Circuit breaker open for role %s, deferring node %s", node.role, node.node_id)
+                        continue
+
                 # Claim via CoordinationLayer if bridge is present
                 if self._bridge is not None and not self._bridge.claim_node(
                     dag.workflow_id, node.node_id, node.agent_id
@@ -322,6 +364,15 @@ class OrchestratorRuntime:
                 node.started_at = time.time()
                 node.spawn_id = proc.spawn_id
                 active_spawns[proc.spawn_id] = node.node_id
+
+                # Register agent with policy enforcer for budget/tool tracking
+                if self._policy_enforcer is not None:
+                    self._policy_enforcer.register_agent(
+                        node.agent_id,
+                        dag.workflow_id,
+                        max_actions=proc.budget.max_actions,
+                        max_runtime_s=proc.budget.max_runtime_seconds,
+                    )
 
                 # Sync agent state to blackboard
                 if self._bridge is not None:
@@ -356,6 +407,8 @@ class OrchestratorRuntime:
                 node.status = NodeStatus.COMPLETED
                 node.result = proc.result
                 node.completed_at = time.time()
+                if self._timeout_mgr is not None:
+                    self._timeout_mgr.record_success(node.role)
                 if self._bridge is not None:
                     self._bridge.complete_node(
                         dag.workflow_id,
@@ -368,13 +421,31 @@ class OrchestratorRuntime:
                         "completed",
                     )
             elif node.retries < node.max_retries:
-                node.retries += 1
-                node.status = NodeStatus.PENDING
-                node.spawn_id = None
+                # Consult TimeoutManager for smart retry decisions
+                error_type = (proc.error or "Unknown").split(":")[0].strip()
+                if self._timeout_mgr is not None and not self._timeout_mgr.should_retry(
+                    node.role, error_type, node.retries
+                ):
+                    # TimeoutManager says don't retry (breaker open, non-retryable, storm)
+                    node.status = NodeStatus.FAILED
+                    node.error = proc.error or "Unknown failure"
+                    node.completed_at = time.time()
+                    self._timeout_mgr.record_failure(node.role)
+                    if self._bridge is not None:
+                        self._bridge.fail_node(dag.workflow_id, node_id, node.agent_id, node.error)
+                        self._bridge.sync_agent_state(node.agent_id, dag.workflow_id, "failed", error=node.error)
+                else:
+                    node.retries += 1
+                    node.status = NodeStatus.PENDING
+                    node.spawn_id = None
+                    if self._timeout_mgr is not None:
+                        self._timeout_mgr.record_failure(node.role)
             else:
                 node.status = NodeStatus.FAILED
                 node.error = proc.error or "Unknown failure"
                 node.completed_at = time.time()
+                if self._timeout_mgr is not None:
+                    self._timeout_mgr.record_failure(node.role)
                 if self._bridge is not None:
                     self._bridge.fail_node(
                         dag.workflow_id,
@@ -422,6 +493,14 @@ class OrchestratorRuntime:
                 if dag.detect_deadlock():
                     dag.status = WorkflowStatus.FAILED
                     dag.error = "Deadlock: no nodes can progress"
+                    break
+
+                # Retry storm detection — halt if too many retries in window
+                if self._timeout_mgr is not None and self._timeout_mgr.is_retry_storm:
+                    dag.status = WorkflowStatus.HALTED
+                    dag.error = "Retry storm detected — halting workflow"
+                    for sid in list(active_spawns):
+                        await self._spawner.terminate(sid, reason="retry storm")
                     break
 
                 await self._spawn_ready_nodes(dag, active_spawns)
@@ -486,9 +565,47 @@ class OrchestratorRuntime:
     # Metrics
     # -------------------------------------------------------------------
 
+    # -------------------------------------------------------------------
+    # Policy proxy
+    # -------------------------------------------------------------------
+
+    def check_tool(
+        self,
+        agent_id: str,
+        workflow_id: str,
+        tool_name: str,
+        *,
+        allowed_tools: list[str] | None = None,
+        denied_tools: list[str] | None = None,
+    ) -> PolicyCheckResult:
+        """Check if an agent is allowed to call a tool.
+
+        Delegates to RuntimePolicyEnforcer if wired. Returns allowed if no enforcer.
+        """
+        if self._policy_enforcer is None:
+            return PolicyCheckResult(allowed=True, agent_id=agent_id, tool_name=tool_name, reason="no enforcer")
+        return self._policy_enforcer.check_tool(
+            agent_id,
+            workflow_id,
+            tool_name,
+            allowed_tools=allowed_tools,
+            denied_tools=denied_tools,
+        )
+
+    # -------------------------------------------------------------------
+    # Metrics
+    # -------------------------------------------------------------------
+
     def get_metrics(self) -> dict[str, Any]:
-        """Aggregate metrics from spawner and bus."""
-        return {
+        """Aggregate metrics from all wired components."""
+        metrics: dict[str, Any] = {
             "spawner": self._spawner.get_metrics(),
             "bus": self._bus.get_metrics(),
         }
+        if self._timeout_mgr is not None:
+            metrics["timeout"] = self._timeout_mgr.get_metrics()
+        if self._policy_enforcer is not None:
+            metrics["policy"] = self._policy_enforcer.get_metrics()
+        if self._context_assembler is not None:
+            metrics["context_budget"] = self._context_assembler.token_budget
+        return metrics
