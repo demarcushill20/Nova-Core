@@ -18,12 +18,17 @@ def dcg_at_k(relevance_scores: list[float], k: int = 10) -> float:
 
     Args:
         relevance_scores: Graded relevance of results in rank order.
-        k: Cutoff position.
+        k: Cutoff position (must be >= 0).
 
     Returns:
         DCG value (non-negative float).
+
+    Raises:
+        ValueError: If k is negative.
     """
-    if k <= 0:
+    if k < 0:
+        raise ValueError(f"k must be non-negative, got {k}")
+    if k == 0:
         return 0.0
     dcg = 0.0
     for i, rel in enumerate(relevance_scores[:k]):
@@ -50,7 +55,9 @@ def ndcg_at_k(
     Returns:
         NDCG@k in [0, 1]. Returns 0.0 if no relevant docs exist.
     """
-    if k <= 0:
+    if k < 0:
+        raise ValueError(f"k must be non-negative, got {k}")
+    if k == 0:
         return 0.0
     # Build actual relevance vector from retrieved IDs
     actual_rels = [float(relevance_grades.get(doc_id, 0)) for doc_id in retrieved_ids[:k]]
@@ -83,7 +90,9 @@ def recall_at_k(
     Returns:
         Recall@k in [0, 1]. Returns 0.0 if expected_ids is empty.
     """
-    if k <= 0:
+    if k < 0:
+        raise ValueError(f"k must be non-negative, got {k}")
+    if k == 0:
         return 0.0
     if not expected_ids:
         return 0.0
@@ -109,7 +118,9 @@ def precision_at_k(
     Returns:
         Precision@k in [0, 1]. Returns 0.0 if k is 0.
     """
-    if k <= 0:
+    if k < 0:
+        raise ValueError(f"k must be non-negative, got {k}")
+    if k == 0:
         return 0.0
     top_k = list(dict.fromkeys(retrieved_ids[:k]))  # preserves order, removes dupes
     if not top_k:
