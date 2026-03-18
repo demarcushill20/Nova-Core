@@ -630,8 +630,6 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
     cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", "--model", "claude-opus-4-6", prompt]
 
     _oa_t0 = time.monotonic()
-    if _mpg_record is not None:
-        _mpg_record(caller="orchestrator", component="orchestrator_adapter.run_classifier", model="claude-opus-4-6")
 
     try:
         child_env = os.environ.copy()

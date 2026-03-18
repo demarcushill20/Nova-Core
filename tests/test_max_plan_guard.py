@@ -11,6 +11,7 @@ from utils.max_plan_guard import (
     ProtectionMode,
     ProtectionState,
     RunawayDetection,
+    _completed_only,
     _recommend_action,
     _run_auth_check,
     check_auth_mode,
@@ -258,9 +259,9 @@ class TestBurnRate:
 
     def test_spike_detection(self, tmp_path):
         """Many recent calls produce elevated burn rate."""
-        # Record 20 calls in the last "minute"
+        # Record 20 completed calls in the last "minute"
         for i in range(20):
-            record_invocation(caller="watcher", component="w", task_id=f"t{i}")
+            record_invocation(caller="watcher", component="w", task_id=f"t{i}", duration_secs=1.0)
 
         metrics = compute_burn_rate()
         assert metrics.claude_calls_last_15m == 20
@@ -271,9 +272,9 @@ class TestBurnRate:
     def test_same_caller_dominance(self, tmp_path):
         """Dominant caller is correctly identified."""
         for _ in range(8):
-            record_invocation(caller="heartbeat_agent", component="h", task_id="")
+            record_invocation(caller="heartbeat_agent", component="h", task_id="", duration_secs=1.0)
         for _ in range(3):
-            record_invocation(caller="watcher", component="w", task_id="")
+            record_invocation(caller="watcher", component="w", task_id="", duration_secs=1.0)
 
         metrics = compute_burn_rate()
         assert metrics.dominant_caller_last_60m == "heartbeat_agent"
@@ -283,10 +284,41 @@ class TestBurnRate:
     def test_anomaly_score_scales(self, tmp_path):
         """Anomaly score increases with more calls."""
         for i in range(30):
-            record_invocation(caller="watcher", component="w", task_id=f"t{i}")
+            record_invocation(caller="watcher", component="w", task_id=f"t{i}", duration_secs=1.0)
 
         metrics = compute_burn_rate()
         assert metrics.anomaly_score > 0.0
+
+    def test_start_entries_not_counted(self, tmp_path):
+        """Start entries (duration_secs=None) are filtered out of burn rate."""
+        # Write 10 start entries (no duration) and 3 completion entries
+        for i in range(10):
+            record_invocation(caller="watcher", component="w", task_id=f"start_{i}")
+        for i in range(3):
+            record_invocation(caller="watcher", component="w", task_id=f"done_{i}", duration_secs=5.0)
+
+        metrics = compute_burn_rate()
+        # Only the 3 completion entries should be counted
+        assert metrics.claude_calls_last_15m == 3
+        assert metrics.claude_calls_last_60m == 3
+
+
+# ---------------------------------------------------------------------------
+# completed_only filter
+# ---------------------------------------------------------------------------
+class TestCompletedOnly:
+    def test_filters_null_duration(self):
+        """Entries with duration_secs=None are excluded."""
+        entries = [
+            {"caller": "a", "duration_secs": None},
+            {"caller": "b", "duration_secs": 1.5},
+            {"caller": "c"},  # missing key
+            {"caller": "d", "duration_secs": 0.0},
+        ]
+        result = _completed_only(entries)
+        assert len(result) == 2
+        assert result[0]["caller"] == "b"
+        assert result[1]["caller"] == "d"
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +337,7 @@ class TestRunawayDetection:
         set_config(cfg)
 
         for _ in range(6):
-            record_invocation(caller="heartbeat_agent", component="h", task_id="")
+            record_invocation(caller="heartbeat_agent", component="h", task_id="", duration_secs=1.0)
 
         result = detect_runaway()
         assert result.detected is True
@@ -317,7 +349,7 @@ class TestRunawayDetection:
         set_config(cfg)
 
         for _ in range(4):
-            record_invocation(caller="watcher", component="w", task_id="stuck_task")
+            record_invocation(caller="watcher", component="w", task_id="stuck_task", duration_secs=1.0)
 
         result = detect_runaway()
         assert result.detected is True
@@ -329,7 +361,7 @@ class TestRunawayDetection:
         set_config(cfg)
 
         for _ in range(4):
-            record_invocation(caller="watcher", component="w", task_id="failing_task", success=False)
+            record_invocation(caller="watcher", component="w", task_id="failing_task", success=False, duration_secs=1.0)
 
         result = detect_runaway()
         assert result.detected is True
@@ -339,7 +371,7 @@ class TestRunawayDetection:
     def test_heartbeat_loop_detection(self, tmp_path):
         """Excessive heartbeat-family calls triggers detection."""
         for _ in range(7):
-            record_invocation(caller="heartbeat_agent", component="h", task_id="")
+            record_invocation(caller="heartbeat_agent", component="h", task_id="", duration_secs=1.0)
 
         result = detect_runaway()
         assert result.detected is True
@@ -351,7 +383,7 @@ class TestRunawayDetection:
         set_config(cfg)
 
         for i in range(25):
-            record_invocation(caller=f"caller_{i % 5}", component="c", task_id=f"task_{i}")
+            record_invocation(caller=f"caller_{i % 5}", component="c", task_id=f"task_{i}", duration_secs=1.0)
 
         result = detect_runaway()
         assert result.detected is True
@@ -632,7 +664,7 @@ class TestHeartbeatIntegration:
 
         # Flood ledger to trigger critical
         for i in range(50):
-            record_invocation(caller="watcher", component="w", task_id=f"t{i}")
+            record_invocation(caller="watcher", component="w", task_id=f"t{i}", duration_secs=1.0)
 
         result = check_max_plan_usage()
         assert result["ok"] is False

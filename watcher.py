@@ -622,7 +622,6 @@ async def _execute_worker(
             _mpg_model = cmd[_i + 1]
             break
     _mpg_t0 = datetime.now(timezone.utc)
-    _mpg_record(caller="watcher", component="watcher._execute_worker", task_id=stem, model=_mpg_model)
 
     proc: asyncio.subprocess.Process | None = None
     try:

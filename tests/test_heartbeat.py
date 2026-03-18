@@ -506,3 +506,84 @@ class TestMain:
         assert code == 1
         m_hb.assert_called_once()
         m_repair.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _is_self_referential_runaway
+# ---------------------------------------------------------------------------
+
+
+class TestSelfReferentialRunaway:
+    """Tests for the feedback loop breaker that prevents the heartbeat agent
+    from amplifying its own runaway detection into a persistent UNHEALTHY state."""
+
+    def test_ok_result_returns_false(self):
+        result = {"ok": True, "detail": "normal", "runaway": {"detected": False, "reasons": []}}
+        assert heartbeat._is_self_referential_runaway(result) is False
+
+    def test_no_runaway_returns_false(self):
+        result = {"ok": False, "detail": "high burn", "runaway": {"detected": False, "reasons": []}}
+        assert heartbeat._is_self_referential_runaway(result) is False
+
+    def test_other_caller_runaway_returns_false(self):
+        result = {
+            "ok": False,
+            "detail": "runaway",
+            "runaway": {"detected": True, "reasons": ["runaway_same_caller: watcher (15 calls)"]},
+        }
+        assert heartbeat._is_self_referential_runaway(result) is False
+
+    def test_heartbeat_agent_runaway_returns_true(self):
+        result = {
+            "ok": False,
+            "detail": "runaway",
+            "runaway": {"detected": True, "reasons": ["runaway_same_caller: heartbeat_agent (23 calls)"]},
+        }
+        assert heartbeat._is_self_referential_runaway(result) is True
+
+    def test_heartbeat_agent_among_multiple_reasons(self):
+        result = {
+            "ok": False,
+            "detail": "runaway",
+            "runaway": {
+                "detected": True,
+                "reasons": [
+                    "high_burn_rate: 5.0x",
+                    "runaway_same_caller: heartbeat_agent (40 calls)",
+                ],
+            },
+        }
+        assert heartbeat._is_self_referential_runaway(result) is True
+
+    def test_missing_runaway_key_returns_false(self):
+        result = {"ok": False, "detail": "error"}
+        assert heartbeat._is_self_referential_runaway(result) is False
+
+    def test_suppression_in_main_flow(self, tmp_path):
+        """Integration: when heartbeat_agent is the runaway caller, the
+        max_plan_usage check should be downgraded to ok=True so the overall
+        heartbeat status is HEALTHY (breaking the feedback loop)."""
+        _make_tmp_base(tmp_path)
+        mpg_result = {
+            "name": "max_plan_usage",
+            "ok": False,
+            "detail": "mode=PROTECTION, burn=2.77x, runaway=heartbeat_agent",
+            "alerts": [],
+            "protection_mode": "PROTECTION",
+            "burn_rate": {},
+            "runaway": {"detected": True, "reasons": ["runaway_same_caller: heartbeat_agent (23 calls)"]},
+        }
+        with (
+            mock.patch("heartbeat.check_service") as m_svc,
+            mock.patch("heartbeat.check_disk") as m_disk,
+            mock.patch("heartbeat.check_claude_binary") as m_claude,
+            mock.patch("heartbeat.send_telegram_heartbeat"),
+            mock.patch("heartbeat.inject_repair_task"),
+            mock.patch("utils.max_plan_guard.check_max_plan_usage", return_value=mpg_result),
+        ):
+            m_svc.return_value = {"name": "svc", "ok": True, "detail": "active"}
+            m_disk.return_value = {"name": "disk", "ok": True, "detail": "ok"}
+            m_claude.return_value = {"name": "claude", "ok": True, "detail": "ok"}
+            code = heartbeat.main()
+        # The self-referential runaway should be suppressed: overall HEALTHY
+        assert code == 0

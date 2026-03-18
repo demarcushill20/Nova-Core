@@ -307,9 +307,20 @@ class BurnRateMetrics:
         return asdict(self)
 
 
+def _completed_only(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter ledger entries to only completed invocations.
+
+    Start/in-flight entries have ``duration_secs: null`` and ``success: null``.
+    Counting them would inflate call counts (each invocation produces a start
+    entry *and* a completion entry).  Only completion entries carry meaningful
+    metrics so we use those for burn-rate and runaway analysis.
+    """
+    return [e for e in entries if e.get("duration_secs") is not None]
+
+
 def compute_burn_rate() -> BurnRateMetrics:
     """Compute usage health metrics from the local invocation ledger."""
-    entries = read_ledger(max_age_hours=24.0)
+    entries = _completed_only(read_ledger(max_age_hours=24.0))
     now = time.time()
 
     def _age_secs(e: dict) -> float:
@@ -410,7 +421,7 @@ class RunawayDetection:
 def detect_runaway() -> RunawayDetection:
     """Detect runaway automation patterns in the invocation ledger."""
     cfg = get_config()
-    entries = read_ledger(max_age_hours=1.0)
+    entries = _completed_only(read_ledger(max_age_hours=1.0))
     now = time.time()
 
     def _age_secs(e: dict) -> float:

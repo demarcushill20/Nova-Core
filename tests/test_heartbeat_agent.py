@@ -8,6 +8,7 @@ Covers:
 - Agent log writing
 - Checklist file requirement
 """
+
 import json
 import sys
 import tempfile
@@ -31,8 +32,7 @@ class TestActiveHoursGating(unittest.TestCase):
     @patch("heartbeat.CHECKLIST_FILE", Path("/tmp/nonexistent_checklist.md"))
     def test_skips_outside_active_hours(self, mock_run):
         """Agent should not run outside active hours."""
-        with patch("heartbeat.ACTIVE_HOURS_START", 8), \
-             patch("heartbeat.ACTIVE_HOURS_END", 23):
+        with patch("heartbeat.ACTIVE_HOURS_START", 8), patch("heartbeat.ACTIVE_HOURS_END", 23):
             # Mock current hour to 3 AM UTC (outside active hours)
             mock_dt = MagicMock()
             mock_dt.hour = 3
@@ -48,16 +48,56 @@ class TestActiveHoursGating(unittest.TestCase):
         tmpdir = tempfile.mkdtemp()
         checklist = Path(tmpdir) / "checklist.md"
         checklist.write_text("# Test Checklist\n- Check stuff")
+        state_dir = Path(tmpdir) / "STATE"
+        state_dir.mkdir(parents=True, exist_ok=True)
         mock_run.return_value = MagicMock(stdout="HEARTBEAT_OK", returncode=0)
 
-        with patch("heartbeat.CHECKLIST_FILE", checklist), \
-             patch("heartbeat.ACTIVE_HOURS_START", 0), \
-             patch("heartbeat.ACTIVE_HOURS_END", 24), \
-             patch("heartbeat.HEARTBEAT_AGENT_LOG", Path(tmpdir) / "agent.log"):
+        with (
+            patch("heartbeat.CHECKLIST_FILE", checklist),
+            patch("heartbeat.ACTIVE_HOURS_START", 0),
+            patch("heartbeat.ACTIVE_HOURS_END", 24),
+            patch("heartbeat.HEARTBEAT_AGENT_LOG", Path(tmpdir) / "agent.log"),
+            patch("heartbeat.STATE_DIR", state_dir),
+            patch("heartbeat.HEARTBEAT_AGENT_COOLDOWN_FILE", state_dir / "last_heartbeat_agent.json"),
+        ):
             heartbeat._run_heartbeat_agent([])
 
         mock_run.assert_called_once()
         import shutil
+
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    @patch("heartbeat.subprocess.run")
+    def test_skips_during_cooldown(self, mock_run):
+        """Agent should skip if it ran recently (within cooldown period)."""
+        tmpdir = tempfile.mkdtemp()
+        checklist = Path(tmpdir) / "checklist.md"
+        checklist.write_text("# Test Checklist\n- Check stuff")
+        state_dir = Path(tmpdir) / "STATE"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write a recent cooldown timestamp (just now)
+        cooldown_file = state_dir / "last_heartbeat_agent.json"
+        cooldown_file.write_text(
+            json.dumps(
+                {
+                    "last_run_utc": datetime.now().astimezone().isoformat(),
+                    "success": True,
+                }
+            )
+        )
+
+        with (
+            patch("heartbeat.CHECKLIST_FILE", checklist),
+            patch("heartbeat.ACTIVE_HOURS_START", 0),
+            patch("heartbeat.ACTIVE_HOURS_END", 24),
+            patch("heartbeat.HEARTBEAT_AGENT_COOLDOWN_FILE", cooldown_file),
+        ):
+            heartbeat._run_heartbeat_agent([])
+
+        mock_run.assert_not_called()
+        import shutil
+
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
@@ -88,8 +128,7 @@ class TestExtendedStateGathering(unittest.TestCase):
         heartbeat.STATE_DIR = Path(self._tmpdir) / "STATE"
         heartbeat.LOGS_DIR = Path(self._tmpdir) / "LOGS"
         heartbeat.HEARTBEAT_AGENT_LOG = Path(self._tmpdir) / "LOGS" / "heartbeat_agent.log"
-        for d in (heartbeat.TASKS_DIR, heartbeat.OUTPUT_DIR,
-                  heartbeat.STATE_DIR, heartbeat.LOGS_DIR):
+        for d in (heartbeat.TASKS_DIR, heartbeat.OUTPUT_DIR, heartbeat.STATE_DIR, heartbeat.LOGS_DIR):
             d.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
@@ -99,6 +138,7 @@ class TestExtendedStateGathering(unittest.TestCase):
         heartbeat.LOGS_DIR = self._orig_logs
         heartbeat.HEARTBEAT_AGENT_LOG = self._orig_agent_log
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_includes_check_results(self):
@@ -162,7 +202,7 @@ class TestJsonActionParsing(unittest.TestCase):
         self.assertIsNone(heartbeat._extract_json_actions("[not valid json"))
 
     def test_returns_none_for_non_dict_array(self):
-        self.assertIsNone(heartbeat._extract_json_actions('[1, 2, 3]'))
+        self.assertIsNone(heartbeat._extract_json_actions("[1, 2, 3]"))
 
     def test_multiple_actions(self):
         text = '[{"type": "notify", "message": "hi"}, {"type": "task", "title": "t", "body": "b"}]'
@@ -182,6 +222,7 @@ class TestProactiveTaskInjection(unittest.TestCase):
     def tearDown(self):
         heartbeat.TASKS_DIR = self._orig_tasks
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_creates_task_file(self):
@@ -206,8 +247,7 @@ class TestProactiveTaskInjection(unittest.TestCase):
         # Create a completed one
         (heartbeat.TASKS_DIR / "hb_proactive_old_task.md.done").write_text("done")
         heartbeat._inject_proactive_task("New task", "body")
-        pending = [p for p in heartbeat.TASKS_DIR.glob("hb_proactive_*.md")
-                   if not p.name.endswith(".done")]
+        pending = [p for p in heartbeat.TASKS_DIR.glob("hb_proactive_*.md") if not p.name.endswith(".done")]
         self.assertEqual(len(pending), 1)
 
 
@@ -225,6 +265,7 @@ class TestAgentLogging(unittest.TestCase):
         heartbeat.HEARTBEAT_AGENT_LOG = self._orig
         heartbeat.LOGS_DIR = self._orig_logs
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_creates_log_entry(self):
@@ -251,6 +292,7 @@ class TestHandleAgentActions(unittest.TestCase):
     def tearDown(self):
         heartbeat.TASKS_DIR = self._orig_tasks
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     @patch("heartbeat._send_telegram")

@@ -555,8 +555,8 @@ class TestRunClaudeCycle:
         assert "ERROR" in log_fn.call_args[0][0]
         cooldown_update.assert_called_once_with("error", success=False)
 
-    def test_mpg_record_called_on_start(self, capsys):
-        """When _mpg_record is available, it should be called before subprocess."""
+    def test_mpg_record_called_on_completion(self, capsys):
+        """When _mpg_record is available, it should be called once on completion."""
         mock_dt = mock.MagicMock()
         mock_dt.hour = 12
         mock_mpg_record = mock.Mock()
@@ -588,6 +588,8 @@ class TestRunClaudeCycle:
         mock_mpg_record.assert_called_once()
         call_kwargs = mock_mpg_record.call_args
         assert call_kwargs[1]["caller"] == "research_cycle"
+        assert call_kwargs[1]["success"] is True
+        assert call_kwargs[1]["duration_secs"] is not None
 
 
 def subprocess_timeout():
@@ -706,3 +708,154 @@ class TestMetricsInMain:
         assert snap.status in ("healthy", "unhealthy")
         assert snap.duration_ms >= 0
         assert snap.total_checks > 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.3: _parse_cycle_outcome()
+# ---------------------------------------------------------------------------
+
+
+class TestParseCycleOutcome:
+    """_parse_cycle_outcome extracts structured CycleOutcome from freeform text."""
+
+    def test_extracts_title_from_header(self):
+        response = "# My Research Topic\nSome body text here."
+        outcome = heartbeat._parse_cycle_outcome(response)
+        assert outcome.title == "My Research Topic"
+
+    def test_extracts_title_from_h2_header(self):
+        response = "## Sub-heading Title\nDetails follow."
+        outcome = heartbeat._parse_cycle_outcome(response)
+        assert outcome.title == "Sub-heading Title"
+
+    def test_title_unknown_when_no_header(self):
+        response = "Just some plain text without any headers."
+        outcome = heartbeat._parse_cycle_outcome(response)
+        assert outcome.title == "unknown"
+
+    def test_title_truncated_at_200_chars(self):
+        long_title = "A" * 300
+        response = f"# {long_title}\nBody."
+        outcome = heartbeat._parse_cycle_outcome(response)
+        assert len(outcome.title) <= 200
+
+    def test_vault_write_success_keywords(self):
+        from utils.schemas.heartbeat import WriteStatus
+
+        for kw in ("success", "accepted", "written"):
+            response = f"Called vault_write and got {kw}."
+            outcome = heartbeat._parse_cycle_outcome(response)
+            assert outcome.vault_write == WriteStatus.SUCCESS, f"Failed for keyword: {kw}"
+
+    def test_vault_write_failed_keywords(self):
+        from utils.schemas.heartbeat import WriteStatus
+
+        for kw in ("error", "rejected", "failed", "invalid"):
+            response = f"Called vault_write but got {kw}."
+            outcome = heartbeat._parse_cycle_outcome(response)
+            assert outcome.vault_write == WriteStatus.FAILED, f"Failed for keyword: {kw}"
+
+    def test_vault_write_unknown_when_not_mentioned(self):
+        from utils.schemas.heartbeat import WriteStatus
+
+        response = "# Title\nDid some research, no vault involved."
+        outcome = heartbeat._parse_cycle_outcome(response)
+        assert outcome.vault_write == WriteStatus.UNKNOWN
+
+    def test_memory_write_success_keywords(self):
+        from utils.schemas.heartbeat import WriteStatus
+
+        for kw in ("success", "stored"):
+            response = f"Called upsert_memory and it returned {kw}."
+            outcome = heartbeat._parse_cycle_outcome(response)
+            assert outcome.memory_write == WriteStatus.SUCCESS, f"Failed for keyword: {kw}"
+
+    def test_memory_write_unknown_when_not_mentioned(self):
+        from utils.schemas.heartbeat import WriteStatus
+
+        response = "# Title\nResearch complete, no memory writes."
+        outcome = heartbeat._parse_cycle_outcome(response)
+        assert outcome.memory_write == WriteStatus.UNKNOWN
+
+    def test_empty_response_defaults(self):
+        from utils.schemas.heartbeat import WriteStatus
+
+        outcome = heartbeat._parse_cycle_outcome("")
+        assert outcome.title == "unknown"
+        assert outcome.vault_write == WriteStatus.UNKNOWN
+        assert outcome.memory_write == WriteStatus.UNKNOWN
+
+    def test_combined_vault_and_memory_success(self):
+        from utils.schemas.heartbeat import WriteStatus
+
+        response = "# Research Complete\nvault_write success confirmed.\nupsert_memory stored the findings."
+        outcome = heartbeat._parse_cycle_outcome(response)
+        assert outcome.title == "Research Complete"
+        assert outcome.vault_write == WriteStatus.SUCCESS
+        assert outcome.memory_write == WriteStatus.SUCCESS
+
+    def test_returns_cycle_outcome_type(self):
+        from utils.schemas.heartbeat import CycleOutcome
+
+        outcome = heartbeat._parse_cycle_outcome("# Test\nBody")
+        assert isinstance(outcome, CycleOutcome)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.3: Updated _extract_json_actions()
+# ---------------------------------------------------------------------------
+
+
+class TestExtractJsonActionsPhase53:
+    """Updated _extract_json_actions uses structured_output._extract_json."""
+
+    def test_valid_json_array(self):
+        text = '[{"type": "notify", "message": "hello"}, {"type": "task", "title": "fix"}]'
+        result = heartbeat._extract_json_actions(text)
+        assert result is not None
+        assert len(result) == 2
+        assert result[0]["type"] == "notify"
+        assert result[1]["type"] == "task"
+
+    def test_json_in_code_block(self):
+        text = 'Here is my response:\n```json\n[{"type": "notify", "message": "alert"}]\n```\nDone.'
+        result = heartbeat._extract_json_actions(text)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["message"] == "alert"
+
+    def test_no_json_returns_none(self):
+        text = "This is just plain text with no JSON at all."
+        result = heartbeat._extract_json_actions(text)
+        assert result is None
+
+    def test_invalid_json_returns_none(self):
+        text = '[{"type": "notify", "message": invalid}]'
+        result = heartbeat._extract_json_actions(text)
+        assert result is None
+
+    def test_json_object_not_array_returns_none(self):
+        text = '{"type": "notify", "message": "hello"}'
+        result = heartbeat._extract_json_actions(text)
+        assert result is None
+
+    def test_array_of_non_dicts_returns_none(self):
+        text = '["a", "b", "c"]'
+        result = heartbeat._extract_json_actions(text)
+        assert result is None
+
+    def test_nested_array_in_response(self):
+        text = (
+            'Some preamble text.\n[{"type": "notify", "message": "check [this] out", "tags": ["a", "b"]}]\nMore text.'
+        )
+        result = heartbeat._extract_json_actions(text)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["tags"] == ["a", "b"]
+
+    def test_empty_array_returns_none(self):
+        """Empty array has no dicts, so all() vacuously true — returns []."""
+        text = "[]"
+        result = heartbeat._extract_json_actions(text)
+        # Empty list: all(isinstance(d, dict) for d in []) is True, returns []
+        assert result == []

@@ -115,8 +115,6 @@ async def generate_response(
     import time as _time
 
     _tg_t0 = _time.monotonic()
-    if _mpg_record is not None:
-        _mpg_record(caller="telegram", component="telegram.llm.generate_response", model=MODEL, automated=False)
 
     try:
         proc = await asyncio.create_subprocess_exec(

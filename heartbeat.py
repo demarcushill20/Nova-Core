@@ -672,6 +672,23 @@ def _telegram_cooldown_gate(message: str, cooldown_secs: int | None = None) -> b
     return True  # allowed
 
 
+def _is_self_referential_runaway(mpg_result: dict) -> bool:
+    """Detect when max_plan_usage failure is caused by the heartbeat agent itself.
+
+    When the heartbeat_agent is detected as the runaway caller, the heartbeat
+    reporting UNHEALTHY and triggering the agent to act just makes things worse
+    (more calls -> higher burn rate -> more UNHEALTHY). Break the loop by
+    recognising this self-referential condition.
+    """
+    if mpg_result.get("ok", True):
+        return False
+    runaway_info = mpg_result.get("runaway", {})
+    if not runaway_info.get("detected", False):
+        return False
+    reasons = runaway_info.get("reasons", [])
+    return any("heartbeat_agent" in r for r in reasons)
+
+
 def _ground_service_alert(message: str, checks: list | None) -> bool:
     """Validate service-down claims against actual structured check results.
 
@@ -788,9 +805,43 @@ PLANNING_COOLDOWN_MINUTES = 170  # ~every 3 hours (timer fires every 30 min)
 PLANNING_COOLDOWN_FILE = STATE_DIR / "last_planning_cycle.json"
 PLANNING_LOG = LOGS_DIR / "planning_cycle.log"
 
+# Heartbeat agent cooldown — prevent runaway loops (6-7+ calls per 30min window)
+HEARTBEAT_AGENT_COOLDOWN_MINUTES = 10
+HEARTBEAT_AGENT_COOLDOWN_FILE = STATE_DIR / "last_heartbeat_agent.json"
+
 # Memory maintenance configuration — runs periodically
 MEMORY_MAINTENANCE_COOLDOWN_MINUTES = 360  # every 6 hours
 MEMORY_MAINTENANCE_COOLDOWN_FILE = STATE_DIR / "last_memory_maintenance.json"
+
+
+def _heartbeat_agent_cooldown_ok() -> bool:
+    """Check if enough time has passed since the last heartbeat agent run.
+
+    Prevents runaway loops where the agent fires 6-7+ times in a single
+    30-minute timer window.
+    """
+    if not HEARTBEAT_AGENT_COOLDOWN_FILE.exists():
+        return True
+    try:
+        data = json.loads(HEARTBEAT_AGENT_COOLDOWN_FILE.read_text())
+        last_run = data.get("last_run_utc", "")
+        if not last_run:
+            return True
+        last_dt = datetime.fromisoformat(last_run)
+        age_min = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
+        return age_min >= HEARTBEAT_AGENT_COOLDOWN_MINUTES
+    except Exception:
+        return True
+
+
+def _update_heartbeat_agent_cooldown(success: bool) -> None:
+    """Record that the heartbeat agent ran."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    data = {
+        "last_run_utc": datetime.now(timezone.utc).isoformat(),
+        "success": success,
+    }
+    HEARTBEAT_AGENT_COOLDOWN_FILE.write_text(json.dumps(data, indent=2) + "\n")
 
 
 def _run_heartbeat_agent(checks: list) -> None:
@@ -806,6 +857,13 @@ def _run_heartbeat_agent(checks: list) -> None:
 
     if not CHECKLIST_FILE.exists():
         print("[heartbeat-agent] No HEARTBEAT_CHECKLIST.md, skipping")
+        return
+
+    # Cooldown gate: prevent runaway loops (the agent was firing 6-7+ times
+    # per 30-min timer window, which is the very problem max_plan_guard is
+    # designed to stop — but is_essential=True was bypassing it).
+    if not _heartbeat_agent_cooldown_ok():
+        print(f"[heartbeat-agent] Cooldown active — skipping (ran within last {HEARTBEAT_AGENT_COOLDOWN_MINUTES} min)")
         return
 
     checklist = CHECKLIST_FILE.read_text()
@@ -824,16 +882,19 @@ def _run_heartbeat_agent(checks: list) -> None:
 
     claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
 
-    # Max-plan guard: check if heartbeat agent should run
+    # Max-plan guard: check if heartbeat agent should run.
+    # NOTE: is_essential=False so that PROTECTION and CRITICAL_LOCKDOWN modes
+    # can actually block the heartbeat agent — it IS the runaway caller.
     if _mpg_allow is not None:
-        allowed, reason = _mpg_allow("heartbeat_agent", is_essential=True)
+        allowed, reason = _mpg_allow("heartbeat_agent", is_essential=False)
         if not allowed:
             print(f"[heartbeat-agent] Blocked by max-plan guard: {reason}")
             return
 
     _hb_t0 = datetime.now(timezone.utc)
-    if _mpg_record is not None:
-        _mpg_record(caller="heartbeat_agent", component="heartbeat._run_heartbeat_agent", model=HEARTBEAT_MODEL)
+    # Record cooldown immediately so that crashes/timeouts still count
+    # (prevents runaway retries from bypassing the cooldown gate).
+    _update_heartbeat_agent_cooldown(success=True)
 
     try:
         child_env = os.environ.copy()
@@ -935,18 +996,18 @@ def _handle_agent_actions(response: str, checks: list | None = None) -> None:
 
 
 def _extract_json_actions(text: str) -> list | None:
-    """Try to extract a JSON action array from the agent's response."""
-    import re
+    """Extract JSON action list from Claude response text."""
+    from utils.structured_output import _extract_json
 
-    # Look for JSON array in the response (possibly in a code block)
-    json_match = re.search(r"\[[\s\S]*?\]", text)
-    if json_match:
-        try:
-            data = json.loads(json_match.group())
-            if isinstance(data, list) and all(isinstance(d, dict) for d in data):
-                return data
-        except (json.JSONDecodeError, TypeError):
-            pass
+    json_str = _extract_json(text)
+    if json_str is None:
+        return None
+    try:
+        data = json.loads(json_str)
+        if isinstance(data, list) and all(isinstance(d, dict) for d in data):
+            return data
+    except (json.JSONDecodeError, TypeError):
+        pass
     return None
 
 
@@ -1120,6 +1181,38 @@ def _log_research(message: str) -> None:
 # --- Unified LLM Cycle Runner ------------------------------------------------
 
 
+def _parse_cycle_outcome(response: str):
+    """Parse a freeform cycle response into a structured CycleOutcome."""
+    from utils.schemas.heartbeat import CycleOutcome, WriteStatus
+
+    title = "unknown"
+    for line in response.splitlines()[:30]:
+        if line.startswith("#") and len(line) > 3:
+            title = line.lstrip("# ").strip()[:200]
+            break
+
+    response_lower = response.lower()
+
+    # Detect vault write status
+    vault_status = WriteStatus.UNKNOWN
+    if "vault_write" in response_lower:
+        if any(kw in response_lower for kw in ("success", "accepted", "written")):
+            vault_status = WriteStatus.SUCCESS
+        elif any(kw in response_lower for kw in ("error", "rejected", "failed", "invalid")):
+            vault_status = WriteStatus.FAILED
+
+    # Detect memory write status
+    memory_status = WriteStatus.UNKNOWN
+    if "upsert_memory" in response_lower and any(kw in response_lower for kw in ("success", "stored")):
+        memory_status = WriteStatus.SUCCESS
+
+    return CycleOutcome(
+        title=title,
+        vault_write=vault_status,
+        memory_write=memory_status,
+    )
+
+
 def _run_claude_cycle(
     *,
     cycle_name: str,
@@ -1165,12 +1258,6 @@ def _run_claude_cycle(
 
     claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
     _cycle_t0 = datetime.now(timezone.utc)
-    if _mpg_record is not None:
-        _mpg_record(
-            caller=mpg_caller,
-            component=f"heartbeat._run_{cycle_name}_cycle",
-            model=HEARTBEAT_MODEL,
-        )
 
     try:
         child_env = os.environ.copy()
@@ -1186,6 +1273,17 @@ def _run_claude_cycle(
             env=child_env,
         )
         response = result.stdout.strip()
+        _cycle_dur = (datetime.now(timezone.utc) - _cycle_t0).total_seconds()
+
+        # Record completion in max-plan ledger (single entry per invocation)
+        if _mpg_record is not None:
+            _mpg_record(
+                caller=mpg_caller,
+                component=f"heartbeat._run_{cycle_name}_cycle",
+                model=HEARTBEAT_MODEL,
+                success=result.returncode == 0,
+                duration_secs=_cycle_dur,
+            )
 
         if not response:
             stderr_hint = result.stderr.strip()[:200] if result.stderr else ""
@@ -1194,35 +1292,21 @@ def _run_claude_cycle(
             print(f"{tag} Empty response from Claude (exit={result.returncode})")
             return
 
-        # Extract title from response for logging
-        title = "unknown"
-        for line in response.splitlines()[:30]:
-            if line.startswith("#") and len(line) > 3:
-                title = line.lstrip("# ").strip()[:100]
-                break
+        # Parse response into structured CycleOutcome
+        outcome = _parse_cycle_outcome(response)
+        from utils.schemas.heartbeat import WriteStatus
 
-        # Check vault write outcome from subprocess output
-        response_lower = response.lower()
-        vault_ok = "vault_write" in response_lower and (
-            "success" in response_lower or "accepted" in response_lower or "written" in response_lower
-        )
-        vault_failed = "vault_write" in response_lower and (
-            "error" in response_lower
-            or "rejected" in response_lower
-            or "failed" in response_lower
-            or "invalid" in response_lower
-        )
-        memory_ok = "upsert_memory" in response_lower and ("success" in response_lower or "stored" in response_lower)
+        title = outcome.title
 
         # Log persistence outcomes independently
-        if vault_ok:
+        if outcome.vault_write == WriteStatus.SUCCESS:
             log_fn("VAULT_WRITE: success")
-        elif vault_failed:
+        elif outcome.vault_write == WriteStatus.FAILED:
             log_fn("VAULT_WRITE: FAILED — check vault audit log")
         else:
             log_fn("VAULT_WRITE: unknown (not detected in output)")
 
-        if memory_ok:
+        if outcome.memory_write == WriteStatus.SUCCESS:
             log_fn("FUSION_MEMORY: success")
         else:
             log_fn("FUSION_MEMORY: unknown (not detected in output)")
@@ -1233,16 +1317,24 @@ def _run_claude_cycle(
 
         # Build status summary for notification
         sinks = []
-        if vault_ok:
+        if outcome.vault_write == WriteStatus.SUCCESS:
             sinks.append("vault \u2713")
-        elif vault_failed:
+        elif outcome.vault_write == WriteStatus.FAILED:
             sinks.append("vault \u2717")
-        if memory_ok:
+        if outcome.memory_write == WriteStatus.SUCCESS:
             sinks.append("memory \u2713")
         sink_str = f" [{', '.join(sinks)}]" if sinks else ""
         _send_telegram(f"{emoji} {label} Complete:\n{title}{sink_str}")
 
     except subprocess.TimeoutExpired:
+        if _mpg_record is not None:
+            _mpg_record(
+                caller=mpg_caller,
+                component=f"heartbeat._run_{cycle_name}_cycle",
+                model=HEARTBEAT_MODEL,
+                success=False,
+                duration_secs=(datetime.now(timezone.utc) - _cycle_t0).total_seconds(),
+            )
         log_fn(f"TIMEOUT after {timeout}s")
         cooldown_update("timeout", success=False)
         print(f"{tag} Timed out after {timeout}s")
@@ -1395,6 +1487,19 @@ def main() -> int:
         from utils.max_plan_guard import check_max_plan_usage
 
         mpg_result = check_max_plan_usage()
+
+        # Break self-referential runaway loop: when the heartbeat_agent itself
+        # is detected as the runaway caller, marking UNHEALTHY triggers the
+        # agent to act, which increases the burn rate, which keeps it UNHEALTHY.
+        # Downgrade to ok=True with a warning so the loop can cool down.
+        if _is_self_referential_runaway(mpg_result):
+            mpg_result["ok"] = True
+            mpg_result["detail"] = (
+                f"self-referential runaway (heartbeat_agent) — "
+                f"suppressed to break feedback loop, {mpg_result['detail']}"
+            )
+            print("[heartbeat] max_plan_usage: self-referential runaway detected, suppressing UNHEALTHY to break loop")
+
         checks.append(mpg_result)
         # Send Telegram alert for critical max-plan issues
         mpg_alerts = mpg_result.get("alerts", [])
