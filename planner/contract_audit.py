@@ -111,13 +111,9 @@ class ContractAudit:
                 field_counts[f] = field_counts.get(f, 0) + 1
 
         notes: list[str] = []
-        legacy_count = sum(
-            1 for r in records if r.classification == "legacy_pre_contract"
-        )
+        legacy_count = sum(1 for r in records if r.classification == "legacy_pre_contract")
         if legacy_count:
-            notes.append(
-                f"{legacy_count} output(s) classified as legacy (pre-contract system)"
-            )
+            notes.append(f"{legacy_count} output(s) classified as legacy (pre-contract system)")
 
         return ContractAuditSummary(
             audit_id=audit_id,

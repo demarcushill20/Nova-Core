@@ -25,6 +25,7 @@ from tools.orchestrator_adapter import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def state_dir(tmp_path, monkeypatch):
     """Redirect STATE_DIR to tmp_path/STATE for isolated workflow writes."""
@@ -47,17 +48,25 @@ def evidence_root(tmp_path):
     (state / "leases").mkdir(parents=True)
 
     # Minimal healthy heartbeat
-    (state / "heartbeat_multiagent.json").write_text(json.dumps({
-        "overall": "healthy",
-        "findings": [{"severity": "healthy", "component": "test"}],
-        "generated_at": "2026-03-08T00:00:00Z",
-    }))
+    (state / "heartbeat_multiagent.json").write_text(
+        json.dumps(
+            {
+                "overall": "healthy",
+                "findings": [{"severity": "healthy", "component": "test"}],
+                "generated_at": "2026-03-08T00:00:00Z",
+            }
+        )
+    )
 
     # Empty metrics (no contract failures)
-    (state / "metrics.json").write_text(json.dumps({
-        "contract_success": {"_total": 10},
-        "contract_failure": {"_total": 0},
-    }))
+    (state / "metrics.json").write_text(
+        json.dumps(
+            {
+                "contract_success": {"_total": 10},
+                "contract_failure": {"_total": 0},
+            }
+        )
+    )
 
     return root
 
@@ -65,6 +74,7 @@ def evidence_root(tmp_path):
 # ===================================================================
 # Part 1 — Direct _persist_workflow_state tests
 # ===================================================================
+
 
 class TestPersistWorkflowState:
     """Test the _persist_workflow_state function directly."""
@@ -98,7 +108,10 @@ class TestPersistWorkflowState:
     def test_rejected_workflow_written(self, state_dir):
         """Plan validation rejection writes rejected workflow with halt_reason."""
         _persist_workflow_state(
-            "task_003", "rejected", "code_impl", "C",
+            "task_003",
+            "rejected",
+            "code_impl",
+            "C",
             halt_reason="plan_validation: missing self-verification step",
         )
 
@@ -109,7 +122,10 @@ class TestPersistWorkflowState:
     def test_halt_reason_persisted(self, state_dir):
         """halt_reason field written when provided."""
         _persist_workflow_state(
-            "task_004", "failed", "research", "B",
+            "task_004",
+            "failed",
+            "research",
+            "B",
             halt_reason="verifier_rejected",
         )
 
@@ -144,6 +160,7 @@ class TestPersistWorkflowState:
 # Part 2 — Overwrite and idempotency
 # ===================================================================
 
+
 class TestPersistOverwrite:
     """Test repeat writes and idempotency."""
 
@@ -176,6 +193,7 @@ class TestPersistOverwrite:
 # Part 3 — Status mapping
 # ===================================================================
 
+
 class TestStatusMapping:
     """Verify orchestrator status → workflow status mapping."""
 
@@ -200,13 +218,13 @@ class TestStatusMapping:
 # Part 4 — Rollout gate reader compatibility
 # ===================================================================
 
+
 class TestRolloutGateCompatibility:
     """Verify persisted workflows are consumable by rollout_gate.collect_evidence()."""
 
     def test_completed_workflow_counted(self, evidence_root, monkeypatch):
         """A completed workflow persisted by the adapter is counted by collect_evidence."""
-        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR",
-                            evidence_root / "STATE")
+        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR", evidence_root / "STATE")
         _persist_workflow_state("wf_live_1", "completed", "research", "B")
 
         ev = collect_evidence(evidence_root)
@@ -215,8 +233,7 @@ class TestRolloutGateCompatibility:
 
     def test_failed_workflow_counted(self, evidence_root, monkeypatch):
         """A failed workflow is counted toward failure rate."""
-        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR",
-                            evidence_root / "STATE")
+        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR", evidence_root / "STATE")
         _persist_workflow_state("wf_live_2", "failed", "code_review", "C")
 
         ev = collect_evidence(evidence_root)
@@ -226,8 +243,7 @@ class TestRolloutGateCompatibility:
 
     def test_mixed_workflows_correct_rates(self, evidence_root, monkeypatch):
         """Mix of completed and failed workflows produces correct failure rate."""
-        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR",
-                            evidence_root / "STATE")
+        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR", evidence_root / "STATE")
 
         _persist_workflow_state("wf_a", "completed", "research", "B")
         _persist_workflow_state("wf_b", "completed", "research", "B")
@@ -245,8 +261,7 @@ class TestRolloutGateCompatibility:
         """3 completed workflows meet the MIN_COMPLETED_WORKFLOWS threshold."""
         from agents.rollout_gate import MIN_COMPLETED_WORKFLOWS, evaluate_rollout
 
-        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR",
-                            evidence_root / "STATE")
+        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR", evidence_root / "STATE")
 
         for i in range(MIN_COMPLETED_WORKFLOWS):
             _persist_workflow_state(f"wf_{i}", "completed", "research", "B")
@@ -263,8 +278,7 @@ class TestRolloutGateCompatibility:
 
     def test_rejected_workflow_not_counted_as_completed(self, evidence_root, monkeypatch):
         """Rejected workflows (plan validation failures) don't count as completed."""
-        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR",
-                            evidence_root / "STATE")
+        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR", evidence_root / "STATE")
         _persist_workflow_state("wf_rej", "rejected", "code_impl", "C")
 
         ev = collect_evidence(evidence_root)
@@ -274,10 +288,8 @@ class TestRolloutGateCompatibility:
 
     def test_verifier_rejected_halt_reason_present(self, evidence_root, monkeypatch):
         """Verifier rejection records halt_reason for operational inspection."""
-        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR",
-                            evidence_root / "STATE")
-        _persist_workflow_state("wf_vrej", "failed", "code_review", "C",
-                                halt_reason="verifier_rejected")
+        monkeypatch.setattr("tools.orchestrator_adapter.STATE_DIR", evidence_root / "STATE")
+        _persist_workflow_state("wf_vrej", "failed", "code_review", "C", halt_reason="verifier_rejected")
 
         wf_path = evidence_root / "STATE" / "workflows" / "wf_vrej.json"
         data = json.loads(wf_path.read_text())
@@ -292,6 +304,7 @@ class TestRolloutGateCompatibility:
 # Part 5 — Integration with execute_via_orchestrator paths
 # ===================================================================
 
+
 class TestExecuteViaOrchestratorPersistence:
     """Test that execute_via_orchestrator writes workflow state at terminal points.
 
@@ -299,59 +312,55 @@ class TestExecuteViaOrchestratorPersistence:
     calls happen for each terminal path.
     """
 
-    def _mock_orchestrator_run(self, state_dir, monkeypatch, summary_status,
-                               steps=None, stage="B", verifier_required=False,
-                               task_class="research", should_raise=False):
+    def _mock_orchestrator_run(
+        self,
+        state_dir,
+        monkeypatch,
+        summary_status,
+        steps=None,
+        stage="B",
+        verifier_required=False,
+        task_class="research",
+        should_raise=False,
+    ):
         """Helper: run execute_via_orchestrator with mocked internals."""
         from tools.orchestrator_adapter import execute_via_orchestrator
 
-        monkeypatch.setattr("tools.orchestrator_adapter.OUTPUT_DIR",
-                            state_dir.parent / "OUTPUT")
+        monkeypatch.setattr("tools.orchestrator_adapter.OUTPUT_DIR", state_dir.parent / "OUTPUT")
         (state_dir.parent / "OUTPUT").mkdir(exist_ok=True)
 
         # Mock plan building
         mock_plan = MagicMock()
         mock_plan.plan_id = "plan_test"
         mock_plan.steps = steps or [
-            MagicMock(step_id="s1", skill_name="web-research",
-                      goal="test", depends_on=[]),
+            MagicMock(step_id="s1", skill_name="web-research", goal="test", depends_on=[]),
         ]
         mock_plan.strategy = "single_skill"
         mock_plan.success_criteria = []
-        monkeypatch.setattr("tools.orchestrator_adapter.build_plan_from_task",
-                            lambda *a, **kw: mock_plan)
+        monkeypatch.setattr("tools.orchestrator_adapter.build_plan_from_task", lambda *a, **kw: mock_plan)
 
         # Mock classifier
-        monkeypatch.setattr("tools.orchestrator_adapter.classify_task",
-                            lambda t: (task_class, 0.9))
+        monkeypatch.setattr("tools.orchestrator_adapter.classify_task", lambda t: (task_class, 0.9))
 
         # Mock pattern trace
-        monkeypatch.setattr("tools.orchestrator_adapter.init_pattern_trace",
-                            lambda *a, **kw: {})
-        monkeypatch.setattr("tools.orchestrator_adapter.finalize_pattern_trace",
-                            lambda *a, **kw: None)
-        monkeypatch.setattr("tools.orchestrator_adapter.log_pattern_trace",
-                            lambda *a, **kw: None)
+        monkeypatch.setattr("tools.orchestrator_adapter.init_pattern_trace", lambda *a, **kw: {})
+        monkeypatch.setattr("tools.orchestrator_adapter.finalize_pattern_trace", lambda *a, **kw: None)
+        monkeypatch.setattr("tools.orchestrator_adapter.log_pattern_trace", lambda *a, **kw: None)
 
         # Mock vault context + pattern retriever
-        monkeypatch.setattr("tools.orchestrator_adapter.inject_vault_context",
-                            lambda *a, **kw: None)
-        monkeypatch.setattr("tools.orchestrator_adapter.retrieve_pattern_guidance",
-                            lambda *a, **kw: None)
+        monkeypatch.setattr("tools.orchestrator_adapter.inject_vault_context", lambda *a, **kw: None)
+        monkeypatch.setattr("tools.orchestrator_adapter.retrieve_pattern_guidance", lambda *a, **kw: None)
 
         # Mock promotion + sync
-        monkeypatch.setattr("tools.orchestrator_adapter.attempt_promotion",
-                            lambda *a, **kw: {"promoted": False})
-        monkeypatch.setattr("tools.orchestrator_adapter.attempt_pattern_promotion",
-                            lambda *a, **kw: {"promoted": False})
-        monkeypatch.setattr("tools.orchestrator_adapter.check_sync_after_write",
-                            lambda *a, **kw: None)
+        monkeypatch.setattr("tools.orchestrator_adapter.attempt_promotion", lambda *a, **kw: {"promoted": False})
+        monkeypatch.setattr(
+            "tools.orchestrator_adapter.attempt_pattern_promotion", lambda *a, **kw: {"promoted": False}
+        )
+        monkeypatch.setattr("tools.orchestrator_adapter.check_sync_after_write", lambda *a, **kw: None)
 
         # Mock plan validation to pass
-        monkeypatch.setattr("tools.orchestrator_adapter.validate_stageB_plan",
-                            lambda p: (True, ""))
-        monkeypatch.setattr("tools.orchestrator_adapter.validate_stageC_plan",
-                            lambda p: (True, ""))
+        monkeypatch.setattr("tools.orchestrator_adapter.validate_stageB_plan", lambda p: (True, ""))
+        monkeypatch.setattr("tools.orchestrator_adapter.validate_stageC_plan", lambda p: (True, ""))
 
         # Mock Orchestrator
         mock_orch = MagicMock()
@@ -364,10 +373,8 @@ class TestExecuteViaOrchestratorPersistence:
                 "status": summary_status,
                 "steps": steps or [],
             }
-        monkeypatch.setattr("tools.orchestrator_adapter.Orchestrator",
-                            lambda **kw: mock_orch)
-        monkeypatch.setattr("tools.orchestrator_adapter.Supervisor",
-                            lambda: MagicMock())
+        monkeypatch.setattr("tools.orchestrator_adapter.Orchestrator", lambda **kw: mock_orch)
+        monkeypatch.setattr("tools.orchestrator_adapter.Supervisor", lambda: MagicMock())
 
         task_path = state_dir.parent / "TASKS" / "test_stem.md.inprogress"
         task_path.parent.mkdir(parents=True, exist_ok=True)
@@ -394,8 +401,7 @@ class TestExecuteViaOrchestratorPersistence:
 
     def test_exception_writes_failed(self, state_dir, monkeypatch):
         """Orchestrator exception persists as 'failed'."""
-        self._mock_orchestrator_run(state_dir, monkeypatch, "done",
-                                    should_raise=True)
+        self._mock_orchestrator_run(state_dir, monkeypatch, "done", should_raise=True)
 
         data = json.loads((state_dir / "workflows" / "test_stem.json").read_text())
         assert data["status"] == "failed"
@@ -415,12 +421,14 @@ class TestExecuteViaOrchestratorPersistence:
             "status": "done",
             "steps": [verify_step],
         }
-        monkeypatch.setattr("tools.orchestrator_adapter.Orchestrator",
-                            lambda **kw: mock_orch)
+        monkeypatch.setattr("tools.orchestrator_adapter.Orchestrator", lambda **kw: mock_orch)
 
         self._mock_orchestrator_run(
-            state_dir, monkeypatch, "done",
-            stage="C", verifier_required=True,
+            state_dir,
+            monkeypatch,
+            "done",
+            stage="C",
+            verifier_required=True,
             steps=[{"step_id": "verify_output", "status": "failed"}],
         )
 
@@ -432,8 +440,7 @@ class TestExecuteViaOrchestratorPersistence:
         """Stage B plan validation failure persists as 'rejected'."""
         from tools.orchestrator_adapter import execute_via_orchestrator
 
-        monkeypatch.setattr("tools.orchestrator_adapter.OUTPUT_DIR",
-                            state_dir.parent / "OUTPUT")
+        monkeypatch.setattr("tools.orchestrator_adapter.OUTPUT_DIR", state_dir.parent / "OUTPUT")
         (state_dir.parent / "OUTPUT").mkdir(exist_ok=True)
 
         mock_plan = MagicMock()
@@ -442,27 +449,26 @@ class TestExecuteViaOrchestratorPersistence:
             MagicMock(step_id="s1", skill_name="shell-ops", goal="test"),
         ]
         mock_plan.strategy = "single_skill"
-        monkeypatch.setattr("tools.orchestrator_adapter.build_plan_from_task",
-                            lambda *a, **kw: mock_plan)
-        monkeypatch.setattr("tools.orchestrator_adapter.classify_task",
-                            lambda t: ("research", 0.9))
-        monkeypatch.setattr("tools.orchestrator_adapter.init_pattern_trace",
-                            lambda *a, **kw: {})
-        monkeypatch.setattr("tools.orchestrator_adapter.inject_vault_context",
-                            lambda *a, **kw: None)
-        monkeypatch.setattr("tools.orchestrator_adapter.retrieve_pattern_guidance",
-                            lambda *a, **kw: None)
+        monkeypatch.setattr("tools.orchestrator_adapter.build_plan_from_task", lambda *a, **kw: mock_plan)
+        monkeypatch.setattr("tools.orchestrator_adapter.classify_task", lambda t: ("research", 0.9))
+        monkeypatch.setattr("tools.orchestrator_adapter.init_pattern_trace", lambda *a, **kw: {})
+        monkeypatch.setattr("tools.orchestrator_adapter.inject_vault_context", lambda *a, **kw: None)
+        monkeypatch.setattr("tools.orchestrator_adapter.retrieve_pattern_guidance", lambda *a, **kw: None)
 
         # Stage B validation fails
-        monkeypatch.setattr("tools.orchestrator_adapter.validate_stageB_plan",
-                            lambda p: (False, "blocked skill: shell-ops"))
+        monkeypatch.setattr(
+            "tools.orchestrator_adapter.validate_stageB_plan", lambda p: (False, "blocked skill: shell-ops")
+        )
 
         task_path = state_dir.parent / "TASKS" / "rej_stem.md.inprogress"
         task_path.parent.mkdir(parents=True, exist_ok=True)
         task_path.write_text("Test")
 
         result = execute_via_orchestrator(
-            "rej_stem", "Test", task_path, {"stage": "B"},
+            "rej_stem",
+            "Test",
+            task_path,
+            {"stage": "B"},
         )
         assert result["success"] is False
 

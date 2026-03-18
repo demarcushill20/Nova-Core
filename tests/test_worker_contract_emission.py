@@ -39,7 +39,7 @@ def test_dispatch_prompt_requires_confidence_field():
 def test_dispatch_prompt_mentions_none_for_no_files():
     """Prompt must tell workers to use 'none' when no files changed."""
     lower = DISPATCH_PROMPT_TEMPLATE.lower()
-    assert "files_changed: none" in lower or "files_changed:" in lower and "none" in lower
+    assert "files_changed: none" in lower or ("files_changed:" in lower and "none" in lower)
 
 
 def test_dispatch_prompt_mentions_not_run_for_verification():
@@ -275,9 +275,7 @@ def test_cross_validator_compliant_outputs():
     for output in _COMPLIANT_OUTPUTS:
         watcher_result = validate_contract(output)
         planner_result = contracts_validate(output)
-        assert watcher_result["valid"] is True, (
-            f"Watcher rejected output it should accept: {watcher_result['errors']}"
-        )
+        assert watcher_result["valid"] is True, f"Watcher rejected output it should accept: {watcher_result['errors']}"
         assert planner_result["valid"] is True, (
             f"Planner rejected output accepted by watcher: {planner_result['errors']}"
         )
@@ -287,6 +285,7 @@ def test_cross_validator_required_fields_match():
     """Both validators must require the same four fields."""
     from tools.adapters.contracts_validate import REQUIRED_FIELDS as planner_required
     from tools.contracts import _REQUIRED_FIELDS as watcher_required
+
     assert set(watcher_required) == set(planner_required), (
         f"Required fields diverge: watcher={watcher_required}, planner={planner_required}"
     )
@@ -354,7 +353,9 @@ def test_supervisor_retries_on_invalid_contract():
 
     step = PlanStep(step_id="s1", skill_name="file-ops", goal="test")
     result = StepResult(
-        step_id="s1", status="failed", contract_valid=False,
+        step_id="s1",
+        status="failed",
+        contract_valid=False,
         validation_errors=["missing required field: files_changed"],
         retry_count=0,
     )
@@ -365,8 +366,7 @@ def test_supervisor_retries_on_invalid_contract():
 # --- Run as script -----------------------------------------------------------
 
 if __name__ == "__main__":
-    tests = [v for k, v in sorted(globals().items())
-             if k.startswith("test_") and callable(v)]
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
     for t in tests:
         try:

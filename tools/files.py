@@ -32,9 +32,7 @@ def resolve_path(sandbox_root: Path, user_path: str) -> Path:
     try:
         resolved.relative_to(sandbox_root)
     except ValueError:
-        raise ValueError(
-            f"Path {resolved} is outside sandbox {sandbox_root}"
-        ) from None
+        raise ValueError(f"Path {resolved} is outside sandbox {sandbox_root}") from None
     return resolved
 
 
@@ -149,8 +147,10 @@ def unified_diff(
     a_lines = a_text.splitlines(keepends=True)
     b_lines = b_text.splitlines(keepends=True)
     diff = difflib.unified_diff(
-        a_lines, b_lines,
-        fromfile=fromfile, tofile=tofile,
+        a_lines,
+        b_lines,
+        fromfile=fromfile,
+        tofile=tofile,
         n=context_lines,
     )
     return "".join(diff)

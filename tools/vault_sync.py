@@ -39,11 +39,11 @@ _SYNC_CONFIG_PATH = Path("/home/nova/nova-vault/.nova-sync-config.json")
 
 _DEFAULT_SYNC_CONFIG = {
     "enabled": False,
-    "mode": "continuous",           # "continuous" (daemon) or "oneshot" (per-write)
-    "ob_binary": "ob",              # path to obsidian-headless CLI
+    "mode": "continuous",  # "continuous" (daemon) or "oneshot" (per-write)
+    "ob_binary": "ob",  # path to obsidian-headless CLI
     "vault_path": "/home/nova/nova-vault",
-    "sync_timeout_seconds": 30,     # timeout for oneshot sync
-    "check_daemon": True,           # check if daemon is running
+    "sync_timeout_seconds": 30,  # timeout for oneshot sync
+    "check_daemon": True,  # check if daemon is running
 }
 
 
@@ -68,6 +68,7 @@ def _load_sync_config() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Daemon status check
 # ---------------------------------------------------------------------------
+
 
 def _is_daemon_running(ob_binary: str = "ob") -> bool:
     """Check if the obsidian-headless sync daemon is running."""
@@ -99,6 +100,7 @@ def _check_ob_available(ob_binary: str = "ob") -> bool:
 # ---------------------------------------------------------------------------
 # One-shot sync nudge
 # ---------------------------------------------------------------------------
+
 
 def _trigger_oneshot_sync(
     ob_binary: str,
@@ -146,6 +148,7 @@ def _trigger_oneshot_sync(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def check_sync_after_write(
     write_path: str,
@@ -221,7 +224,8 @@ def check_sync_after_write(
                     write_path,
                 )
                 oneshot = _trigger_oneshot_sync(
-                    ob_binary, vault_path,
+                    ob_binary,
+                    vault_path,
                     config.get("sync_timeout_seconds", 30),
                 )
                 result.update(oneshot)
@@ -234,7 +238,8 @@ def check_sync_after_write(
         elif mode == "oneshot":
             # Oneshot mode: always trigger sync after each write
             oneshot = _trigger_oneshot_sync(
-                ob_binary, vault_path,
+                ob_binary,
+                vault_path,
                 config.get("sync_timeout_seconds", 30),
             )
             result.update(oneshot)

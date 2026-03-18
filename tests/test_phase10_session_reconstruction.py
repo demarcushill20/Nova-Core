@@ -7,6 +7,7 @@ Covers:
 - Session restart reconstruction pipeline
 - Persona capability contract honesty
 """
+
 import json
 import os
 import sys
@@ -57,6 +58,7 @@ class TestConversationRecap(unittest.TestCase):
     def tearDown(self):
         tg_recap.RECAP_DIR = self._orig_dir
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_update_and_load(self):
@@ -119,6 +121,7 @@ class TestRecentCompletions(unittest.TestCase):
         tg_rc.RC_FILE = self._orig_file
         tg_rc.STATE_DIR = self._orig_dir
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_record_and_get(self):
@@ -141,8 +144,12 @@ class TestRecentCompletions(unittest.TestCase):
 
     def test_cleanup_removes_old(self):
         tg_rc.record_completion(
-            task_stem="old", chat_id="c", original_message="x",
-            intent_summary="x", output_file="", output_summary_line="",
+            task_stem="old",
+            chat_id="c",
+            original_message="x",
+            intent_summary="x",
+            output_file="",
+            output_summary_line="",
             completion_response="",
         )
         # Manually age it
@@ -159,7 +166,8 @@ class TestRecentCompletions(unittest.TestCase):
 
     def test_format_for_context_has_content(self):
         tg_rc.record_completion(
-            task_stem="0150_plan", chat_id="chat1",
+            task_stem="0150_plan",
+            chat_id="chat1",
             original_message="create implementation plan",
             intent_summary="Create OpenClaw implementation plan",
             output_file="/OUTPUT/plan.md",
@@ -174,8 +182,12 @@ class TestRecentCompletions(unittest.TestCase):
     def test_max_entries_bounded(self):
         for i in range(25):
             tg_rc.record_completion(
-                task_stem=f"task_{i}", chat_id="c", original_message="x",
-                intent_summary=f"task {i}", output_file="", output_summary_line="",
+                task_stem=f"task_{i}",
+                chat_id="c",
+                original_message="x",
+                intent_summary=f"task {i}",
+                output_file="",
+                output_summary_line="",
                 completion_response="",
             )
         entries = json.loads(tg_rc.RC_FILE.read_text())
@@ -183,13 +195,21 @@ class TestRecentCompletions(unittest.TestCase):
 
     def test_chat_id_filtering(self):
         tg_rc.record_completion(
-            task_stem="a", chat_id="chat1", original_message="x",
-            intent_summary="a", output_file="", output_summary_line="",
+            task_stem="a",
+            chat_id="chat1",
+            original_message="x",
+            intent_summary="a",
+            output_file="",
+            output_summary_line="",
             completion_response="",
         )
         tg_rc.record_completion(
-            task_stem="b", chat_id="chat2", original_message="x",
-            intent_summary="b", output_file="", output_summary_line="",
+            task_stem="b",
+            chat_id="chat2",
+            original_message="x",
+            intent_summary="b",
+            output_file="",
+            output_summary_line="",
             completion_response="",
         )
         r1 = tg_rc.get_recent(chat_id="chat1")
@@ -334,6 +354,7 @@ class TestSessionReconstruction(unittest.TestCase):
         tg_rc.RC_FILE = self._orig_rc_file
         tg_rc.STATE_DIR = self._orig_rc_state
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_recap_survives_conversation_expiry(self):
@@ -347,9 +368,12 @@ class TestSessionReconstruction(unittest.TestCase):
     def test_recent_completions_survives_conversation_expiry(self):
         """Recent completions persist for 4 hours."""
         tg_rc.record_completion(
-            task_stem="test", chat_id="chat1",
-            original_message="do the thing", intent_summary="Do the thing",
-            output_file="out.md", output_summary_line="Done",
+            task_stem="test",
+            chat_id="chat1",
+            original_message="do the thing",
+            intent_summary="Do the thing",
+            output_file="out.md",
+            output_summary_line="Done",
             completion_response="The thing is done.",
         )
         # Should be retrievable
@@ -360,9 +384,12 @@ class TestSessionReconstruction(unittest.TestCase):
         """Both recap and recent-completions contribute to context."""
         tg_recap.update_recap("chat1", "research openclaw", "On it.")
         tg_rc.record_completion(
-            task_stem="0147", chat_id="chat1",
-            original_message="deep research openclaw", intent_summary="OpenClaw deep research",
-            output_file="out.md", output_summary_line="Full report generated",
+            task_stem="0147",
+            chat_id="chat1",
+            original_message="deep research openclaw",
+            intent_summary="OpenClaw deep research",
+            output_file="out.md",
+            output_summary_line="Full report generated",
             completion_response="Research complete.",
         )
         recap_ctx = tg_recap.format_for_context("chat1")

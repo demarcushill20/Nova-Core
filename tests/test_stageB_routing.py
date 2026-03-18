@@ -36,6 +36,7 @@ from tools.task_classifier import (
 # Feature flag fixtures
 # ---------------------------------------------------------------------------
 
+
 def _stageB_flags(enabled=True, classes=None, min_confidence=0.5):
     """Build Stage B feature flags for testing."""
     return {
@@ -76,14 +77,13 @@ def _non_stageB_flags():
 # 1. Eligible research tasks routed to orchestrator
 # ---------------------------------------------------------------------------
 
+
 class TestEligibleResearchRouting:
     """Research tasks matching Stage B criteria should be routed to orchestrator."""
 
     def test_pure_research_task_eligible(self):
         task = "Research the latest developments in transformer architectures and summarize findings"
-        eligible, reason = is_stageB_eligible(
-            "research", 0.8, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible("research", 0.8, task, _stageB_flags())
         assert eligible is True
         assert reason == "stageB_research_eligible"
 
@@ -97,31 +97,24 @@ class TestEligibleResearchRouting:
         task = "Summarize the key findings from the web search about AI safety research"
         cls, conf = classify_task(task)
         assert cls == "research"
-        eligible, reason = is_stageB_eligible(
-            cls, conf, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, task, _stageB_flags())
         assert eligible is True
 
     def test_investigation_task_eligible(self):
         task = (
-            "Investigate and analyze how other open-source projects"
-            " handle plugin architectures and compare approaches"
+            "Investigate and analyze how other open-source projects handle plugin architectures and compare approaches"
         )
         cls, conf = classify_task(task)
         assert cls == "research"
         assert conf >= 0.5
-        eligible, reason = is_stageB_eligible(
-            cls, conf, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, task, _stageB_flags())
         assert eligible is True
 
     def test_literature_review_eligible(self):
         task = "Survey the literature on reinforcement learning from human feedback"
         cls, conf = classify_task(task)
         assert cls == "research"
-        eligible, reason = is_stageB_eligible(
-            cls, conf, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, task, _stageB_flags())
         assert eligible is True
 
     def test_routing_dict_includes_stage_and_roles(self):
@@ -138,6 +131,7 @@ class TestEligibleResearchRouting:
 # 2. Ineligible task classes stay on default path
 # ---------------------------------------------------------------------------
 
+
 class TestIneligibleClassRouting:
     """Non-research task classes must NOT enter Stage B multi-agent path."""
 
@@ -145,9 +139,7 @@ class TestIneligibleClassRouting:
         task = "Implement a new caching layer for the API endpoints"
         cls, conf = classify_task(task)
         assert cls == "code_impl"
-        eligible, reason = is_stageB_eligible(
-            cls, conf, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, task, _stageB_flags())
         assert eligible is False
         assert "not_in_stageB" in reason
 
@@ -155,33 +147,25 @@ class TestIneligibleClassRouting:
         task = "Review code changes in the authentication module for security issues"
         cls, conf = classify_task(task)
         assert cls == "code_review"
-        eligible, reason = is_stageB_eligible(
-            cls, conf, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, task, _stageB_flags())
         assert eligible is False
 
     def test_system_rejected(self):
         task = "Deploy the new service configuration to production infrastructure"
         cls, conf = classify_task(task)
         assert cls == "system"
-        eligible, reason = is_stageB_eligible(
-            cls, conf, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, task, _stageB_flags())
         assert eligible is False
 
     def test_simple_rejected(self):
         task = "Check the status of running tasks"
         cls, conf = classify_task(task)
         assert cls == "simple"
-        eligible, reason = is_stageB_eligible(
-            cls, conf, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, task, _stageB_flags())
         assert eligible is False
 
     def test_unknown_rejected(self):
-        eligible, reason = is_stageB_eligible(
-            "unknown", 0.0, "xyzzy", _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible("unknown", 0.0, "xyzzy", _stageB_flags())
         assert eligible is False
 
     def test_routing_for_code_impl_stays_default(self):
@@ -197,14 +181,13 @@ class TestIneligibleClassRouting:
 # 3. Feature-flag-off preserves prior behavior
 # ---------------------------------------------------------------------------
 
+
 class TestDisabledFlagBehavior:
     """When orchestrator is disabled, all tasks use direct worker path."""
 
     def test_research_rejected_when_disabled(self):
         task = "Research the latest developments in quantum computing"
-        eligible, reason = is_stageB_eligible(
-            "research", 0.9, task, _disabled_flags()
-        )
+        eligible, reason = is_stageB_eligible("research", 0.9, task, _disabled_flags())
         assert eligible is False
         assert reason == "orchestrator_disabled"
 
@@ -223,6 +206,7 @@ class TestDisabledFlagBehavior:
 # 4. Research tasks with mutation signals rejected
 # ---------------------------------------------------------------------------
 
+
 class TestMutationSignalRejection:
     """Tasks classified as research but containing mutation intent must be rejected."""
 
@@ -234,9 +218,7 @@ class TestMutationSignalRejection:
 
     def test_research_with_deploy_rejected(self):
         task = "Research deployment strategies and deploy to staging"
-        eligible, reason = is_stageB_eligible(
-            "research", 0.8, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible("research", 0.8, task, _stageB_flags())
         assert eligible is False
         assert "mutation_signals_detected" in reason
 
@@ -257,9 +239,7 @@ class TestMutationSignalRejection:
 
     def test_research_with_modify_rejected(self):
         task = "Research the module and modify the configuration"
-        eligible, reason = is_stageB_eligible(
-            "research", 0.8, task, _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible("research", 0.8, task, _stageB_flags())
         assert eligible is False
 
     def test_pure_research_no_mutation(self):
@@ -283,32 +263,25 @@ class TestMutationSignalRejection:
 # 5. Confidence threshold enforcement
 # ---------------------------------------------------------------------------
 
+
 class TestConfidenceThreshold:
     """Stage B requires confidence >= min_confidence (default 0.5)."""
 
     def test_low_confidence_rejected(self):
-        eligible, reason = is_stageB_eligible(
-            "research", 0.3, "Research topic", _stageB_flags(min_confidence=0.5)
-        )
+        eligible, reason = is_stageB_eligible("research", 0.3, "Research topic", _stageB_flags(min_confidence=0.5))
         assert eligible is False
         assert "below" in reason
 
     def test_exact_threshold_accepted(self):
-        eligible, reason = is_stageB_eligible(
-            "research", 0.5, "Research topic", _stageB_flags(min_confidence=0.5)
-        )
+        eligible, reason = is_stageB_eligible("research", 0.5, "Research topic", _stageB_flags(min_confidence=0.5))
         assert eligible is True
 
     def test_above_threshold_accepted(self):
-        eligible, reason = is_stageB_eligible(
-            "research", 0.9, "Research topic", _stageB_flags(min_confidence=0.5)
-        )
+        eligible, reason = is_stageB_eligible("research", 0.9, "Research topic", _stageB_flags(min_confidence=0.5))
         assert eligible is True
 
     def test_zero_confidence_rejected(self):
-        eligible, reason = is_stageB_eligible(
-            "research", 0.0, "Research topic", _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible("research", 0.0, "Research topic", _stageB_flags())
         assert eligible is False
 
 
@@ -316,14 +289,12 @@ class TestConfidenceThreshold:
 # 6. Stage B plan validation
 # ---------------------------------------------------------------------------
 
+
 class TestStageBPlanValidation:
     """Stage B plans must only contain research-safe skills."""
 
     def test_research_plan_valid(self):
-        plan = build_plan_from_task(
-            "test_task", "Research AI safety",
-            routing={"stage": "B"}
-        )
+        plan = build_plan_from_task("test_task", "Research AI safety", routing={"stage": "B"})
         valid, reason = validate_stageB_plan(plan)
         assert valid is True
         assert reason == "all_skills_allowed"
@@ -331,12 +302,14 @@ class TestStageBPlanValidation:
     def test_research_steps_use_allowed_skills(self):
         steps = _build_stageB_research_steps("test", "Research topic")
         for step in steps:
-            assert step.skill_name in _STAGE_B_ALLOWED_SKILLS, \
+            assert step.skill_name in _STAGE_B_ALLOWED_SKILLS, (
                 f"Step {step.step_id} uses disallowed skill: {step.skill_name}"
+            )
 
     def test_plan_with_shell_ops_rejected(self):
         """Manually constructed plan with shell-ops should be rejected."""
         from planner.schemas import ExecutionPlan, PlanStep
+
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",
@@ -357,6 +330,7 @@ class TestStageBPlanValidation:
 
     def test_plan_with_git_ops_rejected(self):
         from planner.schemas import ExecutionPlan, PlanStep
+
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",
@@ -377,6 +351,7 @@ class TestStageBPlanValidation:
 
     def test_plan_with_task_execution_rejected(self):
         from planner.schemas import ExecutionPlan, PlanStep
+
         plan = ExecutionPlan(
             plan_id="test_plan",
             task_id="test",
@@ -396,17 +371,11 @@ class TestStageBPlanValidation:
         assert "blocked_skill:task-execution" in reason
 
     def test_stageB_plan_strategy_name(self):
-        plan = build_plan_from_task(
-            "test_task", "Research AI safety",
-            routing={"stage": "B"}
-        )
+        plan = build_plan_from_task("test_task", "Research AI safety", routing={"stage": "B"})
         assert plan.strategy == "stageB_research"
 
     def test_non_stageB_plan_uses_class_strategy(self):
-        plan = build_plan_from_task(
-            "test_task", "Research AI safety",
-            routing={"stage": ""}
-        )
+        plan = build_plan_from_task("test_task", "Research AI safety", routing={"stage": ""})
         assert plan.strategy == "orchestrated_research"
 
 
@@ -414,38 +383,32 @@ class TestStageBPlanValidation:
 # 7. Orchestrator adapter Stage B enforcement
 # ---------------------------------------------------------------------------
 
+
 class TestOrchestratorAdapterStageB:
     """Orchestrator adapter must enforce Stage B constraints."""
 
     def test_stageB_builds_research_only_steps(self):
-        plan = build_plan_from_task(
-            "research_test", "Research and analyze data structures",
-            routing={"stage": "B"}
-        )
+        plan = build_plan_from_task("research_test", "Research and analyze data structures", routing={"stage": "B"})
         for step in plan.steps:
-            assert step.skill_name not in _STAGE_B_BLOCKED_SKILLS, \
+            assert step.skill_name not in _STAGE_B_BLOCKED_SKILLS, (
                 f"Stage B plan contains blocked skill: {step.skill_name}"
+            )
 
     def test_stageB_plan_has_three_steps(self):
-        plan = build_plan_from_task(
-            "research_test", "Research the topic",
-            routing={"stage": "B"}
-        )
+        plan = build_plan_from_task("research_test", "Research the topic", routing={"stage": "B"})
         assert len(plan.steps) == 3
         skills = [s.skill_name for s in plan.steps]
         assert skills == ["web-research", "file-ops", "self-verification"]
 
     def test_non_stageB_code_impl_plan_has_different_steps(self):
-        plan = build_plan_from_task(
-            "code_test", "Implement a new caching layer",
-            routing={"stage": ""}
-        )
+        plan = build_plan_from_task("code_test", "Implement a new caching layer", routing={"stage": ""})
         assert plan.strategy == "orchestrated_code_impl"
 
 
 # ---------------------------------------------------------------------------
 # 8. Fallback on uncertain classification
 # ---------------------------------------------------------------------------
+
 
 class TestFallbackBehavior:
     """Uncertain or unclassifiable tasks must fall back safely."""
@@ -454,26 +417,20 @@ class TestFallbackBehavior:
         cls, conf = classify_task("")
         assert cls == "unknown"
         assert conf == 0.0
-        eligible, reason = is_stageB_eligible(
-            cls, conf, "", _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, "", _stageB_flags())
         assert eligible is False
 
     def test_nonsense_task_falls_back(self):
         cls, conf = classify_task("xyzzy plugh qwerty")
         assert cls == "unknown"
-        eligible, reason = is_stageB_eligible(
-            cls, conf, "xyzzy plugh qwerty", _stageB_flags()
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, "xyzzy plugh qwerty", _stageB_flags())
         assert eligible is False
 
     def test_ambiguous_task_with_low_confidence_falls_back(self):
         # A task that might match research weakly
         task = "Look up something"
         cls, conf = classify_task(task)
-        eligible, reason = is_stageB_eligible(
-            cls, conf, task, _stageB_flags(min_confidence=0.8)
-        )
+        eligible, reason = is_stageB_eligible(cls, conf, task, _stageB_flags(min_confidence=0.8))
         # Either not research or below threshold — either way, not eligible
         assert eligible is False
 
@@ -481,6 +438,7 @@ class TestFallbackBehavior:
 # ---------------------------------------------------------------------------
 # 9. Feature flag fail-closed defaults
 # ---------------------------------------------------------------------------
+
 
 class TestFailClosedDefaults:
     """Missing or corrupt feature flags must result in disabled routing."""
@@ -492,18 +450,14 @@ class TestFailClosedDefaults:
 
     def test_missing_stage_treated_as_not_B(self):
         flags = {"enabled": True, "supported_classes": ["research"]}
-        eligible, reason = is_stageB_eligible(
-            "research", 0.9, "Research topic", flags
-        )
+        eligible, reason = is_stageB_eligible("research", 0.9, "Research topic", flags)
         assert eligible is False
         assert "not_B" in reason
 
     def test_empty_supported_classes_rejects_all(self):
         flags = _stageB_flags()
         flags["supported_classes"] = []
-        eligible, reason = is_stageB_eligible(
-            "research", 0.9, "Research topic", flags
-        )
+        eligible, reason = is_stageB_eligible("research", 0.9, "Research topic", flags)
         assert eligible is False
 
     def test_stageB_classes_constant(self):
@@ -515,9 +469,7 @@ class TestFailClosedDefaults:
         # Python treats non-empty string as truthy, but the design
         # should use explicit bool check. Currently truthy passes.
         # This test documents the current behavior.
-        eligible, _ = is_stageB_eligible(
-            "research", 0.9, "Research topic", flags
-        )
+        eligible, _ = is_stageB_eligible("research", 0.9, "Research topic", flags)
         # "yes" is truthy, so enabled check passes — this is acceptable
         # because the feature flag file uses JSON booleans, not strings
         assert isinstance(flags["enabled"], str)
@@ -535,6 +487,7 @@ class TestFailClosedDefaults:
 # ---------------------------------------------------------------------------
 # 10. Stage B constant definitions
 # ---------------------------------------------------------------------------
+
 
 class TestStageBConstants:
     """Verify Stage B constant definitions are correct."""
@@ -591,9 +544,11 @@ if __name__ == "__main__":
                 method = getattr(instance, method_name)
                 # Handle methods that need tmp_path
                 import inspect
+
                 sig = inspect.signature(method)
                 if "tmp_path" in sig.parameters:
                     import tempfile
+
                     with tempfile.TemporaryDirectory() as td:
                         method(Path(td))
                 else:
@@ -604,6 +559,6 @@ if __name__ == "__main__":
                 failed += 1
                 print(f"  FAIL: {cls.__name__}.{method_name}: {e}")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Total: {total}  Passed: {passed}  Failed: {failed}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")

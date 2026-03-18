@@ -20,7 +20,7 @@ import pytest
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-@pytest.fixture()
+@pytest.fixture
 def tmp_state_dir(tmp_path):
     """Provide a temporary STATE directory and patch watcher/self_healing to use it."""
     state_dir = tmp_path / "STATE"

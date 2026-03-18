@@ -60,6 +60,7 @@ def _plan(task_id: str = "t001", steps: list[PlanStep] | None = None) -> Executi
 
 # -- sequential execution ----------------------------------------------------
 
+
 def test_sequential_execution(orch: Orchestrator):
     plan = _plan()
     result = orch.run_plan(plan)
@@ -90,6 +91,7 @@ def test_empty_plan(orch: Orchestrator):
 
 # -- plan state saved ---------------------------------------------------------
 
+
 def test_plan_state_saved(orch: Orchestrator, tmp_state: Path):
     plan = _plan(task_id="t042")
     orch.run_plan(plan)
@@ -116,6 +118,7 @@ def test_plan_state_snapshot_has_required_fields(orch: Orchestrator, tmp_state: 
 
 # -- step result shape -------------------------------------------------------
 
+
 def test_step_result_shape(orch: Orchestrator):
     plan = _plan()
     result = orch.run_plan(plan)
@@ -130,6 +133,7 @@ def test_step_result_shape(orch: Orchestrator):
 
 # -- decision shape ----------------------------------------------------------
 
+
 def test_decision_shape(orch: Orchestrator):
     plan = _plan()
     result = orch.run_plan(plan)
@@ -142,6 +146,7 @@ def test_decision_shape(orch: Orchestrator):
 
 
 # -- retry path exercised -----------------------------------------------------
+
 
 def test_retry_path_exercised(history_store: SkillHistoryStore, tmp_state: Path):
     """Orchestrator retries a step when supervisor says retry."""
@@ -173,6 +178,7 @@ def test_retry_path_exercised(history_store: SkillHistoryStore, tmp_state: Path)
 
 # -- supervisor continue path -------------------------------------------------
 
+
 def test_supervisor_continue_path(orch: Orchestrator):
     """All steps succeed → supervisor says continue → plan done."""
     plan = _plan()
@@ -185,6 +191,7 @@ def test_supervisor_continue_path(orch: Orchestrator):
 
 
 # -- supervisor escalate path -------------------------------------------------
+
 
 def test_supervisor_escalate_on_anomaly(history_store: SkillHistoryStore, tmp_state: Path):
     """When supervisor escalates on anomaly, plan stops and status is 'failed'."""
@@ -200,10 +207,12 @@ def test_supervisor_escalate_on_anomaly(history_store: SkillHistoryStore, tmp_st
 
     orch.run_step = mock_run_step
 
-    plan = _plan(steps=[
-        PlanStep(step_id="s1", skill_name="code_improve", goal="Fix"),
-        PlanStep(step_id="s2", skill_name="system_supervisor", goal="Validate"),
-    ])
+    plan = _plan(
+        steps=[
+            PlanStep(step_id="s1", skill_name="code_improve", goal="Fix"),
+            PlanStep(step_id="s2", skill_name="system_supervisor", goal="Validate"),
+        ]
+    )
     result = orch.run_plan(plan)
     assert result["status"] == "failed"
     assert len(result["steps"]) == 1
@@ -228,17 +237,20 @@ def test_escalate_stops_remaining_steps(history_store: SkillHistoryStore, tmp_st
 
     orch.run_step = mock_run_step
 
-    plan = _plan(steps=[
-        PlanStep(step_id="s1", skill_name="log_triage", goal="Triage"),
-        PlanStep(step_id="s2", skill_name="code_improve", goal="Fix"),
-        PlanStep(step_id="s3", skill_name="system_supervisor", goal="Verify"),
-    ])
+    plan = _plan(
+        steps=[
+            PlanStep(step_id="s1", skill_name="log_triage", goal="Triage"),
+            PlanStep(step_id="s2", skill_name="code_improve", goal="Fix"),
+            PlanStep(step_id="s3", skill_name="system_supervisor", goal="Verify"),
+        ]
+    )
     result = orch.run_plan(plan)
     assert result["status"] == "failed"
     assert step_ids_executed == ["s1"]
 
 
 # -- history recording -------------------------------------------------------
+
 
 def test_history_recorded_after_steps(orch: Orchestrator, history_store: SkillHistoryStore):
     plan = _plan()
@@ -256,6 +268,7 @@ def test_history_records_success(orch: Orchestrator, history_store: SkillHistory
 
 
 # -- run_step with executor ---------------------------------------------------
+
 
 def test_run_step_returns_step_result(orch: Orchestrator):
     step = PlanStep(step_id="s1", skill_name="file_ops", goal="Create file")
@@ -289,10 +302,7 @@ VALID_CONTRACT = (
 
 INVALID_CONTRACT = "Some output text without a valid contract block"
 
-PARTIAL_CONTRACT = (
-    "## CONTRACT\n"
-    "summary: only summary\n"
-)
+PARTIAL_CONTRACT = "## CONTRACT\nsummary: only summary\n"
 
 
 def _executor_always_invalid(step: PlanStep) -> tuple[str, bool, str]:
@@ -331,6 +341,7 @@ def _executor_raises(step: PlanStep) -> tuple[str, bool, str]:
 
 # -- contract validation via step_executor ------------------------------------
 
+
 def test_valid_contract_via_executor(history_store: SkillHistoryStore, tmp_state: Path):
     """Step executor returning valid contract → contract_valid=True → continue."""
     orch = Orchestrator(
@@ -358,9 +369,7 @@ def test_invalid_contract_triggers_retry(history_store: SkillHistoryStore, tmp_s
     assert result["steps"][0]["contract_valid"] is True
 
 
-def test_invalid_contract_retries_twice_then_succeeds(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+def test_invalid_contract_retries_twice_then_succeeds(history_store: SkillHistoryStore, tmp_state: Path):
     """Invalid contract output for 2 attempts, then valid on 3rd."""
     executor = _executor_valid_after_n(2)
     orch = Orchestrator(
@@ -374,9 +383,7 @@ def test_invalid_contract_retries_twice_then_succeeds(
     assert result["steps"][0]["contract_valid"] is True
 
 
-def test_invalid_contract_exhausts_retries_and_escalates(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+def test_invalid_contract_exhausts_retries_and_escalates(history_store: SkillHistoryStore, tmp_state: Path):
     """Invalid contract for all 3 attempts → retries exhausted → escalate."""
     orch = Orchestrator(
         history_store=history_store,
@@ -410,9 +417,7 @@ def test_partial_contract_triggers_retry(history_store: SkillHistoryStore, tmp_s
     assert result["steps"][0]["retry_count"] == 1
 
 
-def test_executor_exception_treated_as_failure(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+def test_executor_exception_treated_as_failure(history_store: SkillHistoryStore, tmp_state: Path):
     """If the executor raises, the step fails with contract_valid=False."""
     orch = Orchestrator(
         history_store=history_store,
@@ -439,9 +444,8 @@ def test_executor_failure_with_error(history_store: SkillHistoryStore, tmp_state
 
 # -- retry metadata in plan state --------------------------------------------
 
-def test_retry_count_persisted_in_plan_state(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+
+def test_retry_count_persisted_in_plan_state(history_store: SkillHistoryStore, tmp_state: Path):
     """Plan state JSON should reflect the retry count."""
     orch = Orchestrator(
         history_store=history_store,
@@ -459,9 +463,7 @@ def test_retry_count_persisted_in_plan_state(
     assert data["decisions"][0]["action"] == "escalate"
 
 
-def test_supervisor_decisions_persisted(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+def test_supervisor_decisions_persisted(history_store: SkillHistoryStore, tmp_state: Path):
     """Supervisor decision is persisted after retries."""
     executor = _executor_valid_after_n(1)
     orch = Orchestrator(
@@ -483,9 +485,8 @@ def test_supervisor_decisions_persisted(
 
 # -- multi-step plan with retry on one step -----------------------------------
 
-def test_retry_on_first_step_then_second_succeeds(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+
+def test_retry_on_first_step_then_second_succeeds(history_store: SkillHistoryStore, tmp_state: Path):
     """First step needs retry, second step succeeds immediately."""
     call_count = {"s1": 0, "s2": 0}
 
@@ -499,10 +500,12 @@ def test_retry_on_first_step_then_second_succeeds(
         history_store=history_store,
         step_executor=mixed_executor,
     )
-    plan = _plan(steps=[
-        PlanStep(step_id="s1", skill_name="code_improve", goal="Fix"),
-        PlanStep(step_id="s2", skill_name="system_supervisor", goal="Verify"),
-    ])
+    plan = _plan(
+        steps=[
+            PlanStep(step_id="s1", skill_name="code_improve", goal="Fix"),
+            PlanStep(step_id="s2", skill_name="system_supervisor", goal="Verify"),
+        ]
+    )
     result = orch.run_plan(plan)
     assert result["status"] == "done"
     assert len(result["steps"]) == 2
@@ -511,6 +514,7 @@ def test_retry_on_first_step_then_second_succeeds(
 
 
 # -- plan_id and task_id in result -------------------------------------------
+
 
 def test_result_includes_plan_and_task_id(orch: Orchestrator):
     plan = _plan(task_id="t555")
@@ -675,9 +679,7 @@ def test_plan_state_includes_full_history(orch: Orchestrator, tmp_state: Path):
     assert isinstance(data["saved_at"], float)
 
 
-def test_plan_state_with_retry_has_decision_history(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+def test_plan_state_with_retry_has_decision_history(history_store: SkillHistoryStore, tmp_state: Path):
     """Plan state after retries shows final decision per step."""
     executor = _executor_valid_after_n(1)
     orch = Orchestrator(
@@ -702,9 +704,7 @@ def test_plan_state_with_retry_has_decision_history(
 # -- contract validation errors observable ------------------------------------
 
 
-def test_invalid_contract_populates_validation_errors(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+def test_invalid_contract_populates_validation_errors(history_store: SkillHistoryStore, tmp_state: Path):
     """Invalid contract produces specific validation_errors in StepResult."""
     orch = Orchestrator(
         history_store=history_store,
@@ -718,9 +718,7 @@ def test_invalid_contract_populates_validation_errors(
     assert any("CONTRACT" in e or "Missing" in e or "contract" in e for e in errors)
 
 
-def test_supervisor_consumes_contract_invalid_correctly(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+def test_supervisor_consumes_contract_invalid_correctly(history_store: SkillHistoryStore, tmp_state: Path):
     """Supervisor produces escalate decision for persistent contract invalidity."""
     orch = Orchestrator(
         history_store=history_store,
@@ -789,9 +787,7 @@ def test_evaluation_perfect_plan_grade_A(orch: Orchestrator):
     assert result["evaluation"]["aggregate_score"] >= 0.90
 
 
-def test_evaluation_failed_plan_has_followup(
-    history_store: SkillHistoryStore, tmp_state: Path
-):
+def test_evaluation_failed_plan_has_followup(history_store: SkillHistoryStore, tmp_state: Path):
     """Failed plan with escalation → followup_recommended and followup_task."""
     orch = Orchestrator(
         history_store=history_store,
@@ -814,9 +810,7 @@ def test_evaluation_followup_none_for_perfect(orch: Orchestrator):
     assert ev["followup_task"] is None
 
 
-def test_incremental_save_has_null_evaluation(
-    orch: Orchestrator, tmp_state: Path
-):
+def test_incremental_save_has_null_evaluation(orch: Orchestrator, tmp_state: Path):
     """Incremental saves during execution have evaluation=null."""
     # The incremental saves don't include evaluation; only the final save does.
     # We verify the final save has evaluation.
@@ -836,9 +830,7 @@ def test_incremental_save_has_null_evaluation(
 def tmp_improvement_dir(tmp_path: Path, monkeypatch):
     """Redirect IMPROVEMENT_DIR to a temp directory."""
     imp_dir = tmp_path / "improvement_runs"
-    monkeypatch.setattr(
-        "planner.improvement_planner.IMPROVEMENT_DIR", imp_dir
-    )
+    monkeypatch.setattr("planner.improvement_planner.IMPROVEMENT_DIR", imp_dir)
     return imp_dir
 
 
@@ -890,6 +882,7 @@ def test_improvement_cycle_stops_when_supervisor_escalates(
     history_store: SkillHistoryStore, tmp_state: Path, tmp_improvement_dir: Path
 ):
     """Critical findings → requires_human_review → supervisor blocks execution."""
+
     # Create an improvement planner that always produces critical findings
     class ForceCriticalPlanner(ImprovementPlanner):
         def build_health_findings(self, plan_eval, recent=None):
@@ -923,6 +916,7 @@ def test_improvement_cycle_executes_one_bounded_plan(
     history_store: SkillHistoryStore, tmp_state: Path, tmp_improvement_dir: Path
 ):
     """Improvement cycle with actionable findings executes exactly one plan."""
+
     class ForceHighPlanner(ImprovementPlanner):
         def build_health_findings(self, plan_eval, recent=None):
             return [
@@ -959,6 +953,7 @@ def test_improvement_result_includes_evaluation_fields(
     history_store: SkillHistoryStore, tmp_state: Path, tmp_improvement_dir: Path
 ):
     """Improvement result dict includes evaluation-related fields."""
+
     class ForceHighPlanner(ImprovementPlanner):
         def build_health_findings(self, plan_eval, recent=None):
             return [

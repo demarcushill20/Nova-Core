@@ -9,6 +9,7 @@ Covers:
 - Conversation buffer compaction
 - Session summary in conversation history
 """
+
 import json
 import sys
 import tempfile
@@ -88,6 +89,7 @@ class TestSessionLifecycle(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def _make_mgr(self):
@@ -140,9 +142,7 @@ class TestSessionLifecycle(unittest.TestCase):
         self.assertNotEqual(new_session.session_id, old_sid)
 
         # Old session should be archived
-        old_data = json.loads(
-            (self._session_dir / f"{old_sid}.json").read_text()
-        )
+        old_data = json.loads((self._session_dir / f"{old_sid}.json").read_text())
         self.assertEqual(old_data["status"], "archived")
 
 
@@ -157,6 +157,7 @@ class TestTaskRecording(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def _make_mgr(self):
@@ -212,6 +213,7 @@ class TestContextInjection(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def _make_mgr(self):
@@ -299,6 +301,7 @@ class TestSessionCleanup(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_removes_old_sessions(self):
@@ -392,6 +395,7 @@ class TestConversationPersistence(unittest.TestCase):
         try:
             import telegram.conversation as conv_mod
             from telegram.conversation import ConversationManager
+
             orig_persist = conv_mod.PERSIST_DIR
             conv_mod.PERSIST_DIR = Path(tmpdir)
 
@@ -409,6 +413,7 @@ class TestConversationPersistence(unittest.TestCase):
             conv_mod.PERSIST_DIR = orig_persist
         finally:
             import shutil
+
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
@@ -423,6 +428,7 @@ class TestArchivedSessionContext(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_falls_back_to_archived_session(self):
@@ -437,15 +443,17 @@ class TestArchivedSessionContext(unittest.TestCase):
             created_at=time.time() - 3 * 3600,
             last_activity=time.time() - 3 * 3600,
             status="archived",
-            tasks=[{
-                "stem": "0200_prior_work",
-                "status": "completed",
-                "started_at": time.time() - 3 * 3600,
-                "completed_at": time.time() - 3 * 3600,
-                "summary": "Set up the auth system",
-                "files_changed": "auth.py",
-                "confidence": "high",
-            }],
+            tasks=[
+                {
+                    "stem": "0200_prior_work",
+                    "status": "completed",
+                    "started_at": time.time() - 3 * 3600,
+                    "completed_at": time.time() - 3 * 3600,
+                    "summary": "Set up the auth system",
+                    "files_changed": "auth.py",
+                    "confidence": "high",
+                }
+            ],
         )
         mgr._persist(archived)
 

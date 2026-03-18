@@ -14,13 +14,13 @@ Message = _mod.Message
 ThreadStore = _mod.ThreadStore
 
 
-@pytest.fixture()
+@pytest.fixture
 def store(tmp_path):
     """ThreadStore backed by a temp directory."""
     return ThreadStore(threads_dir=tmp_path)
 
 
-@pytest.fixture()
+@pytest.fixture
 def legacy_dir(tmp_path):
     """Create a fake legacy conversation file and return the conversations dir."""
     conv_dir = tmp_path / "conversations"
@@ -571,7 +571,7 @@ class TestDeterministicFallback:
 
 
 class TestGenerateThreadSummary:
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_falls_back_on_llm_failure(self, monkeypatch):
         """When LLM call returns None, falls back to deterministic summary."""
         _generate = _api_mod._generate_thread_summary
@@ -588,7 +588,7 @@ class TestGenerateThreadSummary:
         assert result["type"] == "text"
         assert "Test msg" in result["content"]
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_parses_valid_llm_json(self, monkeypatch):
         """When LLM returns valid JSON, it's parsed into the summary."""
         _generate = _api_mod._generate_thread_summary
@@ -618,7 +618,7 @@ class TestGenerateThreadSummary:
         assert result["goals"] == ["build chat app"]
         assert result["content"] == "User wants to build a chat app"
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_handles_markdown_fenced_json(self, monkeypatch):
         """LLM sometimes wraps JSON in ```json ... ``` fences."""
         _generate = _api_mod._generate_thread_summary
@@ -637,7 +637,7 @@ class TestGenerateThreadSummary:
         assert result["type"] == "structured"
         assert result["content"] == "summary"
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_invalid_json_falls_back(self, monkeypatch):
         """Garbled LLM output falls back to deterministic summary."""
         _generate = _api_mod._generate_thread_summary
@@ -676,7 +676,7 @@ class TestMaybeSummarizeThread:
         monkeypatch.setattr(_api_mod, "_summarize_via_llm", _mock_llm)
         self._store = store
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_no_op_below_threshold(self):
         t = self._store.create_thread(title="Small")
         for i in range(5):
@@ -688,7 +688,7 @@ class TestMaybeSummarizeThread:
         assert reloaded.message_count == 5  # unchanged
         assert reloaded.summary is None
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_compacts_above_threshold(self, monkeypatch):
         monkeypatch.setattr(_api_mod, "_SUMMARIZE_THRESHOLD", 10)
         monkeypatch.setattr(_api_mod, "_SUMMARIZE_KEEP_RECENT", 4)
@@ -709,6 +709,6 @@ class TestMaybeSummarizeThread:
         assert len(msgs) == 4
         assert msgs[0].content == "Message 8"
 
-    @pytest.mark.asyncio()
+    @pytest.mark.asyncio
     async def test_nonexistent_thread_no_error(self):
         await _api_mod._maybe_summarize_thread("nonexistent")  # should not raise

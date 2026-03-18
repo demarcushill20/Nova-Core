@@ -6,6 +6,7 @@ from utils.extract_task_class import KNOWN_TASK_CLASSES, extract_task_class
 
 # --- Happy path ---
 
+
 @pytest.mark.parametrize("cls", sorted(KNOWN_TASK_CLASSES))
 def test_known_classes(cls: str) -> None:
     assert extract_task_class({"task_class": cls}) == cls
@@ -22,14 +23,18 @@ def test_strips_whitespace() -> None:
 
 # --- Invalid shapes → None ---
 
-@pytest.mark.parametrize("bad_record", [
-    None,
-    42,
-    "not a dict",
-    [],
-    [{"task_class": "research"}],
-    True,
-])
+
+@pytest.mark.parametrize(
+    "bad_record",
+    [
+        None,
+        42,
+        "not a dict",
+        [],
+        [{"task_class": "research"}],
+        True,
+    ],
+)
 def test_non_dict_returns_none(bad_record: object) -> None:
     assert extract_task_class(bad_record) is None
 
@@ -52,6 +57,7 @@ def test_whitespace_only() -> None:
 
 
 # --- Extra keys ignored ---
+
 
 def test_extra_keys_ignored() -> None:
     record = {"task_class": "code_impl", "status": "completed", "extra": 99}

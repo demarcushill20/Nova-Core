@@ -91,8 +91,7 @@ def test_create_retry_task_content(tmp_path):
     errors = ["no ## CONTRACT section found"]
     warnings = []
 
-    with patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
+    with patch("watcher.TASKS_DIR", tasks_dir), patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
         retry_path = _create_retry_task("0031_broken", output_file, errors, warnings)
 
     assert retry_path.exists()
@@ -124,8 +123,7 @@ def test_create_retry_task_with_warnings(tmp_path):
     errors = ["missing required field: verification"]
     warnings = ["confidence value is borderline"]
 
-    with patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
+    with patch("watcher.TASKS_DIR", tasks_dir), patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
         retry_path = _create_retry_task("0032_x", output_file, errors, warnings)
 
     content = retry_path.read_text(encoding="utf-8")
@@ -149,9 +147,11 @@ def test_maybe_create_retry_creates_task(tmp_path):
         "  contract error: no ## CONTRACT section found",
     ]
 
-    with patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         _maybe_create_retry("0031_broken", output_file, contract_msgs)
 
     retry_file = tasks_dir / "0031_broken__retry1.md"
@@ -171,8 +171,7 @@ def test_maybe_create_retry_skips_if_already_retry(tmp_path):
         "  contract error: no ## CONTRACT section found",
     ]
 
-    with patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
+    with patch("watcher.TASKS_DIR", tasks_dir), patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
         _maybe_create_retry("0031_broken__retry1", output_file, contract_msgs)
 
     # No __retry1__retry1 should exist
@@ -197,8 +196,7 @@ def test_maybe_create_retry_skips_if_retry_already_exists(tmp_path):
         "  contract error: no ## CONTRACT section found",
     ]
 
-    with patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
+    with patch("watcher.TASKS_DIR", tasks_dir), patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
         _maybe_create_retry("0031_broken", output_file, contract_msgs)
 
     # Should NOT create a new .md retry
@@ -220,8 +218,7 @@ def test_maybe_create_retry_skips_if_retry_inprogress(tmp_path):
         "  contract error: no ## CONTRACT section found",
     ]
 
-    with patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
+    with patch("watcher.TASKS_DIR", tasks_dir), patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
         _maybe_create_retry("0031_broken", output_file, contract_msgs)
 
     assert not (tasks_dir / "0031_broken__retry1.md").exists()
@@ -242,8 +239,7 @@ def test_maybe_create_retry_skips_if_retry_done(tmp_path):
         "  contract error: no ## CONTRACT section found",
     ]
 
-    with patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
+    with patch("watcher.TASKS_DIR", tasks_dir), patch("watcher.OUTPUT_DIR", tmp_path / "OUTPUT"):
         _maybe_create_retry("0031_broken", output_file, contract_msgs)
 
     assert not (tasks_dir / "0031_broken__retry1.md").exists()
@@ -262,9 +258,11 @@ def test_verify_valid_contract_no_retry(tmp_path):
     out_file.write_text(VALID_OUTPUT)
     out_file.touch()
 
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts("0030_example")
 
     assert passed is True
@@ -282,10 +280,12 @@ def test_verify_missing_contract_creates_retry(tmp_path):
     out_file.write_text(MISSING_CONTRACT)
     out_file.touch()
 
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", out_dir), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.OUTPUT_DIR", out_dir),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts("0031_broken")
 
     assert passed is False
@@ -307,10 +307,12 @@ def test_verify_retry_task_failure_no_second_retry(tmp_path):
     out_file.write_text(MISSING_CONTRACT)
     out_file.touch()
 
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", out_dir), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.OUTPUT_DIR", out_dir),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts("0031_broken__retry1")
 
     assert passed is False
@@ -324,9 +326,11 @@ def test_verify_no_output_no_retry(tmp_path):
     tasks_dir = tmp_path / "TASKS"
     tasks_dir.mkdir()
 
-    with patch("watcher._find_recent_output", return_value=None), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=None),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts("0099_missing")
 
     assert passed is False
@@ -346,10 +350,12 @@ def test_retry_task_has_repair_instructions(tmp_path):
     out_file.write_text(BAD_CONFIDENCE)
     out_file.touch()
 
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", out_dir), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.OUTPUT_DIR", out_dir),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts("0032_badconf")
 
     assert passed is False

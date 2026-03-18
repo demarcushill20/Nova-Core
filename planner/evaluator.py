@@ -33,18 +33,18 @@ from planner.schemas import (
 # ---------------------------------------------------------------------------
 # Scoring weights — sum to 1.0 for a perfect execution
 # ---------------------------------------------------------------------------
-_EXECUTION_BASE = 0.40       # awarded if execution succeeded
-_CONTRACT_BONUS = 0.25       # awarded if contract is valid
-_VERIFICATION_MAX = 0.20     # awarded based on verification evidence
-_DURATION_MAX = 0.15         # awarded based on execution speed
-_RETRY_PENALTY_PER = 0.05   # penalty per retry attempt
-_RETRY_PENALTY_CAP = 0.15   # maximum total retry penalty
+_EXECUTION_BASE = 0.40  # awarded if execution succeeded
+_CONTRACT_BONUS = 0.25  # awarded if contract is valid
+_VERIFICATION_MAX = 0.20  # awarded based on verification evidence
+_DURATION_MAX = 0.15  # awarded based on execution speed
+_RETRY_PENALTY_PER = 0.05  # penalty per retry attempt
+_RETRY_PENALTY_CAP = 0.15  # maximum total retry penalty
 
 # Duration thresholds (milliseconds)
-_DURATION_FAST = 1000        # < 1s   → full duration score (0.15)
-_DURATION_MEDIUM = 5000      # < 5s   → 2/3 duration score  (0.10)
-_DURATION_SLOW = 30000       # < 30s  → 1/3 duration score  (0.05)
-                             # >= 30s → 0.00
+_DURATION_FAST = 1000  # < 1s   → full duration score (0.15)
+_DURATION_MEDIUM = 5000  # < 5s   → 2/3 duration score  (0.10)
+_DURATION_SLOW = 30000  # < 30s  → 1/3 duration score  (0.05)
+# >= 30s → 0.00
 
 # Grade boundaries
 _GRADE_A = 0.90
@@ -77,16 +77,12 @@ class Evaluator:
         # 1. Execution success
         execution_success = result.status == "success"
         exec_base = _EXECUTION_BASE if execution_success else 0.0
-        reasons.append(
-            "execution_success" if execution_success else "execution_failed"
-        )
+        reasons.append("execution_success" if execution_success else "execution_failed")
 
         # 2. Contract validity — directly from StepResult
         contract_valid = result.contract_valid is True
         contract_bonus = _CONTRACT_BONUS if contract_valid else 0.0
-        reasons.append(
-            "contract_valid" if contract_valid else "contract_invalid"
-        )
+        reasons.append("contract_valid" if contract_valid else "contract_invalid")
 
         # 3. Tests passed — deterministic inference
         #    True  if contract valid (contract requires "verification" field)
@@ -102,9 +98,7 @@ class Evaluator:
             reasons.append(f"tests_passed:{tests_passed}")
 
         # 4. Verification score
-        verification_score = _compute_verification_score(
-            contract_valid, tests_passed
-        )
+        verification_score = _compute_verification_score(contract_valid, tests_passed)
         reasons.append(f"verification_score:{verification_score:.2f}")
 
         # 5. Duration score
@@ -112,15 +106,12 @@ class Evaluator:
         reasons.append(f"duration_score:{duration_score:.2f}")
 
         # 6. Retry penalty
-        retry_penalty = min(
-            result.retry_count * _RETRY_PENALTY_PER, _RETRY_PENALTY_CAP
-        )
+        retry_penalty = min(result.retry_count * _RETRY_PENALTY_PER, _RETRY_PENALTY_CAP)
         if retry_penalty > 0:
             reasons.append(f"retry_penalty_applied:{retry_penalty:.2f}")
 
         # Total score (clamped 0.0–1.0)
-        raw = exec_base + contract_bonus + verification_score \
-            + duration_score - retry_penalty
+        raw = exec_base + contract_bonus + verification_score + duration_score - retry_penalty
         total_score = max(0.0, min(1.0, round(raw, 2)))
 
         # Grade
@@ -168,9 +159,7 @@ class Evaluator:
 
         # Aggregate score: mean of step scores (0.0 if no steps)
         if step_evals:
-            aggregate_score = round(
-                sum(e.total_score for e in step_evals) / len(step_evals), 2
-            )
+            aggregate_score = round(sum(e.total_score for e in step_evals) / len(step_evals), 2)
         else:
             aggregate_score = 0.0
 
@@ -187,9 +176,7 @@ class Evaluator:
         )
 
         # Follow-up recommendation
-        followup_recommended, followup_reason = _determine_followup(
-            grade, step_evals
-        )
+        followup_recommended, followup_reason = _determine_followup(grade, step_evals)
 
         return PlanEvaluation(
             plan_id=plan.plan_id,
@@ -207,9 +194,7 @@ class Evaluator:
 # ---------------------------------------------------------------------------
 
 
-def _compute_verification_score(
-    contract_valid: bool, tests_passed: bool | None
-) -> float:
+def _compute_verification_score(contract_valid: bool, tests_passed: bool | None) -> float:
     """Compute verification score from contract validity and test evidence.
 
     - 0.20 if contract valid (contract requires verification field)
@@ -283,15 +268,11 @@ def _determine_followup(
         return False, None
 
     if grade in ("D", "F"):
-        return True, (
-            f"Low grade {grade}: execution quality below acceptable threshold"
-        )
+        return True, (f"Low grade {grade}: execution quality below acceptable threshold")
 
     if grade in ("B", "C"):
         if any_contract_invalid:
-            return True, (
-                f"Grade {grade}: {n_invalid} step(s) with invalid contracts"
-            )
+            return True, (f"Grade {grade}: {n_invalid} step(s) with invalid contracts")
         if any_failed:
             return True, f"Grade {grade}: step execution failure detected"
         return False, None

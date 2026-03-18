@@ -3,6 +3,7 @@
 Aggregates security metrics from all hardening components into a single
 dashboard state file for reporting via heartbeat and Telegram.
 """
+
 from __future__ import annotations
 
 import json
@@ -27,6 +28,7 @@ _BOOT_TIME = time.monotonic()
 # Dashboard template
 # ---------------------------------------------------------------------------
 
+
 def _empty_dashboard() -> dict[str, Any]:
     """Return a zeroed-out dashboard structure."""
     return {
@@ -47,6 +49,7 @@ def _empty_dashboard() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # SecurityDashboard
 # ---------------------------------------------------------------------------
+
 
 class SecurityDashboard:
     """Aggregate security metrics from all hardening subsystems.
@@ -71,9 +74,7 @@ class SecurityDashboard:
         """Load persisted dashboard state if available."""
         try:
             if self.STATE_FILE.exists():
-                self._data = json.loads(
-                    self.STATE_FILE.read_text(encoding="utf-8")
-                )
+                self._data = json.loads(self.STATE_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
             _log.warning("Failed to load dashboard state: %s", exc)
 
@@ -99,9 +100,7 @@ class SecurityDashboard:
         """
         data = _empty_dashboard()
         data["last_updated"] = datetime.now(timezone.utc).isoformat()
-        data["uptime_hours"] = round(
-            (time.monotonic() - _BOOT_TIME) / 3600, 2
-        )
+        data["uptime_hours"] = round((time.monotonic() - _BOOT_TIME) / 3600, 2)
 
         # Collect from each subsystem (each is independently fault-tolerant)
         data["kill_switch"] = self._collect_kill_switch()
@@ -135,45 +134,33 @@ class SecurityDashboard:
         for name, info in cbs.items():
             state = info if isinstance(info, str) else info.get("state", "")
             if state == "OPEN":
-                anomalies.append(
-                    f"Circuit breaker '{name}' is OPEN"
-                )
+                anomalies.append(f"Circuit breaker '{name}' is OPEN")
 
         # Budget > 90%
         budget_pct = data.get("budget", {}).get("daily_used_pct", 0)
         if budget_pct > 90:
-            anomalies.append(
-                f"Daily budget at {budget_pct:.1f}% (exceeds 90% threshold)"
-            )
+            anomalies.append(f"Daily budget at {budget_pct:.1f}% (exceeds 90% threshold)")
 
         # Kill switch not in "run"
         ks = data.get("kill_switch", {})
         mode = ks.get("mode", "run")
         if mode != "run":
-            anomalies.append(
-                f"Kill switch mode is '{mode}' (not 'run')"
-            )
+            anomalies.append(f"Kill switch mode is '{mode}' (not 'run')")
 
         # Heartbeat not alive
         if not ks.get("heartbeat_alive", True):
-            anomalies.append(
-                "Heartbeat dead man's switch is NOT alive"
-            )
+            anomalies.append("Heartbeat dead man's switch is NOT alive")
 
         # Auth failures > 5 in 24h
         auth_failures = data.get("auth_failures_24h", 0)
         if auth_failures > 5:
-            anomalies.append(
-                f"Auth failures in 24h: {auth_failures} (exceeds threshold of 5)"
-            )
+            anomalies.append(f"Auth failures in 24h: {auth_failures} (exceeds threshold of 5)")
 
         # Any task blocked in last hour
         tv = data.get("task_validations", {})
         blocked = tv.get("blocked", 0)
         if blocked > 0:
-            anomalies.append(
-                f"Tasks blocked in last hour: {blocked}"
-            )
+            anomalies.append(f"Tasks blocked in last hour: {blocked}")
 
         return anomalies
 
@@ -250,9 +237,7 @@ class SecurityDashboard:
             if not audit_file.exists():
                 return result
 
-            one_hour_ago = (
-                datetime.now(timezone.utc) - timedelta(hours=1)
-            ).isoformat()
+            one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 
             with audit_file.open("r", encoding="utf-8") as f:
                 for line in f:
@@ -281,9 +266,7 @@ class SecurityDashboard:
     def _collect_auth_failures(self) -> int:
         """Parse recent watcher.log and telegram_bot.log for AUTH_DENIED."""
         count = 0
-        twenty_four_hours_ago = (
-            datetime.now(timezone.utc) - timedelta(hours=24)
-        )
+        twenty_four_hours_ago = datetime.now(timezone.utc) - timedelta(hours=24)
 
         log_files = [
             LOGS_DIR / "watcher.log",
@@ -317,9 +300,7 @@ class SecurityDashboard:
         try:
             if audit_dir.is_dir():
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                yesterday = (
-                    datetime.now(timezone.utc) - timedelta(days=1)
-                ).strftime("%Y-%m-%d")
+                yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
                 for date_str in [yesterday, today]:
                     audit_file = audit_dir / f"audit_{date_str}.jsonl"
                     if not audit_file.exists():
@@ -427,6 +408,7 @@ class SecurityDashboard:
 # Helper functions
 # ---------------------------------------------------------------------------
 
+
 def _tail_file(path: Path, max_bytes: int = 256_000) -> str:
     """Read the tail of a file (last *max_bytes* bytes).
 
@@ -470,6 +452,7 @@ def _extract_log_timestamp(line: str) -> datetime | None:
 # Telegram formatter
 # ---------------------------------------------------------------------------
 
+
 def format_dashboard_telegram(data: dict[str, Any]) -> str:
     """Format dashboard data as Telegram-friendly text.
 
@@ -510,8 +493,7 @@ def format_dashboard_telegram(data: dict[str, Any]) -> str:
     else:
         budget_status = "[OK]"
     lines.append(
-        f"Budget:       {budget_status} daily={daily_pct:.1f}%"
-        f"  monthly=${monthly_cost:.2f}/${monthly_cap:.2f}"
+        f"Budget:       {budget_status} daily={daily_pct:.1f}%  monthly=${monthly_cost:.2f}/${monthly_cap:.2f}"
     )
     lines.append("")
 
@@ -549,10 +531,7 @@ def format_dashboard_telegram(data: dict[str, Any]) -> str:
         tv_status = "[WARN]"
     else:
         tv_status = "[OK]"
-    lines.append(
-        f"Tasks (1h):   {tv_status}"
-        f" passed={tv_passed} flagged={tv_flagged} blocked={tv_blocked}"
-    )
+    lines.append(f"Tasks (1h):   {tv_status} passed={tv_passed} flagged={tv_flagged} blocked={tv_blocked}")
 
     # Auth Failures
     auth_failures = data.get("auth_failures_24h", 0)

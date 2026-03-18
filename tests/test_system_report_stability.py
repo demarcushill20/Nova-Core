@@ -39,6 +39,7 @@ from agents.rollout_gate import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_temp_repo():
     tmp = tempfile.mkdtemp()
     root = Path(tmp)
@@ -57,27 +58,31 @@ def _write_feature_flags(root, system_scope="report"):
         "rollout_stage": "stage4_research_code_review_code_impl_system_report",
         "system_scope": system_scope,
         "system_allowed_skills": [
-            "file-ops", "http-fetch", "reading-obsidian-memory",
-            "self-verification", "web-research", "shell-ops",
+            "file-ops",
+            "http-fetch",
+            "reading-obsidian-memory",
+            "self-verification",
+            "web-research",
+            "shell-ops",
         ],
         "system_blocked_skills": ["git-ops", "task-execution"],
     }
     data = {"phase7_orchestrator": orch, "version": 9}
-    (root / "STATE" / "config" / "feature_flags.json").write_text(
-        json.dumps(data, indent=2)
-    )
+    (root / "STATE" / "config" / "feature_flags.json").write_text(json.dumps(data, indent=2))
 
 
 def _write_heartbeat(root, overall="healthy"):
     (root / "STATE" / "heartbeat_multiagent.json").write_text(
-        json.dumps({
-            "overall": overall,
-            "metrics": {
-                "budget_exhaustion_count": 0,
-                "contract_success_count": 10,
-                "contract_failure_count": 0,
-            },
-        })
+        json.dumps(
+            {
+                "overall": overall,
+                "metrics": {
+                    "budget_exhaustion_count": 0,
+                    "contract_success_count": 10,
+                    "contract_failure_count": 0,
+                },
+            }
+        )
     )
 
 
@@ -155,6 +160,7 @@ def _all_pass_kwargs(total_runs=5):
 # Stable Continue Tests
 # ============================================================================
 
+
 class TestStableContinue:
     """When all criteria pass -> stable_continue_system_report."""
 
@@ -190,6 +196,7 @@ class TestStableContinue:
 # ============================================================================
 # Hold Tests (soft failures)
 # ============================================================================
+
 
 class TestHold:
     """Soft criteria failures -> hold_system_report."""
@@ -250,6 +257,7 @@ class TestHold:
 # Rollback Tests (hard failures)
 # ============================================================================
 
+
 class TestRollback:
     """Hard criteria failures -> rollback_system_report_recommended."""
 
@@ -299,8 +307,12 @@ class TestRollback:
     def test_high_failure_rate(self):
         kwargs = _all_pass_kwargs()
         kwargs["system_report_metrics"] = {
-            "total_runs": 10, "completed": 7, "failed": 3,
-            "verifier_rejected": 0, "failure_rate": 0.3, "rejection_rate": 0.0,
+            "total_runs": 10,
+            "completed": 7,
+            "failed": 3,
+            "verifier_rejected": 0,
+            "failure_rate": 0.3,
+            "rejection_rate": 0.0,
         }
         criteria = evaluate_system_report_stability(**kwargs)
         decision, _ = decide_system_report_stability(criteria)
@@ -326,6 +338,7 @@ class TestRollback:
 # ============================================================================
 # Post-Activation Workflow Filtering Tests
 # ============================================================================
+
 
 class TestPostActivationFiltering:
     """Test _collect_post_activation_system_workflows."""
@@ -367,6 +380,7 @@ class TestPostActivationFiltering:
 # ============================================================================
 # System Report Metrics Tests
 # ============================================================================
+
 
 class TestSystemReportMetrics:
     """Test _collect_system_report_metrics."""
@@ -415,6 +429,7 @@ class TestSystemReportMetrics:
 # Shell Audit Violation Tests
 # ============================================================================
 
+
 class TestShellAuditViolations:
     """Test _count_shell_audit_violations."""
 
@@ -440,8 +455,7 @@ class TestShellAuditViolations:
     def test_clean_audit_log(self):
         root = _make_temp_repo()
         (root / "LOGS" / "system_shell_audit.log").write_text(
-            "2026-03-08T23:00:00Z [ALLOWED] ps aux\n"
-            "2026-03-08T23:01:00Z [ALLOWED] df -h\n"
+            "2026-03-08T23:00:00Z [ALLOWED] ps aux\n2026-03-08T23:01:00Z [ALLOWED] df -h\n"
         )
         assert _count_shell_audit_violations(root) == 0
 
@@ -449,6 +463,7 @@ class TestShellAuditViolations:
 # ============================================================================
 # Scope Integrity Tests
 # ============================================================================
+
 
 class TestScopeIntegrity:
     """Test _verify_system_report_scope_integrity."""
@@ -504,6 +519,7 @@ class TestScopeIntegrity:
 # Artifact Generation Tests
 # ============================================================================
 
+
 class TestArtifactGeneration:
     """Test rendering and file writing."""
 
@@ -522,18 +538,32 @@ class TestArtifactGeneration:
             rollout_stage="stage4_research_code_review_code_impl_system_report",
             system_scope="report",
             criteria=criteria,
-            system_report_metrics={"total_runs": 5, "completed": 5, "failed": 0,
-                                    "verifier_rejected": 0, "failure_rate": 0.0, "rejection_rate": 0.0},
+            system_report_metrics={
+                "total_runs": 5,
+                "completed": 5,
+                "failed": 0,
+                "verifier_rejected": 0,
+                "failure_rate": 0.0,
+                "rejection_rate": 0.0,
+            },
             evidence_summary={"test": True},
             generated_at="2026-03-09T01:00:00Z",
             next_action=next_action,
-            observation_window={"activation_at": "2026-03-08T22:52:56Z",
-                                "review_at": "2026-03-09T01:00:00Z",
-                                "elapsed_hours": 2.1, "elapsed_seconds": 7564},
+            observation_window={
+                "activation_at": "2026-03-08T22:52:56Z",
+                "review_at": "2026-03-09T01:00:00Z",
+                "elapsed_hours": 2.1,
+                "elapsed_seconds": 7564,
+            },
             scope_integrity=_good_scope_integrity(),
-            monitoring_progress={"runs_completed": 5, "runs_target": 5,
-                                  "runs_pct": 100, "elapsed_hours": 2.1,
-                                  "elapsed_target_hours": 2.0, "elapsed_pct": 100},
+            monitoring_progress={
+                "runs_completed": 5,
+                "runs_target": 5,
+                "runs_pct": 100,
+                "elapsed_hours": 2.1,
+                "elapsed_target_hours": 2.0,
+                "elapsed_pct": 100,
+            },
         )
 
     def test_stable_markdown(self):
@@ -592,46 +622,35 @@ class TestArtifactGeneration:
 # Integration Tests
 # ============================================================================
 
+
 class TestIntegration:
     """End-to-end with temp repo."""
 
     def test_hold_on_fresh_activation(self):
         root = _make_stable_repo(num_workflows=0)
-        review = review_system_report_stability(
-            root, now_override="2026-03-08T23:00:00Z"
-        )
+        review = review_system_report_stability(root, now_override="2026-03-08T23:00:00Z")
         assert review.decision == "hold_system_report"
 
     def test_stable_with_enough_evidence(self):
         root = _make_stable_repo(num_workflows=6)
-        review = review_system_report_stability(
-            root, now_override="2026-03-09T02:00:00Z"
-        )
+        review = review_system_report_stability(root, now_override="2026-03-09T02:00:00Z")
         assert review.decision == "stable_continue_system_report"
 
     def test_rollback_on_unhealthy(self):
         root = _make_stable_repo(num_workflows=6)
         _write_heartbeat(root, overall="unhealthy")
-        review = review_system_report_stability(
-            root, now_override="2026-03-09T02:00:00Z"
-        )
+        review = review_system_report_stability(root, now_override="2026-03-09T02:00:00Z")
         assert review.decision == "rollback_system_report_recommended"
 
     def test_rollback_on_shell_violation(self):
         root = _make_stable_repo(num_workflows=6)
-        (root / "LOGS" / "system_shell_audit.log").write_text(
-            "2026-03-09T00:30:00Z [VIOLATION] rm -rf /tmp\n"
-        )
-        review = review_system_report_stability(
-            root, now_override="2026-03-09T02:00:00Z"
-        )
+        (root / "LOGS" / "system_shell_audit.log").write_text("2026-03-09T00:30:00Z [VIOLATION] rm -rf /tmp\n")
+        review = review_system_report_stability(root, now_override="2026-03-09T02:00:00Z")
         assert review.decision == "rollback_system_report_recommended"
 
     def test_artifacts_written(self):
         root = _make_stable_repo(num_workflows=6)
-        review = review_system_report_stability(
-            root, now_override="2026-03-09T02:00:00Z"
-        )
+        review = review_system_report_stability(root, now_override="2026-03-09T02:00:00Z")
         md_path, json_path = write_system_report_stability_review(review, root)
         assert md_path.exists()
         assert json_path.exists()
@@ -642,9 +661,7 @@ class TestIntegration:
         root = _make_stable_repo(num_workflows=6)
         # Break scope integrity
         _write_feature_flags(root, system_scope="inspect_only")
-        review = review_system_report_stability(
-            root, now_override="2026-03-09T02:00:00Z"
-        )
+        review = review_system_report_stability(root, now_override="2026-03-09T02:00:00Z")
         assert review.decision == "rollback_system_report_recommended"
         c = next(c for c in review.criteria if c.name == "scope_integrity")
         assert not c.passed
@@ -653,6 +670,7 @@ class TestIntegration:
 # ============================================================================
 # No Scope Expansion Tests
 # ============================================================================
+
 
 class TestNoScopeExpansion:
     """Verify monitoring does not change scope."""
@@ -673,8 +691,6 @@ class TestNoScopeExpansion:
 
     def test_scope_remains_report(self):
         root = _make_stable_repo(num_workflows=6)
-        review = review_system_report_stability(
-            root, now_override="2026-03-09T02:00:00Z"
-        )
+        review = review_system_report_stability(root, now_override="2026-03-09T02:00:00Z")
         assert review.system_scope == "report"
         assert "diagnose" not in review.next_action.lower() or "future" in review.next_action.lower()

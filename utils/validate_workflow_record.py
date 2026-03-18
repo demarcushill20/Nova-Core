@@ -12,9 +12,17 @@ REQUIRED_FIELDS: dict[str, type] = {
     "task_class": str,
 }
 
-VALID_STATUSES = frozenset({
-    "created", "planning", "executing", "completed", "failed", "halted", "rejected",
-})
+VALID_STATUSES = frozenset(
+    {
+        "created",
+        "planning",
+        "executing",
+        "completed",
+        "failed",
+        "halted",
+        "rejected",
+    }
+)
 
 
 def validate_workflow_record(

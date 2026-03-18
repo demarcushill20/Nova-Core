@@ -4,6 +4,7 @@ Persistent JSON-backed goal store for short-term and long-term priorities.
 Goals are injected into conversation context so CEO Nova naturally
 references them when relevant.
 """
+
 from __future__ import annotations
 
 import json
@@ -39,9 +40,7 @@ def _load() -> dict:
 def _save(data: dict) -> None:
     """Save goals to disk."""
     GOALS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    GOALS_FILE.write_text(
-        json.dumps(data, indent=2) + "\n", encoding="utf-8"
-    )
+    GOALS_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 def add_goal(text: str, priority: str = "normal") -> dict:

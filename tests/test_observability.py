@@ -35,6 +35,7 @@ from agents.observability import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, default=str) + "\n")
@@ -47,9 +48,17 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
             f.write(json.dumps(r, default=str) + "\n")
 
 
-def _make_workflow(tmp_path, workflow_id="wf01", task_id="task01",
-                   status="executing", created_at=None, budget=None,
-                   delegations=None, halt_reason=None, node_states=None):
+def _make_workflow(
+    tmp_path,
+    workflow_id="wf01",
+    task_id="task01",
+    status="executing",
+    created_at=None,
+    budget=None,
+    delegations=None,
+    halt_reason=None,
+    node_states=None,
+):
     wf = {
         "workflow_id": workflow_id,
         "task_id": task_id,
@@ -67,9 +76,16 @@ def _make_workflow(tmp_path, workflow_id="wf01", task_id="task01",
     return wf
 
 
-def _make_delegation(tmp_path, workflow_id="wf01", subtask_id="sub01",
-                     agent_id="agent01", role="coder", status="completed",
-                     claimed_at=None, completed_at=None):
+def _make_delegation(
+    tmp_path,
+    workflow_id="wf01",
+    subtask_id="sub01",
+    agent_id="agent01",
+    role="coder",
+    status="completed",
+    claimed_at=None,
+    completed_at=None,
+):
     d = {
         "workflow_id": workflow_id,
         "subtask_id": subtask_id,
@@ -86,8 +102,7 @@ def _make_delegation(tmp_path, workflow_id="wf01", subtask_id="sub01",
     return d
 
 
-def _make_agent_state(tmp_path, agent_id="agent01", status="idle",
-                      started_at=None, updated_at=None, workflow_id=None):
+def _make_agent_state(tmp_path, agent_id="agent01", status="idle", started_at=None, updated_at=None, workflow_id=None):
     a = {
         "agent_id": agent_id,
         "status": status,
@@ -103,8 +118,7 @@ def _make_agent_state(tmp_path, agent_id="agent01", status="idle",
     return a
 
 
-def _make_verification(tmp_path, workflow_id="wf01", verdict="approved",
-                       report_id=None):
+def _make_verification(tmp_path, workflow_id="wf01", verdict="approved", report_id=None):
     rid = report_id or f"vr_{workflow_id}_{int(time.time())}"
     v = {
         "report_id": rid,
@@ -116,8 +130,7 @@ def _make_verification(tmp_path, workflow_id="wf01", verdict="approved",
     return v
 
 
-def _make_lease(tmp_path, workflow_id="wf01", node_id="node01",
-                holder="agent01", expires_at=None):
+def _make_lease(tmp_path, workflow_id="wf01", node_id="node01", holder="agent01", expires_at=None):
     lease = {
         "workflow_id": workflow_id,
         "node_id": node_id,
@@ -148,6 +161,7 @@ def _make_audit_trail(tmp_path, records: list[dict]):
 # 1. Metric collection tests
 # ---------------------------------------------------------------------------
 
+
 class TestCollectMetrics:
     """Test metric aggregation from repository-native state."""
 
@@ -170,16 +184,14 @@ class TestCollectMetrics:
         assert m.failed_workflows == 1
 
     def test_halted_workflow_with_budget_exhaustion(self, tmp_path):
-        _make_workflow(tmp_path, status="halted",
-                       halt_reason="budget_exhausted: exceeded limit")
+        _make_workflow(tmp_path, status="halted", halt_reason="budget_exhausted: exceeded limit")
         m = collect_metrics(base=tmp_path)
         assert m.halted_workflows == 1
         assert m.budget_exhaustion_count == 1
 
     def test_delegation_counts_and_latency(self, tmp_path):
         now = time.time()
-        _make_delegation(tmp_path, subtask_id="s1", status="completed",
-                         claimed_at=now - 100, completed_at=now - 50)
+        _make_delegation(tmp_path, subtask_id="s1", status="completed", claimed_at=now - 100, completed_at=now - 50)
         _make_delegation(tmp_path, subtask_id="s2", status="failed")
         m = collect_metrics(base=tmp_path)
         assert m.total_delegations == 2
@@ -210,30 +222,34 @@ class TestCollectMetrics:
         assert m.contract_failure_rate == 0.3
 
     def test_policy_violations_from_audit(self, tmp_path):
-        _make_audit_trail(tmp_path, [
-            {"tool": "shell.run", "ok": True, "exit_code": 0},
-            {"tool": "shell.run", "ok": False, "exit_code": -1,
-             "error": "blocked by safety"},
-            {"tool": "repo.files.write", "ok": False, "exit_code": -1,
-             "error": "denied by policy"},
-        ])
+        _make_audit_trail(
+            tmp_path,
+            [
+                {"tool": "shell.run", "ok": True, "exit_code": 0},
+                {"tool": "shell.run", "ok": False, "exit_code": -1, "error": "blocked by safety"},
+                {"tool": "repo.files.write", "ok": False, "exit_code": -1, "error": "denied by policy"},
+            ],
+        )
         m = collect_metrics(base=tmp_path)
         assert m.policy_violation_count == 2
 
     def test_retry_count_from_node_states(self, tmp_path):
-        _make_workflow(tmp_path, node_states={
-            "node1": {"retry_count": 2},
-            "node2": {"retry_count": 1},
-        })
+        _make_workflow(
+            tmp_path,
+            node_states={
+                "node1": {"retry_count": 2},
+                "node2": {"retry_count": 1},
+            },
+        )
         _make_delegation(tmp_path)  # 1 delegation for retry_rate calc
         m = collect_metrics(base=tmp_path)
         assert m.retry_count == 3
 
     def test_orphaned_agent_count(self, tmp_path):
         # Agent executing since long ago
-        _make_agent_state(tmp_path, agent_id="stuck_agent",
-                          status="executing",
-                          started_at=time.time() - AGENT_EXECUTING_SLA_S - 100)
+        _make_agent_state(
+            tmp_path, agent_id="stuck_agent", status="executing", started_at=time.time() - AGENT_EXECUTING_SLA_S - 100
+        )
         m = collect_metrics(base=tmp_path)
         assert m.orphaned_agent_count == 1
 
@@ -244,38 +260,37 @@ class TestCollectMetrics:
         assert m.active_lease_count == 1
 
     def test_most_rejected_tool(self, tmp_path):
-        _make_audit_trail(tmp_path, [
-            {"tool": "shell.run", "ok": False, "exit_code": -1,
-             "error": "blocked"},
-            {"tool": "shell.run", "ok": False, "exit_code": -1,
-             "error": "blocked"},
-            {"tool": "repo.files.write", "ok": False, "exit_code": -1,
-             "error": "denied"},
-        ])
+        _make_audit_trail(
+            tmp_path,
+            [
+                {"tool": "shell.run", "ok": False, "exit_code": -1, "error": "blocked"},
+                {"tool": "shell.run", "ok": False, "exit_code": -1, "error": "blocked"},
+                {"tool": "repo.files.write", "ok": False, "exit_code": -1, "error": "denied"},
+            ],
+        )
         m = collect_metrics(base=tmp_path)
         assert m.most_rejected_tool == "shell.run"
 
     def test_most_overloaded_role(self, tmp_path):
-        _make_delegation(tmp_path, subtask_id="s1", agent_id="a1",
-                         role="coder", status="executing")
-        _make_delegation(tmp_path, subtask_id="s2", agent_id="a2",
-                         role="coder", status="claimed")
-        _make_delegation(tmp_path, subtask_id="s3", agent_id="a3",
-                         role="research", status="executing")
+        _make_delegation(tmp_path, subtask_id="s1", agent_id="a1", role="coder", status="executing")
+        _make_delegation(tmp_path, subtask_id="s2", agent_id="a2", role="coder", status="claimed")
+        _make_delegation(tmp_path, subtask_id="s3", agent_id="a3", role="research", status="executing")
         m = collect_metrics(base=tmp_path)
         assert m.most_overloaded_role == "coder"
 
     def test_max_dependency_wait(self, tmp_path):
-        _make_agent_state(tmp_path, agent_id="waiter", status="waiting",
-                          updated_at=time.time() - 300)
+        _make_agent_state(tmp_path, agent_id="waiter", status="waiting", updated_at=time.time() - 300)
         m = collect_metrics(base=tmp_path)
         assert m.max_dependency_wait_s is not None
         assert m.max_dependency_wait_s >= 299.0
 
     def test_no_rejected_tool_when_clean(self, tmp_path):
-        _make_audit_trail(tmp_path, [
-            {"tool": "shell.run", "ok": True, "exit_code": 0},
-        ])
+        _make_audit_trail(
+            tmp_path,
+            [
+                {"tool": "shell.run", "ok": True, "exit_code": 0},
+            ],
+        )
         m = collect_metrics(base=tmp_path)
         assert m.most_rejected_tool is None
 
@@ -283,6 +298,7 @@ class TestCollectMetrics:
 # ---------------------------------------------------------------------------
 # 2. Health detection tests
 # ---------------------------------------------------------------------------
+
 
 class TestDetectHealthIssues:
     """Test health detection rules."""
@@ -316,7 +332,9 @@ class TestDetectHealthIssues:
 
     def test_stuck_agent_detected(self, tmp_path):
         _make_agent_state(
-            tmp_path, agent_id="slow_agent", status="executing",
+            tmp_path,
+            agent_id="slow_agent",
+            status="executing",
             started_at=time.time() - AGENT_EXECUTING_SLA_S - 100,
         )
         findings = detect_health_issues(base=tmp_path)
@@ -327,7 +345,9 @@ class TestDetectHealthIssues:
 
     def test_stale_dependency_wait_detected(self, tmp_path):
         _make_agent_state(
-            tmp_path, agent_id="waiting_agent", status="waiting",
+            tmp_path,
+            agent_id="waiting_agent",
+            status="waiting",
             updated_at=time.time() - DEPENDENCY_WAIT_SLA_S - 100,
         )
         findings = detect_health_issues(base=tmp_path)
@@ -336,8 +356,7 @@ class TestDetectHealthIssues:
         assert waits[0].severity == Severity.WARNING
 
     def test_orphaned_lease_detected(self, tmp_path):
-        _make_lease(tmp_path, holder="dead_agent",
-                    expires_at=time.time() - 300)
+        _make_lease(tmp_path, holder="dead_agent", expires_at=time.time() - 300)
         findings = detect_health_issues(base=tmp_path)
         orphans = [f for f in findings if f.category == "orphan"]
         assert len(orphans) >= 1
@@ -352,7 +371,8 @@ class TestDetectHealthIssues:
 
     def test_budget_exhausted(self, tmp_path):
         _make_workflow(
-            tmp_path, status="executing",
+            tmp_path,
+            status="executing",
             created_at=time.time() - 2000,
             budget={"max_runtime_s": 1800},
         )
@@ -365,7 +385,8 @@ class TestDetectHealthIssues:
         max_runtime = 1800
         # 90% elapsed → 10% remaining → below 15% threshold
         _make_workflow(
-            tmp_path, status="executing",
+            tmp_path,
+            status="executing",
             created_at=time.time() - max_runtime * 0.90,
             budget={"max_runtime_s": max_runtime},
         )
@@ -376,25 +397,21 @@ class TestDetectHealthIssues:
 
     def test_repeated_verifier_rejections(self, tmp_path):
         _make_workflow(tmp_path, workflow_id="wf_reject", status="executing")
-        _make_verification(tmp_path, workflow_id="wf_reject",
-                           verdict="rejected", report_id="v1")
-        _make_verification(tmp_path, workflow_id="wf_reject",
-                           verdict="rejected", report_id="v2")
+        _make_verification(tmp_path, workflow_id="wf_reject", verdict="rejected", report_id="v1")
+        _make_verification(tmp_path, workflow_id="wf_reject", verdict="rejected", report_id="v2")
         findings = detect_health_issues(base=tmp_path)
         verifier = [f for f in findings if f.category == "verifier_failure"]
         assert len(verifier) == 1
         assert verifier[0].severity == Severity.UNHEALTHY
 
     def test_unresolved_child_contract(self, tmp_path):
-        _make_workflow(tmp_path, status="completed",
-                       delegations=["sub_missing"])
+        _make_workflow(tmp_path, status="completed", delegations=["sub_missing"])
         findings = detect_health_issues(base=tmp_path)
         gaps = [f for f in findings if f.category == "contract_gap"]
         assert len(gaps) == 1
 
     def test_healthy_workflow_no_findings(self, tmp_path):
-        _make_workflow(tmp_path, status="completed",
-                       created_at=time.time() - 60)
+        _make_workflow(tmp_path, status="completed", created_at=time.time() - 60)
         findings = detect_health_issues(base=tmp_path)
         assert len(findings) == 0
 
@@ -402,6 +419,7 @@ class TestDetectHealthIssues:
 # ---------------------------------------------------------------------------
 # 3. Report generation tests
 # ---------------------------------------------------------------------------
+
 
 class TestReportGeneration:
     """Test heartbeat report generation and rendering."""
@@ -414,7 +432,8 @@ class TestReportGeneration:
 
     def test_generate_with_issues(self, tmp_path):
         _make_workflow(
-            tmp_path, status="executing",
+            tmp_path,
+            status="executing",
             created_at=time.time() - WORKFLOW_EXECUTING_SLA_S - 100,
         )
         report = generate_health_report(base=tmp_path)
@@ -422,15 +441,13 @@ class TestReportGeneration:
         assert len(report.findings) >= 1
 
     def test_report_includes_workflow_summaries(self, tmp_path):
-        _make_workflow(tmp_path, workflow_id="wf_test", task_id="task_123",
-                       status="completed")
+        _make_workflow(tmp_path, workflow_id="wf_test", task_id="task_123", status="completed")
         report = generate_health_report(base=tmp_path)
         assert len(report.workflow_summaries) == 1
         assert report.workflow_summaries[0]["workflow_id"] == "wf_test"
 
     def test_render_markdown(self, tmp_path):
-        _make_workflow(tmp_path, status="executing",
-                       created_at=time.time() - 100)
+        _make_workflow(tmp_path, status="executing", created_at=time.time() - 100)
         _make_metrics_json(tmp_path, contract_success=5, contract_failure=2)
         report = generate_health_report(base=tmp_path)
         md = render_report_markdown(report)
@@ -457,16 +474,14 @@ class TestReportGeneration:
 
     def test_run_multiagent_heartbeat_e2e(self, tmp_path):
         # Full end-to-end: state → report → files
-        _make_workflow(tmp_path, status="executing",
-                       created_at=time.time() - 100)
+        _make_workflow(tmp_path, status="executing", created_at=time.time() - 100)
         _make_delegation(tmp_path, status="completed")
         _make_agent_state(tmp_path)
         _make_metrics_json(tmp_path, contract_success=10, contract_failure=1)
 
         report = run_multiagent_heartbeat(base=tmp_path)
 
-        assert report.overall in (Severity.HEALTHY, Severity.WARNING,
-                                   Severity.UNHEALTHY)
+        assert report.overall in (Severity.HEALTHY, Severity.WARNING, Severity.UNHEALTHY)
         assert report.metrics.active_workflows == 1
         assert report.metrics.contract_success_count == 10
 
@@ -477,7 +492,9 @@ class TestReportGeneration:
     def test_overall_warning_not_unhealthy(self, tmp_path):
         # Warning-level issue only → overall should be WARNING
         _make_agent_state(
-            tmp_path, agent_id="waiter", status="waiting",
+            tmp_path,
+            agent_id="waiter",
+            status="waiting",
             updated_at=time.time() - DEPENDENCY_WAIT_SLA_S - 10,
         )
         report = generate_health_report(base=tmp_path)
@@ -487,7 +504,9 @@ class TestReportGeneration:
         # Create multiple issues of same category
         for i in range(3):
             _make_agent_state(
-                tmp_path, agent_id=f"stuck_{i}", status="executing",
+                tmp_path,
+                agent_id=f"stuck_{i}",
+                status="executing",
                 started_at=time.time() - AGENT_EXECUTING_SLA_S - 100,
             )
         report = generate_health_report(base=tmp_path)
@@ -500,8 +519,7 @@ class TestReportGeneration:
         assert "No issues detected" in md
 
     def test_markdown_shows_findings_when_unhealthy(self, tmp_path):
-        _make_workflow(tmp_path, status="executing",
-                       created_at=time.time() - WORKFLOW_EXECUTING_SLA_S - 100)
+        _make_workflow(tmp_path, status="executing", created_at=time.time() - WORKFLOW_EXECUTING_SLA_S - 100)
         report = generate_health_report(base=tmp_path)
         md = render_report_markdown(report)
         assert "workflow_stuck" in md
@@ -511,6 +529,7 @@ class TestReportGeneration:
 # ---------------------------------------------------------------------------
 # 4. Contract failure rate tracking test
 # ---------------------------------------------------------------------------
+
 
 class TestContractFailureRate:
     """Explicit test for contract failure rate metric."""
@@ -528,36 +547,36 @@ class TestContractFailureRate:
     def test_high_failure_rate_in_bottlenecks(self, tmp_path):
         _make_metrics_json(tmp_path, contract_success=3, contract_failure=7)
         report = generate_health_report(base=tmp_path)
-        assert any("contract failure rate" in b.lower()
-                    for b in report.top_bottlenecks)
+        assert any("contract failure rate" in b.lower() for b in report.top_bottlenecks)
 
 
 class TestNewMetricsInReport:
     """Test most_rejected_tool, most_overloaded_role, max_dependency_wait in report."""
 
     def test_rejected_tool_in_bottlenecks(self, tmp_path):
-        _make_audit_trail(tmp_path, [
-            {"tool": "shell.run", "ok": False, "exit_code": -1,
-             "error": "blocked by policy"},
-        ])
+        _make_audit_trail(
+            tmp_path,
+            [
+                {"tool": "shell.run", "ok": False, "exit_code": -1, "error": "blocked by policy"},
+            ],
+        )
         report = generate_health_report(base=tmp_path)
         assert any("shell.run" in b for b in report.top_bottlenecks)
 
     def test_overloaded_role_in_bottlenecks(self, tmp_path):
-        _make_delegation(tmp_path, subtask_id="s1", role="coder",
-                         status="executing")
+        _make_delegation(tmp_path, subtask_id="s1", role="coder", status="executing")
         report = generate_health_report(base=tmp_path)
         assert any("coder" in b for b in report.top_bottlenecks)
 
     def test_new_metrics_in_markdown(self, tmp_path):
-        _make_audit_trail(tmp_path, [
-            {"tool": "shell.run", "ok": False, "exit_code": -1,
-             "error": "denied"},
-        ])
-        _make_delegation(tmp_path, subtask_id="s1", role="research",
-                         status="executing")
-        _make_agent_state(tmp_path, agent_id="w1", status="waiting",
-                          updated_at=time.time() - 120)
+        _make_audit_trail(
+            tmp_path,
+            [
+                {"tool": "shell.run", "ok": False, "exit_code": -1, "error": "denied"},
+            ],
+        )
+        _make_delegation(tmp_path, subtask_id="s1", role="research", status="executing")
+        _make_agent_state(tmp_path, agent_id="w1", status="waiting", updated_at=time.time() - 120)
         report = generate_health_report(base=tmp_path)
         md = render_report_markdown(report)
         assert "Most rejected tool" in md

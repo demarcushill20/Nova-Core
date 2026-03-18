@@ -158,22 +158,28 @@ class TestClassifyOutput:
 
     def test_valid_contract(self, auditor: ContractAudit):
         rec = ContractAuditRecord(
-            output_file="0030_x.md", task_id="0030",
-            has_contract=True, valid_contract=True,
+            output_file="0030_x.md",
+            task_id="0030",
+            has_contract=True,
+            valid_contract=True,
         )
         assert auditor.classify_output(rec) == "post_contract_valid"
 
     def test_invalid_contract_post(self, auditor: ContractAudit):
         rec = ContractAuditRecord(
-            output_file="0030_x.md", task_id="0030",
-            has_contract=True, valid_contract=False,
+            output_file="0030_x.md",
+            task_id="0030",
+            has_contract=True,
+            valid_contract=False,
         )
         assert auditor.classify_output(rec) == "post_contract_invalid"
 
     def test_invalid_contract_legacy(self, auditor: ContractAudit):
         rec = ContractAuditRecord(
-            output_file="0010_x.md", task_id="0010",
-            has_contract=True, valid_contract=False,
+            output_file="0010_x.md",
+            task_id="0010",
+            has_contract=True,
+            valid_contract=False,
         )
         assert auditor.classify_output(rec) == "legacy_pre_contract"
 

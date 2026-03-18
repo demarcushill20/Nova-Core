@@ -17,6 +17,7 @@ def tmp_store(tmp_path: Path) -> SkillHistoryStore:
 
 # -- creates file if missing -------------------------------------------------
 
+
 def test_creates_file_if_missing(tmp_path: Path):
     p = tmp_path / "subdir" / "history.json"
     assert not p.exists()
@@ -28,6 +29,7 @@ def test_creates_file_if_missing(tmp_path: Path):
 
 
 # -- record success -----------------------------------------------------------
+
 
 def test_record_success(tmp_store: SkillHistoryStore):
     tmp_store.record_run("code_improve", success=True, duration_ms=1500, retries=0)
@@ -42,6 +44,7 @@ def test_record_success(tmp_store: SkillHistoryStore):
 
 # -- record failure -----------------------------------------------------------
 
+
 def test_record_failure(tmp_store: SkillHistoryStore):
     tmp_store.record_run("log_triage", success=False, duration_ms=3000, retries=2)
     stats = tmp_store.get_stats("log_triage")
@@ -53,6 +56,7 @@ def test_record_failure(tmp_store: SkillHistoryStore):
 
 
 # -- computes success rate ----------------------------------------------------
+
 
 def test_success_rate_basic(tmp_store: SkillHistoryStore):
     tmp_store.record_run("shell_ops", success=True, duration_ms=100, retries=0)
@@ -79,6 +83,7 @@ def test_success_rate_unknown_skill(tmp_store: SkillHistoryStore):
 
 # -- computes recency score ---------------------------------------------------
 
+
 def test_recency_score_recently_used(tmp_store: SkillHistoryStore):
     tmp_store.record_run("web_research", success=True, duration_ms=500, retries=0)
     score = tmp_store.get_recency_score("web_research")
@@ -102,6 +107,7 @@ def test_recency_score_updates_on_new_record(tmp_store: SkillHistoryStore):
 
 # -- tolerates empty file -----------------------------------------------------
 
+
 def test_empty_file(tmp_path: Path):
     p = tmp_path / "history.json"
     p.write_text("")
@@ -112,6 +118,7 @@ def test_empty_file(tmp_path: Path):
 
 
 # -- tolerates corrupt JSON ---------------------------------------------------
+
 
 def test_corrupt_json(tmp_path: Path):
     p = tmp_path / "history.json"
@@ -125,6 +132,7 @@ def test_corrupt_json(tmp_path: Path):
 
 # -- avg_duration_ms ----------------------------------------------------------
 
+
 def test_avg_duration_ms(tmp_store: SkillHistoryStore):
     tmp_store.record_run("code_improve", success=True, duration_ms=1000, retries=0)
     tmp_store.record_run("code_improve", success=True, duration_ms=2000, retries=0)
@@ -135,6 +143,7 @@ def test_avg_duration_ms(tmp_store: SkillHistoryStore):
 
 # -- total_retries ------------------------------------------------------------
 
+
 def test_total_retries_accumulated(tmp_store: SkillHistoryStore):
     tmp_store.record_run("code_improve", success=True, duration_ms=100, retries=1)
     tmp_store.record_run("code_improve", success=False, duration_ms=100, retries=2)
@@ -143,6 +152,7 @@ def test_total_retries_accumulated(tmp_store: SkillHistoryStore):
 
 
 # -- persistence round-trip ---------------------------------------------------
+
 
 def test_persistence_round_trip(tmp_path: Path):
     p = tmp_path / "history.json"
@@ -158,6 +168,7 @@ def test_persistence_round_trip(tmp_path: Path):
 
 # -- load/save API ------------------------------------------------------------
 
+
 def test_load_returns_dict(tmp_store: SkillHistoryStore):
     result = tmp_store.load()
     assert isinstance(result, dict)
@@ -166,21 +177,24 @@ def test_load_returns_dict(tmp_store: SkillHistoryStore):
 def test_save_persists(tmp_path: Path):
     p = tmp_path / "history.json"
     store = SkillHistoryStore(path=p)
-    store.save({
-        "test_skill": {
-            "runs": 1,
-            "successes": 1,
-            "failures": 0,
-            "avg_duration_ms": 100,
-            "last_used_ts": "2026-03-06T00:00:00Z",
-            "total_retries": 0,
+    store.save(
+        {
+            "test_skill": {
+                "runs": 1,
+                "successes": 1,
+                "failures": 0,
+                "avg_duration_ms": 100,
+                "last_used_ts": "2026-03-06T00:00:00Z",
+                "total_retries": 0,
+            }
         }
-    })
+    )
     data = json.loads(p.read_text())
     assert data["test_skill"]["runs"] == 1
 
 
 # -- exact JSON shape ---------------------------------------------------------
+
 
 def test_exact_json_shape(tmp_store: SkillHistoryStore):
     tmp_store.record_run("code_improve", success=True, duration_ms=1420, retries=0)

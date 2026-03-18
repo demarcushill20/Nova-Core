@@ -69,9 +69,7 @@ class DLPBlockedError(Exception):
     def __init__(self, result: DLPResult) -> None:
         self.result = result
         names = [f.pattern_name for f in result.findings if f.severity == "critical"]
-        super().__init__(
-            f"DLP blocked output: critical findings {names}"
-        )
+        super().__init__(f"DLP blocked output: critical findings {names}")
 
 
 # ------------------------------------------------------------------
@@ -218,29 +216,24 @@ _PII_PATTERNS = _build_pii_patterns()
 _SYSTEM_PATH_PATTERNS = _build_system_path_patterns()
 _SENSITIVE_FILE_PATTERNS = _build_sensitive_file_patterns()
 
-_ALL_PATTERNS: list[_PatternEntry] = (
-    _SECRET_PATTERNS
-    + _PII_PATTERNS
-    + _SYSTEM_PATH_PATTERNS
-    + _SENSITIVE_FILE_PATTERNS
-)
+_ALL_PATTERNS: list[_PatternEntry] = _SECRET_PATTERNS + _PII_PATTERNS + _SYSTEM_PATH_PATTERNS + _SENSITIVE_FILE_PATTERNS
 
 # Contexts where IP addresses are elevated to "high" severity.
-_IP_SENSITIVE_CONTEXTS = frozenset({
-    "telegram_outbound",
-    "memory_store",
-    "file_write",
-    "api_response",
-})
+_IP_SENSITIVE_CONTEXTS = frozenset(
+    {
+        "telegram_outbound",
+        "memory_store",
+        "file_write",
+        "api_response",
+    }
+)
 
 
 # ------------------------------------------------------------------
 # Credit card validation (Luhn algorithm)
 # ------------------------------------------------------------------
 
-_CC_CANDIDATE_RE = re.compile(
-    r"(?<!\d)(\d[ -]?){13,19}(?!\d)"
-)
+_CC_CANDIDATE_RE = re.compile(r"(?<!\d)(\d[ -]?){13,19}(?!\d)")
 
 
 def _luhn_check(number: str) -> bool:
@@ -503,9 +496,7 @@ def dlp_protected(
 
             scan_result = dlp.scan(result, context=context)
 
-            if scan_result.action == "block" or (
-                action == "block" and scan_result.findings
-            ):
+            if scan_result.action == "block" or (action == "block" and scan_result.findings):
                 raise DLPBlockedError(scan_result)
 
             if scan_result.action == "redact":

@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
-# Add project root to path  # noqa: E402
+# Add project root to path
 _here = str(Path(__file__).resolve().parent.parent)
 if _here not in sys.path:
     sys.path.insert(0, _here)

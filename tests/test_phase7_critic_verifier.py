@@ -24,6 +24,7 @@ from agents.workflow_gate import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _bb(tmp_path: Path) -> Blackboard:
     """Create a Blackboard rooted in a temp directory."""
     return Blackboard(base=tmp_path)
@@ -55,8 +56,7 @@ def _bad_contract_bad_confidence() -> dict:
     }
 
 
-def _make_deliverable_file(tmp_path: Path, name: str = "output.md",
-                           content: str = "result") -> str:
+def _make_deliverable_file(tmp_path: Path, name: str = "output.md", content: str = "result") -> str:
     p = tmp_path / name
     p.write_text(content)
     return str(p)
@@ -65,6 +65,7 @@ def _make_deliverable_file(tmp_path: Path, name: str = "output.md",
 # ===========================================================================
 # 1. Critic: structured blocking objection
 # ===========================================================================
+
 
 class TestCriticObjection:
     """AC: critic can emit a structured blocking objection."""
@@ -103,7 +104,8 @@ class TestCriticObjection:
         critic = CriticEngine(blackboard=bb)
         fpath = _make_deliverable_file(tmp_path, "good.md", "content here")
         review = critic.review(
-            "wf_4", "node_d",
+            "wf_4",
+            "node_d",
             deliverables={"good.md": fpath},
             contract=_good_contract(),
         )
@@ -116,7 +118,8 @@ class TestCriticObjection:
         critic = CriticEngine(blackboard=bb)
         fpath = _make_deliverable_file(tmp_path, "out.md", "ok")
         review = critic.review(
-            "wf_5", "node_e",
+            "wf_5",
+            "node_e",
             deliverables={"out.md": fpath},
             contract=_bad_contract_missing_field(),  # high severity: missing fields
         )
@@ -135,15 +138,13 @@ class TestCriticObjection:
         critic = CriticEngine(blackboard=bb)
         fpath = _make_deliverable_file(tmp_path, "empty.md", "")
         review = critic.review("wf_6", "node_f", deliverables={"empty.md": fpath})
-        assert any(
-            i.reason_code == "empty_file" or i.reason_code == "empty_deliverable"
-            for i in review.issues
-        )
+        assert any(i.reason_code == "empty_file" or i.reason_code == "empty_deliverable" for i in review.issues)
 
 
 # ===========================================================================
 # 2. Critic: deterministic reroute/replan signal
 # ===========================================================================
+
 
 class TestCriticReplanSignal:
     """AC: critic objection produces a deterministic reroute/replan signal."""
@@ -194,8 +195,7 @@ class TestCriticReplanSignal:
         bb = _bb(tmp_path)
         critic = CriticEngine(blackboard=bb)
         fpath = _make_deliverable_file(tmp_path, "ok.md", "content")
-        critic.review("wf_14", "node_v", deliverables={"ok.md": fpath},
-                       contract=_good_contract())
+        critic.review("wf_14", "node_v", deliverables={"ok.md": fpath}, contract=_good_contract())
         signals = critic.list_pending_replans("wf_14")
         assert len(signals) == 0
 
@@ -203,6 +203,7 @@ class TestCriticReplanSignal:
 # ===========================================================================
 # 3. Verifier: failed verification blocks completion
 # ===========================================================================
+
 
 class TestVerifierBlocking:
     """AC: failed verification blocks completion."""
@@ -280,6 +281,7 @@ class TestVerifierBlocking:
 # 4. Verifier: accepted verification allows finalization
 # ===========================================================================
 
+
 class TestVerifierApproval:
     """AC: accepted verification allows synthesis/finalization to proceed."""
 
@@ -300,8 +302,7 @@ class TestVerifierApproval:
         bb = _bb(tmp_path)
         verifier = VerifierEngine(blackboard=bb)
         fpath = _make_deliverable_file(tmp_path, "ok.md", "data")
-        verifier.verify("wf_31", deliverables={"ok.md": fpath},
-                        contracts=[_good_contract()])
+        verifier.verify("wf_31", deliverables={"ok.md": fpath}, contracts=[_good_contract()])
         assert verifier.is_workflow_approved("wf_31") is True
 
     def test_float_confidence_accepted(self, tmp_path):
@@ -310,14 +311,14 @@ class TestVerifierApproval:
         fpath = _make_deliverable_file(tmp_path, "ok.md", "data")
         contract = _good_contract()
         contract["confidence"] = "0.85"
-        report = verifier.verify("wf_32", deliverables={"ok.md": fpath},
-                                 contracts=[contract])
+        report = verifier.verify("wf_32", deliverables={"ok.md": fpath}, contracts=[contract])
         assert report.verdict == "approved"
 
 
 # ===========================================================================
 # 5. Maker-checker: repo-changing paths need verifier approval
 # ===========================================================================
+
 
 class TestMakerChecker:
     """AC: repo-changing workflow paths cannot finalize without verifier approval."""
@@ -385,6 +386,7 @@ class TestMakerChecker:
 # 6. Contract validation: rejects missing fields for gated paths
 # ===========================================================================
 
+
 class TestContractValidation:
     """AC: contract validation rejects missing required contract structure."""
 
@@ -431,6 +433,7 @@ class TestContractValidation:
 # ===========================================================================
 # 7. WorkflowGate: integration seam
 # ===========================================================================
+
 
 class TestWorkflowGate:
     """AC: integration of critic + verifier into workflow gate."""
@@ -511,10 +514,12 @@ class TestWorkflowGate:
     def test_validate_contracts_batch(self, tmp_path):
         bb = _bb(tmp_path)
         gate = WorkflowGate(blackboard=bb)
-        valid, errors = gate.validate_contracts_for_completion([
-            _good_contract(),
-            _bad_contract_missing_field(),
-        ])
+        valid, errors = gate.validate_contracts_for_completion(
+            [
+                _good_contract(),
+                _bad_contract_missing_field(),
+            ]
+        )
         assert valid is False
         assert any("contract #1" in e for e in errors)
 
@@ -537,7 +542,8 @@ class TestWorkflowGate:
         # Create objection with file_not_found (retryable)
         fpath = "/nonexistent/file.md"
         gate.run_critic_review(
-            "wf_57", "node_a",
+            "wf_57",
+            "node_a",
             deliverables={"missing": fpath},
         )
         decisions = gate.check_replan_signals("wf_57")
@@ -575,6 +581,7 @@ if __name__ == "__main__":
             method = getattr(instance, name)
             try:
                 import inspect
+
                 sig = inspect.signature(method)
                 if "tmp_path" in sig.parameters:
                     with tempfile.TemporaryDirectory() as td:

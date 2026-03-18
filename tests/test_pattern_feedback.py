@@ -18,6 +18,7 @@ from planner.pattern_feedback import (
 # Test helpers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MockStep:
     step_id: str = "test_step"
@@ -36,11 +37,13 @@ class MockPlan:
 
 def _plan_with_patterns(guidance="## Pattern guidance", paths=None):
     """Create a mock plan with pattern guidance injected."""
-    step = MockStep(inputs={
-        "task_text": "research multi-query strategy",
-        "pattern_guidance": guidance,
-        "pattern_paths": paths or ["20-agent-patterns/test.md"],
-    })
+    step = MockStep(
+        inputs={
+            "task_text": "research multi-query strategy",
+            "pattern_guidance": guidance,
+            "pattern_paths": paths or ["20-agent-patterns/test.md"],
+        }
+    )
     return MockPlan(steps=[step])
 
 
@@ -83,6 +86,7 @@ def _rejected_summary():
 # Trace initialization
 # ===================================================================
 
+
 class TestInitPatternTrace:
     def test_with_pattern_guidance(self):
         plan = _plan_with_patterns()
@@ -115,11 +119,13 @@ class TestInitPatternTrace:
 
     def test_paths_found_but_no_guidance(self):
         """Patterns were found by search but no extractable guidance."""
-        step = MockStep(inputs={
-            "task_text": "test",
-            "pattern_guidance": "",
-            "pattern_paths": ["20-agent-patterns/found.md"],
-        })
+        step = MockStep(
+            inputs={
+                "task_text": "test",
+                "pattern_guidance": "",
+                "pattern_paths": ["20-agent-patterns/found.md"],
+            }
+        )
         plan = MockPlan(steps=[step])
         trace = init_pattern_trace("0054", "research", plan)
 
@@ -143,6 +149,7 @@ class TestInitPatternTrace:
 # ===================================================================
 # Usefulness computation
 # ===================================================================
+
 
 class TestComputeUsefulness:
     def test_not_injected(self):
@@ -200,6 +207,7 @@ class TestComputeUsefulness:
 # ===================================================================
 # Trace finalization
 # ===================================================================
+
 
 class TestFinalizePatternTrace:
     def test_finalize_useful(self):
@@ -259,6 +267,7 @@ class TestFinalizePatternTrace:
 # Trace logging
 # ===================================================================
 
+
 class TestLogPatternTrace:
     def test_logs_to_jsonl(self):
         with tempfile.TemporaryDirectory() as tmpdir, patch("planner.pattern_feedback.LOGS_DIR", Path(tmpdir)):
@@ -299,12 +308,14 @@ class TestLogPatternTrace:
 # Safety boundaries
 # ===================================================================
 
+
 class TestSafetyBoundaries:
     def test_no_vault_writes(self):
         """pattern_feedback module has no vault write imports."""
         import inspect
 
         import planner.pattern_feedback as pf
+
         source = inspect.getsource(pf)
         assert "vault_write" not in source
         assert "vault_update" not in source
@@ -312,6 +323,7 @@ class TestSafetyBoundaries:
     def test_log_is_runtime_only(self):
         """Log path is in LOGS/, not in the vault."""
         from planner.pattern_feedback import LOGS_DIR
+
         assert "LOGS" in str(LOGS_DIR)
         assert "nova-vault" not in str(LOGS_DIR)
 
@@ -340,6 +352,7 @@ class TestSafetyBoundaries:
 # Orchestrator integration
 # ===================================================================
 
+
 class TestOrchestratorIntegration:
     def test_feedback_imports(self):
         from planner.pattern_feedback import (
@@ -347,6 +360,7 @@ class TestOrchestratorIntegration:
             init_pattern_trace,
             log_pattern_trace,
         )
+
         assert callable(init_pattern_trace)
         assert callable(finalize_pattern_trace)
         assert callable(log_pattern_trace)
@@ -355,6 +369,7 @@ class TestOrchestratorIntegration:
         import inspect
 
         import tools.orchestrator_adapter as oa
+
         source = inspect.getsource(oa.execute_via_orchestrator)
         assert "init_pattern_trace" in source
         assert "finalize_pattern_trace" in source
@@ -366,5 +381,6 @@ class TestOrchestratorIntegration:
         import inspect
 
         import tools.orchestrator_adapter as oa
+
         source = inspect.getsource(oa.execute_via_orchestrator)
         assert '"pattern_feedback"' in source

@@ -164,9 +164,11 @@ def test_verify_success_records_metric(tmp_path):
     out_file.write_text(VALID_OUTPUT, encoding="utf-8")
     out_file.touch()
 
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.METRICS_FILE", metrics), \
-         patch("watcher.TASKS_DIR", tmp_path / "TASKS"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.METRICS_FILE", metrics),
+        patch("watcher.TASKS_DIR", tmp_path / "TASKS"),
+    ):
         passed, msgs = verify_artifacts("0040_metrics")
 
     assert passed is True
@@ -187,10 +189,12 @@ def test_verify_failure_records_metric(tmp_path):
     out_file.write_text(MISSING_CONTRACT, encoding="utf-8")
     out_file.touch()
 
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.METRICS_FILE", metrics), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", out_dir):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.METRICS_FILE", metrics),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.OUTPUT_DIR", out_dir),
+    ):
         passed, msgs = verify_artifacts("0041_broken")
 
     assert passed is False
@@ -210,10 +214,12 @@ def test_verify_failure_records_retry_issued(tmp_path):
     out_file.write_text(MISSING_CONTRACT, encoding="utf-8")
     out_file.touch()
 
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.METRICS_FILE", metrics), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", out_dir):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.METRICS_FILE", metrics),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.OUTPUT_DIR", out_dir),
+    ):
         verify_artifacts("0041_broken")
 
     data = json.loads(metrics.read_text(encoding="utf-8"))
@@ -230,9 +236,11 @@ def test_retry_success_metric(tmp_path):
     out_file.write_text(VALID_OUTPUT, encoding="utf-8")
     out_file.touch()
 
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.METRICS_FILE", metrics), \
-         patch("watcher.TASKS_DIR", tmp_path / "TASKS"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.METRICS_FILE", metrics),
+        patch("watcher.TASKS_DIR", tmp_path / "TASKS"),
+    ):
         passed, msgs = verify_artifacts("0041_broken__retry1")
 
     assert passed is True
@@ -253,10 +261,12 @@ def test_retry_failure_metric(tmp_path):
     out_file.write_text(MISSING_CONTRACT, encoding="utf-8")
     out_file.touch()
 
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.METRICS_FILE", metrics), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", out_dir):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.METRICS_FILE", metrics),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.OUTPUT_DIR", out_dir),
+    ):
         passed, msgs = verify_artifacts("0041_broken__retry1")
 
     assert passed is False
@@ -274,9 +284,11 @@ def test_no_output_no_metrics(tmp_path):
     tasks_dir = tmp_path / "TASKS"
     tasks_dir.mkdir()
 
-    with patch("watcher._find_recent_output", return_value=None), \
-         patch("watcher.METRICS_FILE", metrics), \
-         patch("watcher.TASKS_DIR", tasks_dir):
+    with (
+        patch("watcher._find_recent_output", return_value=None),
+        patch("watcher.METRICS_FILE", metrics),
+        patch("watcher.TASKS_DIR", tasks_dir),
+    ):
         passed, msgs = verify_artifacts("0099_missing")
 
     assert passed is False

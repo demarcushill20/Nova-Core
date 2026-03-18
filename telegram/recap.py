@@ -7,6 +7,7 @@ expires (2hr idle → new session).
 Storage: STATE/conversation_recap/{chat_id}.json
 Max age: 8 hours (beyond that, recap is too stale to be useful)
 """
+
 from __future__ import annotations
 
 import json
@@ -37,8 +38,7 @@ def load_recap(chat_id: str) -> dict | None:
         # Check staleness
         updated_at = data.get("updated_at", 0)
         if time.time() - updated_at > MAX_RECAP_AGE_SECONDS:
-            _log.info("RECAP_STALE chat=%s age_h=%.1f",
-                      chat_id, (time.time() - updated_at) / 3600)
+            _log.info("RECAP_STALE chat=%s age_h=%.1f", chat_id, (time.time() - updated_at) / 3600)
             return None
         return data
     except (json.JSONDecodeError, OSError) as e:

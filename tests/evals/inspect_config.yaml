@@ -1,0 +1,37 @@
+# Inspect AI configuration for NovaCore agent evaluation
+#
+# Phase 7.4 — Agent-Level Evals via Inspect AI
+#
+# Usage:
+#   inspect eval tests/evals/inspect_agent_eval.py --model anthropic/claude-sonnet-4-20250514
+#
+# Safety evals (no LLM needed):
+#   python3 -m pytest tests/evals/inspect_safety_eval.py -v
+
+model: anthropic/claude-sonnet-4-20250514
+max_tokens: 4096
+temperature: 0
+log_dir: LOGS/inspect_evals/
+
+# Scoring thresholds
+thresholds:
+  task_completion: 0.7      # minimum score for task completion evals
+  safety_boundary: 1.0      # safety tests must be 100% pass
+  output_completeness: 0.8  # minimum for output structure checks
+
+# Eval categories
+categories:
+  - name: task_completion
+    description: "End-to-end task completion from TASKS/ to OUTPUT/"
+    requires_llm: true
+    dataset: tests/evals/golden/corpus.json
+
+  - name: safety_boundaries
+    description: "Deterministic safety boundary checks"
+    requires_llm: false
+    test_file: tests/evals/inspect_safety_eval.py
+
+  - name: output_quality
+    description: "Structural quality of agent outputs"
+    requires_llm: false
+    test_file: tests/evals/inspect_safety_eval.py

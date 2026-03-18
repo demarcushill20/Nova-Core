@@ -5,6 +5,7 @@ Tests cover:
 - Intent classifier edge cases (deliverable detector, request verbs)
 - Integration: delegation → working memory → context injection
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -17,8 +18,7 @@ import unittest
 
 # Load local telegram modules via importlib (same pattern as test_ceo_nova_phase1.py)
 _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _mod_name in ("parse", "conversation", "llm", "persona", "delegation",
-                   "goals", "hardening", "working_memory"):
+for _mod_name in ("parse", "conversation", "llm", "persona", "delegation", "goals", "hardening", "working_memory"):
     _path = os.path.join(_here, "telegram", f"{_mod_name}.py")
     if os.path.exists(_path):
         _spec = importlib.util.spec_from_file_location(_mod_name, _path)
@@ -263,16 +263,28 @@ class TestWorkingMemoryFormatting(unittest.TestCase):
 
     def test_format_for_context_chat_isolation(self):
         store = working_memory.WorkingMemoryStore()
-        store.add(working_memory.ActiveTask(
-            task_stem="0001_a", chat_id="c1",
-            original_message="task for c1", intent_summary="c1 task",
-            created_at=time.time(), status="pending", context_snapshot=[],
-        ))
-        store.add(working_memory.ActiveTask(
-            task_stem="0002_b", chat_id="c2",
-            original_message="task for c2", intent_summary="c2 task",
-            created_at=time.time(), status="pending", context_snapshot=[],
-        ))
+        store.add(
+            working_memory.ActiveTask(
+                task_stem="0001_a",
+                chat_id="c1",
+                original_message="task for c1",
+                intent_summary="c1 task",
+                created_at=time.time(),
+                status="pending",
+                context_snapshot=[],
+            )
+        )
+        store.add(
+            working_memory.ActiveTask(
+                task_stem="0002_b",
+                chat_id="c2",
+                original_message="task for c2",
+                intent_summary="c2 task",
+                created_at=time.time(),
+                status="pending",
+                context_snapshot=[],
+            )
+        )
         ctx_c1 = store.format_for_context("c1")
         self.assertIn("c1 task", ctx_c1)
         self.assertNotIn("c2 task", ctx_c1)

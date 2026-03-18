@@ -75,7 +75,7 @@ class AuditLogger:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _today(self) -> str:  # noqa: PLR6301
+    def _today(self) -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     def _log_path(self, date_str: str) -> Path:
@@ -103,9 +103,7 @@ class AuditLogger:
                 except json.JSONDecodeError:
                     pass
         # Fresh chain for the day.
-        self._prev_hash = hashlib.sha256(
-            f"genesis:{today}".encode()
-        ).hexdigest()
+        self._prev_hash = hashlib.sha256(f"genesis:{today}".encode()).hexdigest()
 
     def _write_event(self, event: AuditEvent) -> None:
         """Append an event to the current day's log file."""
@@ -330,18 +328,14 @@ def verify_chain(log_file: Path | str) -> tuple[bool, list[str]]:
             # Verify prev_hash linkage.
             if prev_hash is not None and entry.get("prev_hash") != prev_hash:
                 errors.append(
-                    f"Line {line_no}: prev_hash mismatch "
-                    f"(expected {prev_hash!r}, got {entry.get('prev_hash')!r})"
+                    f"Line {line_no}: prev_hash mismatch (expected {prev_hash!r}, got {entry.get('prev_hash')!r})"
                 )
 
             # Recompute and verify chain_hash.
             expected = _hash_entry(entry.get("prev_hash", ""), entry)
             actual = entry.get("chain_hash", "")
             if expected != actual:
-                errors.append(
-                    f"Line {line_no}: chain_hash mismatch "
-                    f"(expected {expected!r}, got {actual!r})"
-                )
+                errors.append(f"Line {line_no}: chain_hash mismatch (expected {expected!r}, got {actual!r})")
 
             prev_hash = actual
 

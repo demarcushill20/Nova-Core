@@ -30,7 +30,7 @@ def main():
         if not path.is_file():
             print(f"Error: {arg} is not a file")
             sys.exit(1)
-        task_text = path.read_text(encoding="utf-8")[:50 * 1024]
+        task_text = path.read_text(encoding="utf-8")[: 50 * 1024]
         source = str(path)
 
     all_skills = load_skills()

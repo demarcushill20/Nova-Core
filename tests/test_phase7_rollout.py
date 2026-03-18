@@ -29,6 +29,7 @@ from agents.production_hardening import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def setup_tmpdir(tmp_path):
     """Create standard STATE/ layout for isolated tests."""
@@ -104,6 +105,7 @@ def _write_heartbeat(tmp_path, overall, findings=None, metrics=None):
 # Part 1 — Rollout Routing: Research Enabled
 # ===================================================================
 
+
 class TestRollout_ResearchEnabled:
     """Verify research class routes to multi-agent path."""
 
@@ -143,6 +145,7 @@ class TestRollout_ResearchEnabled:
 # ===================================================================
 # Part 2 — Non-Research Classes: Fallback
 # ===================================================================
+
 
 class TestRollout_NonResearchFallback:
     """Verify non-research classes route to single-agent fallback."""
@@ -190,6 +193,7 @@ class TestRollout_NonResearchFallback:
 # Part 3 — Flag Off: Safe Fallback
 # ===================================================================
 
+
 class TestRollout_FlagOff:
     """Verify disabled flags result in clean fallback."""
 
@@ -232,16 +236,18 @@ class TestRollout_FlagOff:
 # Part 4 — UNHEALTHY Heartbeat: Auto-Degrade
 # ===================================================================
 
+
 class TestRollout_UnhealthyHeartbeat:
     """Verify UNHEALTHY heartbeat triggers auto-degrade."""
 
     def test_unhealthy_heartbeat_degrades(self, tmp_path):
         """UNHEALTHY heartbeat → degrade even for supported class."""
         _write_flags(tmp_path, _stage1_flags())
-        _write_heartbeat(tmp_path, "unhealthy", findings=[
-            {"category": "workflow_stuck", "severity": "unhealthy",
-             "subject": "wf_001", "detail": "stuck"}
-        ])
+        _write_heartbeat(
+            tmp_path,
+            "unhealthy",
+            findings=[{"category": "workflow_stuck", "severity": "unhealthy", "subject": "wf_001", "detail": "stuck"}],
+        )
         gd = GracefulDegradation(base=tmp_path)
         result = gd.check_orchestrator_available("research")
         assert result.action == "degrade"
@@ -271,6 +277,7 @@ class TestRollout_UnhealthyHeartbeat:
 # ===================================================================
 # Part 5 — Rollback Behavior
 # ===================================================================
+
 
 class TestRollout_Rollback:
     """Verify immediate rollback by config change."""
@@ -334,6 +341,7 @@ class TestRollout_Rollback:
 # Part 6 — Health Gating Edge Cases
 # ===================================================================
 
+
 class TestRollout_HealthGatingEdgeCases:
     """Edge cases for the rollout health gate."""
 
@@ -389,6 +397,7 @@ class TestRollout_HealthGatingEdgeCases:
 # Part 7 — Rollout Stage Config
 # ===================================================================
 
+
 class TestRollout_StageConfig:
     """Verify rollout_stage field is read and tracked."""
 
@@ -413,31 +422,32 @@ class TestRollout_StageConfig:
 # Part 8 — Task Classifier Integration
 # ===================================================================
 
+
 class TestRollout_ClassifierIntegration:
     """Verify task classifier respects Stage 1 narrowing."""
 
     def test_classify_research_task(self, tmp_path):
         """Research-classified task routes correctly."""
         from tools.task_classifier import classify_task
-        task_class, confidence = classify_task(
-            "Research the best practices for API rate limiting"
-        )
+
+        task_class, confidence = classify_task("Research the best practices for API rate limiting")
         assert task_class == "research"
         assert confidence > 0.0
 
     def test_classify_coding_task_not_research(self, tmp_path):
         """Coding task classified correctly (not research)."""
         from tools.task_classifier import classify_task
-        task_class, _ = classify_task(
-            "Implement a new authentication module with JWT tokens"
-        )
+
+        task_class, _ = classify_task("Implement a new authentication module with JWT tokens")
         assert task_class != "research"
 
     def test_research_eligible_with_stage1_flags(self, tmp_path):
         """Research task + Stage 1 flags → eligible via is_stageC_eligible."""
         from tools.task_classifier import is_stageC_eligible
+
         eligible, reason = is_stageC_eligible(
-            "research", 0.8,
+            "research",
+            0.8,
             "Investigate how other projects handle caching",
             _stage1_flags(),
         )
@@ -447,8 +457,10 @@ class TestRollout_ClassifierIntegration:
     def test_coding_ineligible_with_stage1_flags(self, tmp_path):
         """Coding task + Stage 1 flags → ineligible (class not supported)."""
         from tools.task_classifier import is_stageC_eligible
+
         eligible, reason = is_stageC_eligible(
-            "code_impl", 0.8,
+            "code_impl",
+            0.8,
             "Refactor the authentication module",
             _stage1_flags(),
         )
@@ -460,16 +472,21 @@ class TestRollout_ClassifierIntegration:
 # Part 9 — Combined: Full Rollout Pre-Flight
 # ===================================================================
 
+
 class TestRollout_FullPreFlight:
     """Combined pre-flight check simulating watcher dispatch gate."""
 
     def test_full_preflight_research_healthy(self, tmp_path):
         """Stage 1 + research + HEALTHY → proceed through all gates."""
-        _write_flags(tmp_path, _stage1_flags(), {
-            "archive_cleanup": True,
-            "rate_limiting": True,
-            "manual_approval": False,
-        })
+        _write_flags(
+            tmp_path,
+            _stage1_flags(),
+            {
+                "archive_cleanup": True,
+                "rate_limiting": True,
+                "manual_approval": False,
+            },
+        )
         _write_heartbeat(tmp_path, "healthy")
 
         gd = GracefulDegradation(base=tmp_path)
@@ -488,10 +505,14 @@ class TestRollout_FullPreFlight:
 
     def test_full_preflight_unhealthy_blocks(self, tmp_path):
         """Stage 1 + research + UNHEALTHY → blocked at gate 1."""
-        _write_flags(tmp_path, _stage1_flags(), {
-            "archive_cleanup": True,
-            "rate_limiting": True,
-        })
+        _write_flags(
+            tmp_path,
+            _stage1_flags(),
+            {
+                "archive_cleanup": True,
+                "rate_limiting": True,
+            },
+        )
         _write_heartbeat(tmp_path, "unhealthy")
 
         gd = GracefulDegradation(base=tmp_path)
@@ -513,6 +534,7 @@ class TestRollout_FullPreFlight:
 # ===================================================================
 # Part 10 — Stage 2: code_review Enabled
 # ===================================================================
+
 
 class TestRollout_Stage2_CodeReviewEnabled:
     """Verify code_review routes to multi-agent path under Stage 2 flags."""
@@ -561,6 +583,7 @@ class TestRollout_Stage2_CodeReviewEnabled:
 # Part 11 — Stage 2: Excluded Classes Still Blocked
 # ===================================================================
 
+
 class TestRollout_Stage2_ExcludedClasses:
     """Verify non-selected classes remain on fallback under Stage 2."""
 
@@ -598,6 +621,7 @@ class TestRollout_Stage2_ExcludedClasses:
 # ===================================================================
 # Part 12 — Stage 2: UNHEALTHY Heartbeat Blocks code_review
 # ===================================================================
+
 
 class TestRollout_Stage2_UnhealthyBlocks:
     """Verify UNHEALTHY heartbeat blocks code_review under Stage 2."""
@@ -637,6 +661,7 @@ class TestRollout_Stage2_UnhealthyBlocks:
 # ===================================================================
 # Part 13 — Stage 2: Rollback Behavior
 # ===================================================================
+
 
 class TestRollout_Stage2_Rollback:
     """Verify rollback controls work for Stage 2."""
@@ -697,6 +722,7 @@ class TestRollout_Stage2_Rollback:
 # Part 14 — Stage 2: Config and Classifier Integration
 # ===================================================================
 
+
 class TestRollout_Stage2_Config:
     """Verify Stage 2 config fields and classifier integration."""
 
@@ -719,17 +745,18 @@ class TestRollout_Stage2_Config:
     def test_classify_code_review_task(self, tmp_path):
         """code_review-classified task routes correctly."""
         from tools.task_classifier import classify_task
-        task_class, confidence = classify_task(
-            "Review code quality of the authentication module"
-        )
+
+        task_class, confidence = classify_task("Review code quality of the authentication module")
         assert task_class == "code_review"
         assert confidence > 0.0
 
     def test_code_review_eligible_with_stage2_flags(self, tmp_path):
         """code_review task + Stage 2 flags → eligible via is_stageC_eligible."""
         from tools.task_classifier import is_stageC_eligible
+
         eligible, reason = is_stageC_eligible(
-            "code_review", 0.8,
+            "code_review",
+            0.8,
             "Audit the error handling in the API layer",
             _stage2_flags(),
         )
@@ -739,8 +766,10 @@ class TestRollout_Stage2_Config:
     def test_code_review_with_high_risk_blocked(self, tmp_path):
         """code_review with high-risk signals → rejected by classifier."""
         from tools.task_classifier import is_stageC_eligible
+
         eligible, reason = is_stageC_eligible(
-            "code_review", 0.8,
+            "code_review",
+            0.8,
             "Review code and deploy to production with sudo access",
             _stage2_flags(),
         )
@@ -750,8 +779,10 @@ class TestRollout_Stage2_Config:
     def test_code_impl_ineligible_with_stage2_flags(self, tmp_path):
         """code_impl + Stage 2 flags → ineligible (not in supported_classes)."""
         from tools.task_classifier import is_stageC_eligible
+
         eligible, reason = is_stageC_eligible(
-            "code_impl", 0.8,
+            "code_impl",
+            0.8,
             "Implement a caching layer for the API",
             _stage2_flags(),
         )
@@ -763,16 +794,21 @@ class TestRollout_Stage2_Config:
 # Part 15 — Stage 2: Full Pre-Flight
 # ===================================================================
 
+
 class TestRollout_Stage2_FullPreFlight:
     """Combined pre-flight for Stage 2 dispatch."""
 
     def test_preflight_code_review_healthy(self, tmp_path):
         """Stage 2 + code_review + HEALTHY → proceed through all gates."""
-        _write_flags(tmp_path, _stage2_flags(), {
-            "archive_cleanup": True,
-            "rate_limiting": True,
-            "manual_approval": False,
-        })
+        _write_flags(
+            tmp_path,
+            _stage2_flags(),
+            {
+                "archive_cleanup": True,
+                "rate_limiting": True,
+                "manual_approval": False,
+            },
+        )
         _write_heartbeat(tmp_path, "healthy")
 
         gd = GracefulDegradation(base=tmp_path)
@@ -805,6 +841,7 @@ class TestRollout_Stage2_FullPreFlight:
 # Stage 3 helpers
 # ===================================================================
 
+
 def _stage3_flags(**overrides):
     """Standard Stage 3 research + code_review + code_impl rollout flags."""
     flags = {
@@ -831,20 +868,28 @@ def _write_ready_evidence(tmp_path):
     wf_dir = tmp_path / "STATE" / "workflows"
     wf_dir.mkdir(parents=True, exist_ok=True)
     for i in range(5):
-        (wf_dir / f"wf_{i:03d}.json").write_text(json.dumps({
-            "workflow_id": f"wf_{i:03d}",
-            "status": "completed",
-            "completed_at": time.time() - 100,
-        }))
+        (wf_dir / f"wf_{i:03d}.json").write_text(
+            json.dumps(
+                {
+                    "workflow_id": f"wf_{i:03d}",
+                    "status": "completed",
+                    "completed_at": time.time() - 100,
+                }
+            )
+        )
 
     # Clean verifications (some approvals, no rejections)
     ver_dir = tmp_path / "STATE" / "verifications"
     ver_dir.mkdir(parents=True, exist_ok=True)
     for i in range(3):
-        (ver_dir / f"ver_{i:03d}.json").write_text(json.dumps({
-            "verification_id": f"ver_{i:03d}",
-            "verdict": "approved",
-        }))
+        (ver_dir / f"ver_{i:03d}.json").write_text(
+            json.dumps(
+                {
+                    "verification_id": f"ver_{i:03d}",
+                    "verdict": "approved",
+                }
+            )
+        )
 
 
 def _write_hold_evidence(tmp_path):
@@ -853,10 +898,14 @@ def _write_hold_evidence(tmp_path):
     # Only 1 completed workflow (need >= 3)
     wf_dir = tmp_path / "STATE" / "workflows"
     wf_dir.mkdir(parents=True, exist_ok=True)
-    (wf_dir / "wf_000.json").write_text(json.dumps({
-        "workflow_id": "wf_000",
-        "status": "completed",
-    }))
+    (wf_dir / "wf_000.json").write_text(
+        json.dumps(
+            {
+                "workflow_id": "wf_000",
+                "status": "completed",
+            }
+        )
+    )
 
 
 def _write_rollback_evidence(tmp_path):
@@ -868,12 +917,14 @@ def _write_rollback_evidence(tmp_path):
 # Part 16 — Stage 3: Evaluation-Gated Expansion
 # ===================================================================
 
+
 class TestRollout_Stage3_EvaluationGated:
     """Verify code_impl enablement is gated by rollout evaluation."""
 
     def test_expansion_proceeds_on_ready(self, tmp_path):
         """ready_to_expand → code_impl added to supported_classes."""
         from agents.rollout_gate import expand_to_stage3
+
         _write_flags(tmp_path, _stage2_flags())
         _write_ready_evidence(tmp_path)
 
@@ -893,6 +944,7 @@ class TestRollout_Stage3_EvaluationGated:
     def test_expansion_blocked_on_hold(self, tmp_path):
         """hold → code_impl NOT added, config unchanged."""
         from agents.rollout_gate import expand_to_stage3
+
         _write_flags(tmp_path, _stage2_flags())
         _write_hold_evidence(tmp_path)
 
@@ -909,6 +961,7 @@ class TestRollout_Stage3_EvaluationGated:
     def test_expansion_blocked_on_rollback(self, tmp_path):
         """rollback_recommended → code_impl NOT added."""
         from agents.rollout_gate import expand_to_stage3
+
         _write_flags(tmp_path, _stage2_flags())
         _write_rollback_evidence(tmp_path)
 
@@ -922,6 +975,7 @@ class TestRollout_Stage3_EvaluationGated:
     def test_expansion_preserves_version_increment(self, tmp_path):
         """Expansion increments version number."""
         from agents.rollout_gate import expand_to_stage3
+
         _write_flags(tmp_path, _stage2_flags())
         _write_ready_evidence(tmp_path)
 
@@ -938,6 +992,7 @@ class TestRollout_Stage3_EvaluationGated:
     def test_expansion_sets_verifier_required(self, tmp_path):
         """After expansion, verifier_required is True."""
         from agents.rollout_gate import expand_to_stage3
+
         _write_flags(tmp_path, _stage2_flags())
         _write_ready_evidence(tmp_path)
         expand_to_stage3(tmp_path)
@@ -949,6 +1004,7 @@ class TestRollout_Stage3_EvaluationGated:
     def test_expansion_result_contains_evaluation(self, tmp_path):
         """ExpansionResult includes the full evaluation."""
         from agents.rollout_gate import expand_to_stage3
+
         _write_flags(tmp_path, _stage2_flags())
         _write_ready_evidence(tmp_path)
         result = expand_to_stage3(tmp_path)
@@ -958,6 +1014,7 @@ class TestRollout_Stage3_EvaluationGated:
     def test_expansion_with_missing_flags_file(self, tmp_path):
         """Missing feature_flags.json → expansion refused."""
         from agents.rollout_gate import expand_to_stage3
+
         # Don't write any flags — only evidence
         _write_ready_evidence(tmp_path)
         result = expand_to_stage3(tmp_path)
@@ -968,6 +1025,7 @@ class TestRollout_Stage3_EvaluationGated:
 # ===================================================================
 # Part 17 — Stage 3: code_impl Routing
 # ===================================================================
+
 
 class TestRollout_Stage3_CodeImplEnabled:
     """Verify code_impl routes to multi-agent path under Stage 3 flags."""
@@ -1017,6 +1075,7 @@ class TestRollout_Stage3_CodeImplEnabled:
 # Part 18 — Stage 3: Excluded Classes Still Blocked
 # ===================================================================
 
+
 class TestRollout_Stage3_ExcludedClasses:
     """Verify non-selected classes remain on fallback under Stage 3."""
 
@@ -1046,6 +1105,7 @@ class TestRollout_Stage3_ExcludedClasses:
 # ===================================================================
 # Part 19 — Stage 3: UNHEALTHY Blocks code_impl
 # ===================================================================
+
 
 class TestRollout_Stage3_UnhealthyBlocks:
     """Verify UNHEALTHY heartbeat blocks code_impl under Stage 3."""
@@ -1083,6 +1143,7 @@ class TestRollout_Stage3_UnhealthyBlocks:
 # Part 20 — Stage 3: Rollback Behavior
 # ===================================================================
 
+
 class TestRollout_Stage3_Rollback:
     """Verify rollback controls work for Stage 3."""
 
@@ -1103,9 +1164,7 @@ class TestRollout_Stage3_Rollback:
         gd = GracefulDegradation(base=tmp_path)
         assert gd.check_orchestrator_available("code_impl").action == "proceed"
 
-        _write_flags(tmp_path, _stage3_flags(
-            supported_classes=["research", "code_review"]
-        ))
+        _write_flags(tmp_path, _stage3_flags(supported_classes=["research", "code_review"]))
         gd2 = GracefulDegradation(base=tmp_path)
         assert gd2.check_orchestrator_available("research").action == "proceed"
         assert gd2.check_orchestrator_available("code_review").action == "proceed"
@@ -1150,19 +1209,23 @@ class TestRollout_Stage3_Rollback:
 # Part 21 — Stage 3: Verifier / Maker-Checker Enforcement
 # ===================================================================
 
+
 class TestRollout_Stage3_VerifierEnforcement:
     """Verify maker-checker protections apply to code_impl."""
 
     def test_code_impl_gets_verifier_required(self, tmp_path):
         """code_impl is in STAGE_C_CLASSES → verifier_required=True from classifier."""
         from tools.task_classifier import STAGE_C_CLASSES
+
         assert "code_impl" in STAGE_C_CLASSES
 
     def test_code_impl_eligible_low_risk(self, tmp_path):
         """Low-risk code_impl task + Stage 3 flags → eligible."""
         from tools.task_classifier import is_stageC_eligible
+
         eligible, reason = is_stageC_eligible(
-            "code_impl", 0.8,
+            "code_impl",
+            0.8,
             "Implement a caching layer for the API",
             _stage3_flags(),
         )
@@ -1172,8 +1235,10 @@ class TestRollout_Stage3_VerifierEnforcement:
     def test_code_impl_blocked_high_risk(self, tmp_path):
         """code_impl with high-risk signals → rejected by classifier."""
         from tools.task_classifier import is_stageC_eligible
+
         eligible, reason = is_stageC_eligible(
-            "code_impl", 0.8,
+            "code_impl",
+            0.8,
             "Implement deployment pipeline with sudo access",
             _stage3_flags(),
         )
@@ -1191,13 +1256,13 @@ class TestRollout_Stage3_VerifierEnforcement:
 
         # Use a task that classifies as code_impl
         import tools.task_classifier as tc
-        tc.flags_path if hasattr(tc, 'flags_path') else None
+
+        tc.flags_path if hasattr(tc, "flags_path") else None
 
         # Directly test with the flags dict
         from tools.task_classifier import STAGE_C_CLASSES, is_stageC_eligible
-        eligible, _ = is_stageC_eligible(
-            "code_impl", 0.8, "Refactor the module", _stage3_flags()
-        )
+
+        eligible, _ = is_stageC_eligible("code_impl", 0.8, "Refactor the module", _stage3_flags())
         assert eligible is True
         # The routing dict would set verifier_required for code_impl
         assert "code_impl" in STAGE_C_CLASSES
@@ -1212,8 +1277,10 @@ class TestRollout_Stage3_VerifierEnforcement:
     def test_system_class_still_excluded_from_stageC(self, tmp_path):
         """system class is NOT in STAGE_C_CLASSES → not eligible."""
         from tools.task_classifier import is_stageC_eligible
+
         eligible, reason = is_stageC_eligible(
-            "system", 0.8,
+            "system",
+            0.8,
             "Configure the infrastructure",
             _stage3_flags(),
         )
@@ -1224,6 +1291,7 @@ class TestRollout_Stage3_VerifierEnforcement:
 # ===================================================================
 # Part 22 — Stage 3: Config and Full Pre-Flight
 # ===================================================================
+
 
 class TestRollout_Stage3_Config:
     """Verify Stage 3 config fields."""
@@ -1247,6 +1315,7 @@ class TestRollout_Stage3_Config:
     def test_expansion_result_serializable(self, tmp_path):
         """ExpansionResult.to_dict() is JSON-serializable."""
         from agents.rollout_gate import expand_to_stage3
+
         _write_flags(tmp_path, _stage2_flags())
         _write_ready_evidence(tmp_path)
         result = expand_to_stage3(tmp_path)
@@ -1260,11 +1329,15 @@ class TestRollout_Stage3_FullPreFlight:
 
     def test_preflight_code_impl_healthy(self, tmp_path):
         """Stage 3 + code_impl + HEALTHY → proceed through all gates."""
-        _write_flags(tmp_path, _stage3_flags(), {
-            "archive_cleanup": True,
-            "rate_limiting": True,
-            "manual_approval": False,
-        })
+        _write_flags(
+            tmp_path,
+            _stage3_flags(),
+            {
+                "archive_cleanup": True,
+                "rate_limiting": True,
+                "manual_approval": False,
+            },
+        )
         _write_heartbeat(tmp_path, "healthy")
 
         gd = GracefulDegradation(base=tmp_path)

@@ -167,8 +167,10 @@ def _make_recent_output(tmp_path, stem, content):
 def test_verify_artifacts_valid_contract(tmp_path):
     stem = "0010_example"
     out_dir, out_file = _make_recent_output(tmp_path, stem, VALID_OUTPUT_FILES_CHANGED)
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts(stem)
     assert passed is True
     assert any("OUTPUT verified" in m for m in msgs)
@@ -180,10 +182,12 @@ def test_verify_artifacts_missing_contract_fails(tmp_path):
     out_dir, out_file = _make_recent_output(tmp_path, stem, MISSING_CONTRACT)
     tasks_dir = tmp_path / "TASKS"
     tasks_dir.mkdir(exist_ok=True)
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", out_dir), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.OUTPUT_DIR", out_dir),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts(stem)
     assert passed is False
     assert any("CONTRACT FAILED" in m for m in msgs)
@@ -197,10 +201,12 @@ def test_verify_artifacts_bad_confidence_fails(tmp_path):
     out_dir, out_file = _make_recent_output(tmp_path, stem, BAD_CONFIDENCE)
     tasks_dir = tmp_path / "TASKS"
     tasks_dir.mkdir(exist_ok=True)
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.TASKS_DIR", tasks_dir), \
-         patch("watcher.OUTPUT_DIR", out_dir), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.TASKS_DIR", tasks_dir),
+        patch("watcher.OUTPUT_DIR", out_dir),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts(stem)
     assert passed is False
 
@@ -208,8 +214,10 @@ def test_verify_artifacts_bad_confidence_fails(tmp_path):
 def test_verify_artifacts_multiple_contracts_ok(tmp_path):
     stem = "0015_multi"
     out_dir, out_file = _make_recent_output(tmp_path, stem, MULTIPLE_CONTRACTS)
-    with patch("watcher._find_recent_output", return_value=out_file), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=out_file),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts(stem)
     assert passed is True
 
@@ -217,8 +225,10 @@ def test_verify_artifacts_multiple_contracts_ok(tmp_path):
 def test_verify_artifacts_no_output_skips_contract(tmp_path):
     """If no output file exists, contract check is skipped (but still fails on missing output)."""
     stem = "0099_missing"
-    with patch("watcher._find_recent_output", return_value=None), \
-         patch("watcher.METRICS_FILE", tmp_path / "metrics.json"):
+    with (
+        patch("watcher._find_recent_output", return_value=None),
+        patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+    ):
         passed, msgs = verify_artifacts(stem)
     assert passed is False
     # Should fail on missing output, NOT on contract
@@ -251,6 +261,7 @@ def test_failure_report_bad_confidence_detail(tmp_path):
 
 if __name__ == "__main__":
     import tempfile
+
     tests = [
         test_check_contract_valid,
         test_check_contract_valid_commands,

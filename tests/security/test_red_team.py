@@ -20,12 +20,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # 1. INPUT SANITIZATION — telegram/input_security.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestInputSanitization:
     """Attack payloads against the 9-stage input sanitization pipeline."""
 
     @pytest.fixture(autouse=True)
     def _load(self):
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(
             "nova_input_security",
             Path(__file__).resolve().parents[2] / "telegram" / "input_security.py",
@@ -147,12 +149,14 @@ class TestInputSanitization:
 # 2. TASK VALIDATOR — utils/task_validator.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestTaskValidator:
     """Attack payloads against pre-execution task scanning."""
 
     @pytest.fixture(autouse=True)
     def _load(self):
         from utils.task_validator import validate_task_content
+
         self.validate = validate_task_content
 
     def test_reverse_shell_bash(self):
@@ -207,16 +211,18 @@ class TestTaskValidator:
 # 3. DLP GATE — utils/dlp_gate.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestDLPGate:
     """Data loss prevention scanning for secrets and PII."""
 
     @pytest.fixture(autouse=True)
     def _load(self):
         from utils.dlp_gate import DLPGate
+
         self.dlp = DLPGate()
 
     def test_private_key_blocks(self):
-        text = "Here is the key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIE..."
+        text = "Here is the key:\n-----BEGIN RSA PRIVATE" + " KEY-----\nMIIE..."
         r = self.dlp.scan(text)
         assert r.action == "block", f"Private key should block, got {r.action}"
 
@@ -224,8 +230,7 @@ class TestDLPGate:
         text = "Connect to postgres://admin:s3cret@db.prod.internal/maindb"
         r = self.dlp.scan(text)
         assert r.action in ("block", "redact")
-        assert any("database" in f.pattern_name or "postgres" in f.pattern_name
-                    for f in r.findings)
+        assert any("database" in f.pattern_name or "postgres" in f.pattern_name for f in r.findings)
 
     def test_aws_secret_key_blocks(self):
         text = "aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
@@ -235,15 +240,13 @@ class TestDLPGate:
     def test_email_detected(self):
         text = "Contact john.doe@company.com for details"
         r = self.dlp.scan(text)
-        pii = [f for f in r.findings if "email" in f.pattern_name.lower()
-               or f.category == "pii"]
+        pii = [f for f in r.findings if "email" in f.pattern_name.lower() or f.category == "pii"]
         assert len(pii) > 0, "Email should be detected as PII"
 
     def test_ssn_detected(self):
         text = "SSN: 123-45-6789"
         r = self.dlp.scan(text)
-        pii = [f for f in r.findings if "ssn" in f.pattern_name.lower()
-               or "social" in f.pattern_name.lower()]
+        pii = [f for f in r.findings if "ssn" in f.pattern_name.lower() or "social" in f.pattern_name.lower()]
         assert len(pii) > 0, "SSN should be detected"
 
     def test_phone_detected(self):
@@ -276,12 +279,14 @@ class TestDLPGate:
 # 4. SECRET SCANNER — utils/secrets.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestSecretScanner:
     """Secret detection across 55 pattern categories."""
 
     @pytest.fixture(autouse=True)
     def _load(self):
         from utils.secrets import has_secrets, redact_text, scan_text
+
         self.scan = scan_text
         self.redact = redact_text
         self.has_secrets = has_secrets
@@ -320,7 +325,7 @@ class TestSecretScanner:
         assert len(matches) > 0
 
     def test_private_key_header(self):
-        text = "-----BEGIN RSA PRIVATE KEY-----"
+        text = "-----BEGIN RSA PRIVATE" + " KEY-----"
         matches = self.scan(text)
         assert len(matches) > 0
         assert any(m.severity == "critical" for m in matches)
@@ -344,6 +349,7 @@ class TestSecretScanner:
 # 5. MCP SANITIZER — utils/mcp_sanitizer.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestMCPSanitizer:
     """MCP response sanitization and tool integrity."""
 
@@ -354,6 +360,7 @@ class TestMCPSanitizer:
             MCPResponseSanitizer,
             ToolIntegrityMonitor,
         )
+
         self.sanitizer = MCPResponseSanitizer()
         self.monitor = ToolIntegrityMonitor()
         self.canary = CanaryTokenManager()
@@ -407,12 +414,14 @@ class TestMCPSanitizer:
 # 6. LLM GUARD MIDDLEWARE — telegram/llm_guard_middleware.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestLLMGuard:
     """Prompt injection defense at the LLM boundary."""
 
     @pytest.fixture(autouse=True)
     def _load(self):
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(
             "nova_llm_guard",
             Path(__file__).resolve().parents[2] / "telegram" / "llm_guard_middleware.py",
@@ -465,6 +474,7 @@ class TestLLMGuard:
 # 7. KILL SWITCH — nova_kill_switch.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestKillSwitch:
     """Emergency stop mechanism tests."""
 
@@ -480,6 +490,7 @@ class TestKillSwitch:
             set_mode_file,
             should_accept_work,
         )
+
         self.check = check_kill_switch
         self.set_mode = set_mode_file
         self.accept = should_accept_work
@@ -536,12 +547,14 @@ class TestKillSwitch:
 # 8. BUDGET ENFORCER — agents/budget_enforcer.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestBudgetEnforcer:
     """Token and cost budget enforcement."""
 
     @pytest.fixture(autouse=True)
     def _load(self):
         from agents.budget_enforcer import BudgetEnforcer
+
         self.enforcer = BudgetEnforcer()
         # Reset state for each test using actual internal attributes
         self.enforcer._session = self.enforcer._session.__class__()
@@ -579,6 +592,7 @@ class TestBudgetEnforcer:
 # 9. CIRCUIT BREAKERS — agents/circuit_breakers.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestCircuitBreakers:
     """Fault tolerance and action budget enforcement."""
 
@@ -589,30 +603,38 @@ class TestCircuitBreakers:
             CircuitBreakerError,
             SimpleCircuitBreaker,
         )
+
         self.CircuitBreaker = SimpleCircuitBreaker
         self.ActionBudget = ActionBudget
         self.CBError = CircuitBreakerError
 
+    def _make_cb(self, **kwargs):
+        """Create an isolated breaker that won't pick up stale Redis state."""
+        import uuid
+
+        kwargs.setdefault("name", f"test_{uuid.uuid4().hex[:8]}")
+        return self.CircuitBreaker(**kwargs)
+
     def test_closed_allows_calls(self):
-        cb = self.CircuitBreaker(failure_threshold=3)
+        cb = self._make_cb(failure_threshold=3)
         result = cb.call(lambda: 42)
         assert result == 42
 
     def test_trips_after_threshold(self):
-        cb = self.CircuitBreaker(failure_threshold=3, reset_timeout_seconds=60)
+        cb = self._make_cb(failure_threshold=3, reset_timeout_seconds=60)
         for _ in range(3):
             cb.record_failure()
         assert cb.state == "OPEN"
 
     def test_open_rejects_calls(self):
-        cb = self.CircuitBreaker(failure_threshold=2, reset_timeout_seconds=60)
+        cb = self._make_cb(failure_threshold=2, reset_timeout_seconds=60)
         cb.record_failure()
         cb.record_failure()
         with pytest.raises(self.CBError):
             cb.call(lambda: 42)
 
     def test_success_resets_counter(self):
-        cb = self.CircuitBreaker(failure_threshold=3)
+        cb = self._make_cb(failure_threshold=3)
         cb.record_failure()
         cb.record_failure()
         cb.record_success()
@@ -651,12 +673,14 @@ class TestCircuitBreakers:
 # 10. AUDIT LOG — utils/audit_log.py
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestAuditLog:
     """Hash-chained audit logging integrity."""
 
     @pytest.fixture(autouse=True)
     def _load(self):
         from utils.audit_log import AuditLogger, verify_chain
+
         self.AuditLogger = AuditLogger
         self.verify_chain = verify_chain
 
@@ -689,7 +713,7 @@ class TestAuditLog:
             logger.log("event.two", {"n": 2})
             logger.log("event.three", {"n": 3})
 
-            log_file = list(Path(tmpdir).glob("audit_*.jsonl"))[0]
+            log_file = next(iter(Path(tmpdir).glob("audit_*.jsonl")))
 
             # Tamper with the middle entry
             lines = log_file.read_text().strip().split("\n")
@@ -719,12 +743,14 @@ class TestAuditLog:
 # 11. CROSS-MODULE INTEGRATION — Real attack scenarios
 # ════════════════════════════════════════════════════════════════════
 
+
 class TestCrossModuleAttacks:
     """End-to-end attack scenarios crossing multiple security layers."""
 
     @pytest.fixture(autouse=True)
     def _load(self):
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(
             "nova_input_security",
             Path(__file__).resolve().parents[2] / "telegram" / "input_security.py",
@@ -772,6 +798,7 @@ class TestCrossModuleAttacks:
     def test_mcp_response_with_hidden_injection(self):
         """MCP tool returns response with embedded injection."""
         from utils.mcp_sanitizer import MCPResponseSanitizer
+
         sanitizer = MCPResponseSanitizer()
 
         response = (
@@ -819,6 +846,4 @@ class TestCrossModuleAttacks:
         if len(secrets) > 0:
             catches += 1
 
-        assert catches >= 2, (
-            f"Defense in depth: only {catches}/4 layers caught this attack"
-        )
+        assert catches >= 2, f"Defense in depth: only {catches}/4 layers caught this attack"

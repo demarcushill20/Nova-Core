@@ -40,6 +40,7 @@ def _result(
 
 # -- continue on valid contract -----------------------------------------------
 
+
 def test_continue_on_success_and_valid_contract(sup: Supervisor):
     step = _step()
     result = _result(status="success", contract_valid=True)
@@ -56,6 +57,7 @@ def test_continue_reason_mentions_success(sup: Supervisor):
 
 
 # -- retry on invalid contract under limit ------------------------------------
+
 
 def test_retry_on_invalid_contract_under_limit(sup: Supervisor):
     step = _step()
@@ -83,6 +85,7 @@ def test_retry_on_second_attempt(sup: Supervisor):
 
 # -- escalate after retry limit -----------------------------------------------
 
+
 def test_escalate_when_retries_exhausted(sup: Supervisor):
     step = _step()
     result = _result(status="failed", contract_valid=False, retry_count=2)
@@ -105,6 +108,7 @@ def test_escalate_includes_reason(sup: Supervisor):
 
 
 # -- anomaly escalation (non-retryable errors) --------------------------------
+
 
 def test_escalate_on_permission_denied(sup: Supervisor):
     step = _step()
@@ -158,6 +162,7 @@ def test_escalate_on_blocked(sup: Supervisor):
 
 # -- follow-up task generation ------------------------------------------------
 
+
 def test_followup_task_on_failure(sup: Supervisor):
     result = _result(
         status="failed",
@@ -194,6 +199,7 @@ def test_followup_includes_step_id(sup: Supervisor):
 
 # -- should_retry helper ------------------------------------------------------
 
+
 def test_should_retry_false_for_permission_denied(sup: Supervisor):
     result = _result(
         status="failed",
@@ -222,6 +228,7 @@ def test_should_retry_true_for_empty_errors(sup: Supervisor):
 
 # -- build_retry_reason -------------------------------------------------------
 
+
 def test_build_retry_reason_includes_failed(sup: Supervisor):
     result = _result(status="failed", contract_valid=False)
     reason = sup.build_retry_reason(result)
@@ -246,6 +253,7 @@ def test_build_retry_reason_includes_errors(sup: Supervisor):
 
 # -- decision shape -----------------------------------------------------------
 
+
 def test_decision_is_supervisor_decision(sup: Supervisor):
     step = _step()
     result = _result()
@@ -264,6 +272,7 @@ def test_decision_retry_allowed_type(sup: Supervisor):
 
 
 # -- MAX_RETRIES constant -----------------------------------------------------
+
 
 def test_max_retries_is_two():
     assert Supervisor.MAX_RETRIES == 2
@@ -300,9 +309,7 @@ def test_followup_none_for_grade_A(sup: Supervisor):
 
 def test_followup_high_for_grade_D(sup: Supervisor):
     """D grade → high-priority followup."""
-    pe = _plan_eval(
-        grade="D", aggregate_score=0.55, followup_recommended=True
-    )
+    pe = _plan_eval(grade="D", aggregate_score=0.55, followup_recommended=True)
     rec = sup.recommend_followup_from_evaluation(pe)
     assert rec is not None
     assert rec["priority"] == "high"
@@ -311,9 +318,7 @@ def test_followup_high_for_grade_D(sup: Supervisor):
 
 def test_followup_high_for_grade_F(sup: Supervisor):
     """F grade → high-priority followup."""
-    pe = _plan_eval(
-        grade="F", aggregate_score=0.15, followup_recommended=True
-    )
+    pe = _plan_eval(grade="F", aggregate_score=0.15, followup_recommended=True)
     rec = sup.recommend_followup_from_evaluation(pe)
     assert rec is not None
     assert rec["priority"] == "high"
@@ -361,9 +366,7 @@ def test_followup_dict_shape_exact(sup: Supervisor):
     )
     rec = sup.recommend_followup_from_evaluation(pe)
     assert rec is not None
-    assert set(rec.keys()) == {
-        "title", "description", "priority", "source", "related_plan_id"
-    }
+    assert set(rec.keys()) == {"title", "description", "priority", "source", "related_plan_id"}
     assert rec["related_plan_id"] == "plan_x"
     assert rec["source"] == "supervisor"
 

@@ -44,22 +44,18 @@ def verify_chain(log_file: Path) -> tuple[bool, list[str]]:
         entry_prev = entry.get("prev_hash", "")
         if entry_prev != prev_hash:
             errors.append(
-                f"Line {line_num}: prev_hash mismatch — "
-                f"expected {prev_hash[:16]}..., got {entry_prev[:16]}..."
+                f"Line {line_num}: prev_hash mismatch — expected {prev_hash[:16]}..., got {entry_prev[:16]}..."
             )
 
         # Verify chain_hash
         chain_hash = entry.get("chain_hash", "")
         # Reconstruct: hash = SHA-256(prev_hash + json_without_chain_hash)
         verify_entry = {k: v for k, v in entry.items() if k != "chain_hash"}
-        expected_hash = hashlib.sha256(
-            (prev_hash + json.dumps(verify_entry, sort_keys=True)).encode()
-        ).hexdigest()
+        expected_hash = hashlib.sha256((prev_hash + json.dumps(verify_entry, sort_keys=True)).encode()).hexdigest()
 
         if chain_hash != expected_hash:
             errors.append(
-                f"Line {line_num}: chain_hash mismatch — "
-                f"expected {expected_hash[:16]}..., got {chain_hash[:16]}..."
+                f"Line {line_num}: chain_hash mismatch — expected {expected_hash[:16]}..., got {chain_hash[:16]}..."
             )
 
         prev_hash = chain_hash

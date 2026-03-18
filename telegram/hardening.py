@@ -2,6 +2,7 @@
 
 Rate limiting, metrics collection, circuit breaker, and response caching.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,9 +54,7 @@ class RateLimiter:
             return False, "global"
 
         # Per-chat limit
-        self._chat_timestamps[chat_id] = self._prune(
-            self._chat_timestamps[chat_id], self.per_chat_window
-        )
+        self._chat_timestamps[chat_id] = self._prune(self._chat_timestamps[chat_id], self.per_chat_window)
         if len(self._chat_timestamps[chat_id]) >= self.per_chat_limit:
             return False, "per_chat"
 
@@ -69,8 +68,7 @@ class RateLimiter:
 
 
 RATE_LIMIT_MESSAGE = (
-    "I'm getting a lot of messages right now — give me a moment to catch up. "
-    "Try again in about 30 seconds."
+    "I'm getting a lot of messages right now — give me a moment to catch up. Try again in about 30 seconds."
 )
 
 
@@ -110,7 +108,8 @@ class CircuitBreaker:
             self._tripped_at = time.time()
             _log.warning(
                 "Circuit breaker TRIPPED after %d failures (cooldown=%ds)",
-                self._consecutive_failures, self.cooldown_seconds,
+                self._consecutive_failures,
+                self.cooldown_seconds,
             )
 
     @property
@@ -119,8 +118,7 @@ class CircuitBreaker:
 
 
 CIRCUIT_OPEN_MESSAGE = (
-    "I'm having trouble connecting to my brain right now. "
-    "I'll be back online shortly — try again in a couple minutes."
+    "I'm having trouble connecting to my brain right now. I'll be back online shortly — try again in a couple minutes."
 )
 
 

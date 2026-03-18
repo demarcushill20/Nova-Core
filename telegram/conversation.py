@@ -3,6 +3,7 @@
 Stores the last N messages per chat_id with automatic eviction
 by count and age. Supports disk persistence for restart survival.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,7 +19,7 @@ MAX_AGE_SECONDS = 2 * 3600  # 2 hours
 
 
 class Message:
-    __slots__ = ("role", "content", "timestamp")
+    __slots__ = ("content", "role", "timestamp")
 
     def __init__(self, role: str, content: str, timestamp: float) -> None:
         self.role = role
@@ -49,13 +50,13 @@ class ConversationBuffer:
         self._evict()
         history = []
         if self.session_summary:
-            history.append({
-                "role": "user",
-                "content": f"[Prior conversation summary: {self.session_summary}]",
-            })
-        history.extend(
-            {"role": m.role, "content": m.content} for m in self.messages
-        )
+            history.append(
+                {
+                    "role": "user",
+                    "content": f"[Prior conversation summary: {self.session_summary}]",
+                }
+            )
+        history.extend({"role": m.role, "content": m.content} for m in self.messages)
         return history
 
     def is_session_start(self) -> bool:
@@ -185,10 +186,7 @@ class ConversationManager:
             PERSIST_DIR.mkdir(parents=True, exist_ok=True)
             buf = self.get(chat_id)
             data = {
-                "messages": [
-                    {"role": m.role, "content": m.content, "timestamp": m.timestamp}
-                    for m in buf.messages
-                ],
+                "messages": [{"role": m.role, "content": m.content, "timestamp": m.timestamp} for m in buf.messages],
                 "last_activity": buf.last_activity,
                 "session_summary": buf.session_summary,
             }

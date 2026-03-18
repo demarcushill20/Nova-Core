@@ -178,8 +178,17 @@ def test_git_status_json_shape(mock_run):
     mock_run.return_value = {"exit_code": 0, "stdout": AHEAD_BEHIND, "stderr": ""}
     result = git_status()
     required_keys = {
-        "ok", "exit_code", "stderr", "branch", "remote",
-        "ahead", "behind", "staged", "modified", "untracked", "clean",
+        "ok",
+        "exit_code",
+        "stderr",
+        "branch",
+        "remote",
+        "ahead",
+        "behind",
+        "staged",
+        "modified",
+        "untracked",
+        "clean",
     }
     assert required_keys.issubset(set(result.keys())), f"Missing: {required_keys - set(result.keys())}"
     assert isinstance(result["clean"], bool)
@@ -228,11 +237,8 @@ index 111aaaa..222bbbb 100644
 NO_CHANGES_DIFF = ""
 
 LARGE_FILE_DIFF = (
-    "diff --git a/big.py b/big.py\nindex aaa..bbb 100644\n"
-    "--- a/big.py\n+++ b/big.py\n@@ -1,5 +1,30 @@\n"
-) + "\n".join(
-    f"+line {i}" for i in range(1, 51)
-)
+    "diff --git a/big.py b/big.py\nindex aaa..bbb 100644\n--- a/big.py\n+++ b/big.py\n@@ -1,5 +1,30 @@\n"
+) + "\n".join(f"+line {i}" for i in range(1, 51))
 
 
 # --- Tests for parse_diff ---------------------------------------------------

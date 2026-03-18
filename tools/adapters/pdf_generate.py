@@ -128,14 +128,16 @@ def _inline_markup(text: str) -> str:
 def _build_styles():
     """Build the stylesheet for PDF rendering."""
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(
-        "bullet",
-        parent=styles["BodyText"],
-        leftIndent=12 * mm,
-        firstLineIndent=0,
-        spaceBefore=1 * mm,
-        spaceAfter=1 * mm,
-    ))
+    styles.add(
+        ParagraphStyle(
+            "bullet",
+            parent=styles["BodyText"],
+            leftIndent=12 * mm,
+            firstLineIndent=0,
+            spaceBefore=1 * mm,
+            spaceAfter=1 * mm,
+        )
+    )
     return styles
 
 

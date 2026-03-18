@@ -42,7 +42,7 @@ sys.modules["telegram.parse"] = _tg_parse
 from telegram.parse import is_memory_persist_request, parse_message  # noqa: E402
 
 # Register additional local telegram modules via the same shim pattern.
-for _mod_name in (  # noqa: E501
+for _mod_name in (
     "conversation",
     "llm",
     "persona",

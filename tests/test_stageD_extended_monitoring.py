@@ -46,6 +46,7 @@ from agents.rollout_gate import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_workflow(task_class: str, status: str = "completed", **extra) -> dict:
     return {"task_class": task_class, "status": status, **extra}
 
@@ -70,8 +71,11 @@ def _populate_extended_env(root: Path, num_system_runs: int = 10) -> None:
             "system_allowed_operations": sorted(STAGE4_ALLOWED_OPERATIONS),
             "system_blocked_operations": sorted(STAGE4_BLOCKED_OPERATIONS),
             "system_allowed_skills": [
-                "file-ops", "http-fetch", "reading-obsidian-memory",
-                "self-verification", "web-research",
+                "file-ops",
+                "http-fetch",
+                "reading-obsidian-memory",
+                "self-verification",
+                "web-research",
             ],
             "system_blocked_skills": ["git-ops", "shell-ops", "task-execution"],
         },
@@ -87,24 +91,30 @@ def _populate_extended_env(root: Path, num_system_runs: int = 10) -> None:
 
     # Activation log — Stage D activated 5 hours ago
     log_entries = [
-        json.dumps({
-            "attempted_at": "2026-03-07T12:00:00Z",
-            "outcome": "activated",
-            "decision": "ready_to_expand",
-            "reason": "Stage 3 expansion",
-            "pre_config": {}, "post_config": {},
-            "blocking_criteria": [],
-        }),
-        json.dumps({
-            "attempted_at": "2026-03-08T10:00:00Z",
-            "outcome": "activated",
-            "gate_decision": "ready_to_activate_stage4",
-            "reason": "Stage 4 activation",
-            "activated_scope": "system_inspect",
-            "pre_config": {}, "post_config": {},
-            "blocking_criteria": [],
-            "plan_validation": {"valid": True, "errors": []},
-        }),
+        json.dumps(
+            {
+                "attempted_at": "2026-03-07T12:00:00Z",
+                "outcome": "activated",
+                "decision": "ready_to_expand",
+                "reason": "Stage 3 expansion",
+                "pre_config": {},
+                "post_config": {},
+                "blocking_criteria": [],
+            }
+        ),
+        json.dumps(
+            {
+                "attempted_at": "2026-03-08T10:00:00Z",
+                "outcome": "activated",
+                "gate_decision": "ready_to_activate_stage4",
+                "reason": "Stage 4 activation",
+                "activated_scope": "system_inspect",
+                "pre_config": {},
+                "post_config": {},
+                "blocking_criteria": [],
+                "plan_validation": {"valid": True, "errors": []},
+            }
+        ),
     ]
     (state / "activation_log.jsonl").write_text("\n".join(log_entries) + "\n")
 
@@ -118,11 +128,15 @@ def _populate_extended_env(root: Path, num_system_runs: int = 10) -> None:
 
     # system_inspect workflows
     for i in range(num_system_runs):
-        wf = _make_workflow("system", "completed", steps=[
-            {"name": "inspect", "contract_status": "valid"},
-            {"name": "analyze", "contract_status": "valid"},
-            {"name": "verify", "contract_status": "valid"},
-        ])
+        wf = _make_workflow(
+            "system",
+            "completed",
+            steps=[
+                {"name": "inspect", "contract_status": "valid"},
+                {"name": "analyze", "contract_status": "valid"},
+                {"name": "verify", "contract_status": "valid"},
+            ],
+        )
         (state / "workflows" / f"system_{i}.json").write_text(json.dumps(wf))
 
 
@@ -164,11 +178,10 @@ def _intact_scope() -> dict:
 # TestComputeElapsedSeconds
 # ---------------------------------------------------------------------------
 
+
 class TestComputeElapsedSeconds:
     def test_normal_elapsed(self):
-        result = _compute_elapsed_seconds(
-            "2026-03-08T10:00:00Z", "2026-03-08T14:00:00Z"
-        )
+        result = _compute_elapsed_seconds("2026-03-08T10:00:00Z", "2026-03-08T14:00:00Z")
         assert result == 4 * 3600
 
     def test_empty_activation(self):
@@ -178,29 +191,24 @@ class TestComputeElapsedSeconds:
         assert _compute_elapsed_seconds("2026-03-08T10:00:00Z", "") == 0.0
 
     def test_same_time(self):
-        assert _compute_elapsed_seconds(
-            "2026-03-08T10:00:00Z", "2026-03-08T10:00:00Z"
-        ) == 0.0
+        assert _compute_elapsed_seconds("2026-03-08T10:00:00Z", "2026-03-08T10:00:00Z") == 0.0
 
     def test_negative_clamps_to_zero(self):
-        result = _compute_elapsed_seconds(
-            "2026-03-08T14:00:00Z", "2026-03-08T10:00:00Z"
-        )
+        result = _compute_elapsed_seconds("2026-03-08T14:00:00Z", "2026-03-08T10:00:00Z")
         assert result == 0.0
 
     def test_invalid_format(self):
         assert _compute_elapsed_seconds("not-a-date", "2026-03-08T14:00:00Z") == 0.0
 
     def test_fractional_hours(self):
-        result = _compute_elapsed_seconds(
-            "2026-03-08T10:00:00Z", "2026-03-08T10:30:00Z"
-        )
+        result = _compute_elapsed_seconds("2026-03-08T10:00:00Z", "2026-03-08T10:30:00Z")
         assert result == 1800
 
 
 # ---------------------------------------------------------------------------
 # TestComputeContractFailureRate
 # ---------------------------------------------------------------------------
+
 
 class TestComputeContractFailureRate:
     def test_no_system_workflows(self):
@@ -209,19 +217,27 @@ class TestComputeContractFailureRate:
 
     def test_all_valid_contracts(self):
         workflows = [
-            _make_workflow("system", "completed", steps=[
-                {"contract_status": "valid"},
-                {"contract_status": "valid"},
-            ]),
+            _make_workflow(
+                "system",
+                "completed",
+                steps=[
+                    {"contract_status": "valid"},
+                    {"contract_status": "valid"},
+                ],
+            ),
         ]
         assert _compute_contract_failure_rate(workflows) == 0.0
 
     def test_some_invalid_contracts(self):
         workflows = [
-            _make_workflow("system", "completed", steps=[
-                {"contract_status": "valid"},
-                {"contract_status": "invalid"},
-            ]),
+            _make_workflow(
+                "system",
+                "completed",
+                steps=[
+                    {"contract_status": "valid"},
+                    {"contract_status": "invalid"},
+                ],
+            ),
         ]
         assert _compute_contract_failure_rate(workflows) == 0.5
 
@@ -242,6 +258,7 @@ class TestComputeContractFailureRate:
 # TestSustainedStable
 # ---------------------------------------------------------------------------
 
+
 class TestSustainedStable:
     def test_all_criteria_pass(self):
         criteria = evaluate_stageD_extended(
@@ -260,7 +277,11 @@ class TestSustainedStable:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         assert len(criteria) == 15
 
@@ -268,7 +289,11 @@ class TestSustainedStable:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         hard = [c for c in criteria if c.severity == "hard"]
         assert len(hard) == 8
@@ -277,7 +302,11 @@ class TestSustainedStable:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         soft = [c for c in criteria if c.severity == "soft"]
         assert len(soft) == 7
@@ -286,7 +315,11 @@ class TestSustainedStable:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         for c in criteria:
             assert c.passed, f"{c.name} should pass"
@@ -295,7 +328,11 @@ class TestSustainedStable:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         _, next_action = decide_stageD_extended(criteria)
         assert "sustained-stable" in next_action
@@ -303,16 +340,12 @@ class TestSustainedStable:
     def test_integration_with_review(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
         # now_override = 5h after activation (10:00 -> 15:00)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert result.decision == "stageD_sustained_stable"
 
     def test_observation_window_has_elapsed(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert result.observation_window["elapsed_hours"] == 5.0
         assert result.observation_window["elapsed_seconds"] == 18000.0
 
@@ -321,12 +354,15 @@ class TestSustainedStable:
 # TestContinueMonitoring
 # ---------------------------------------------------------------------------
 
+
 class TestContinueMonitoring:
     def test_insufficient_elapsed_time(self):
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
-            0, 0, _intact_scope(),
+            0,
+            0,
+            _intact_scope(),
             elapsed_seconds=2 * 3600,  # 2h < 4h required
             contract_failure_rate=0.0,
         )
@@ -337,7 +373,9 @@ class TestContinueMonitoring:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(5),  # 5 < 10 required
-            0, 0, _intact_scope(),
+            0,
+            0,
+            _intact_scope(),
             elapsed_seconds=5 * 3600,
             contract_failure_rate=0.0,
         )
@@ -348,7 +386,9 @@ class TestContinueMonitoring:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
-            0, 0, _intact_scope(),
+            0,
+            0,
+            _intact_scope(),
             elapsed_seconds=0,
             contract_failure_rate=0.0,
         )
@@ -359,7 +399,9 @@ class TestContinueMonitoring:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(0),
-            0, 0, _intact_scope(),
+            0,
+            0,
+            _intact_scope(),
             elapsed_seconds=5 * 3600,
             contract_failure_rate=None,
         )
@@ -371,7 +413,9 @@ class TestContinueMonitoring:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(5),  # also insufficient
-            0, 0, _intact_scope(),
+            0,
+            0,
+            _intact_scope(),
             elapsed_seconds=1 * 3600,  # insufficient
             contract_failure_rate=0.0,
         )
@@ -383,8 +427,13 @@ class TestContinueMonitoring:
         ev = _healthy_evidence()
         ev["orphaned_agents"] = 1
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "stageD_continue_monitoring"
@@ -393,7 +442,10 @@ class TestContinueMonitoring:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
             contract_failure_rate=0.15,  # > 10%
         )
         decision, _ = decide_stageD_extended(criteria)
@@ -416,7 +468,11 @@ class TestContinueMonitoring:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(5),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         _, next_action = decide_stageD_extended(criteria)
         assert "continue" in next_action.lower()
@@ -424,16 +480,12 @@ class TestContinueMonitoring:
     def test_integration_insufficient_time(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
         # Only 2h after activation
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T12:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T12:00:00Z")
         assert result.decision == "stageD_continue_monitoring"
 
     def test_integration_insufficient_runs(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=5)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert result.decision == "stageD_continue_monitoring"
 
 
@@ -441,13 +493,19 @@ class TestContinueMonitoring:
 # TestRollbackRecommended
 # ---------------------------------------------------------------------------
 
+
 class TestRollbackRecommended:
     def test_unhealthy_heartbeat(self):
         ev = _healthy_evidence()
         ev["heartbeat_overall"] = "degraded"
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -456,8 +514,13 @@ class TestRollbackRecommended:
         ev = _healthy_evidence()
         ev["policy_violations"] = 1
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -466,8 +529,13 @@ class TestRollbackRecommended:
         ev = _healthy_evidence()
         ev["budget_exhaustions"] = 1
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -476,8 +544,13 @@ class TestRollbackRecommended:
         ev = _healthy_evidence()
         ev["failure_rate"] = 0.25  # > 15%
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -493,7 +566,11 @@ class TestRollbackRecommended:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
-            0, 0, broken_scope, 5 * 3600, 0.0,
+            0,
+            0,
+            broken_scope,
+            5 * 3600,
+            0.0,
         )
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -502,8 +579,13 @@ class TestRollbackRecommended:
         ev = _healthy_evidence()
         ev["rollout_stage"] = "stage3_research_code_review_code_impl"
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -512,8 +594,13 @@ class TestRollbackRecommended:
         ev = _healthy_evidence()
         ev["supported_classes"] = ["research", "code_review", "code_impl"]
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         decision, _ = decide_stageD_extended(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -551,10 +638,19 @@ class TestRollbackRecommended:
 
     def test_resolved_recovery_does_not_trigger_rollback(self):
         """Benign watcher requeue (resolved) does not trigger rollback."""
-        rc = {"total": 1, "resolved": 1, "unresolved": 0, "details": [
-            {"task": "0117_test", "ts": "T1", "outcome": "resolved",
-             "reason": "task completed successfully after requeue"},
-        ]}
+        rc = {
+            "total": 1,
+            "resolved": 1,
+            "unresolved": 0,
+            "details": [
+                {
+                    "task": "0117_test",
+                    "ts": "T1",
+                    "outcome": "resolved",
+                    "reason": "task completed successfully after requeue",
+                },
+            ],
+        }
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(12),
@@ -592,7 +688,9 @@ class TestRollbackRecommended:
         criteria = evaluate_stageD_extended(
             ev,
             _healthy_sys_metrics(5),  # soft fail (insufficient runs)
-            0, 0, _intact_scope(),
+            0,
+            0,
+            _intact_scope(),
             elapsed_seconds=1 * 3600,  # soft fail (insufficient time)
             contract_failure_rate=0.0,
         )
@@ -603,8 +701,13 @@ class TestRollbackRecommended:
         ev = _healthy_evidence()
         ev["policy_violations"] = 2
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         _, next_action = decide_stageD_extended(criteria)
         assert "revert to Stage C" in next_action
@@ -614,11 +717,17 @@ class TestRollbackRecommended:
 # TestDecisionLogic
 # ---------------------------------------------------------------------------
 
+
 class TestDecisionLogic:
     def test_all_pass(self):
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         d, _ = decide_stageD_extended(criteria)
         assert d == "stageD_sustained_stable"
@@ -627,16 +736,26 @@ class TestDecisionLogic:
         ev = _healthy_evidence()
         ev["heartbeat_overall"] = "degraded"
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         d, _ = decide_stageD_extended(criteria)
         assert d == "rollback_system_inspect_recommended"
 
     def test_soft_failure(self):
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), _healthy_sys_metrics(5),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            _healthy_evidence(),
+            _healthy_sys_metrics(5),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         d, _ = decide_stageD_extended(criteria)
         assert d == "stageD_continue_monitoring"
@@ -646,8 +765,13 @@ class TestDecisionLogic:
         ev["heartbeat_overall"] = "unhealthy"
         ev["policy_violations"] = 1
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         d, _ = decide_stageD_extended(criteria)
         assert d == "rollback_system_inspect_recommended"
@@ -656,16 +780,24 @@ class TestDecisionLogic:
         ev = _healthy_evidence()
         ev["orphaned_agents"] = 1
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(5),
-            0, 0, _intact_scope(), 1 * 3600, 0.5,
+            ev,
+            _healthy_sys_metrics(5),
+            0,
+            0,
+            _intact_scope(),
+            1 * 3600,
+            0.5,
         )
         d, _ = decide_stageD_extended(criteria)
         assert d == "stageD_continue_monitoring"
 
     def test_boundary_elapsed_exactly_at_threshold(self):
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), _healthy_sys_metrics(12),
-            0, 0, _intact_scope(),
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
             elapsed_seconds=EXTENDED_MIN_ELAPSED_SECONDS,  # exactly at threshold
             contract_failure_rate=0.0,
         )
@@ -676,7 +808,11 @@ class TestDecisionLogic:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(EXTENDED_MIN_SYSTEM_INSPECT_RUNS),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         d, _ = decide_stageD_extended(criteria)
         assert d == "stageD_sustained_stable"
@@ -685,7 +821,11 @@ class TestDecisionLogic:
         criteria = evaluate_stageD_extended(
             _healthy_evidence(),
             _healthy_sys_metrics(EXTENDED_MIN_SYSTEM_INSPECT_RUNS - 1),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         d, _ = decide_stageD_extended(criteria)
         assert d == "stageD_continue_monitoring"
@@ -695,12 +835,11 @@ class TestDecisionLogic:
 # TestMonitoringProgress
 # ---------------------------------------------------------------------------
 
+
 class TestMonitoringProgress:
     def test_full_progress(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         mp = result.monitoring_progress
         assert mp["runs_completed"] == 12
         assert mp["runs_required"] == EXTENDED_MIN_SYSTEM_INSPECT_RUNS
@@ -710,9 +849,7 @@ class TestMonitoringProgress:
 
     def test_partial_progress_runs(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=5)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         mp = result.monitoring_progress
         assert mp["runs_completed"] == 5
         assert mp["runs_progress_pct"] == 50.0
@@ -720,18 +857,14 @@ class TestMonitoringProgress:
     def test_partial_progress_time(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
         # Only 2h after activation (50% of 4h)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T12:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T12:00:00Z")
         mp = result.monitoring_progress
         assert mp["elapsed_hours"] == 2.0
         assert mp["elapsed_progress_pct"] == 50.0
 
     def test_hard_soft_counts(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         mp = result.monitoring_progress
         assert mp["hard_criteria_passed"] == 8
         assert mp["hard_criteria_total"] == 8
@@ -740,9 +873,7 @@ class TestMonitoringProgress:
 
     def test_progress_caps_at_100(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=20)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T20:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T20:00:00Z")
         mp = result.monitoring_progress
         assert mp["runs_progress_pct"] == 100.0
         assert mp["elapsed_progress_pct"] == 100.0
@@ -751,6 +882,7 @@ class TestMonitoringProgress:
 # ---------------------------------------------------------------------------
 # TestThresholdTightening
 # ---------------------------------------------------------------------------
+
 
 class TestThresholdTightening:
     """Verify extended thresholds are tighter than initial."""
@@ -781,13 +913,19 @@ class TestThresholdTightening:
 # TestCriteriaEvaluation
 # ---------------------------------------------------------------------------
 
+
 class TestCriteriaEvaluation:
     def test_strict_healthy(self):
         ev = _healthy_evidence()
         ev["heartbeat_overall"] = "degraded"
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         hb = next(c for c in criteria if c.name == "heartbeat_healthy")
         assert not hb.passed
@@ -797,8 +935,13 @@ class TestCriteriaEvaluation:
         ev = _healthy_evidence()
         ev["heartbeat_overall"] = ""
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         hb = next(c for c in criteria if c.name == "heartbeat_healthy")
         assert not hb.passed
@@ -807,8 +950,13 @@ class TestCriteriaEvaluation:
         ev = _healthy_evidence()
         ev["failure_rate"] = None
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         fr = next(c for c in criteria if c.name == "overall_failure_rate")
         assert fr.passed
@@ -818,8 +966,13 @@ class TestCriteriaEvaluation:
         ev = _healthy_evidence()
         ev["failure_rate"] = EXTENDED_MAX_FAILURE_RATE
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         fr = next(c for c in criteria if c.name == "overall_failure_rate")
         assert fr.passed
@@ -828,45 +981,76 @@ class TestCriteriaEvaluation:
         ev = _healthy_evidence()
         ev["failure_rate"] = EXTENDED_MAX_FAILURE_RATE + 0.01
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         fr = next(c for c in criteria if c.name == "overall_failure_rate")
         assert not fr.passed
 
     def test_all_criteria_names(self):
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         names = {c.name for c in criteria}
         expected = {
-            "heartbeat_healthy", "no_policy_violations", "no_budget_exhaustions",
-            "overall_failure_rate", "scope_integrity", "stage_is_D",
-            "system_class_active", "no_recovery_anomalies",
-            "minimum_elapsed_time", "extended_minimum_runs",
-            "system_inspect_failure_rate", "system_verifier_rejection_rate",
-            "blocked_mutation_attempts", "contract_failure_rate",
+            "heartbeat_healthy",
+            "no_policy_violations",
+            "no_budget_exhaustions",
+            "overall_failure_rate",
+            "scope_integrity",
+            "stage_is_D",
+            "system_class_active",
+            "no_recovery_anomalies",
+            "minimum_elapsed_time",
+            "extended_minimum_runs",
+            "system_inspect_failure_rate",
+            "system_verifier_rejection_rate",
+            "blocked_mutation_attempts",
+            "contract_failure_rate",
             "no_workflow_anomalies",
         }
         assert names == expected
 
     def test_severity_classification(self):
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         hard_names = {c.name for c in criteria if c.severity == "hard"}
         soft_names = {c.name for c in criteria if c.severity == "soft"}
         expected_hard = {
-            "heartbeat_healthy", "no_policy_violations", "no_budget_exhaustions",
-            "overall_failure_rate", "scope_integrity", "stage_is_D",
-            "system_class_active", "no_recovery_anomalies",
+            "heartbeat_healthy",
+            "no_policy_violations",
+            "no_budget_exhaustions",
+            "overall_failure_rate",
+            "scope_integrity",
+            "stage_is_D",
+            "system_class_active",
+            "no_recovery_anomalies",
         }
         expected_soft = {
-            "minimum_elapsed_time", "extended_minimum_runs",
-            "system_inspect_failure_rate", "system_verifier_rejection_rate",
-            "blocked_mutation_attempts", "contract_failure_rate",
+            "minimum_elapsed_time",
+            "extended_minimum_runs",
+            "system_inspect_failure_rate",
+            "system_verifier_rejection_rate",
+            "blocked_mutation_attempts",
+            "contract_failure_rate",
             "no_workflow_anomalies",
         }
         assert hard_names == expected_hard
@@ -877,8 +1061,13 @@ class TestCriteriaEvaluation:
         metrics = _healthy_sys_metrics(10)
         metrics["failure_rate"] = 0.12
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), metrics,
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            _healthy_evidence(),
+            metrics,
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         fr = next(c for c in criteria if c.name == "system_inspect_failure_rate")
         assert not fr.passed
@@ -888,11 +1077,17 @@ class TestCriteriaEvaluation:
 # TestArtifactGeneration
 # ---------------------------------------------------------------------------
 
+
 class TestArtifactGeneration:
     def test_sustained_stable_markdown(self):
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         review = StageDExtendedMonitoring(
             decision="stageD_sustained_stable",
@@ -902,17 +1097,24 @@ class TestArtifactGeneration:
             system_inspect_metrics=_healthy_sys_metrics(12),
             evidence_summary={},
             observation_window={
-                "activation_at": "T1", "review_at": "T2",
-                "elapsed_hours": 5.0, "elapsed_seconds": 18000.0,
+                "activation_at": "T1",
+                "review_at": "T2",
+                "elapsed_hours": 5.0,
+                "elapsed_seconds": 18000.0,
                 "scope": "system_inspect (read-only)",
             },
             scope_integrity=_intact_scope(),
             monitoring_progress={
-                "runs_completed": 12, "runs_required": 10,
-                "runs_progress_pct": 100.0, "elapsed_hours": 5.0,
-                "elapsed_required_hours": 4.0, "elapsed_progress_pct": 100.0,
-                "hard_criteria_passed": 8, "hard_criteria_total": 8,
-                "soft_criteria_passed": 7, "soft_criteria_total": 7,
+                "runs_completed": 12,
+                "runs_required": 10,
+                "runs_progress_pct": 100.0,
+                "elapsed_hours": 5.0,
+                "elapsed_required_hours": 4.0,
+                "elapsed_progress_pct": 100.0,
+                "hard_criteria_passed": 8,
+                "hard_criteria_total": 8,
+                "soft_criteria_passed": 7,
+                "soft_criteria_total": 7,
             },
         )
         md = render_stageD_extended_markdown(review)
@@ -921,8 +1123,13 @@ class TestArtifactGeneration:
 
     def test_continue_monitoring_markdown(self):
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), _healthy_sys_metrics(5),
-            0, 0, _intact_scope(), 2 * 3600, 0.0,
+            _healthy_evidence(),
+            _healthy_sys_metrics(5),
+            0,
+            0,
+            _intact_scope(),
+            2 * 3600,
+            0.0,
         )
         review = StageDExtendedMonitoring(
             decision="stageD_continue_monitoring",
@@ -932,17 +1139,24 @@ class TestArtifactGeneration:
             system_inspect_metrics=_healthy_sys_metrics(5),
             evidence_summary={},
             observation_window={
-                "activation_at": "T1", "review_at": "T2",
-                "elapsed_hours": 2.0, "elapsed_seconds": 7200.0,
+                "activation_at": "T1",
+                "review_at": "T2",
+                "elapsed_hours": 2.0,
+                "elapsed_seconds": 7200.0,
                 "scope": "system_inspect (read-only)",
             },
             scope_integrity=_intact_scope(),
             monitoring_progress={
-                "runs_completed": 5, "runs_required": 10,
-                "runs_progress_pct": 50.0, "elapsed_hours": 2.0,
-                "elapsed_required_hours": 4.0, "elapsed_progress_pct": 50.0,
-                "hard_criteria_passed": 8, "hard_criteria_total": 8,
-                "soft_criteria_passed": 5, "soft_criteria_total": 7,
+                "runs_completed": 5,
+                "runs_required": 10,
+                "runs_progress_pct": 50.0,
+                "elapsed_hours": 2.0,
+                "elapsed_required_hours": 4.0,
+                "elapsed_progress_pct": 50.0,
+                "hard_criteria_passed": 8,
+                "hard_criteria_total": 8,
+                "soft_criteria_passed": 5,
+                "soft_criteria_total": 7,
             },
         )
         md = render_stageD_extended_markdown(review)
@@ -952,8 +1166,13 @@ class TestArtifactGeneration:
         ev = _healthy_evidence()
         ev["heartbeat_overall"] = "unhealthy"
         criteria = evaluate_stageD_extended(
-            ev, _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            ev,
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         review = StageDExtendedMonitoring(
             decision="rollback_system_inspect_recommended",
@@ -963,8 +1182,10 @@ class TestArtifactGeneration:
             system_inspect_metrics=_healthy_sys_metrics(12),
             evidence_summary={},
             observation_window={
-                "activation_at": "T1", "review_at": "T2",
-                "elapsed_hours": 5.0, "elapsed_seconds": 18000.0,
+                "activation_at": "T1",
+                "review_at": "T2",
+                "elapsed_hours": 5.0,
+                "elapsed_seconds": 18000.0,
                 "scope": "system_inspect (read-only)",
             },
             scope_integrity=_intact_scope(),
@@ -976,8 +1197,13 @@ class TestArtifactGeneration:
 
     def test_threshold_comparison_in_markdown(self):
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), _healthy_sys_metrics(12),
-            0, 0, _intact_scope(), 5 * 3600, 0.0,
+            _healthy_evidence(),
+            _healthy_sys_metrics(12),
+            0,
+            0,
+            _intact_scope(),
+            5 * 3600,
+            0.0,
         )
         review = StageDExtendedMonitoring(
             decision="stageD_sustained_stable",
@@ -986,17 +1212,24 @@ class TestArtifactGeneration:
             system_inspect_metrics=_healthy_sys_metrics(12),
             evidence_summary={},
             observation_window={
-                "activation_at": "T1", "review_at": "T2",
-                "elapsed_hours": 5.0, "elapsed_seconds": 18000.0,
+                "activation_at": "T1",
+                "review_at": "T2",
+                "elapsed_hours": 5.0,
+                "elapsed_seconds": 18000.0,
                 "scope": "test",
             },
             scope_integrity=_intact_scope(),
             monitoring_progress={
-                "runs_completed": 12, "runs_required": 10,
-                "runs_progress_pct": 100.0, "elapsed_hours": 5.0,
-                "elapsed_required_hours": 4.0, "elapsed_progress_pct": 100.0,
-                "hard_criteria_passed": 8, "hard_criteria_total": 8,
-                "soft_criteria_passed": 7, "soft_criteria_total": 7,
+                "runs_completed": 12,
+                "runs_required": 10,
+                "runs_progress_pct": 100.0,
+                "elapsed_hours": 5.0,
+                "elapsed_required_hours": 4.0,
+                "elapsed_progress_pct": 100.0,
+                "hard_criteria_passed": 8,
+                "hard_criteria_total": 8,
+                "soft_criteria_passed": 7,
+                "soft_criteria_total": 7,
             },
         )
         md = render_stageD_extended_markdown(review)
@@ -1006,8 +1239,13 @@ class TestArtifactGeneration:
 
     def test_monitoring_progress_in_markdown(self):
         criteria = evaluate_stageD_extended(
-            _healthy_evidence(), _healthy_sys_metrics(5),
-            0, 0, _intact_scope(), 2 * 3600, 0.0,
+            _healthy_evidence(),
+            _healthy_sys_metrics(5),
+            0,
+            0,
+            _intact_scope(),
+            2 * 3600,
+            0.0,
         )
         review = StageDExtendedMonitoring(
             decision="stageD_continue_monitoring",
@@ -1016,17 +1254,24 @@ class TestArtifactGeneration:
             system_inspect_metrics=_healthy_sys_metrics(5),
             evidence_summary={},
             observation_window={
-                "activation_at": "T1", "review_at": "T2",
-                "elapsed_hours": 2.0, "elapsed_seconds": 7200.0,
+                "activation_at": "T1",
+                "review_at": "T2",
+                "elapsed_hours": 2.0,
+                "elapsed_seconds": 7200.0,
                 "scope": "test",
             },
             scope_integrity=_intact_scope(),
             monitoring_progress={
-                "runs_completed": 5, "runs_required": 10,
-                "runs_progress_pct": 50.0, "elapsed_hours": 2.0,
-                "elapsed_required_hours": 4.0, "elapsed_progress_pct": 50.0,
-                "hard_criteria_passed": 8, "hard_criteria_total": 8,
-                "soft_criteria_passed": 5, "soft_criteria_total": 7,
+                "runs_completed": 5,
+                "runs_required": 10,
+                "runs_progress_pct": 50.0,
+                "elapsed_hours": 2.0,
+                "elapsed_required_hours": 4.0,
+                "elapsed_progress_pct": 50.0,
+                "hard_criteria_passed": 8,
+                "hard_criteria_total": 8,
+                "soft_criteria_passed": 5,
+                "soft_criteria_total": 7,
             },
         )
         md = render_stageD_extended_markdown(review)
@@ -1035,27 +1280,21 @@ class TestArtifactGeneration:
 
     def test_file_creation(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         md_path, json_path = write_stageD_extended_monitoring(result, tmp_path)
         assert md_path.exists()
         assert json_path.exists()
 
     def test_json_valid(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         _, json_path = write_stageD_extended_monitoring(result, tmp_path)
         data = json.loads(json_path.read_text())
         assert data["decision"] == "stageD_sustained_stable"
 
     def test_json_roundtrip(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         d = result.to_dict()
         assert d["decision"] == "stageD_sustained_stable"
         assert len(d["criteria"]) == 15
@@ -1063,9 +1302,7 @@ class TestArtifactGeneration:
 
     def test_file_paths(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         md_path, json_path = write_stageD_extended_monitoring(result, tmp_path)
         assert md_path.name == "phase7_stageD_extended_monitoring.md"
         assert json_path.name == "stageD_extended_monitoring.json"
@@ -1075,54 +1312,42 @@ class TestArtifactGeneration:
 # TestNoScopeExpansion
 # ---------------------------------------------------------------------------
 
+
 class TestNoScopeExpansion:
     def test_feature_flags_unchanged(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        flags_before = json.loads(
-            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
-        )
-        review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
-        flags_after = json.loads(
-            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        flags_before = json.loads((tmp_path / "STATE" / "config" / "feature_flags.json").read_text())
+        review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
+        flags_after = json.loads((tmp_path / "STATE" / "config" / "feature_flags.json").read_text())
         assert flags_before == flags_after
 
     def test_activation_log_unchanged(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
         log_before = (tmp_path / "STATE" / "activation_log.jsonl").read_text()
-        review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         log_after = (tmp_path / "STATE" / "activation_log.jsonl").read_text()
         assert log_before == log_after
 
     def test_classes_not_expanded(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert result.enabled_classes == ["research", "code_review", "code_impl", "system"]
 
     def test_no_auto_expand_in_next_action(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert "expand" not in result.next_action.lower() or "may be evaluated" in result.next_action.lower()
 
     def test_scope_remains_inspect_only(self, tmp_path):
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert result.scope_integrity["system_scope"] == "inspect_only"
 
 
 # ---------------------------------------------------------------------------
 # TestClassifyPostActivationRecoveries
 # ---------------------------------------------------------------------------
+
 
 def _write_recovery_log(root, entries):
     """Write a recovery.log with the given entries.
@@ -1134,10 +1359,7 @@ def _write_recovery_log(root, entries):
     lines = []
     for e in entries:
         lines.append(f"--- Recovery at {e['ts']} ---")
-        lines.append(
-            f"  [task_requeued] {e['task']}.md.inprogress "
-            f"\u2014 Requeued abandoned task (no worker running)"
-        )
+        lines.append(f"  [task_requeued] {e['task']}.md.inprogress \u2014 Requeued abandoned task (no worker running)")
         lines.append("")
     log.write_text("\n".join(lines))
 
@@ -1145,44 +1367,45 @@ def _write_recovery_log(root, entries):
 def _write_workflow(root, task_stem, status="completed"):
     wf_dir = root / "STATE" / "workflows"
     wf_dir.mkdir(parents=True, exist_ok=True)
-    (wf_dir / f"{task_stem}.json").write_text(
-        json.dumps({"task_class": "system", "status": status})
-    )
+    (wf_dir / f"{task_stem}.json").write_text(json.dumps({"task_class": "system", "status": status}))
 
 
 class TestClassifyPostActivationRecoveries:
     def test_no_recovery_log(self, tmp_path):
-        result = _classify_post_activation_recoveries(
-            tmp_path, "2026-03-08T14:00:00Z"
-        )
+        result = _classify_post_activation_recoveries(tmp_path, "2026-03-08T14:00:00Z")
         assert result == {"total": 0, "resolved": 0, "unresolved": 0, "details": []}
 
     def test_empty_activation_ts(self, tmp_path):
-        _write_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T15:00:00Z", "task": "task_a"},
-        ])
+        _write_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T15:00:00Z", "task": "task_a"},
+            ],
+        )
         result = _classify_post_activation_recoveries(tmp_path, "")
         assert result["total"] == 0
 
     def test_pre_activation_events_excluded(self, tmp_path):
-        _write_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T06:00:00Z", "task": "task_before"},
-        ])
-        (tmp_path / "STATE" / "workflows").mkdir(parents=True, exist_ok=True)
-        result = _classify_post_activation_recoveries(
-            tmp_path, "2026-03-08T14:00:00Z"
+        _write_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T06:00:00Z", "task": "task_before"},
+            ],
         )
+        (tmp_path / "STATE" / "workflows").mkdir(parents=True, exist_ok=True)
+        result = _classify_post_activation_recoveries(tmp_path, "2026-03-08T14:00:00Z")
         assert result["total"] == 0
 
     def test_resolved_requeue(self, tmp_path):
         """Requeue + later completed = resolved (benign)."""
-        _write_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T17:00:00Z", "task": "0117_System_inspect_scope"},
-        ])
-        _write_workflow(tmp_path, "0117_System_inspect_scope", "completed")
-        result = _classify_post_activation_recoveries(
-            tmp_path, "2026-03-08T14:00:00Z"
+        _write_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T17:00:00Z", "task": "0117_System_inspect_scope"},
+            ],
         )
+        _write_workflow(tmp_path, "0117_System_inspect_scope", "completed")
+        result = _classify_post_activation_recoveries(tmp_path, "2026-03-08T14:00:00Z")
         assert result["total"] == 1
         assert result["resolved"] == 1
         assert result["unresolved"] == 0
@@ -1190,14 +1413,15 @@ class TestClassifyPostActivationRecoveries:
 
     def test_unresolved_requeue(self, tmp_path):
         """Requeue + no workflow completion = unresolved (genuine anomaly)."""
-        _write_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T17:00:00Z", "task": "0117_System_inspect_scope"},
-        ])
+        _write_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T17:00:00Z", "task": "0117_System_inspect_scope"},
+            ],
+        )
         (tmp_path / "STATE" / "workflows").mkdir(parents=True, exist_ok=True)
         # No workflow file → unresolved
-        result = _classify_post_activation_recoveries(
-            tmp_path, "2026-03-08T14:00:00Z"
-        )
+        result = _classify_post_activation_recoveries(tmp_path, "2026-03-08T14:00:00Z")
         assert result["total"] == 1
         assert result["resolved"] == 0
         assert result["unresolved"] == 1
@@ -1205,56 +1429,60 @@ class TestClassifyPostActivationRecoveries:
 
     def test_failed_workflow_is_unresolved(self, tmp_path):
         """Requeue + workflow exists but failed = unresolved."""
-        _write_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T17:00:00Z", "task": "0117_task"},
-        ])
-        _write_workflow(tmp_path, "0117_task", "failed")
-        result = _classify_post_activation_recoveries(
-            tmp_path, "2026-03-08T14:00:00Z"
+        _write_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T17:00:00Z", "task": "0117_task"},
+            ],
         )
+        _write_workflow(tmp_path, "0117_task", "failed")
+        result = _classify_post_activation_recoveries(tmp_path, "2026-03-08T14:00:00Z")
         assert result["unresolved"] == 1
         assert result["resolved"] == 0
 
     def test_mixed_resolved_unresolved(self, tmp_path):
         """Mix of resolved and unresolved events."""
-        _write_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T15:00:00Z", "task": "task_ok"},
-            {"ts": "2026-03-08T16:00:00Z", "task": "task_missing"},
-            {"ts": "2026-03-08T17:00:00Z", "task": "task_also_ok"},
-        ])
+        _write_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T15:00:00Z", "task": "task_ok"},
+                {"ts": "2026-03-08T16:00:00Z", "task": "task_missing"},
+                {"ts": "2026-03-08T17:00:00Z", "task": "task_also_ok"},
+            ],
+        )
         _write_workflow(tmp_path, "task_ok", "completed")
         _write_workflow(tmp_path, "task_also_ok", "completed")
         (tmp_path / "STATE" / "workflows").mkdir(parents=True, exist_ok=True)
-        result = _classify_post_activation_recoveries(
-            tmp_path, "2026-03-08T14:00:00Z"
-        )
+        result = _classify_post_activation_recoveries(tmp_path, "2026-03-08T14:00:00Z")
         assert result["total"] == 3
         assert result["resolved"] == 2
         assert result["unresolved"] == 1
 
     def test_pre_and_post_mixed(self, tmp_path):
         """Pre-activation events ignored; post-activation classified."""
-        _write_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T06:00:00Z", "task": "task_pre"},
-            {"ts": "2026-03-08T08:00:00Z", "task": "task_pre2"},
-            {"ts": "2026-03-08T17:00:00Z", "task": "task_post"},
-        ])
-        _write_workflow(tmp_path, "task_post", "completed")
-        result = _classify_post_activation_recoveries(
-            tmp_path, "2026-03-08T14:00:00Z"
+        _write_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T06:00:00Z", "task": "task_pre"},
+                {"ts": "2026-03-08T08:00:00Z", "task": "task_pre2"},
+                {"ts": "2026-03-08T17:00:00Z", "task": "task_post"},
+            ],
         )
+        _write_workflow(tmp_path, "task_post", "completed")
+        result = _classify_post_activation_recoveries(tmp_path, "2026-03-08T14:00:00Z")
         assert result["total"] == 1  # only post-activation
         assert result["resolved"] == 1
 
     def test_details_populated(self, tmp_path):
         """Each event gets a detail entry with task, ts, outcome, reason."""
-        _write_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T17:00:00Z", "task": "task_x"},
-        ])
-        _write_workflow(tmp_path, "task_x", "completed")
-        result = _classify_post_activation_recoveries(
-            tmp_path, "2026-03-08T14:00:00Z"
+        _write_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T17:00:00Z", "task": "task_x"},
+            ],
         )
+        _write_workflow(tmp_path, "task_x", "completed")
+        result = _classify_post_activation_recoveries(tmp_path, "2026-03-08T14:00:00Z")
         detail = result["details"][0]
         assert detail["task"] == "task_x"
         assert "resolved" in detail["outcome"]
@@ -1264,6 +1492,7 @@ class TestClassifyPostActivationRecoveries:
 # ---------------------------------------------------------------------------
 # TestRecoveryClassificationIntegration
 # ---------------------------------------------------------------------------
+
 
 class TestRecoveryClassificationIntegration:
     """Integration tests: recovery log + workflow state → correct decision."""
@@ -1275,13 +1504,14 @@ class TestRecoveryClassificationIntegration:
         """Resolved watcher requeue → sustained_stable (not rollback)."""
         _populate_extended_env(tmp_path, num_system_runs=12)
         # Add a post-activation recovery for a task that completed
-        self._add_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T12:00:00Z", "task": "system_5"},
-        ])
-        # system_5 already exists as completed in _populate_extended_env
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
+        self._add_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T12:00:00Z", "task": "system_5"},
+            ],
         )
+        # system_5 already exists as completed in _populate_extended_env
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert result.decision == "stageD_sustained_stable"
         rec = next(c for c in result.criteria if c.name == "no_recovery_anomalies")
         assert rec.passed
@@ -1290,12 +1520,13 @@ class TestRecoveryClassificationIntegration:
     def test_unresolved_requeue_triggers_rollback(self, tmp_path):
         """Unresolved requeue (no completion) → rollback."""
         _populate_extended_env(tmp_path, num_system_runs=12)
-        self._add_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T12:00:00Z", "task": "ghost_task_never_completed"},
-        ])
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
+        self._add_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T12:00:00Z", "task": "ghost_task_never_completed"},
+            ],
         )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert result.decision == "rollback_system_inspect_recommended"
         rec = next(c for c in result.criteria if c.name == "no_recovery_anomalies")
         assert not rec.passed
@@ -1304,24 +1535,26 @@ class TestRecoveryClassificationIntegration:
     def test_mixed_resolved_and_unresolved(self, tmp_path):
         """1 resolved + 1 unresolved → rollback (unresolved dominates)."""
         _populate_extended_env(tmp_path, num_system_runs=12)
-        self._add_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T11:00:00Z", "task": "system_3"},  # completed
-            {"ts": "2026-03-08T12:00:00Z", "task": "vanished_task"},  # no workflow
-        ])
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
+        self._add_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T11:00:00Z", "task": "system_3"},  # completed
+                {"ts": "2026-03-08T12:00:00Z", "task": "vanished_task"},  # no workflow
+            ],
         )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert result.decision == "rollback_system_inspect_recommended"
 
     def test_evidence_summary_includes_classification(self, tmp_path):
         """Evidence summary has resolved/total/details fields."""
         _populate_extended_env(tmp_path, num_system_runs=12)
-        self._add_recovery_log(tmp_path, [
-            {"ts": "2026-03-08T12:00:00Z", "task": "system_5"},
-        ])
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
+        self._add_recovery_log(
+            tmp_path,
+            [
+                {"ts": "2026-03-08T12:00:00Z", "task": "system_5"},
+            ],
         )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         es = result.evidence_summary
         assert es["post_activation_recoveries"] == 0  # unresolved
         assert es["post_activation_recoveries_total"] == 1
@@ -1331,9 +1564,7 @@ class TestRecoveryClassificationIntegration:
     def test_no_recovery_log_still_works(self, tmp_path):
         """No recovery log → sustained_stable (no anomalies)."""
         _populate_extended_env(tmp_path, num_system_runs=12)
-        result = review_stageD_extended(
-            tmp_path, now_override="2026-03-08T15:00:00Z"
-        )
+        result = review_stageD_extended(tmp_path, now_override="2026-03-08T15:00:00Z")
         assert result.decision == "stageD_sustained_stable"
         es = result.evidence_summary
         assert es["post_activation_recoveries"] == 0

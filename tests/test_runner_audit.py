@@ -37,6 +37,7 @@ MOCK_REGISTRY = {
 
 # --- Mock tool functions -----------------------------------------------------
 
+
 def _echo_tool(text="hello"):
     return {"ok": True, "exit_code": 0, "stdout": text, "stderr": ""}
 
@@ -147,8 +148,7 @@ def test_run_tool_returns_envelope(tmp_path):
     }
 
     valid_text = (
-        "# Output\n\n## CONTRACT\nsummary: test\n"
-        "verification: checked\nconfidence: high\nfiles_changed: a.py\n"
+        "# Output\n\n## CONTRACT\nsummary: test\nverification: checked\nconfidence: high\nfiles_changed: a.py\n"
     )
 
     envelope = run_tool("contracts.validate", {"text": valid_text}, registry=registry)

@@ -49,61 +49,66 @@ _CONFIRM_TOKEN = "ALLOW_DESTRUCTIVE"
 # High-risk destructive commands (always blocked unless confirmed)
 _SHELL_DENY_PATTERNS = [
     # rm -rf / or ~ or /home etc.  (no \b after / — not a word char)
-    (re.compile(r"\brm\s+(-\w*[rf]\w*\s+)*(\/|~|\$HOME|\/home|\/etc|\/usr|\/bin|\/lib)(\s|$)"),
-     "rm -rf on critical path"),
+    (
+        re.compile(r"\brm\s+(-\w*[rf]\w*\s+)*(\/|~|\$HOME|\/home|\/etc|\/usr|\/bin|\/lib)(\s|$)"),
+        "rm -rf on critical path",
+    ),
     # dd writing to block devices or system paths
-    (re.compile(r"\bdd\b.*\bof\s*=\s*\/"),
-     "dd write to system path"),
+    (re.compile(r"\bdd\b.*\bof\s*=\s*\/"), "dd write to system path"),
     # Filesystem destructors
-    (re.compile(r"\b(mkfs|wipefs|shred)\b"),
-     "filesystem destructive command"),
+    (re.compile(r"\b(mkfs|wipefs|shred)\b"), "filesystem destructive command"),
     # Fork bomb
-    (re.compile(r":\(\)\s*\{|:\(\){"),
-     "fork bomb pattern"),
+    (re.compile(r":\(\)\s*\{|:\(\){"), "fork bomb pattern"),
     # System power commands
-    (re.compile(r"\b(shutdown|reboot|halt|poweroff)\b"),
-     "system power command"),
-    (re.compile(r"\binit\s+[06]\b"),
-     "init runlevel change"),
+    (re.compile(r"\b(shutdown|reboot|halt|poweroff)\b"), "system power command"),
+    (re.compile(r"\binit\s+[06]\b"), "init runlevel change"),
     # chmod/chown -R on critical paths (no \b after / — not a word char)
-    (re.compile(r"\b(chmod|chown)\b.*-[Rr].*\s+(\/|\/home|\/etc|\/usr|\/bin|\/lib)(\s|$)"),
-     "recursive permission change on critical path"),
+    (
+        re.compile(r"\b(chmod|chown)\b.*-[Rr].*\s+(\/|\/home|\/etc|\/usr|\/bin|\/lib)(\s|$)"),
+        "recursive permission change on critical path",
+    ),
     # Pipe to shell (curl|bash, wget|sh, etc.)
-    (re.compile(r"\b(curl|wget)\b.*\|\s*(bash|sh|zsh)\b"),
-     "pipe remote content to shell"),
+    (re.compile(r"\b(curl|wget)\b.*\|\s*(bash|sh|zsh)\b"), "pipe remote content to shell"),
     # Redirect writes into system directories
-    (re.compile(r">\s*\/(etc|bin|usr|lib)\/"),
-     "redirect write to system directory"),
+    (re.compile(r">\s*\/(etc|bin|usr|lib)\/"), "redirect write to system directory"),
     # fdisk
-    (re.compile(r"\bfdisk\b"),
-     "disk partition command"),
+    (re.compile(r"\bfdisk\b"), "disk partition command"),
 ]
 
 _PKG_MANAGERS = ("apt ", "apt-get ", "dnf ", "yum ")
 
 # --- Git safety (expanded allowlist + forbidden patterns) --------------------
 
-_GIT_ALLOWED = frozenset((
-    "status", "diff", "log", "add", "commit", "branch", "checkout", "show",
-    "switch", "restore", "fetch", "pull", "merge", "tag", "rev-parse",
-    "stash", "remote",
-))
+_GIT_ALLOWED = frozenset(
+    (
+        "status",
+        "diff",
+        "log",
+        "add",
+        "commit",
+        "branch",
+        "checkout",
+        "show",
+        "switch",
+        "restore",
+        "fetch",
+        "pull",
+        "merge",
+        "tag",
+        "rev-parse",
+        "stash",
+        "remote",
+    )
+)
 
 _GIT_DENY_PATTERNS = [
-    (re.compile(r"\b--force\b|(?<!\w)-f\b"),
-     "force push/operation"),
-    (re.compile(r"\breset\b.*--hard\b"),
-     "hard reset"),
-    (re.compile(r"\bclean\b.*-[a-z]*[fdx]"),
-     "git clean (destructive)"),
-    (re.compile(r"\brebase\b"),
-     "rebase"),
-    (re.compile(r"\bfilter-branch\b"),
-     "filter-branch (history rewrite)"),
-    (re.compile(r"\b--force-with-lease\b"),
-     "force push with lease"),
-    (re.compile(r"\bmerge\b.*--strategy[= ]ours\b"),
-     "merge strategy=ours (discards changes)"),
+    (re.compile(r"\b--force\b|(?<!\w)-f\b"), "force push/operation"),
+    (re.compile(r"\breset\b.*--hard\b"), "hard reset"),
+    (re.compile(r"\bclean\b.*-[a-z]*[fdx]"), "git clean (destructive)"),
+    (re.compile(r"\brebase\b"), "rebase"),
+    (re.compile(r"\bfilter-branch\b"), "filter-branch (history rewrite)"),
+    (re.compile(r"\b--force-with-lease\b"), "force push with lease"),
+    (re.compile(r"\bmerge\b.*--strategy[= ]ours\b"), "merge strategy=ours (discards changes)"),
 ]
 
 
@@ -169,10 +174,7 @@ def enforce_shell_safety(cmd: str) -> None:
         if pattern.search(cmd):
             if _is_confirmed():
                 return
-            raise ValueError(
-                f"BLOCKED: {reason}. "
-                f"To override, set env NOVACORE_CONFIRM={_CONFIRM_TOKEN}"
-            )
+            raise ValueError(f"BLOCKED: {reason}. To override, set env NOVACORE_CONFIRM={_CONFIRM_TOKEN}")
     lower = cmd.lower()
     for mgr in _PKG_MANAGERS:
         if mgr in lower:
@@ -190,27 +192,19 @@ def enforce_git_safety(subcommand: str, args: list[str]) -> None:
     Override: set NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE in environment.
     """
     if subcommand not in _GIT_ALLOWED:
-        raise ValueError(
-            f"BLOCKED: git subcommand {subcommand!r} not in allowlist: "
-            + ", ".join(sorted(_GIT_ALLOWED))
-        )
+        raise ValueError(f"BLOCKED: git subcommand {subcommand!r} not in allowlist: " + ", ".join(sorted(_GIT_ALLOWED)))
     combined = " ".join([subcommand] + args)
     for pattern, reason in _GIT_DENY_PATTERNS:
         if pattern.search(combined):
             if _is_confirmed():
                 return
-            raise ValueError(
-                f"BLOCKED: {reason}. "
-                f"To override, set env NOVACORE_CONFIRM={_CONFIRM_TOKEN}"
-            )
+            raise ValueError(f"BLOCKED: {reason}. To override, set env NOVACORE_CONFIRM={_CONFIRM_TOKEN}")
 
 
 # --- Execution audit envelope ------------------------------------------------
 
 
-def _execute_with_audit(
-    tool_name: str, func, registry: dict, **kwargs
-) -> dict:
+def _execute_with_audit(tool_name: str, func, registry: dict, **kwargs) -> dict:
     """Wrap a tool execution in a structured audit envelope.
 
     Validates that *tool_name* is registered before calling *func*.
@@ -228,9 +222,7 @@ def _execute_with_audit(
     tools = registry.get("tools", {})
     if tool_name not in tools:
         available = ", ".join(sorted(tools)) or "(none)"
-        raise ValueError(
-            f"Unregistered tool {tool_name!r}. Available: {available}"
-        )
+        raise ValueError(f"Unregistered tool {tool_name!r}. Available: {available}")
 
     start_time = time.time()
     result = func(**kwargs)
@@ -248,9 +240,7 @@ def _execute_with_audit(
 # --- Main entry point --------------------------------------------------------
 
 
-def run_tool(
-    tool_name: str, args: dict, registry: dict | None = None
-) -> dict:
+def run_tool(tool_name: str, args: dict, registry: dict | None = None) -> dict:
     """Execute a registered tool and return the result with audit logging."""
     if registry is None:
         registry = load_registry()
@@ -263,9 +253,7 @@ def run_tool(
         reg_tools = registry.get("tools", {})
         if tool_name not in reg_tools:
             available = ", ".join(sorted(reg_tools)) or "(none)"
-            raise ValueError(
-                f"Unregistered tool {tool_name!r}. Available: {available}"
-            )
+            raise ValueError(f"Unregistered tool {tool_name!r}. Available: {available}")
 
         if tool_name == "shell.run":
             func = lambda: _run_shell(args, sandbox)
@@ -321,8 +309,7 @@ def run_tool(
         }
 
     # Sanitize args for audit (strip content that might contain secrets)
-    safe_args = {k: (redact_secrets(str(v)) if isinstance(v, str) else v)
-                 for k, v in args.items()}
+    safe_args = {k: (redact_secrets(str(v)) if isinstance(v, str) else v) for k, v in args.items()}
 
     audit_record = {
         "ts": time.time(),
@@ -335,9 +322,7 @@ def run_tool(
 
     # For files.* tools, include a compact summary of the structured result
     if tool_name.startswith("files.") and "result" in envelope["result"]:
-        audit_record["result_summary"] = _summarize_files_result(
-            tool_name, envelope["result"]["result"]
-        )
+        audit_record["result_summary"] = _summarize_files_result(tool_name, envelope["result"]["result"])
 
     append_audit(audit_path, audit_record)
 
@@ -376,14 +361,12 @@ def _run_shell(args: dict, sandbox: Path) -> dict:
     timeout = max(1, min(timeout, 600))
 
     cwd = sandbox
-    if "cwd" in args and args["cwd"]:
+    if args.get("cwd"):
         cwd = Path(args["cwd"]).expanduser().resolve()
         try:
             cwd.relative_to(sandbox)
         except ValueError:
-            raise ValueError(
-                f"cwd {cwd} is outside sandbox_root {sandbox}"
-            ) from None
+            raise ValueError(f"cwd {cwd} is outside sandbox_root {sandbox}") from None
 
     enforce_shell_safety(cmd)
 
@@ -404,9 +387,7 @@ def _run_git(args: dict, sandbox: Path) -> dict:
 
     enforce_git_safety(subcommand, git_args)
 
-    result = run_subprocess(
-        ["git", subcommand] + git_args, cwd=sandbox, timeout=30
-    )
+    result = run_subprocess(["git", subcommand] + git_args, cwd=sandbox, timeout=30)
     result["ok"] = result["exit_code"] == 0
     return result
 
@@ -414,30 +395,35 @@ def _run_git(args: dict, sandbox: Path) -> dict:
 def _run_system_service_status(args: dict, sandbox: Path) -> dict:
     """Execute system.service.status via the adapter."""
     from tools.adapters.system_service import service_status
+
     return service_status(args.get("name", ""), sandbox=sandbox)
 
 
 def _run_system_service_restart(args: dict, sandbox: Path) -> dict:
     """Execute system.service.restart via the adapter."""
     from tools.adapters.system_service import service_restart
+
     return service_restart(args.get("name", ""), sandbox=sandbox)
 
 
 def _run_repo_git_status(sandbox: Path) -> dict:
     """Execute repo.git.status via the adapter."""
     from tools.adapters.git_repo import git_status
+
     return git_status(sandbox=sandbox)
 
 
 def _run_repo_git_diff(args: dict, sandbox: Path) -> dict:
     """Execute repo.git.diff via the adapter."""
     from tools.adapters.git_repo import git_diff
+
     return git_diff(path=args.get("path"), sandbox=sandbox)
 
 
 def _run_repo_git_commit(args: dict, sandbox: Path) -> dict:
     """Execute repo.git.commit via the adapter."""
     from tools.adapters.git_repo import git_commit
+
     return git_commit(
         message=args.get("message", ""),
         paths=args.get("paths"),
@@ -448,6 +434,7 @@ def _run_repo_git_commit(args: dict, sandbox: Path) -> dict:
 def _run_logs_tail(args: dict, sandbox: Path) -> dict:
     """Execute logs.tail via the adapter."""
     from tools.adapters.logs_tool import logs_tail
+
     return logs_tail(
         service=args.get("service", ""),
         lines=args.get("lines", 200),
@@ -458,6 +445,7 @@ def _run_logs_tail(args: dict, sandbox: Path) -> dict:
 def _run_repo_files_read(args: dict, sandbox: Path) -> dict:
     """Execute repo.files.read via the adapter."""
     from tools.adapters.repo_files import repo_read
+
     return repo_read(
         path=args.get("path", ""),
         max_bytes=args.get("max_bytes", 200_000),
@@ -472,6 +460,7 @@ def _run_repo_files_write(args: dict, sandbox: Path) -> dict:
     The _sandbox parameter is set internally — never from args.
     """
     from tools.adapters.repo_files import repo_write
+
     return repo_write(
         path=args.get("path", ""),
         content=args.get("content", ""),
@@ -487,6 +476,7 @@ def _run_repo_files_patch(args: dict, sandbox: Path) -> dict:
     The _sandbox parameter is set internally — never from args.
     """
     from tools.adapters.repo_files import repo_patch
+
     return repo_patch(
         path=args.get("path", ""),
         operations=args.get("operations", []),
@@ -498,6 +488,7 @@ def _run_repo_files_patch(args: dict, sandbox: Path) -> dict:
 def _run_repo_diff(args: dict, sandbox: Path) -> dict:
     """Execute repo.diff via the adapter."""
     from tools.adapters.repo_diff import repo_diff
+
     return repo_diff(
         path=args.get("path", ""),
         against=args.get("against"),
@@ -508,6 +499,7 @@ def _run_repo_diff(args: dict, sandbox: Path) -> dict:
 def _run_repo_search(args: dict, sandbox: Path) -> dict:
     """Execute repo.search via the adapter."""
     from tools.adapters.repo_search import repo_search
+
     return repo_search(
         query=args.get("query", ""),
         path=args.get("path"),
@@ -519,6 +511,7 @@ def _run_repo_search(args: dict, sandbox: Path) -> dict:
 def _run_pdf_generate(args: dict, sandbox: Path) -> dict:
     """Execute pdf.generate via the adapter."""
     from tools.adapters.pdf_generate import pdf_generate
+
     return pdf_generate(
         content=args.get("content", ""),
         filename=args.get("filename", ""),
@@ -529,6 +522,7 @@ def _run_pdf_generate(args: dict, sandbox: Path) -> dict:
 def _run_telegram_send_file(args: dict, sandbox: Path) -> dict:
     """Execute telegram.send_file via the adapter."""
     from tools.adapters.telegram_send_file import telegram_send_file
+
     return telegram_send_file(
         path=args.get("path", ""),
         caption=args.get("caption", ""),
@@ -539,6 +533,7 @@ def _run_telegram_send_file(args: dict, sandbox: Path) -> dict:
 def _run_contracts_validate(args: dict) -> dict:
     """Execute contracts.validate tool."""
     from tools.adapters.contracts_validate import contracts_validate
+
     text = args.get("text", "")
     if not isinstance(text, str):
         raise ValueError("contracts.validate requires 'text' (str)")
@@ -549,6 +544,7 @@ def _run_contracts_validate(args: dict) -> dict:
 def _run_browser_screenshot(args: dict, sandbox: Path) -> dict:
     """Execute browser.screenshot via the Playwright adapter."""
     from tools.adapters.playwright_browser import browser_screenshot
+
     return browser_screenshot(
         url=args.get("url", ""),
         filename=args.get("filename", ""),
@@ -561,6 +557,7 @@ def _run_browser_screenshot(args: dict, sandbox: Path) -> dict:
 def _run_browser_pdf(args: dict, sandbox: Path) -> dict:
     """Execute browser.pdf via the Playwright adapter."""
     from tools.adapters.playwright_browser import browser_pdf
+
     return browser_pdf(
         url=args.get("url", ""),
         filename=args.get("filename", ""),

@@ -81,7 +81,7 @@ try:
 except ImportError:
     _budget_enforcer = None  # type: ignore[assignment]
 
-from prompts.heartbeat_prompts import (  # noqa: E402, F401
+from prompts.heartbeat_prompts import (  # noqa: E402
     _build_planning_prompt,
     _build_research_prompt,
     _gather_extended_state,

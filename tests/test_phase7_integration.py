@@ -43,6 +43,7 @@ from agents.workflow_graph import WorkflowGraphBuilder, render_markdown
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _bb(tmp_path: Path) -> Blackboard:
     return Blackboard(base=tmp_path)
 
@@ -76,10 +77,15 @@ def _good_contract_dict() -> dict:
     }
 
 
-def _child_contract(wf_id: str, subtask_id: str, agent_id: str,
-                     role: str = "coder", summary: str = "Done",
-                     files_changed: str = "module.py",
-                     confidence: str = "high") -> ChildContract:
+def _child_contract(
+    wf_id: str,
+    subtask_id: str,
+    agent_id: str,
+    role: str = "coder",
+    summary: str = "Done",
+    files_changed: str = "module.py",
+    confidence: str = "high",
+) -> ChildContract:
     return ChildContract(
         agent_id=agent_id,
         workflow_id=wf_id,
@@ -116,8 +122,7 @@ def _setup_policy_registry(tmp_path: Path) -> None:
             {
                 "agent_id": "coder_001",
                 "role": "coder",
-                "allowed_tools": ["repo.files.read", "repo.files.write",
-                                  "repo.search.*"],
+                "allowed_tools": ["repo.files.read", "repo.files.write", "repo.search.*"],
                 "denied_tools": ["system.service.restart"],
                 "max_actions": 50,
                 "max_runtime_seconds": 300,
@@ -128,8 +133,7 @@ def _setup_policy_registry(tmp_path: Path) -> None:
                 "agent_id": "researcher_001",
                 "role": "researcher",
                 "allowed_tools": ["web.*", "http.fetch"],
-                "denied_tools": ["repo.files.write", "repo.git.commit",
-                                 "shell.run"],
+                "denied_tools": ["repo.files.write", "repo.git.commit", "shell.run"],
                 "max_actions": 30,
                 "max_runtime_seconds": 180,
                 "max_retries": 1,
@@ -154,6 +158,7 @@ def _setup_policy_registry(tmp_path: Path) -> None:
 # 1. Full governed workflow lifecycle (happy path)
 # ===========================================================================
 
+
 class TestGovernedWorkflowLifecycle:
     """End-to-end: create → delegate → complete → critic → verifier → synthesize → memory."""
 
@@ -175,16 +180,13 @@ class TestGovernedWorkflowLifecycle:
 
         # 2. Save node states
         nodes = [
-            NodeState(node_id="research", workflow_id="wf_e2e_1",
-                      status="pending"),
-            NodeState(node_id="code", workflow_id="wf_e2e_1",
-                      status="pending", depends_on=["research"]),
+            NodeState(node_id="research", workflow_id="wf_e2e_1", status="pending"),
+            NodeState(node_id="code", workflow_id="wf_e2e_1", status="pending", depends_on=["research"]),
         ]
         coord.save_node_states("wf_e2e_1", nodes)
 
         # 3. Delegate subtask
-        d1 = engine.delegate("wf_e2e_1", "research", "researcher_001",
-                             "researcher", "Research the API")
+        d1 = engine.delegate("wf_e2e_1", "research", "researcher_001", "researcher", "Research the API")
         assert d1.status == "pending"
 
         # 4. Claim delegation
@@ -193,27 +195,21 @@ class TestGovernedWorkflowLifecycle:
         assert d1_data["status"] == "claimed"
 
         # 5. Complete delegation with child contract
-        contract = _child_contract("wf_e2e_1", "research", "researcher_001",
-                                   "researcher", "Researched API docs")
-        engine.complete_delegation("wf_e2e_1", "research",
-                                   "researcher_001", contract)
+        contract = _child_contract("wf_e2e_1", "research", "researcher_001", "researcher", "Researched API docs")
+        engine.complete_delegation("wf_e2e_1", "research", "researcher_001", contract)
         d1_data = bb.get_delegation("wf_e2e_1", "research")
         assert d1_data["status"] == "completed"
 
         # Complete research node
-        coord.update_node_state("wf_e2e_1", "research",
-                                {"status": "completed"})
+        coord.update_node_state("wf_e2e_1", "research", {"status": "completed"})
 
         # 6. Delegate second subtask (depends on research)
-        engine.delegate("wf_e2e_1", "code", "coder_001",
-                             "coder", "Implement the feature")
+        engine.delegate("wf_e2e_1", "code", "coder_001", "coder", "Implement the feature")
 
         # 7. Claim and complete second subtask
         engine.claim_delegation("wf_e2e_1", "code", "coder_001")
-        out_file = _make_file(tmp_path, "OUTPUT/feature.py",
-                              "def feature(): pass")
-        contract2 = _child_contract("wf_e2e_1", "code", "coder_001",
-                                    "coder", "Implemented feature")
+        out_file = _make_file(tmp_path, "OUTPUT/feature.py", "def feature(): pass")
+        contract2 = _child_contract("wf_e2e_1", "code", "coder_001", "coder", "Implemented feature")
         contract2.artifacts = [out_file]
         engine.complete_delegation("wf_e2e_1", "code", "coder_001", contract2)
         coord.update_node_state("wf_e2e_1", "code", {"status": "completed"})
@@ -221,7 +217,9 @@ class TestGovernedWorkflowLifecycle:
         # 8. Critic review (pass)
         deliverables = {"feature.py": out_file}
         review = gate.run_critic_review(
-            "wf_e2e_1", "code", deliverables,
+            "wf_e2e_1",
+            "code",
+            deliverables,
             contract=_good_contract_dict(),
         )
         assert review.verdict == "pass"
@@ -289,6 +287,7 @@ class TestGovernedWorkflowLifecycle:
 # 2. Multi-delegation with node dependencies
 # ===========================================================================
 
+
 class TestMultiDelegationDependencies:
     """Validate dependency resolution across multiple delegations."""
 
@@ -302,10 +301,8 @@ class TestMultiDelegationDependencies:
         # DAG: A → B → C
         nodes = [
             NodeState(node_id="A", workflow_id="wf_dep_1", status="pending"),
-            NodeState(node_id="B", workflow_id="wf_dep_1", status="pending",
-                      depends_on=["A"]),
-            NodeState(node_id="C", workflow_id="wf_dep_1", status="pending",
-                      depends_on=["B"]),
+            NodeState(node_id="B", workflow_id="wf_dep_1", status="pending", depends_on=["A"]),
+            NodeState(node_id="C", workflow_id="wf_dep_1", status="pending", depends_on=["B"]),
         ]
         coord.save_node_states("wf_dep_1", nodes)
 
@@ -334,8 +331,7 @@ class TestMultiDelegationDependencies:
         nodes = [
             NodeState(node_id="A", workflow_id="wf_par_1", status="pending"),
             NodeState(node_id="B", workflow_id="wf_par_1", status="pending"),
-            NodeState(node_id="C", workflow_id="wf_par_1", status="pending",
-                      depends_on=["A", "B"]),
+            NodeState(node_id="C", workflow_id="wf_par_1", status="pending", depends_on=["A", "B"]),
         ]
         coord.save_node_states("wf_par_1", nodes)
 
@@ -358,6 +354,7 @@ class TestMultiDelegationDependencies:
 # 3. Maker-checker enforcement in integrated flow
 # ===========================================================================
 
+
 class TestMakerCheckerIntegrated:
     """Repo-changing paths require critic review before verifier approves."""
 
@@ -379,8 +376,7 @@ class TestMakerCheckerIntegrated:
             repo_changes=["code.py"],
         )
         assert synthesis["status"] == "blocked"
-        assert "Maker-checker" in synthesis.get("reason", "") or \
-               "Verifier" in synthesis.get("reason", "")
+        assert "Maker-checker" in synthesis.get("reason", "") or "Verifier" in synthesis.get("reason", "")
 
     def test_repo_changes_approved_with_critic(self, tmp_path):
         bb = _bb(tmp_path)
@@ -397,7 +393,8 @@ class TestMakerCheckerIntegrated:
 
         # Run critic review (passes)
         review = gate.run_critic_review(
-            "wf_mc_2", "code",
+            "wf_mc_2",
+            "code",
             deliverables={"code.py": code_file},
             contract=_good_contract_dict(),
         )
@@ -416,6 +413,7 @@ class TestMakerCheckerIntegrated:
 # ===========================================================================
 # 4. Feature-flag-disabled fallback
 # ===========================================================================
+
 
 class TestFeatureFlagFallback:
     """When phase7_orchestrator is disabled, multi-agent features are off."""
@@ -474,6 +472,7 @@ class TestFeatureFlagFallback:
 # ===========================================================================
 # 5. Observability / heartbeat visibility
 # ===========================================================================
+
 
 class TestObservabilityIntegrated:
     """Heartbeat reports accurately reflect live workflow state."""
@@ -535,6 +534,7 @@ class TestObservabilityIntegrated:
 # 6. Coordination + lease lifecycle in integrated context
 # ===========================================================================
 
+
 class TestCoordinationIntegrated:
     """Lease + node state + delegation work together correctly."""
 
@@ -544,9 +544,12 @@ class TestCoordinationIntegrated:
         coord = CoordinationLayer(blackboard=bb)
 
         engine.create_workflow("wf_coord_1", "task_c1")
-        coord.save_node_states("wf_coord_1", [
-            NodeState(node_id="A", workflow_id="wf_coord_1", status="pending"),
-        ])
+        coord.save_node_states(
+            "wf_coord_1",
+            [
+                NodeState(node_id="A", workflow_id="wf_coord_1", status="pending"),
+            ],
+        )
 
         # First agent claims
         lease = coord.claim_node("wf_coord_1", "A", "agent_1")
@@ -562,9 +565,12 @@ class TestCoordinationIntegrated:
         coord = CoordinationLayer(blackboard=bb)
 
         engine.create_workflow("wf_coord_2", "task_c2")
-        coord.save_node_states("wf_coord_2", [
-            NodeState(node_id="A", workflow_id="wf_coord_2", status="pending"),
-        ])
+        coord.save_node_states(
+            "wf_coord_2",
+            [
+                NodeState(node_id="A", workflow_id="wf_coord_2", status="pending"),
+            ],
+        )
 
         coord.claim_node("wf_coord_2", "A", "agent_1")
         coord.complete_node("wf_coord_2", "A", "agent_1", "OUTPUT/a.md")
@@ -583,12 +589,13 @@ class TestCoordinationIntegrated:
         coord = CoordinationLayer(blackboard=bb)
 
         engine.create_workflow("wf_coord_3", "task_c3")
-        coord.save_node_states("wf_coord_3", [
-            NodeState(node_id="A", workflow_id="wf_coord_3",
-                      status="completed"),
-            NodeState(node_id="B", workflow_id="wf_coord_3",
-                      status="pending", depends_on=["A"]),
-        ])
+        coord.save_node_states(
+            "wf_coord_3",
+            [
+                NodeState(node_id="A", workflow_id="wf_coord_3", status="completed"),
+                NodeState(node_id="B", workflow_id="wf_coord_3", status="pending", depends_on=["A"]),
+            ],
+        )
 
         resume = coord.resume_workflow("wf_coord_3")
         assert "A" in resume["completed_nodes"]
@@ -598,6 +605,7 @@ class TestCoordinationIntegrated:
 # ===========================================================================
 # 7. Workflow graph rendering from integrated state
 # ===========================================================================
+
 
 class TestWorkflowGraphIntegrated:
     """Workflow graph accurately represents integrated state."""
@@ -629,6 +637,7 @@ class TestWorkflowGraphIntegrated:
 # 8. Memory capture and retrieval in integrated context
 # ===========================================================================
 
+
 class TestMemoryCaptureIntegrated:
     """Memory artifacts correctly capture workflow learnings."""
 
@@ -639,8 +648,7 @@ class TestMemoryCaptureIntegrated:
         engine.create_workflow("wf_mem_1", "task_m1")
         engine.delegate("wf_mem_1", "sub1", "agent_1", "coder", "Code task")
         engine.claim_delegation("wf_mem_1", "sub1", "agent_1")
-        contract = _child_contract("wf_mem_1", "sub1", "agent_1",
-                                   summary="Built auth module")
+        contract = _child_contract("wf_mem_1", "sub1", "agent_1", summary="Built auth module")
         engine.complete_delegation("wf_mem_1", "sub1", "agent_1", contract)
 
         delegations = bb.list_delegations("wf_mem_1")
@@ -689,6 +697,7 @@ class TestMemoryCaptureIntegrated:
 # 9. Full lifecycle with concurrent limit enforcement
 # ===========================================================================
 
+
 class TestConcurrentLimitEnforcement:
     """Workflow engine enforces max concurrent agent limit."""
 
@@ -728,6 +737,7 @@ class TestConcurrentLimitEnforcement:
 # 10. Stop condition: budget exhaustion (time-based)
 # ===========================================================================
 
+
 class TestBudgetExhaustion:
     """Workflow halts when runtime budget is exceeded."""
 
@@ -736,14 +746,12 @@ class TestBudgetExhaustion:
         limits = WorkflowLimits(max_workflow_runtime_s=0)
         engine = WorkflowEngine(blackboard=bb, limits=limits)
 
-        engine.create_workflow("wf_budget_1", "task_b1",
-                                     budget={"max_runtime_s": 0})
+        engine.create_workflow("wf_budget_1", "task_b1", budget={"max_runtime_s": 0})
 
         # Any stop-condition check should halt
         with pytest.raises(WorkflowHalt) as exc_info:
             engine.check_stop_conditions("wf_budget_1")
-        assert "budget" in str(exc_info.value).lower() or \
-               "runtime" in str(exc_info.value).lower()
+        assert "budget" in str(exc_info.value).lower() or "runtime" in str(exc_info.value).lower()
 
         # Workflow should be halted in state
         wf_data = bb.get_workflow("wf_budget_1")
@@ -754,15 +762,21 @@ class TestBudgetExhaustion:
 # 11. ChildContract schema alignment regression (RISK-1 fix)
 # ===========================================================================
 
+
 class TestChildContractSchemaAlignment:
     """Proves ChildContract schema includes files_changed and confidence,
     and that validation accepts properly-filled contracts without enrichment."""
 
     def test_child_contract_has_files_changed_field(self):
         c = ChildContract(
-            agent_id="a1", workflow_id="wf1", subtask_id="s1",
-            role="coder", status="completed", summary="Done",
-            files_changed="src/main.py", confidence="high",
+            agent_id="a1",
+            workflow_id="wf1",
+            subtask_id="s1",
+            role="coder",
+            status="completed",
+            summary="Done",
+            files_changed="src/main.py",
+            confidence="high",
         )
         d = c.to_dict()
         assert "files_changed" in d
@@ -770,9 +784,14 @@ class TestChildContractSchemaAlignment:
 
     def test_child_contract_has_confidence_field(self):
         c = ChildContract(
-            agent_id="a1", workflow_id="wf1", subtask_id="s1",
-            role="coder", status="completed", summary="Done",
-            files_changed="module.py", confidence="medium",
+            agent_id="a1",
+            workflow_id="wf1",
+            subtask_id="s1",
+            role="coder",
+            status="completed",
+            summary="Done",
+            files_changed="module.py",
+            confidence="medium",
         )
         d = c.to_dict()
         assert "confidence" in d
@@ -780,9 +799,14 @@ class TestChildContractSchemaAlignment:
 
     def test_filled_contract_passes_validation(self):
         c = ChildContract(
-            agent_id="a1", workflow_id="wf1", subtask_id="s1",
-            role="coder", status="completed", summary="Implemented feature",
-            files_changed="src/feature.py", confidence="high",
+            agent_id="a1",
+            workflow_id="wf1",
+            subtask_id="s1",
+            role="coder",
+            status="completed",
+            summary="Implemented feature",
+            files_changed="src/feature.py",
+            confidence="high",
             verification={"result": "pass"},
         )
         valid, errors = validate_contract_fields(c.to_dict())
@@ -792,8 +816,12 @@ class TestChildContractSchemaAlignment:
     def test_default_empty_fields_fail_validation(self):
         """ChildContract defaults (empty strings) correctly fail validation."""
         c = ChildContract(
-            agent_id="a1", workflow_id="wf1", subtask_id="s1",
-            role="coder", status="completed", summary="Done",
+            agent_id="a1",
+            workflow_id="wf1",
+            subtask_id="s1",
+            role="coder",
+            status="completed",
+            summary="Done",
         )
         valid, errors = validate_contract_fields(c.to_dict())
         assert valid is False
@@ -805,9 +833,14 @@ class TestChildContractSchemaAlignment:
         """Contract persisted via blackboard retains files_changed/confidence."""
         bb = _bb(tmp_path)
         c = ChildContract(
-            agent_id="a1", workflow_id="wf1", subtask_id="s1",
-            role="coder", status="completed", summary="Done",
-            files_changed="output.py", confidence="high",
+            agent_id="a1",
+            workflow_id="wf1",
+            subtask_id="s1",
+            role="coder",
+            status="completed",
+            summary="Done",
+            files_changed="output.py",
+            confidence="high",
         )
         bb.write_child_contract(c)
         loaded = bb.get_child_contract("s1")
@@ -830,9 +863,14 @@ class TestChildContractSchemaAlignment:
 
         out = _make_file(tmp_path, "OUTPUT/result.py", "def main(): pass")
         contract = ChildContract(
-            agent_id="a1", workflow_id="wf_schema_1", subtask_id="sub1",
-            role="coder", status="completed", summary="Built it",
-            files_changed="result.py", confidence="high",
+            agent_id="a1",
+            workflow_id="wf_schema_1",
+            subtask_id="sub1",
+            role="coder",
+            status="completed",
+            summary="Built it",
+            files_changed="result.py",
+            confidence="high",
             artifacts=[out],
             verification={"result": "pass", "confidence": "high"},
         )
@@ -840,7 +878,8 @@ class TestChildContractSchemaAlignment:
 
         # Critic review
         review = gate.run_critic_review(
-            "wf_schema_1", "sub1",
+            "wf_schema_1",
+            "sub1",
             deliverables={"result.py": out},
             contract=contract.to_dict(),
         )

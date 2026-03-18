@@ -38,6 +38,7 @@ from agents.rollout_gate import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_workflow(task_class: str, status: str = "completed", **extra) -> dict:
     """Create a minimal workflow record."""
     return {"task_class": task_class, "status": status, **extra}
@@ -120,14 +121,13 @@ def _populate_healthy_env(root: Path) -> None:
         (state / "workflows" / f"research_{i}.json").write_text(json.dumps(wf))
 
     # Valid Stage 4 rollout plan
-    (state / "stage4_rollout_plan.json").write_text(
-        json.dumps(_make_valid_plan(), indent=2)
-    )
+    (state / "stage4_rollout_plan.json").write_text(json.dumps(_make_valid_plan(), indent=2))
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def gate_root(tmp_path):
@@ -140,6 +140,7 @@ def gate_root(tmp_path):
 def healthy_evidence(gate_root):
     """Collect evidence from the healthy environment."""
     from agents.rollout_gate import collect_evidence
+
     ev = collect_evidence(gate_root)
     ev["_base_path"] = gate_root
     return ev
@@ -148,6 +149,7 @@ def healthy_evidence(gate_root):
 # ===========================================================================
 # Test Plan Validation
 # ===========================================================================
+
 
 class TestPlanValidation:
     """Tests for validate_stage4_plan()."""
@@ -226,6 +228,7 @@ class TestPlanValidation:
 # Test Ready to Activate
 # ===========================================================================
 
+
 class TestReadyToActivate:
     """Tests for clean state → ready_to_activate_stage4."""
 
@@ -260,9 +263,7 @@ class TestReadyToActivate:
         gate = evaluate_activation_gate(gate_root)
         assert gate.decision == "ready_to_activate_stage4"
         # Verify feature flags unchanged
-        ff = json.loads(
-            (gate_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff = json.loads((gate_root / "STATE" / "config" / "feature_flags.json").read_text())
         supported = ff["phase7_orchestrator"]["supported_classes"]
         assert "system" not in supported
 
@@ -274,6 +275,7 @@ class TestReadyToActivate:
 # ===========================================================================
 # Test Block Activation
 # ===========================================================================
+
 
 class TestBlockActivation:
     """Tests for hard failures → block_stage4_activation."""
@@ -294,30 +296,22 @@ class TestBlockActivation:
         assert "heartbeat_healthy" in gate.blocking_criteria
 
     def test_policy_violations_block(self, gate_root):
-        (gate_root / "STATE" / "policy_denials.jsonl").write_text(
-            json.dumps({"reason": "test violation"}) + "\n"
-        )
+        (gate_root / "STATE" / "policy_denials.jsonl").write_text(json.dumps({"reason": "test violation"}) + "\n")
         gate = evaluate_activation_gate(gate_root)
         assert gate.decision == "block_stage4_activation"
         assert "no_policy_violations" in gate.blocking_criteria
 
     def test_budget_exhaustions_block(self, gate_root):
         wf = _make_workflow("code_impl", "halted", halt_reason="budget exhausted")
-        (gate_root / "STATE" / "workflows" / "budget_halt.json").write_text(
-            json.dumps(wf)
-        )
+        (gate_root / "STATE" / "workflows" / "budget_halt.json").write_text(json.dumps(wf))
         gate = evaluate_activation_gate(gate_root)
         assert gate.decision == "block_stage4_activation"
         assert "no_budget_exhaustions" in gate.blocking_criteria
 
     def test_system_already_enabled_blocks(self, gate_root):
-        ff = json.loads(
-            (gate_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff = json.loads((gate_root / "STATE" / "config" / "feature_flags.json").read_text())
         ff["phase7_orchestrator"]["supported_classes"].append("system")
-        (gate_root / "STATE" / "config" / "feature_flags.json").write_text(
-            json.dumps(ff)
-        )
+        (gate_root / "STATE" / "config" / "feature_flags.json").write_text(json.dumps(ff))
         gate = evaluate_activation_gate(gate_root)
         assert gate.decision == "block_stage4_activation"
         assert "system_class_blocked" in gate.blocking_criteria
@@ -337,9 +331,7 @@ class TestBlockActivation:
     def test_stage3_unstable_cascades_to_block(self, gate_root):
         """If Stage 3 is not stable_continue, the activation gate blocks."""
         # Make Stage 3 unstable by adding policy violations
-        (gate_root / "STATE" / "policy_denials.jsonl").write_text(
-            json.dumps({"reason": "test"}) + "\n"
-        )
+        (gate_root / "STATE" / "policy_denials.jsonl").write_text(json.dumps({"reason": "test"}) + "\n")
         gate = evaluate_activation_gate(gate_root)
         assert gate.decision == "block_stage4_activation"
         # Both stage3_stable and no_policy_violations should fail
@@ -363,6 +355,7 @@ class TestBlockActivation:
 # Test Hold Activation
 # ===========================================================================
 
+
 class TestHoldActivation:
     """Tests for soft concerns → hold_stage4_activation."""
 
@@ -374,17 +367,19 @@ class TestHoldActivation:
         → Activation gate's stage4_evaluation_ready hard criterion fails
         → block_stage4_activation.
         """
-        log = (gate_root / "STATE" / "activation_log.jsonl")
+        log = gate_root / "STATE" / "activation_log.jsonl"
         existing = log.read_text()
-        rollback = json.dumps({
-            "attempted_at": "2026-03-07T13:00:00Z",
-            "outcome": "rollback",
-            "decision": "rollback_recommended",
-            "reason": "test rollback",
-            "pre_config": {},
-            "post_config": {},
-            "blocking_criteria": [],
-        })
+        rollback = json.dumps(
+            {
+                "attempted_at": "2026-03-07T13:00:00Z",
+                "outcome": "rollback",
+                "decision": "rollback_recommended",
+                "reason": "test rollback",
+                "pre_config": {},
+                "post_config": {},
+                "blocking_criteria": [],
+            }
+        )
         log.write_text(existing + rollback + "\n")
         gate = evaluate_activation_gate(gate_root)
         assert gate.decision == "block_stage4_activation"
@@ -416,6 +411,7 @@ class TestHoldActivation:
 # Test Decision Logic (unit)
 # ===========================================================================
 
+
 class TestDecisionLogic:
     """Unit tests for decide_activation_gate()."""
 
@@ -424,9 +420,12 @@ class TestDecisionLogic:
         base = [
             RolloutCriterion("stage3_stable", True, "stable_continue", "stable_continue", "ok", "hard"),
             RolloutCriterion(
-                "stage4_evaluation_ready", True,
-                "ready_for_stage4_planning", "ready_for_stage4_planning",
-                "ok", "hard",
+                "stage4_evaluation_ready",
+                True,
+                "ready_for_stage4_planning",
+                "ready_for_stage4_planning",
+                "ok",
+                "hard",
             ),
             RolloutCriterion("heartbeat_healthy", True, "healthy", "healthy", "ok", "hard"),
             RolloutCriterion("no_policy_violations", True, 0, 0, "ok", "hard"),
@@ -460,19 +459,23 @@ class TestDecisionLogic:
 
     def test_hard_trumps_soft(self):
         """Hard failure takes precedence over soft failure."""
-        criteria = self._make_criteria({
-            "plan_valid": False,
-            "no_stale_leases": False,
-        })
+        criteria = self._make_criteria(
+            {
+                "plan_valid": False,
+                "no_stale_leases": False,
+            }
+        )
         decision, _ = decide_activation_gate(criteria)
         assert decision == "block_stage4_activation"
 
     def test_multiple_hard_failures(self):
-        criteria = self._make_criteria({
-            "stage3_stable": False,
-            "heartbeat_healthy": False,
-            "plan_valid": False,
-        })
+        criteria = self._make_criteria(
+            {
+                "stage3_stable": False,
+                "heartbeat_healthy": False,
+                "plan_valid": False,
+            }
+        )
         decision, action = decide_activation_gate(criteria)
         assert decision == "block_stage4_activation"
         assert "stage3_stable" in action
@@ -480,10 +483,12 @@ class TestDecisionLogic:
         assert "plan_valid" in action
 
     def test_multiple_soft_failures(self):
-        criteria = self._make_criteria({
-            "no_rollback_history": False,
-            "no_orphaned_agents": False,
-        })
+        criteria = self._make_criteria(
+            {
+                "no_rollback_history": False,
+                "no_orphaned_agents": False,
+            }
+        )
         decision, action = decide_activation_gate(criteria)
         assert decision == "hold_stage4_activation"
         assert "no_rollback_history" in action
@@ -493,6 +498,7 @@ class TestDecisionLogic:
 # ===========================================================================
 # Test Artifact Generation
 # ===========================================================================
+
 
 class TestArtifactGeneration:
     """Tests for rendering and writing artifacts."""
@@ -577,6 +583,7 @@ class TestArtifactGeneration:
 # Test System Remains Blocked
 # ===========================================================================
 
+
 class TestSystemRemainsBlocked:
     """Verify that the activation gate never modifies system state."""
 
@@ -612,6 +619,7 @@ class TestSystemRemainsBlocked:
 # Test Criteria Evaluation (unit)
 # ===========================================================================
 
+
 class TestCriteriaEvaluation:
     """Unit tests for evaluate_activation_gate_criteria()."""
 
@@ -632,7 +640,11 @@ class TestCriteriaEvaluation:
     def test_all_pass(self, tmp_path):
         ev = self._base_evidence(tmp_path)
         criteria = evaluate_activation_gate_criteria(
-            ev, "stable_continue", "ready_for_stage4_planning", True, [],
+            ev,
+            "stable_continue",
+            "ready_for_stage4_planning",
+            True,
+            [],
         )
         assert all(c.passed for c in criteria)
 
@@ -640,7 +652,11 @@ class TestCriteriaEvaluation:
         ev = self._base_evidence(tmp_path)
         ev["heartbeat_overall"] = "degraded"
         criteria = evaluate_activation_gate_criteria(
-            ev, "stable_continue", "ready_for_stage4_planning", True, [],
+            ev,
+            "stable_continue",
+            "ready_for_stage4_planning",
+            True,
+            [],
         )
         hb = next(c for c in criteria if c.name == "heartbeat_healthy")
         assert not hb.passed
@@ -648,8 +664,11 @@ class TestCriteriaEvaluation:
     def test_plan_invalid_fails(self, tmp_path):
         ev = self._base_evidence(tmp_path)
         criteria = evaluate_activation_gate_criteria(
-            ev, "stable_continue", "ready_for_stage4_planning",
-            False, ["missing fields"],
+            ev,
+            "stable_continue",
+            "ready_for_stage4_planning",
+            False,
+            ["missing fields"],
         )
         pv = next(c for c in criteria if c.name == "plan_valid")
         assert not pv.passed
@@ -658,7 +677,11 @@ class TestCriteriaEvaluation:
     def test_stage4_eval_not_ready_fails(self, tmp_path):
         ev = self._base_evidence(tmp_path)
         criteria = evaluate_activation_gate_criteria(
-            ev, "stable_continue", "hold_stage4", True, [],
+            ev,
+            "stable_continue",
+            "hold_stage4",
+            True,
+            [],
         )
         s4 = next(c for c in criteria if c.name == "stage4_evaluation_ready")
         assert not s4.passed
@@ -666,22 +689,36 @@ class TestCriteriaEvaluation:
     def test_hard_vs_soft_severity(self, tmp_path):
         ev = self._base_evidence(tmp_path)
         criteria = evaluate_activation_gate_criteria(
-            ev, "stable_continue", "ready_for_stage4_planning", True, [],
+            ev,
+            "stable_continue",
+            "ready_for_stage4_planning",
+            True,
+            [],
         )
         hard_names = {c.name for c in criteria if c.severity == "hard"}
         soft_names = {c.name for c in criteria if c.severity == "soft"}
         assert hard_names == {
-            "stage3_stable", "stage4_evaluation_ready", "heartbeat_healthy",
-            "no_policy_violations", "no_budget_exhaustions",
-            "system_class_blocked", "plan_valid",
+            "stage3_stable",
+            "stage4_evaluation_ready",
+            "heartbeat_healthy",
+            "no_policy_violations",
+            "no_budget_exhaustions",
+            "system_class_blocked",
+            "plan_valid",
         }
         assert soft_names == {
-            "no_rollback_history", "no_orphaned_agents", "no_stale_leases",
+            "no_rollback_history",
+            "no_orphaned_agents",
+            "no_stale_leases",
         }
 
     def test_criteria_count_is_10(self, tmp_path):
         ev = self._base_evidence(tmp_path)
         criteria = evaluate_activation_gate_criteria(
-            ev, "stable_continue", "ready_for_stage4_planning", True, [],
+            ev,
+            "stable_continue",
+            "ready_for_stage4_planning",
+            True,
+            [],
         )
         assert len(criteria) == 10

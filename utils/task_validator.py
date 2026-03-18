@@ -5,6 +5,7 @@ Part of Phase 1.5 — watcher path security integration.
 
 Phase 1.5 of Security Hardening Plan (2026-03-12).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -30,28 +31,25 @@ _RISK_PATTERNS = [
     (r"(?i)\b(?:reverse\s+shell|bind\s+shell|meterpreter|netcat\s+-[le]|nc\s+-[le])\b", 40, "reverse_shell"),
     (r"(?i)\bbash\s+-i\s+>&\s+/dev/tcp/", 50, "reverse_shell"),
     (r"(?i)\b(?:python|perl|ruby|php)\s+-[ce]\s+.*(?:socket|connect|exec)\b", 35, "remote_code_exec"),
-
     # Crypto mining
     (r"(?i)\b(?:xmrig|cryptominer|monero|stratum|nicehash|coinhive)\b", 40, "crypto_mining"),
-
     # Credential harvesting
     (r"(?i)\b(?:dump|steal|harvest|exfil)\w*\s+(?:cred|password|token|secret|key)\w*\b", 35, "credential_harvesting"),
     (r"(?i)(?:cat|read|print)\s+(?:/etc/shadow|/etc/passwd|~/.ssh/id_)", 30, "credential_access"),
-
     # Security infrastructure tampering
-    (r"(?i)(?:modify|edit|delete|remove|disable)\s+(?:the\s+)?"
-     r"(?:kill\s*switch|firewall|iptables|egress|security)",
-     40, "security_tampering"),
+    (
+        r"(?i)(?:modify|edit|delete|remove|disable)\s+(?:the\s+)?"
+        r"(?:kill\s*switch|firewall|iptables|egress|security)",
+        40,
+        "security_tampering",
+    ),
     (r"(?i)(?:rm|unlink|delete)\s+/tmp/nova-(?:kill|pause|readonly)", 50, "kill_switch_tampering"),
     (r"(?i)(?:modify|overwrite|replace)\s+.*(?:systemd|\.service|novacore-)", 30, "service_tampering"),
-
     # Path traversal outside sandbox
     (r"(?:\.\.\/){3,}", 20, "path_traversal"),
     (r"(?i)(?:read|write|access|modify)\s+(?:/etc/|/var/|/root/|/proc/|/sys/)", 25, "system_path_access"),
-
     # Package installation of suspicious tools
     (r"(?i)pip\s+install\s+(?:pwntools|impacket|responder|mimikatz|lazagne)", 35, "suspicious_package"),
-
     # Data exfiltration
     (r"(?i)(?:curl|wget|fetch)\s+.*(?:webhook|pastebin|requestbin|ngrok|burp)", 30, "data_exfiltration"),
     (r"(?i)(?:tar|zip|7z)\s+.*(?:\.ssh|\.env|/etc/novacore|secrets)", 25, "sensitive_archive"),
@@ -117,14 +115,16 @@ def validate_task_content(task_text: str, task_stem: str = "") -> dict:
     if blocked:
         _log.warning(
             "TASK_BLOCKED stem=%s risk=%d risks=%s secrets=%s",
-            task_stem, total_score,
+            task_stem,
+            total_score,
             [r["name"] for r in risks],
             secrets_found,
         )
     elif risks or secrets_found:
         _log.info(
             "TASK_FLAGGED stem=%s risk=%d risks=%s secrets=%s",
-            task_stem, total_score,
+            task_stem,
+            total_score,
             [r["name"] for r in risks],
             secrets_found,
         )

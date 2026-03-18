@@ -29,6 +29,7 @@ from agents.memory_engine import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _good_artifact(**overrides) -> MemoryArtifact:
     """Create a valid MemoryArtifact with sensible defaults."""
     defaults = dict(
@@ -116,6 +117,7 @@ def _write_artifact_to_dir(directory: Path, artifact_dict: dict) -> Path:
 # 1. Validation tests
 # ---------------------------------------------------------------------------
 
+
 class TestValidateMemoryArtifact:
     """Test memory artifact validation — fail-closed behavior."""
 
@@ -171,9 +173,7 @@ class TestValidateMemoryArtifact:
         assert any("roles_involved" in e for e in errors)
 
     def test_oversized_artifact_rejected(self):
-        data = _good_artifact_dict(
-            key_decisions=["x" * 5000 for _ in range(10)]
-        )
+        data = _good_artifact_dict(key_decisions=["x" * 5000 for _ in range(10)])
         valid, errors = validate_memory_artifact(data)
         assert valid is False
         assert any("too large" in e for e in errors)
@@ -192,6 +192,7 @@ class TestValidateMemoryArtifact:
 # ---------------------------------------------------------------------------
 # 2. Write path tests
 # ---------------------------------------------------------------------------
+
 
 class TestWriteMemoryArtifact:
     """Test bounded, validated write path."""
@@ -235,6 +236,7 @@ class TestWriteMemoryArtifact:
 # ---------------------------------------------------------------------------
 # 3. Workflow compaction tests
 # ---------------------------------------------------------------------------
+
 
 class TestCompactWorkflowSummary:
     """Test workflow state → memory artifact compaction."""
@@ -306,11 +308,9 @@ class TestCompactWorkflowSummary:
 
     def test_guidance_includes_failure_mode_warning(self):
         delegations = [
-            {"role": "coder", "goal": "write code", "status": "failed",
-             "error": "timeout"},
+            {"role": "coder", "goal": "write code", "status": "failed", "error": "timeout"},
         ]
-        metrics = {"total_delegations": 1, "completed": 0, "failed": 1,
-                    "mean_subtask_latency_s": None}
+        metrics = {"total_delegations": 1, "completed": 0, "failed": 1, "mean_subtask_latency_s": None}
         art = compact_workflow_summary(
             workflow_id="wf005",
             task_summary="Failing task",
@@ -319,13 +319,13 @@ class TestCompactWorkflowSummary:
             contracts=[],
             metrics=metrics,
         )
-        assert "failure" in art.reusable_guidance.lower() or \
-               "restructuring" in art.reusable_guidance.lower()
+        assert "failure" in art.reusable_guidance.lower() or "restructuring" in art.reusable_guidance.lower()
 
 
 # ---------------------------------------------------------------------------
 # 4. Planner retrieval tests
 # ---------------------------------------------------------------------------
+
 
 class TestRetrieveRelatedPatterns:
     """Test bounded, safe planner retrieval."""
@@ -463,6 +463,7 @@ class TestRetrieveRelatedPatterns:
 # 5. Planner formatting tests
 # ---------------------------------------------------------------------------
 
+
 class TestFormatRetrievalForPlanner:
     """Test planner-readable output formatting."""
 
@@ -496,6 +497,7 @@ class TestFormatRetrievalForPlanner:
 # ---------------------------------------------------------------------------
 # 6. End-to-end integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestCaptureWorkflowMemory:
     """Test the full capture pipeline: compact + validate + write."""

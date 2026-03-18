@@ -22,6 +22,7 @@ from planner.vault_context import (
 # Eligibility
 # ============================================================================
 
+
 class TestEligibility:
     """Test is_eligible_for_vault_context."""
 
@@ -54,30 +55,22 @@ class TestEligibility:
 
     def test_runtime_state_always_ineligible(self):
         """Runtime-state queries skip vault injection regardless of class."""
-        ok, reason = is_eligible_for_vault_context(
-            "research", "check service status of novacore-watcher"
-        )
+        ok, reason = is_eligible_for_vault_context("research", "check service status of novacore-watcher")
         assert ok is False
         assert reason == "runtime_state_query"
 
     def test_runtime_systemctl_ineligible(self):
-        ok, reason = is_eligible_for_vault_context(
-            "system", "restart the systemctl daemon"
-        )
+        ok, reason = is_eligible_for_vault_context("system", "restart the systemctl daemon")
         assert ok is False
         assert reason == "runtime_state_query"
 
     def test_runtime_pid_ineligible(self):
-        ok, reason = is_eligible_for_vault_context(
-            "code_impl", "check pid of running tasks and kill stale ones"
-        )
+        ok, reason = is_eligible_for_vault_context("code_impl", "check pid of running tasks and kill stale ones")
         assert ok is False
         assert reason == "runtime_state_query"
 
     def test_runtime_watcher_ineligible(self):
-        ok, reason = is_eligible_for_vault_context(
-            "system", "watcher health check"
-        )
+        ok, reason = is_eligible_for_vault_context("system", "watcher health check")
         assert ok is False
         assert reason == "runtime_state_query"
 
@@ -97,6 +90,7 @@ class TestEligibility:
 # ============================================================================
 # Keyword Extraction
 # ============================================================================
+
 
 class TestKeywordExtraction:
     """Test extract_keywords."""
@@ -141,6 +135,7 @@ class TestKeywordExtraction:
 # Context Formatting
 # ============================================================================
 
+
 class TestContextFormatting:
     """Test format_vault_context."""
 
@@ -170,10 +165,7 @@ class TestContextFormatting:
 
     def test_total_size_bounded(self):
         # Many notes with long content
-        notes = [
-            {"path": f"note{i}.md", "title": f"Note {i}", "snippet": "content " * 50}
-            for i in range(10)
-        ]
+        notes = [{"path": f"note{i}.md", "title": f"Note {i}", "snippet": "content " * 50} for i in range(10)]
         result = format_vault_context(notes, "research")
         assert len(result) <= MAX_CONTEXT_SIZE + 50  # small buffer for truncation message
 
@@ -191,6 +183,7 @@ class TestContextFormatting:
 # Vault Retrieval (mocked)
 # ============================================================================
 
+
 class TestVaultRetrieval:
     """Test retrieve_vault_context with mocked vault tools."""
 
@@ -201,13 +194,11 @@ class TestVaultRetrieval:
         """Retrieval never returns more than MAX_VAULT_NOTES."""
         import planner.vault_context as vc
 
-
         def mock_retrieve(tc, kw, max_notes=3):
             # Verify the cap is enforced inside the function
             capped = min(max_notes, MAX_VAULT_NOTES)
             return [
-                {"path": f"note{i}.md", "title": f"Note {i}", "snippet": "x",
-                 "score": 1.0, "source": "obsidian_vault"}
+                {"path": f"note{i}.md", "title": f"Note {i}", "snippet": "x", "score": 1.0, "source": "obsidian_vault"}
                 for i in range(capped)
             ]
 
@@ -225,11 +216,14 @@ class TestVaultRetrieval:
         def failing_retrieve(tc, kw, mn=3):
             # Simulate import failure
             import builtins
+
             real_import = builtins.__import__
+
             def mock_import(name, *args, **kwargs):
                 if name == "tools.mcp_vault_server":
                     raise ImportError("not available")
                 return real_import(name, *args, **kwargs)
+
             monkeypatch.setattr(builtins, "__import__", mock_import)
             return original(tc, kw, mn)
 
@@ -241,6 +235,7 @@ class TestVaultRetrieval:
 # ============================================================================
 # Integration: inject_vault_context
 # ============================================================================
+
 
 class TestInjectVaultContext:
     """Test the top-level inject_vault_context function."""
@@ -266,8 +261,13 @@ class TestInjectVaultContext:
         import planner.vault_context as vc
 
         mock_notes = [
-            {"path": "30-workflow-learnings/test.md", "title": "Test Learning",
-             "snippet": "Prior lesson content", "score": 2.0, "source": "obsidian_vault"},
+            {
+                "path": "30-workflow-learnings/test.md",
+                "title": "Test Learning",
+                "snippet": "Prior lesson content",
+                "score": 2.0,
+                "source": "obsidian_vault",
+            },
         ]
         monkeypatch.setattr(vc, "retrieve_vault_context", lambda tc, kw, **kwargs: mock_notes)
 
@@ -280,6 +280,7 @@ class TestInjectVaultContext:
 
     def test_eligible_but_no_results_returns_not_injected(self, monkeypatch):
         import planner.vault_context as vc
+
         monkeypatch.setattr(vc, "retrieve_vault_context", lambda tc, kw, **kwargs: [])
 
         result = inject_vault_context("code_impl", "implement bounded write path")
@@ -288,8 +289,10 @@ class TestInjectVaultContext:
 
     def test_retrieval_error_returns_not_injected(self, monkeypatch):
         import planner.vault_context as vc
+
         def boom(*a, **kw):
             raise RuntimeError("vault down")
+
         monkeypatch.setattr(vc, "retrieve_vault_context", boom)
 
         result = inject_vault_context("research", "research architecture patterns")
@@ -301,30 +304,42 @@ class TestInjectVaultContext:
 # Source-truth boundary
 # ============================================================================
 
+
 class TestSourceTruthBoundary:
     """Verify runtime-state tasks never get vault context."""
 
-    @pytest.mark.parametrize("task_text", [
-        "check service status of the watcher",
-        "restart the systemctl daemon",
-        "check pid of running tasks",
-        "watcher health check uptime",
-        "kill stale daemon process",
-    ])
+    @pytest.mark.parametrize(
+        "task_text",
+        [
+            "check service status of the watcher",
+            "restart the systemctl daemon",
+            "check pid of running tasks",
+            "watcher health check uptime",
+            "kill stale daemon process",
+        ],
+    )
     def test_runtime_queries_always_skip(self, task_text):
         result = inject_vault_context("research", task_text)
         assert result["vault_context_injected"] is False
 
-    @pytest.mark.parametrize("task_text", [
-        "research MCP server design patterns for the vault integration",
-        "implement a new bounded write skill for workflow learnings",
-        "review the authentication code for security issues",
-    ])
+    @pytest.mark.parametrize(
+        "task_text",
+        [
+            "research MCP server design patterns for the vault integration",
+            "implement a new bounded write skill for workflow learnings",
+            "review the authentication code for security issues",
+        ],
+    )
     def test_non_runtime_queries_eligible(self, task_text, monkeypatch):
         import planner.vault_context as vc
-        monkeypatch.setattr(vc, "retrieve_vault_context", lambda tc, kw, **kwargs: [
-            {"path": "test.md", "title": "Test", "snippet": "s", "score": 1.0, "source": "obsidian_vault"}
-        ])
+
+        monkeypatch.setattr(
+            vc,
+            "retrieve_vault_context",
+            lambda tc, kw, **kwargs: [
+                {"path": "test.md", "title": "Test", "snippet": "s", "score": 1.0, "source": "obsidian_vault"}
+            ],
+        )
 
         # These should be eligible (though actual retrieval is mocked)
         ok, _ = is_eligible_for_vault_context("research", task_text)
@@ -335,21 +350,30 @@ class TestSourceTruthBoundary:
 # Orchestrator adapter integration
 # ============================================================================
 
+
 class TestOrchestratorIntegration:
     """Test that build_plan_from_task integrates vault context correctly."""
 
     def test_eligible_task_gets_vault_inputs(self, monkeypatch):
         """Research task with mock vault results has context in first step inputs."""
         import planner.vault_context as vc
+
         mock_notes = [
-            {"path": "20-agent-patterns/test.md", "title": "Test",
-             "snippet": "content", "score": 1.0, "source": "obsidian_vault"},
+            {
+                "path": "20-agent-patterns/test.md",
+                "title": "Test",
+                "snippet": "content",
+                "score": 1.0,
+                "source": "obsidian_vault",
+            },
         ]
         monkeypatch.setattr(vc, "retrieve_vault_context", lambda tc, kw, **kwargs: mock_notes)
 
         from tools.orchestrator_adapter import build_plan_from_task
+
         plan = build_plan_from_task(
-            "0050", "research multi-agent architecture patterns",
+            "0050",
+            "research multi-agent architecture patterns",
             routing={"stage": "B"},
         )
         first_step = plan.steps[0]
@@ -360,6 +384,7 @@ class TestOrchestratorIntegration:
     def test_ineligible_task_has_no_vault_inputs(self):
         """Simple/unknown tasks should not have vault context in step inputs."""
         from tools.orchestrator_adapter import build_plan_from_task
+
         plan = build_plan_from_task("0051", "fix a typo in readme")
         if plan.steps:
             assert "vault_advisory_context" not in plan.steps[0].inputs
@@ -367,8 +392,10 @@ class TestOrchestratorIntegration:
     def test_runtime_task_has_no_vault_inputs(self, monkeypatch):
         """Runtime-state tasks should never get vault context."""
         from tools.orchestrator_adapter import build_plan_from_task
+
         plan = build_plan_from_task(
-            "0052", "check service status and restart daemon",
+            "0052",
+            "check service status and restart daemon",
         )
         if plan.steps:
             assert "vault_advisory_context" not in plan.steps[0].inputs
@@ -395,11 +422,13 @@ class TestOrchestratorIntegration:
         def mock_run(cmd, **kwargs):
             # The prompt is the last element of cmd
             captured_prompts.append(cmd[-1] if cmd else "")
+
             # Return a fake result
             class FakeResult:
                 returncode = 0
                 stdout = "## CONTRACT\nsummary: test\n"
                 stderr = ""
+
             return FakeResult()
 
         monkeypatch.setattr(sp, "run", mock_run)

@@ -29,11 +29,12 @@ WORK = BASE / "WORK"
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AgentRuntimeState:
     agent_id: str
     workflow_id: str | None = None
-    status: str = "idle"          # idle|executing|waiting|completed|failed
+    status: str = "idle"  # idle|executing|waiting|completed|failed
     current_subtask_id: str | None = None
     started_at: float | None = None
     updated_at: float | None = None
@@ -51,7 +52,7 @@ class Delegation:
     agent_id: str
     role: str
     goal: str
-    status: str = "pending"       # pending|claimed|executing|completed|failed
+    status: str = "pending"  # pending|claimed|executing|completed|failed
     created_at: float = field(default_factory=time.time)
     claimed_at: float | None = None
     completed_at: float | None = None
@@ -66,7 +67,7 @@ class Delegation:
 class WorkflowState:
     workflow_id: str
     task_id: str
-    status: str = "created"       # created|planning|executing|completed|failed|halted
+    status: str = "created"  # created|planning|executing|completed|failed|halted
     created_at: float = field(default_factory=time.time)
     updated_at: float | None = None
     delegations: list[str] = field(default_factory=list)
@@ -84,10 +85,10 @@ class ChildContract:
     workflow_id: str
     subtask_id: str
     role: str
-    status: str                   # completed|failed
+    status: str  # completed|failed
     summary: str
-    files_changed: str = ""       # what files this agent modified (required for governed paths)
-    confidence: str = ""          # agent's confidence in result: high|medium|low (required for governed paths)
+    files_changed: str = ""  # what files this agent modified (required for governed paths)
+    confidence: str = ""  # agent's confidence in result: high|medium|low (required for governed paths)
     artifacts: list[str] = field(default_factory=list)
     verification: dict = field(default_factory=dict)
     handoff: dict = field(default_factory=dict)
@@ -99,6 +100,7 @@ class ChildContract:
 # ---------------------------------------------------------------------------
 # Blackboard read/write operations
 # ---------------------------------------------------------------------------
+
 
 class Blackboard:
     """File-based blackboard for multi-agent state coordination.
@@ -167,8 +169,7 @@ class Blackboard:
         path = self.state / "delegations" / f"{workflow_id}_{subtask_id}.json"
         return self._read_json(path)
 
-    def update_delegation(self, workflow_id: str, subtask_id: str,
-                          updates: dict) -> None:
+    def update_delegation(self, workflow_id: str, subtask_id: str, updates: dict) -> None:
         path = self.state / "delegations" / f"{workflow_id}_{subtask_id}.json"
         data = self._read_json(path)
         if data is None:
@@ -184,8 +185,7 @@ class Blackboard:
         results = []
         for f in sorted(d.glob("*.json")):
             data = self._read_json(f)
-            if data and (workflow_id is None
-                         or data.get("workflow_id") == workflow_id):
+            if data and (workflow_id is None or data.get("workflow_id") == workflow_id):
                 results.append(data)
         return results
 
@@ -211,31 +211,27 @@ class Blackboard:
 
     # --- Messages (append-only log per agent per workflow) ---
 
-    def post_message(self, workflow_id: str, agent_id: str,
-                     msg_type: str, content: Any) -> None:
+    def post_message(self, workflow_id: str, agent_id: str, msg_type: str, content: Any) -> None:
         """Post a message to the blackboard message log.
 
         Messages are append-only JSONL — agents read the full log to see
         prior context. No direct peer-to-peer communication.
         """
-        path = (self.work / "agents" / "messages"
-                / workflow_id / f"{agent_id}.jsonl")
+        path = self.work / "agents" / "messages" / workflow_id / f"{agent_id}.jsonl"
         record = {
             "ts": time.time(),
             "agent_id": agent_id,
-            "type": msg_type,      # progress|output|error|handoff
+            "type": msg_type,  # progress|output|error|handoff
             "content": content,
         }
         self._append_jsonl(path, record)
 
-    def read_messages(self, workflow_id: str,
-                      agent_id: str | None = None) -> list[dict]:
+    def read_messages(self, workflow_id: str, agent_id: str | None = None) -> list[dict]:
         """Read messages for a workflow. If agent_id given, filter to that agent."""
         d = self.work / "agents" / "messages" / workflow_id
         if not d.exists():
             return []
-        files = ([d / f"{agent_id}.jsonl"] if agent_id
-                 else sorted(d.glob("*.jsonl")))
+        files = [d / f"{agent_id}.jsonl"] if agent_id else sorted(d.glob("*.jsonl"))
         messages = []
         for f in files:
             if not f.exists():
@@ -250,8 +246,7 @@ class Blackboard:
     # --- Child contracts ---
 
     def write_child_contract(self, contract: ChildContract) -> Path:
-        path = (self.work / "agents" / "contracts"
-                / f"{contract.subtask_id}.json")
+        path = self.work / "agents" / "contracts" / f"{contract.subtask_id}.json"
         self._write_json(path, contract.to_dict())
         return path
 
@@ -266,8 +261,7 @@ class Blackboard:
         results = []
         for f in sorted(d.glob("*.json")):
             data = self._read_json(f)
-            if data and (workflow_id is None
-                         or data.get("workflow_id") == workflow_id):
+            if data and (workflow_id is None or data.get("workflow_id") == workflow_id):
                 results.append(data)
         return results
 
@@ -303,8 +297,5 @@ class Blackboard:
             "failed": len(failed),
             "pending": len(delegations) - len(completed) - len(failed),
             "contracts_received": len(contracts),
-            "mean_subtask_latency_s": (
-                round(sum(latencies) / len(latencies), 2)
-                if latencies else None
-            ),
+            "mean_subtask_latency_s": (round(sum(latencies) / len(latencies), 2) if latencies else None),
         }

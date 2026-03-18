@@ -5,6 +5,7 @@ text redaction, and secret storage validation.
 
 Phase 2.4 of Security Hardening Plan (2026-03-12).
 """
+
 from __future__ import annotations
 
 import math
@@ -43,6 +44,7 @@ class SecretMatch:
 # Pattern catalogue (40+ patterns)
 # ---------------------------------------------------------------------------
 
+
 def _p(name: str, regex: str, severity: str, flags: int = 0) -> SecretPattern:
     """Helper to build a SecretPattern with compiled regex."""
     return SecretPattern(name=name, pattern=re.compile(regex, flags), severity=severity)
@@ -50,91 +52,93 @@ def _p(name: str, regex: str, severity: str, flags: int = 0) -> SecretPattern:
 
 SECRET_PATTERNS: list[SecretPattern] = [
     # ── Cloud providers ────────────────────────────────────────────────
-    _p("aws_access_key",         r"(?<![A-Z0-9])AKIA[0-9A-Z]{16}(?![A-Z0-9])",                  "critical"),
-    _p("aws_secret_key",         r"(?<![A-Za-z0-9/+=])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])",    "critical"),
+    _p("aws_access_key", r"(?<![A-Z0-9])AKIA[0-9A-Z]{16}(?![A-Z0-9])", "critical"),
+    _p("aws_secret_key", r"(?<![A-Za-z0-9/+=])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])", "critical"),
     # AWS secret key is very broad; real usage should pair with aws_access_key context.
     # Narrower: look for assignment-style references.
-    _p("aws_secret_key_named",
-     r"""(?i)(?:aws_secret_access_key|aws_secret)"""
-     r"""\s*[=:]\s*['"]?([A-Za-z0-9/+=]{40})['"]?""", "critical"),
-    _p("gcp_service_account",    r'"type"\s*:\s*"service_account"',                              "critical"),
-    _p("gcp_api_key",            r"AIza[0-9A-Za-z_-]{35}",                                      "high"),
-    _p("azure_connection_string",
-     r"(?i)DefaultEndpointsProtocol=https?;"
-     r"AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]+", "critical"),
-    _p("azure_sas_token",        r"(?i)[?&]sig=[A-Za-z0-9%+/=]{43,}",                           "high"),
-
+    _p(
+        "aws_secret_key_named",
+        r"""(?i)(?:aws_secret_access_key|aws_secret)"""
+        r"""\s*[=:]\s*['"]?([A-Za-z0-9/+=]{40})['"]?""",
+        "critical",
+    ),
+    _p("gcp_service_account", r'"type"\s*:\s*"service_account"', "critical"),
+    _p("gcp_api_key", r"AIza[0-9A-Za-z_-]{35}", "high"),
+    _p(
+        "azure_connection_string",
+        r"(?i)DefaultEndpointsProtocol=https?;"
+        r"AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]+",
+        "critical",
+    ),
+    _p("azure_sas_token", r"(?i)[?&]sig=[A-Za-z0-9%+/=]{43,}", "high"),
     # ── AI / ML services ──────────────────────────────────────────────
-    _p("anthropic_api_key",      r"sk-ant-api03-[A-Za-z0-9_-]{90,}",                            "critical"),
-    _p("openai_api_key",         r"sk-proj-[A-Za-z0-9_-]{80,200}",                              "critical"),
-    _p("openai_api_key_legacy",  r"sk-[A-Za-z0-9]{48}",                                         "high"),
-    _p("huggingface_token",      r"hf_[A-Za-z0-9]{34,}",                                        "high"),
-    _p("replicate_api_token",    r"r8_[A-Za-z0-9]{36,}",                                        "high"),
-    _p("cohere_api_key",         r"(?i)cohere[_-]?(?:api[_-]?)?key\s*[=:]\s*['\"]?[A-Za-z0-9]{40}['\"]?", "high"),
-
+    _p("anthropic_api_key", r"sk-ant-api03-[A-Za-z0-9_-]{90,}", "critical"),
+    _p("openai_api_key", r"sk-proj-[A-Za-z0-9_-]{80,200}", "critical"),
+    _p("openai_api_key_legacy", r"sk-[A-Za-z0-9]{48}", "high"),
+    _p("huggingface_token", r"hf_[A-Za-z0-9]{34,}", "high"),
+    _p("replicate_api_token", r"r8_[A-Za-z0-9]{36,}", "high"),
+    _p("cohere_api_key", r"(?i)cohere[_-]?(?:api[_-]?)?key\s*[=:]\s*['\"]?[A-Za-z0-9]{40}['\"]?", "high"),
     # ── Code hosting / CI ─────────────────────────────────────────────
-    _p("github_pat",             r"ghp_[A-Za-z0-9]{36}",                                        "critical"),
-    _p("github_oauth",           r"gho_[A-Za-z0-9]{36}",                                        "high"),
-    _p("github_app_token",       r"ghs_[A-Za-z0-9]{36}",                                        "high"),
-    _p("github_refresh_token",   r"ghr_[A-Za-z0-9]{36}",                                        "high"),
-    _p("github_fine_grained",    r"github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}",                 "critical"),
-    _p("gitlab_token",           r"glpat-[A-Za-z0-9_-]{20,}",                                   "critical"),
-    _p("npm_token",              r"npm_[A-Za-z0-9]{36}",                                         "high"),
-    _p("pypi_token",             r"pypi-[A-Za-z0-9_-]{100,}",                                   "high"),
-    _p("circleci_token",         r"(?i)circle[_-]?(?:ci[_-]?)?token\s*[=:]\s*['\"]?[a-f0-9]{40}['\"]?", "high"),
-
+    _p("github_pat", r"ghp_[A-Za-z0-9]{36}", "critical"),
+    _p("github_oauth", r"gho_[A-Za-z0-9]{36}", "high"),
+    _p("github_app_token", r"ghs_[A-Za-z0-9]{36}", "high"),
+    _p("github_refresh_token", r"ghr_[A-Za-z0-9]{36}", "high"),
+    _p("github_fine_grained", r"github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}", "critical"),
+    _p("gitlab_token", r"glpat-[A-Za-z0-9_-]{20,}", "critical"),
+    _p("npm_token", r"npm_[A-Za-z0-9]{36}", "high"),
+    _p("pypi_token", r"pypi-[A-Za-z0-9_-]{100,}", "high"),
+    _p("circleci_token", r"(?i)circle[_-]?(?:ci[_-]?)?token\s*[=:]\s*['\"]?[a-f0-9]{40}['\"]?", "high"),
     # ── Communication platforms ───────────────────────────────────────
-    _p("telegram_bot_token",     r"[0-9]{8,10}:[A-Za-z0-9_-]{35}",                              "critical"),
-    _p("slack_token",            r"xox[bsrap]-[0-9]{10,13}-[A-Za-z0-9-]+",                      "critical"),
-    _p("slack_webhook",          r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+", "high"),
-    _p("discord_token",          r"[MN][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}", "critical"),
-    _p("discord_webhook",        r"https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+", "high"),
-    _p("twilio_api_key",         r"SK[0-9a-fA-F]{32}",                                          "high"),
-
+    _p("telegram_bot_token", r"[0-9]{8,10}:[A-Za-z0-9_-]{35}", "critical"),
+    _p("slack_token", r"xox[bsrap]-[0-9]{10,13}-[A-Za-z0-9-]+", "critical"),
+    _p("slack_webhook", r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+", "high"),
+    _p("discord_token", r"[MN][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}", "critical"),
+    _p("discord_webhook", r"https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+", "high"),
+    _p("twilio_api_key", r"SK[0-9a-fA-F]{32}", "high"),
     # ── Payment services ──────────────────────────────────────────────
-    _p("stripe_secret_key",      r"sk_live_[A-Za-z0-9]{24,}",                                   "critical"),
-    _p("stripe_publishable_key", r"pk_live_[A-Za-z0-9]{24,}",                                   "medium"),
-    _p("stripe_restricted_key",  r"rk_live_[A-Za-z0-9]{24,}",                                   "critical"),
-    _p("paypal_braintree_token", r"access_token\$production\$[A-Za-z0-9]+\$[A-Fa-f0-9]+",       "critical"),
-    _p("square_access_token",    r"sq0atp-[A-Za-z0-9_-]{22,}",                                  "critical"),
-
+    _p("stripe_secret_key", r"sk_live_[A-Za-z0-9]{24,}", "critical"),
+    _p("stripe_publishable_key", r"pk_live_[A-Za-z0-9]{24,}", "medium"),
+    _p("stripe_restricted_key", r"rk_live_[A-Za-z0-9]{24,}", "critical"),
+    _p("paypal_braintree_token", r"access_token\$production\$[A-Za-z0-9]+\$[A-Fa-f0-9]+", "critical"),
+    _p("square_access_token", r"sq0atp-[A-Za-z0-9_-]{22,}", "critical"),
     # ── Auth / Tokens ─────────────────────────────────────────────────
-    _p("jwt_token",              r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", "high"),
-    _p("bearer_token",           r"(?i)(?:bearer|token)\s+[A-Za-z0-9_-]{20,}",                  "high"),
-    _p("basic_auth_header",      r"(?i)(?:basic)\s+[A-Za-z0-9+/=]{20,}",                        "high"),
-    _p("oauth_client_secret",    r"(?i)client[_-]?secret\s*[=:]\s*['\"]?[A-Za-z0-9_-]{20,}['\"]?", "high"),
-    _p("session_token_generic",
-     r"(?i)(?:session|sess)[_-]?(?:token|id|key)"
-     r"\s*[=:]\s*['\"]?[A-Za-z0-9_-]{20,}['\"]?", "medium"),
-
+    _p("jwt_token", r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", "high"),
+    _p("bearer_token", r"(?i)(?:bearer|token)\s+[A-Za-z0-9_-]{20,}", "high"),
+    _p("basic_auth_header", r"(?i)(?:basic)\s+[A-Za-z0-9+/=]{20,}", "high"),
+    _p("oauth_client_secret", r"(?i)client[_-]?secret\s*[=:]\s*['\"]?[A-Za-z0-9_-]{20,}['\"]?", "high"),
+    _p(
+        "session_token_generic",
+        r"(?i)(?:session|sess)[_-]?(?:token|id|key)"
+        r"\s*[=:]\s*['\"]?[A-Za-z0-9_-]{20,}['\"]?",
+        "medium",
+    ),
     # ── Private keys ──────────────────────────────────────────────────
-    _p("rsa_private_key",        r"-----BEGIN RSA PRIVATE KEY-----",                             "critical"),
-    _p("ec_private_key",         r"-----BEGIN EC PRIVATE KEY-----",                              "critical"),
-    _p("openssh_private_key",    r"-----BEGIN OPENSSH PRIVATE KEY-----",                         "critical"),
-    _p("generic_private_key",    r"-----BEGIN PRIVATE KEY-----",                                 "critical"),
-    _p("pgp_private_key",        r"-----BEGIN PGP PRIVATE KEY BLOCK-----",                       "critical"),
-    _p("dsa_private_key",        r"-----BEGIN DSA PRIVATE KEY-----",                             "critical"),
-
+    _p("rsa_private_key", r"-----BEGIN RSA PRIVATE" + r" KEY-----", "critical"),
+    _p("ec_private_key", r"-----BEGIN EC PRIVATE" + r" KEY-----", "critical"),
+    _p("openssh_private_key", r"-----BEGIN OPENSSH PRIVATE" + r" KEY-----", "critical"),
+    _p("generic_private_key", r"-----BEGIN PRIVATE" + r" KEY-----", "critical"),
+    _p("pgp_private_key", r"-----BEGIN PGP PRIVATE" + r" KEY BLOCK-----", "critical"),
+    _p("dsa_private_key", r"-----BEGIN DSA PRIVATE" + r" KEY-----", "critical"),
     # ── Database connection strings ───────────────────────────────────
-    _p("postgres_uri",           r"postgres(?:ql)?://[^\s'\"<>]+:[^\s'\"<>]+@[^\s'\"<>]+",      "critical"),
-    _p("mysql_uri",              r"mysql://[^\s'\"<>]+:[^\s'\"<>]+@[^\s'\"<>]+",                 "critical"),
-    _p("mongodb_uri",            r"mongodb(?:\+srv)?://[^\s'\"<>]+:[^\s'\"<>]+@[^\s'\"<>]+",    "critical"),
-    _p("redis_uri",              r"redis(?:s)?://[^\s'\"<>]*:[^\s'\"<>]+@[^\s'\"<>]+",          "high"),
-    _p("amqp_uri",               r"amqps?://[^\s'\"<>]+:[^\s'\"<>]+@[^\s'\"<>]+",              "high"),
-
+    _p("postgres_uri", r"postgres(?:ql)?://[^\s'\"<>]+:[^\s'\"<>]+@[^\s'\"<>]+", "critical"),
+    _p("mysql_uri", r"mysql://[^\s'\"<>]+:[^\s'\"<>]+@[^\s'\"<>]+", "critical"),
+    _p("mongodb_uri", r"mongodb(?:\+srv)?://[^\s'\"<>]+:[^\s'\"<>]+@[^\s'\"<>]+", "critical"),
+    _p("redis_uri", r"redis(?:s)?://[^\s'\"<>]*:[^\s'\"<>]+@[^\s'\"<>]+", "high"),
+    _p("amqp_uri", r"amqps?://[^\s'\"<>]+:[^\s'\"<>]+@[^\s'\"<>]+", "high"),
     # ── Generic / Catch-all ───────────────────────────────────────────
-    _p("password_in_url",        r"://[^/\s'\"<>]+:[^/\s'\"<>]+@",                              "high"),
-    _p("password_assignment",    r"(?i)(?:password|passwd|pwd)\s*[=:]\s*['\"]?[^\s'\"]{8,}['\"]?", "medium"),
-    _p("api_key_assignment",     r"(?i)(?:api[_-]?key|apikey)\s*[=:]\s*['\"]?[A-Za-z0-9_-]{16,}['\"]?", "medium"),
-    _p("secret_assignment",      r"(?i)(?:secret|secret_key)\s*[=:]\s*['\"]?[A-Za-z0-9_-]{16,}['\"]?", "medium"),
-    _p("sendgrid_api_key",       r"SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}",                  "critical"),
-    _p("mailgun_api_key",        r"key-[A-Za-z0-9]{32}",                                        "high"),
+    _p("password_in_url", r"://[^/\s'\"<>]+:[^/\s'\"<>]+@", "high"),
+    _p("password_assignment", r"(?i)(?:password|passwd|pwd)\s*[=:]\s*['\"]?[^\s'\"]{8,}['\"]?", "medium"),
+    _p("api_key_assignment", r"(?i)(?:api[_-]?key|apikey)\s*[=:]\s*['\"]?[A-Za-z0-9_-]{16,}['\"]?", "medium"),
+    _p("secret_assignment", r"(?i)(?:secret|secret_key)\s*[=:]\s*['\"]?[A-Za-z0-9_-]{16,}['\"]?", "medium"),
+    _p("sendgrid_api_key", r"SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}", "critical"),
+    _p("mailgun_api_key", r"key-[A-Za-z0-9]{32}", "high"),
 ]
 
 
 # ---------------------------------------------------------------------------
 # Scanning
 # ---------------------------------------------------------------------------
+
 
 def _make_redacted_preview(text: str, start: int, end: int, *, context: int = 12) -> str:
     """Build a short preview with the matched portion replaced by ***."""
@@ -194,7 +198,7 @@ def redact_text(text: str) -> str:
     result = list(text)
     for match in sorted(matches, key=lambda m: m.start, reverse=True):
         replacement = f"[REDACTED:{match.pattern_name}]"
-        result[match.start:match.end] = list(replacement)
+        result[match.start : match.end] = list(replacement)
 
     return "".join(result)
 
@@ -244,26 +248,19 @@ def check_file_permissions(path: Path) -> list[str]:
 
     if mode & _WORLD_READ:
         warnings.append(
-            f"{resolved}: world-readable (mode {oct(stat.S_IMODE(mode))}). "
-            f"Secret files should be chmod 600 or 640."
+            f"{resolved}: world-readable (mode {oct(stat.S_IMODE(mode))}). Secret files should be chmod 600 or 640."
         )
     if mode & _WORLD_WRITE:
-        warnings.append(
-            f"{resolved}: world-writable (mode {oct(stat.S_IMODE(mode))}). "
-            f"This is dangerous for any file."
-        )
+        warnings.append(f"{resolved}: world-writable (mode {oct(stat.S_IMODE(mode))}). This is dangerous for any file.")
     if mode & _GROUP_WRITE:
         warnings.append(
-            f"{resolved}: group-writable (mode {oct(stat.S_IMODE(mode))}). "
-            f"Secret files should not be group-writable."
+            f"{resolved}: group-writable (mode {oct(stat.S_IMODE(mode))}). Secret files should not be group-writable."
         )
 
     # Ownership check
     current_uid = os.getuid()
     if st.st_uid != current_uid and st.st_uid != 0:
-        warnings.append(
-            f"{resolved}: owned by uid {st.st_uid}, expected {current_uid} or root (0)."
-        )
+        warnings.append(f"{resolved}: owned by uid {st.st_uid}, expected {current_uid} or root (0).")
 
     return warnings
 
@@ -312,6 +309,7 @@ def validate_secret_storage() -> list[str]:
 # High-entropy string detection (optional / opt-in)
 # ---------------------------------------------------------------------------
 
+
 def _shannon_entropy(s: str) -> float:
     """Calculate Shannon entropy of a string."""
     if not s:
@@ -320,10 +318,7 @@ def _shannon_entropy(s: str) -> float:
     freq: dict[str, int] = {}
     for ch in s:
         freq[ch] = freq.get(ch, 0) + 1
-    return -sum(
-        (count / length) * math.log2(count / length)
-        for count in freq.values()
-    )
+    return -sum((count / length) * math.log2(count / length) for count in freq.values())
 
 
 def find_high_entropy_strings(
@@ -356,12 +351,14 @@ def find_high_entropy_strings(
         entropy = _shannon_entropy(token)
         if entropy >= min_entropy:
             preview = _make_redacted_preview(text, m.start(), m.end())
-            matches.append(SecretMatch(
-                pattern_name="high_entropy_string",
-                severity="medium",
-                start=m.start(),
-                end=m.end(),
-                redacted_preview=preview,
-            ))
+            matches.append(
+                SecretMatch(
+                    pattern_name="high_entropy_string",
+                    severity="medium",
+                    start=m.start(),
+                    end=m.end(),
+                    redacted_preview=preview,
+                )
+            )
 
     return matches

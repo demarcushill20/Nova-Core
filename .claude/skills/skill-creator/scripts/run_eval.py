@@ -246,7 +246,8 @@ def run_single_query(
                             if (
                                 tool_name == "Skill"
                                 and _matches_skill(tool_input.get("skill", ""), clean_name, skill_name)
-                                or tool_name == "Read"
+                            ) or (
+                                tool_name == "Read"
                                 and (
                                     _matches_skill(tool_input.get("file_path", ""), clean_name, skill_name)
                                     or real_skill_path_fragment in tool_input.get("file_path", "")

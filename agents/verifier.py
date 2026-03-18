@@ -22,13 +22,15 @@ from agents.blackboard import Blackboard
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class VerificationCheck:
     """A single verification check result."""
-    checkpoint: str                     # name or subtask_id
-    check_type: str                     # contract | artifact | test | maker_checker
-    result: str                         # pass | fail | inconclusive
-    detail: str = ""                    # what was checked and what was found
+
+    checkpoint: str  # name or subtask_id
+    check_type: str  # contract | artifact | test | maker_checker
+    result: str  # pass | fail | inconclusive
+    detail: str = ""  # what was checked and what was found
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -37,13 +39,14 @@ class VerificationCheck:
 @dataclass
 class VerificationReport:
     """Structured verification report emitted by the Verifier."""
+
     report_id: str
     workflow_id: str
-    verdict: str                        # approved | rejected | incomplete
+    verdict: str  # approved | rejected | incomplete
     checks: list[VerificationCheck] = field(default_factory=list)
     blocking_issues: list[str] = field(default_factory=list)
     artifacts_verified: list[dict] = field(default_factory=list)
-    confidence: str = "medium"          # high | medium | low
+    confidence: str = "medium"  # high | medium | low
     verified_at: float = field(default_factory=time.time)
     verifier: str = "verifier_001"
 
@@ -127,11 +130,13 @@ class VerifierEngine:
                 blocking_issues.append(f"Artifact '{name}' failed: {check.detail}")
             if file_path:
                 path = Path(file_path)
-                artifacts_verified.append({
-                    "path": file_path,
-                    "exists": path.exists(),
-                    "size": path.stat().st_size if path.exists() else 0,
-                })
+                artifacts_verified.append(
+                    {
+                        "path": file_path,
+                        "exists": path.exists(),
+                        "size": path.stat().st_size if path.exists() else 0,
+                    }
+                )
 
         # 2. Contract validation
         for i, contract in enumerate(contracts):
@@ -139,9 +144,7 @@ class VerifierEngine:
             checks.extend(contract_checks)
             for cc in contract_checks:
                 if cc.result == "fail":
-                    blocking_issues.append(
-                        f"Contract #{i} failed: {cc.detail}"
-                    )
+                    blocking_issues.append(f"Contract #{i} failed: {cc.detail}")
 
         # 3. Maker-checker enforcement for repo changes
         maker_checker_enforced = False
@@ -149,16 +152,12 @@ class VerifierEngine:
 
         if repo_changes:
             maker_checker_enforced = True
-            mc_check = self._check_maker_checker(
-                workflow_id, repo_changes, critic_reviews
-            )
+            mc_check = self._check_maker_checker(workflow_id, repo_changes, critic_reviews)
             checks.append(mc_check)
             if mc_check.result == "pass":
                 maker_checker_passed = True
             else:
-                blocking_issues.append(
-                    f"Maker-checker failed: {mc_check.detail}"
-                )
+                blocking_issues.append(f"Maker-checker failed: {mc_check.detail}")
 
         # 4. Determine verdict
         failed_checks = [c for c in checks if c.result == "fail"]
@@ -199,17 +198,22 @@ class VerifierEngine:
         self._save_report(report)
 
         # 8. Post to blackboard
-        self.bb.post_message(workflow_id, verifier_id, "verification_report", {
-            "report_id": report_id,
-            "verdict": verdict,
-            "total_checks": len(checks),
-            "passed": len([c for c in checks if c.result == "pass"]),
-            "failed": len(failed_checks),
-            "inconclusive": len(inconclusive_checks),
-            "blocking_issues_count": len(blocking_issues),
-            "maker_checker_enforced": maker_checker_enforced,
-            "maker_checker_passed": maker_checker_passed,
-        })
+        self.bb.post_message(
+            workflow_id,
+            verifier_id,
+            "verification_report",
+            {
+                "report_id": report_id,
+                "verdict": verdict,
+                "total_checks": len(checks),
+                "passed": len([c for c in checks if c.result == "pass"]),
+                "failed": len(failed_checks),
+                "inconclusive": len(inconclusive_checks),
+                "blocking_issues_count": len(blocking_issues),
+                "maker_checker_enforced": maker_checker_enforced,
+                "maker_checker_passed": maker_checker_passed,
+            },
+        )
 
         return report
 
@@ -257,19 +261,23 @@ class VerifierEngine:
         for field_name in REQUIRED_CONTRACT_FIELDS:
             value = contract.get(field_name)
             if value is None or (isinstance(value, str) and not value.strip()):
-                checks.append(VerificationCheck(
-                    checkpoint=f"contract_{index}_{field_name}",
-                    check_type="contract",
-                    result="fail",
-                    detail=f"Contract #{index} missing required field: {field_name}",
-                ))
+                checks.append(
+                    VerificationCheck(
+                        checkpoint=f"contract_{index}_{field_name}",
+                        check_type="contract",
+                        result="fail",
+                        detail=f"Contract #{index} missing required field: {field_name}",
+                    )
+                )
             else:
-                checks.append(VerificationCheck(
-                    checkpoint=f"contract_{index}_{field_name}",
-                    check_type="contract",
-                    result="pass",
-                    detail=f"Contract #{index} field '{field_name}' present",
-                ))
+                checks.append(
+                    VerificationCheck(
+                        checkpoint=f"contract_{index}_{field_name}",
+                        check_type="contract",
+                        result="pass",
+                        detail=f"Contract #{index} field '{field_name}' present",
+                    )
+                )
 
         # Validate confidence value
         conf = contract.get("confidence", "")
@@ -278,20 +286,24 @@ class VerifierEngine:
             try:
                 fval = float(conf)
                 if not (0.0 <= fval <= 1.0):
-                    checks.append(VerificationCheck(
-                        checkpoint=f"contract_{index}_confidence_range",
+                    checks.append(
+                        VerificationCheck(
+                            checkpoint=f"contract_{index}_confidence_range",
+                            check_type="contract",
+                            result="fail",
+                            detail=f"Contract #{index} confidence '{conf}' out of range [0.0, 1.0]",
+                        )
+                    )
+            except (ValueError, TypeError):
+                checks.append(
+                    VerificationCheck(
+                        checkpoint=f"contract_{index}_confidence_valid",
                         check_type="contract",
                         result="fail",
-                        detail=f"Contract #{index} confidence '{conf}' out of range [0.0, 1.0]",
-                    ))
-            except (ValueError, TypeError):
-                checks.append(VerificationCheck(
-                    checkpoint=f"contract_{index}_confidence_valid",
-                    check_type="contract",
-                    result="fail",
-                    detail=f"Contract #{index} confidence '{conf}' is not a valid value "
-                           f"(expected: high/medium/low or 0.0-1.0)",
-                ))
+                        detail=f"Contract #{index} confidence '{conf}' is not a valid value "
+                        f"(expected: high/medium/low or 0.0-1.0)",
+                    )
+                )
 
         return checks
 
@@ -314,13 +326,12 @@ class VerifierEngine:
                 check_type="maker_checker",
                 result="fail",
                 detail=f"Repo changes detected ({len(repo_changes)} files) but no "
-                       f"critic review found. Maker-checker flow was not followed.",
+                f"critic review found. Maker-checker flow was not followed.",
             )
 
         # Check for blocking objections
         blocking_objections = [
-            r for r in critic_reviews
-            if r.get("verdict") == "objection" and r.get("blocking", False)
+            r for r in critic_reviews if r.get("verdict") == "objection" and r.get("blocking", False)
         ]
 
         if blocking_objections:
@@ -329,23 +340,19 @@ class VerifierEngine:
                 check_type="maker_checker",
                 result="fail",
                 detail=f"Blocking critic objection(s) exist: "
-                       f"{len(blocking_objections)} unresolved objection(s). "
-                       f"Repo changes cannot be finalized.",
+                f"{len(blocking_objections)} unresolved objection(s). "
+                f"Repo changes cannot be finalized.",
             )
 
         # Check that at least one review passed or only has non-blocking issues
-        passing_reviews = [
-            r for r in critic_reviews
-            if r.get("verdict") in ("pass", "needs_revision")
-        ]
+        passing_reviews = [r for r in critic_reviews if r.get("verdict") in ("pass", "needs_revision")]
 
         if not passing_reviews:
             return VerificationCheck(
                 checkpoint="maker_checker",
                 check_type="maker_checker",
                 result="fail",
-                detail="No passing or needs_revision critic review found. "
-                       "All reviews were objections.",
+                detail="No passing or needs_revision critic review found. All reviews were objections.",
             )
 
         return VerificationCheck(
@@ -353,7 +360,7 @@ class VerifierEngine:
             check_type="maker_checker",
             result="pass",
             detail=f"Maker-checker flow satisfied: {len(passing_reviews)} "
-                   f"passing review(s) for {len(repo_changes)} changed file(s).",
+            f"passing review(s) for {len(repo_changes)} changed file(s).",
         )
 
     # --- Persistence ---

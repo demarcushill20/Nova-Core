@@ -1,0 +1,162 @@
+[
+  {
+    "id": "heartbeat_001",
+    "category": "heartbeat",
+    "input_prompt": "Generate a heartbeat report for the NovaCore system. Include system metrics, service status, open threads, anomalies, and next actions.",
+    "expected_output": "A structured heartbeat report showing CPU at moderate usage, memory within limits, disk under 50%, all three core services (novacore-watcher, novacore-telegram, novacore-telegram-notifier) running, open threads listing active Enhancement Plan phases, no anomalies detected, and actionable next steps for in-progress work items.",
+    "expected_properties": ["contains_metrics", "has_service_status", "status_healthy"],
+    "metadata": {"difficulty": "standard", "phase": "4.6"}
+  },
+  {
+    "id": "heartbeat_002",
+    "category": "heartbeat",
+    "input_prompt": "Generate a heartbeat report. The novacore-telegram service has crashed and the circuit breaker for the Telegram API is in OPEN state. Include diagnosis and repair suggestions.",
+    "expected_output": "A degraded heartbeat report listing novacore-telegram as 'stopped' with a failure timestamp, the Telegram API circuit breaker shown in OPEN state with failure count and last-error details. Repair suggestions should include restarting the service, checking API credentials, verifying network connectivity, and optionally resetting the circuit breaker after confirming the upstream is healthy.",
+    "expected_properties": ["contains_metrics", "has_failed_checks", "has_repair_suggestions"],
+    "metadata": {"difficulty": "degraded", "phase": "4.6"}
+  },
+  {
+    "id": "heartbeat_003",
+    "category": "heartbeat",
+    "input_prompt": "Generate a heartbeat report. Memory usage is at 3.6 GB of 4.0 GB (90%) and disk is at 45 GB of 50 GB (90%). Include resource warnings with threshold context.",
+    "expected_output": "A heartbeat report with prominent resource warnings: memory at 90% utilization (3.6/4.0 GB) exceeding the 80% warning threshold, disk at 90% (45/50 GB) exceeding the 85% critical threshold. Should recommend clearing old logs, running memory compactor, pruning Docker images, and consider enabling swap. Warning thresholds displayed alongside current values for quick triage.",
+    "expected_properties": ["contains_metrics", "has_resource_warnings", "has_warning_thresholds"],
+    "metadata": {"difficulty": "resource_pressure", "phase": "4.6"}
+  },
+  {
+    "id": "heartbeat_004",
+    "category": "heartbeat",
+    "input_prompt": "Generate a heartbeat report including NovaTrade status. The trading system is live on FTMO demo with MetaApiAdapter connected. Include current equity, drawdown, and recent trade count.",
+    "expected_output": "A heartbeat report with a dedicated NovaTrade section showing: adapter status as 'connected' via MetaApiAdapter to OANDA-Demo-1, current equity of $100,450 (starting $100,000), max drawdown at 0.8% (well within FTMO 5% daily limit), 12 trades executed in the last 24h with 7 wins and 5 losses, and the active strategy identifier. Standard system metrics section also present.",
+    "expected_properties": ["contains_metrics", "has_trading_metrics", "has_equity_drawdown"],
+    "metadata": {"difficulty": "novatrade_active", "phase": "9"}
+  },
+  {
+    "id": "codegen_001",
+    "category": "codegen",
+    "input_prompt": "Write a Python utility function that calculates the exponential moving average (EMA) of a list of floats. Include type hints, a docstring, and unit tests.",
+    "expected_output": "A complete Python module with a function `calculate_ema(values: list[float], period: int) -> list[float]` that computes EMA using the standard multiplier formula (2 / (period + 1)). Includes a NumPy-style docstring with Args, Returns, and Raises sections. Two or more pytest unit tests covering normal input, edge cases (empty list, period > length), and numerical accuracy within 1e-6 tolerance.",
+    "expected_properties": ["valid_python", "has_docstring", "has_tests"],
+    "metadata": {"difficulty": "standard", "domain": "trading_utils"}
+  },
+  {
+    "id": "codegen_002",
+    "category": "codegen",
+    "input_prompt": "Fix the bug in cost_router.py where the budget check uses stale cached costs when the model pricing changes. The router should invalidate cached pricing data when the config is reloaded.",
+    "expected_output": "A bug fix identifying that the root cause is the _pricing_cache dict not being cleared when reload_config() is called. The fix adds a cache invalidation call (self._pricing_cache.clear()) at the top of reload_config(). Includes a regression test that sets pricing, caches a route, changes pricing, reloads config, and asserts the new pricing is used for subsequent routing decisions.",
+    "expected_properties": ["valid_python", "root_cause_identified", "fix_applied", "tests_pass"],
+    "metadata": {"difficulty": "bugfix", "domain": "cost_optimization"}
+  },
+  {
+    "id": "codegen_003",
+    "category": "codegen",
+    "input_prompt": "Create a Pydantic v2 schema for a WebhookAlert model that validates incoming TradingView alerts. Fields: symbol (str), action (buy/sell/close), price (positive float), timestamp (datetime), strategy_name (str), optional metadata dict.",
+    "expected_output": "A Pydantic v2 BaseModel class WebhookAlert with field validators: symbol validated as non-empty uppercase string, action constrained to Literal['buy','sell','close'] or an enum, price with gt=0 constraint, timestamp as datetime with timezone awareness validation, strategy_name with min_length=1, and metadata as dict[str,str] with default_factory. Includes model_config for JSON schema title and example.",
+    "expected_properties": ["valid_python", "pydantic_model", "has_validators"],
+    "metadata": {"difficulty": "standard", "domain": "novatrade"}
+  },
+  {
+    "id": "codegen_004",
+    "category": "codegen",
+    "input_prompt": "Implement a thread-safe singleton registry for circuit breakers. It should support register(name, breaker), get(name), list_all(), and reset_all() operations. Must be safe for concurrent access from async worker pool threads.",
+    "expected_output": "A Python class BreakerRegistry using threading.Lock for thread safety on all mutating operations. Internal dict storage with register() acquiring lock before insert, get() returning Optional[CircuitBreaker], list_all() returning a snapshot copy to prevent iteration-during-mutation bugs, and reset_all() acquiring lock and calling reset() on each breaker. Proper error handling for duplicate registration and missing breakers.",
+    "expected_properties": ["valid_python", "error_handling", "thread_safe"],
+    "metadata": {"difficulty": "intermediate", "domain": "resilience"}
+  },
+  {
+    "id": "research_001",
+    "category": "research",
+    "input_prompt": "Research and compare MetaTrader 5 bridge approaches for Linux VPS: Wine-based MT5, Windows VPS with FastAPI bridge, and MetaApi cloud service. Evaluate latency, reliability, cost, and maintenance burden.",
+    "expected_output": "A structured comparison across three MT5 bridge approaches. Wine-based: lowest cost but highest maintenance, unreliable for production due to GUI dependencies, ~50ms added latency. Windows VPS bridge: moderate cost ($20-40/mo), reliable but requires managing two servers, ~10-30ms network latency between VPS instances. MetaApi cloud: highest cost ($20-50/mo per account), lowest maintenance, built-in failover, ~100-200ms API latency but handles reconnection automatically. Recommendation: MetaApi for MVP, Windows VPS bridge for production scale.",
+    "expected_properties": ["has_citations", "structured_findings", "recommendations"],
+    "metadata": {"difficulty": "standard", "domain": "novatrade_infra"}
+  },
+  {
+    "id": "research_002",
+    "category": "research",
+    "input_prompt": "Perform a security audit of the NovaCore webhook endpoint at /webhook/alert. Check for authentication, input validation, rate limiting, and common web vulnerabilities.",
+    "expected_output": "A security audit report identifying: (1) CRITICAL - no authentication on webhook endpoint, recommends HMAC signature verification, (2) HIGH - input validation relies solely on Pydantic parsing without size limits, recommends max payload size of 10KB, (3) MEDIUM - no rate limiting, recommends 60 req/min per IP via nginx, (4) LOW - verbose error messages in responses could leak internal structure, recommends generic 400 responses. Each finding includes severity, description, impact, and specific remediation steps with code snippets.",
+    "expected_properties": ["vulnerability_list", "severity_ratings", "remediation"],
+    "metadata": {"difficulty": "audit", "domain": "security"}
+  },
+  {
+    "id": "research_003",
+    "category": "research",
+    "input_prompt": "Research the MetaApi SDK Python API for position management. Document the key endpoints for opening, modifying, and closing positions, authentication methods, and provide usage examples.",
+    "expected_output": "API documentation summary covering: authentication via API token and account ID passed to MetaApi constructor, key methods including create_market_buy_order(), create_market_sell_order(), modify_position(), close_position(), and get_positions(). Each method documented with parameters, return types, and error codes. Authentication supports both access tokens and JWT. Includes three code examples: opening a market order, setting stop-loss/take-profit, and closing by position ID.",
+    "expected_properties": ["endpoints_listed", "auth_methods", "code_examples"],
+    "metadata": {"difficulty": "standard", "domain": "novatrade_api"}
+  },
+  {
+    "id": "research_004",
+    "category": "research",
+    "input_prompt": "Summarize best practices for Pydantic v2 schema design in production Python applications. Cover validation patterns, serialization, performance, and migration from v1.",
+    "expected_output": "A categorized best-practices guide covering: (1) Validation - use field_validator over root_validator when possible, prefer Annotated types for reusable constraints, use model_validator(mode='before') for raw-data preprocessing. (2) Serialization - use model_dump(mode='json') for API responses, configure model_config for JSON schema generation. (3) Performance - use TypeAdapter for hot paths without model overhead, avoid nested model reconstruction in loops. (4) Migration - replace validator with field_validator, update Config to model_config dict, replace __root__ with RootModel. Includes code examples for each category.",
+    "expected_properties": ["categorized_practices", "code_examples", "recommendations"],
+    "metadata": {"difficulty": "standard", "domain": "python_patterns"}
+  },
+  {
+    "id": "plan_001",
+    "category": "plan",
+    "input_prompt": "Create an implementation plan for Phase 7 Eval & Code Quality of Enhancement Plan v32. Break into sub-phases with dependencies, deliverables, and time estimates.",
+    "expected_output": "A phased implementation plan with 5 sub-phases: P7.1 Answer Relevance Evals (2h, no deps), P7.2 Semantic Similarity Checks (2h, depends on P7.1), P7.3 Golden Dataset Regression Corpus (3h, no deps), P7.4 Task Completion Evals (2h, depends on P7.1+P7.3), P7.5 Code Quality Gates (3h, depends on P7.2). Each phase lists specific deliverables (files, test counts), acceptance criteria, and risk factors. Total estimated effort: 12 hours. Dependency graph shown as DAG.",
+    "expected_properties": ["phases_listed", "dependencies_shown", "estimates"],
+    "metadata": {"difficulty": "standard", "domain": "planning"}
+  },
+  {
+    "id": "plan_002",
+    "category": "plan",
+    "input_prompt": "Create a migration plan for upgrading NovaCore from Python 3.10 to Python 3.12. Include rollback strategy, testing requirements, and risk assessment.",
+    "expected_output": "A migration plan covering: pre-migration audit of dependencies for 3.12 compatibility (identify blocking packages), phased rollout starting with dev environment then staging. Rollback strategy: maintain 3.10 venv as fallback, symlink-based Python version switching, systemd service pinned to specific venv path. Testing plan: run full 500+ test suite on 3.12, benchmark heartbeat cycle time, verify all MCP integrations. Risk assessment: HIGH - pydantic C extensions may need rebuild, MEDIUM - asyncio behavior changes in 3.12, LOW - f-string grammar changes.",
+    "expected_properties": ["rollback_strategy", "testing_plan", "risk_assessment"],
+    "metadata": {"difficulty": "migration", "domain": "infrastructure"}
+  },
+  {
+    "id": "plan_003",
+    "category": "plan",
+    "input_prompt": "Design the architecture for the Phase 11 Multi-Agent Runtime. Define the core components, their interfaces, and communication patterns between Orchestrator, Planner, Research, Coder, Critic, Verifier, and Memory agents.",
+    "expected_output": "An architecture design document defining 7 agent components with their interfaces: Orchestrator (dispatch_task, collect_results, resolve_conflicts), Planner (decompose_task, estimate_effort, track_progress), Research (search_codebase, query_memory, summarize_findings), Coder (generate_code, apply_fix, refactor), Critic (review_output, score_quality, suggest_improvements), Verifier (run_tests, check_contracts, validate_schemas), Memory (store_context, recall_relevant, checkpoint). Communication via async message queue with typed envelopes. Shared state through Memory agent only.",
+    "expected_properties": ["components_defined", "interfaces_specified", "dependencies_shown"],
+    "metadata": {"difficulty": "architecture", "domain": "multi_agent"}
+  },
+  {
+    "id": "plan_004",
+    "category": "plan",
+    "input_prompt": "Create a sprint plan for the next 5 days of NovaCore development. Prioritize tasks from the Enhancement Plan v32 backlog, assign acceptance criteria to each.",
+    "expected_output": "A 5-day sprint plan with prioritized tasks: Day 1-2: P7.3 Golden Dataset corpus (AC: 20 test cases, all passing, schema validated), Day 2-3: P7.4 Task Completion evals (AC: parametrized tests, 90%+ structural pass rate), Day 3-4: P9A Memory Retrieval optimization (AC: query latency under 200ms p95), Day 4-5: P11 agent runtime scaffolding (AC: Orchestrator + Planner stubs with message passing). Each task has story points, acceptance criteria, and definition of done. Velocity based on prior sprint completion rates.",
+    "expected_properties": ["tasks_prioritized", "acceptance_criteria", "estimates"],
+    "metadata": {"difficulty": "sprint", "domain": "planning"}
+  },
+  {
+    "id": "bugfix_001",
+    "category": "bugfix",
+    "input_prompt": "Debug and fix the RuntimeError in heartbeat_agent.py where the asyncio event loop is already running when _run_claude_cycle tries to call asyncio.run() inside an existing async context.",
+    "expected_output": "Root cause analysis: asyncio.run() cannot be called from within an already-running event loop. The heartbeat agent's main loop is async but _run_claude_cycle was refactored to use asyncio.run() instead of await. Fix: replace asyncio.run(subprocess_call()) with await subprocess_call() since we are already in an async context. For cases where the function is called from both sync and async contexts, use a helper that detects the running loop and dispatches accordingly. Regression test added that runs _run_claude_cycle from within an async test to confirm no RuntimeError.",
+    "expected_properties": ["root_cause", "fix_description", "test_added"],
+    "metadata": {"difficulty": "runtime_error", "domain": "async"}
+  },
+  {
+    "id": "bugfix_002",
+    "category": "bugfix",
+    "input_prompt": "Investigate and fix the performance issue where heartbeat cycles that used to complete in 30 seconds now take 120+ seconds. The slowdown started after enabling the LLM semantic cache.",
+    "expected_output": "Bottleneck identified: the LLM cache's similarity search performs a full linear scan of all cached embeddings on every cache lookup, with O(n) complexity scaling poorly as the cache grows beyond 1000 entries. The cache had accumulated 3,200 entries with no TTL eviction. Fix: (1) add TTL-based eviction (default 24h) to prevent unbounded growth, (2) replace linear scan with FAISS IndexFlatIP for sub-millisecond similarity search, (3) add cache size limit of 500 entries with LRU eviction. Post-fix benchmark: cache lookup dropped from 2.1s to 8ms, total cycle time back to 35 seconds.",
+    "expected_properties": ["bottleneck_identified", "optimization_applied", "root_cause"],
+    "metadata": {"difficulty": "performance", "domain": "caching"}
+  },
+  {
+    "id": "novatrade_001",
+    "category": "novatrade",
+    "input_prompt": "Define a StrategySpec for a simple EMA crossover strategy on EURUSD for the FTMO demo account. Include entry rules, exit rules, risk parameters, and indicator configuration.",
+    "expected_output": "A complete StrategySpec with: name='EMA_Cross_EURUSD_v1', symbol='EURUSD', timeframe='H1'. Entry rules: go long when EMA(12) crosses above EMA(50) with RSI(14) > 40, go short when EMA(12) crosses below EMA(50) with RSI(14) < 60. Exit rules: opposite crossover signal, or take-profit at 2x ATR(14), or stop-loss at 1.5x ATR(14). Risk params: max_risk_per_trade=1.0% of equity, max_daily_drawdown=4.0% (under FTMO 5% limit), max_total_drawdown=8.0% (under FTMO 10% limit), max_concurrent_positions=2.",
+    "expected_properties": ["entry_rules", "exit_rules", "risk_params"],
+    "metadata": {"difficulty": "standard", "domain": "strategy"}
+  },
+  {
+    "id": "novatrade_002",
+    "category": "novatrade",
+    "input_prompt": "Perform a risk assessment for the NovaTrade system running on the FTMO $100K challenge account. Evaluate drawdown limits, position sizing rules, and FTMO compliance constraints.",
+    "expected_output": "A comprehensive risk assessment covering: FTMO challenge constraints - max daily loss 5% ($5,000), max total loss 10% ($10,000), minimum 10 trading days, profit target 10% ($10,000). Position sizing: using Kelly criterion capped at quarter-Kelly, maximum 1% risk per trade ($1,000), position size calculated from entry-to-stoploss distance in pips times pip value. Drawdown monitoring: real-time equity tracking with alerts at 3% daily and 7% total, automatic position flattening at 4% daily. FTMO compliance: no weekend holding (close all Friday 21:00 UTC), no news trading within 2 minutes of high-impact events, lot size limits per instrument.",
+    "expected_properties": ["drawdown_limits", "position_sizing", "ftmo_compliance"],
+    "metadata": {"difficulty": "compliance", "domain": "risk_management"}
+  }
+]

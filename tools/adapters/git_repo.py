@@ -217,9 +217,7 @@ def git_diff(path: str | None = None, sandbox: Path | None = None) -> dict:
 # --- Commit -----------------------------------------------------------------
 
 # Forbidden flags that must never appear in commit messages or paths
-_COMMIT_FORBIDDEN_RE = re.compile(
-    r"--amend|--no-verify|--force|--allow-empty|-a\b"
-)
+_COMMIT_FORBIDDEN_RE = re.compile(r"--amend|--no-verify|--force|--allow-empty|-a\b")
 
 
 def git_commit(
@@ -247,9 +245,7 @@ def git_commit(
     cwd = sandbox or Path.cwd()
 
     # 1. Check status first
-    status_result = run_subprocess(
-        ["git", "status", "--porcelain=v1"], cwd=cwd, timeout=10
-    )
+    status_result = run_subprocess(["git", "status", "--porcelain=v1"], cwd=cwd, timeout=10)
     if status_result["exit_code"] != 0:
         return {
             "action": "commit",
@@ -269,9 +265,7 @@ def git_commit(
                 continue
             if p.startswith("-"):
                 raise ValueError(f"Invalid path (looks like a flag): {p!r}")
-            add_result = run_subprocess(
-                ["git", "add", "--", p], cwd=cwd, timeout=10
-            )
+            add_result = run_subprocess(["git", "add", "--", p], cwd=cwd, timeout=10)
             if add_result["exit_code"] != 0:
                 return {
                     "action": "commit",
@@ -285,12 +279,8 @@ def git_commit(
             staged_paths.append(p)
 
     # 3. Check if there is anything to commit
-    staged_check = run_subprocess(
-        ["git", "diff", "--cached", "--name-only"], cwd=cwd, timeout=10
-    )
-    cached_files = [
-        f for f in staged_check["stdout"].strip().splitlines() if f
-    ]
+    staged_check = run_subprocess(["git", "diff", "--cached", "--name-only"], cwd=cwd, timeout=10)
+    cached_files = [f for f in staged_check["stdout"].strip().splitlines() if f]
     if not cached_files:
         return {
             "action": "commit",
@@ -303,9 +293,7 @@ def git_commit(
         }
 
     # 4. Commit
-    commit_result = run_subprocess(
-        ["git", "commit", "-m", message], cwd=cwd, timeout=30
-    )
+    commit_result = run_subprocess(["git", "commit", "-m", message], cwd=cwd, timeout=30)
     if commit_result["exit_code"] != 0:
         return {
             "action": "commit",
@@ -318,9 +306,7 @@ def git_commit(
         }
 
     # 5. Verify via git log
-    log_result = run_subprocess(
-        ["git", "log", "-1", "--oneline"], cwd=cwd, timeout=10
-    )
+    log_result = run_subprocess(["git", "log", "-1", "--oneline"], cwd=cwd, timeout=10)
     commit_hash = ""
     if log_result["exit_code"] == 0 and log_result["stdout"].strip():
         commit_hash = log_result["stdout"].strip().split()[0]

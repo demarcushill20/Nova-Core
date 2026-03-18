@@ -22,6 +22,7 @@ def _write(wdir: Path, wid: str, content: str):
 
 # --- Happy path ---
 
+
 def test_returns_status_completed(wdir):
     _write(wdir, "w1", json.dumps({"workflow_id": "w1", "status": "completed"}))
     assert read_workflow_status("w1", workflows_dir=wdir) == "completed"
@@ -39,6 +40,7 @@ def test_returns_status_failed(wdir):
 
 # --- Missing / unreadable ---
 
+
 def test_missing_file_returns_none(wdir):
     assert read_workflow_status("nonexistent", workflows_dir=wdir) is None
 
@@ -49,6 +51,7 @@ def test_empty_file_returns_none(wdir):
 
 
 # --- Malformed ---
+
 
 def test_invalid_json_returns_none(wdir):
     _write(wdir, "bad", "{not json!!")
@@ -71,6 +74,7 @@ def test_non_string_status_returns_none(wdir):
 
 
 # --- Default directory (smoke) ---
+
 
 def test_default_dir_resolves():
     """read_workflow_status with no override should not raise even if file missing."""

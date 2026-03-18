@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def registry():
     path = ROOT / "STATE" / "agents" / "registry.json"
@@ -56,6 +57,7 @@ ALL_VAULT_TOOLS = VAULT_READ_TOOLS | VAULT_WRITE_TOOLS | VAULT_UPDATE_TOOLS
 # ===================================================================
 # Research role — read-only vault access
 # ===================================================================
+
 
 class TestResearchRoleBindings:
     def test_research_has_vault_read_tools(self, registry):
@@ -98,6 +100,7 @@ class TestResearchRoleBindings:
 # Planner role — read-only vault access (retrieval)
 # ===================================================================
 
+
 class TestPlannerRoleBindings:
     def test_planner_has_vault_read_tools(self, registry):
         agent = _agent_by_role(registry, "planner")
@@ -138,6 +141,7 @@ class TestPlannerRoleBindings:
 # ===================================================================
 # Memory role — bounded vault write access
 # ===================================================================
+
 
 class TestMemoryRoleBindings:
     def test_memory_has_vault_read_tools(self, registry):
@@ -189,6 +193,7 @@ class TestMemoryRoleBindings:
 # Roles that must NOT have vault access
 # ===================================================================
 
+
 class TestVaultDeniedRoles:
     """Coder, critic, verifier, and orchestrator must have no vault access."""
 
@@ -205,19 +210,29 @@ class TestVaultDeniedRoles:
         denied = set(agent["denied_tools"])
         assert "vault.*" in denied, f"{role} should have vault.* in denied_tools"
 
-    @pytest.mark.parametrize("profile_name", [
-        "coder_scoped_write", "critic_readonly",
-        "verifier_readonly", "orchestrator_control",
-    ])
+    @pytest.mark.parametrize(
+        "profile_name",
+        [
+            "coder_scoped_write",
+            "critic_readonly",
+            "verifier_readonly",
+            "orchestrator_control",
+        ],
+    )
     def test_policy_denies_vault(self, policies, profile_name):
         profile = policies["profiles"][profile_name]
         denied = set(profile["deny"])
         assert "vault.*" in denied, f"{profile_name} should deny vault.*"
 
-    @pytest.mark.parametrize("profile_name", [
-        "coder_scoped_write", "critic_readonly",
-        "verifier_readonly", "orchestrator_control",
-    ])
+    @pytest.mark.parametrize(
+        "profile_name",
+        [
+            "coder_scoped_write",
+            "critic_readonly",
+            "verifier_readonly",
+            "orchestrator_control",
+        ],
+    )
     def test_policy_no_vault_in_allow(self, policies, profile_name):
         profile = policies["profiles"][profile_name]
         allowed = set(profile["allow"])
@@ -229,6 +244,7 @@ class TestVaultDeniedRoles:
 # Operator / reviewer skill binding
 # ===================================================================
 
+
 class TestOperatorAuditBinding:
     def test_audit_skill_exists(self):
         skill_path = ROOT / ".claude" / "skills" / "auditing-obsidian-memory-safety" / "SKILL.md"
@@ -238,9 +254,7 @@ class TestOperatorAuditBinding:
         skill_path = ROOT / ".claude" / "skills" / "auditing-obsidian-memory-safety" / "SKILL.md"
         content = skill_path.read_text()
         if "allowed-tools" in content:
-            assert "vault_write" not in content.split(
-                "allowed-tools"
-            )[0].split("---")[1]
+            assert "vault_write" not in content.split("allowed-tools")[0].split("---")[1]
         # Check the skill explicitly says it never writes
         assert "No vault_write" in content or "never writes" in content
 
@@ -248,34 +262,33 @@ class TestOperatorAuditBinding:
         """Audit skill is operator-invocable, not bound to any agent."""
         for name, profile in policies["profiles"].items():
             skills = profile.get("obsidian_skills", [])
-            assert "auditing-obsidian-memory-safety" not in skills, \
+            assert "auditing-obsidian-memory-safety" not in skills, (
                 f"Audit skill should not be bound to {name} — it's operator-invocable"
+            )
 
 
 # ===================================================================
 # Cross-cutting safety checks
 # ===================================================================
 
+
 class TestCrossCuttingSafety:
     def test_only_memory_has_vault_write(self, registry):
         """Only the memory role should have vault.write in allowed_tools."""
         for agent in registry["agents"]:
             if agent["role"] != "memory":
-                assert "vault.write" not in agent["allowed_tools"], \
-                    f"{agent['role']} should not have vault.write"
+                assert "vault.write" not in agent["allowed_tools"], f"{agent['role']} should not have vault.write"
 
     def test_only_memory_has_vault_validate(self, registry):
         """Only the memory role should have vault.validate in allowed_tools."""
         for agent in registry["agents"]:
             if agent["role"] != "memory":
-                assert "vault.validate" not in agent["allowed_tools"], \
-                    f"{agent['role']} should not have vault.validate"
+                assert "vault.validate" not in agent["allowed_tools"], f"{agent['role']} should not have vault.validate"
 
     def test_no_role_has_vault_update(self, registry):
         """No role should have vault.update in allowed_tools (create-only discipline)."""
         for agent in registry["agents"]:
-            assert "vault.update" not in agent["allowed_tools"], \
-                f"{agent['role']} should not have vault.update"
+            assert "vault.update" not in agent["allowed_tools"], f"{agent['role']} should not have vault.update"
 
     def test_global_memory_writes_limit(self, policies):
         """Global limit on memory writes per workflow exists."""

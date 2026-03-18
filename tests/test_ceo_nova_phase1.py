@@ -3,6 +3,7 @@
 Tests conversation buffer, parse routing, LLM formatting,
 and persona module.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -79,9 +80,7 @@ class TestConversationBuffer(unittest.TestCase):
 
     def test_age_eviction(self):
         old_time = time.time() - conversation.MAX_AGE_SECONDS - 10
-        self.buf.messages.append(
-            conversation.Message(role="user", content="old", timestamp=old_time)
-        )
+        self.buf.messages.append(conversation.Message(role="user", content="old", timestamp=old_time))
         self.buf.add("user", "new")
         # Old message evicted, compacted into summary
         self.assertEqual(len(self.buf.messages), 1)
@@ -264,17 +263,17 @@ class TestLLMHelpers(unittest.TestCase):
         self.assertEqual(result, "")
 
     def test_format_single_message(self):
-        result = llm.format_history_for_prompt([
-            {"role": "user", "content": "hello"}
-        ])
+        result = llm.format_history_for_prompt([{"role": "user", "content": "hello"}])
         self.assertEqual(result, "Human: hello")
 
     def test_format_conversation(self):
-        result = llm.format_history_for_prompt([
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi there"},
-            {"role": "user", "content": "how are you"},
-        ])
+        result = llm.format_history_for_prompt(
+            [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi there"},
+                {"role": "user", "content": "how are you"},
+            ]
+        )
         lines = result.split("\n")
         self.assertEqual(len(lines), 3)
         self.assertEqual(lines[0], "Human: hello")
@@ -329,8 +328,7 @@ class TestSessionStartHint(unittest.TestCase):
     def test_session_start_hint_pre_loaded_context(self):
         """Phase 10: hint tells LLM to use pre-loaded context, not fetch its own."""
         self.assertIn("pre-loaded", persona.SESSION_START_HINT.lower())
-        self.assertIn("do not call memory tools", persona.SESSION_START_HINT.lower()
-                       .replace("don't", "do not"))
+        self.assertIn("do not call memory tools", persona.SESSION_START_HINT.lower().replace("don't", "do not"))
 
 
 class TestMemoryInstructions(unittest.TestCase):
@@ -394,9 +392,7 @@ class TestDelegationTracker(unittest.TestCase):
 
     def test_track_and_retrieve(self):
         self.tracker.track("0042_refactor_heartbeat", "12345")
-        self.assertEqual(
-            self.tracker.get_chat_id("0042_refactor_heartbeat"), "12345"
-        )
+        self.assertEqual(self.tracker.get_chat_id("0042_refactor_heartbeat"), "12345")
 
     def test_complete_returns_chat_id(self):
         self.tracker.track("0042_foo", "12345")
@@ -434,6 +430,7 @@ class TestFindCompletedOutput(unittest.TestCase):
     def tearDown(self):
         delegation.OUTPUT = self._orig_output
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_finds_matching_output(self):
@@ -583,14 +580,13 @@ class TestRecentCompletions(unittest.TestCase):
     def tearDown(self):
         delegation.OUTPUT = self._orig_output
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_returns_recent_outputs(self):
         # Create a fresh output file
         fname = "0042_test__20260309-020000.md"
-        (delegation.OUTPUT / fname).write_text(
-            "# Report\n**Task:** test\nThis is the result.", encoding="utf-8"
-        )
+        (delegation.OUTPUT / fname).write_text("# Report\n**Task:** test\nThis is the result.", encoding="utf-8")
         results = delegation.get_recent_completions(max_age_seconds=3600)
         self.assertGreaterEqual(len(results), 1)
         self.assertEqual(results[0]["stem"], "0042_test")
@@ -602,9 +598,7 @@ class TestRecentCompletions(unittest.TestCase):
     def test_respects_limit(self):
         for i in range(5):
             fname = f"00{i:02d}_test_{i}__20260309-02000{i}.md"
-            (delegation.OUTPUT / fname).write_text(
-                f"# Report\nResult {i}", encoding="utf-8"
-            )
+            (delegation.OUTPUT / fname).write_text(f"# Report\nResult {i}", encoding="utf-8")
         results = delegation.get_recent_completions(max_age_seconds=3600, limit=2)
         self.assertEqual(len(results), 2)
 
@@ -617,13 +611,12 @@ class TestGoalStore(unittest.TestCase):
         self._orig_file = goals.GOALS_FILE
         self.tmpdir = os.path.join(os.path.dirname(__file__), "_test_goals")
         os.makedirs(self.tmpdir, exist_ok=True)
-        goals.GOALS_FILE = type(goals.GOALS_FILE)(
-            os.path.join(self.tmpdir, "goals.json")
-        )
+        goals.GOALS_FILE = type(goals.GOALS_FILE)(os.path.join(self.tmpdir, "goals.json"))
 
     def tearDown(self):
         goals.GOALS_FILE = self._orig_file
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_add_goal(self):
@@ -746,16 +739,14 @@ class TestGoalsCommandParsing(unittest.TestCase):
 
 class TestRateLimiter(unittest.TestCase):
     def test_allows_within_limit(self):
-        rl = hardening.RateLimiter(per_chat_limit=3, per_chat_window=60,
-                                   global_limit=10, global_window=60)
+        rl = hardening.RateLimiter(per_chat_limit=3, per_chat_window=60, global_limit=10, global_window=60)
         for _ in range(3):
             allowed, _ = rl.check("c1")
             self.assertTrue(allowed)
             rl.record("c1")
 
     def test_blocks_over_per_chat_limit(self):
-        rl = hardening.RateLimiter(per_chat_limit=2, per_chat_window=60,
-                                   global_limit=10, global_window=60)
+        rl = hardening.RateLimiter(per_chat_limit=2, per_chat_window=60, global_limit=10, global_window=60)
         rl.record("c1")
         rl.record("c1")
         allowed, reason = rl.check("c1")
@@ -763,8 +754,7 @@ class TestRateLimiter(unittest.TestCase):
         self.assertEqual(reason, "per_chat")
 
     def test_blocks_over_global_limit(self):
-        rl = hardening.RateLimiter(per_chat_limit=10, per_chat_window=60,
-                                   global_limit=2, global_window=60)
+        rl = hardening.RateLimiter(per_chat_limit=10, per_chat_window=60, global_limit=2, global_window=60)
         rl.record("c1")
         rl.record("c2")
         allowed, reason = rl.check("c3")
@@ -772,8 +762,7 @@ class TestRateLimiter(unittest.TestCase):
         self.assertEqual(reason, "global")
 
     def test_separate_chats_have_own_limits(self):
-        rl = hardening.RateLimiter(per_chat_limit=2, per_chat_window=60,
-                                   global_limit=10, global_window=60)
+        rl = hardening.RateLimiter(per_chat_limit=2, per_chat_window=60, global_limit=10, global_window=60)
         rl.record("c1")
         rl.record("c1")
         allowed, _ = rl.check("c2")  # different chat
@@ -861,6 +850,7 @@ class TestConversationPersistence(unittest.TestCase):
     def tearDown(self):
         conversation.PERSIST_DIR = self._orig_dir
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_persist_and_restore(self):
@@ -881,6 +871,7 @@ class TestConversationPersistence(unittest.TestCase):
         mgr.add_user_message("c1", "test")
         # Should not create files
         import glob
+
         files = glob.glob(os.path.join(self.tmpdir, "*.json"))
         self.assertEqual(len(files), 0)
 
@@ -1040,8 +1031,7 @@ class TestNotifierDeference(unittest.TestCase):
     """Verify notifier deference mechanism exists."""
 
     def _get_notifier_content(self):
-        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "telegram_notifier.py")
+        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram_notifier.py")
         with open(_path) as f:
             return f.read()
 
@@ -1059,8 +1049,7 @@ class TestNotifierDeference(unittest.TestCase):
         self.assertIn("fallback notify", content)
 
     def _get_bot_content(self):
-        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "telegram_bot.py")
+        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram_bot.py")
         with open(_path) as f:
             return f.read()
 
@@ -1078,8 +1067,10 @@ class TestWorkingMemoryStore(unittest.TestCase):
 
     def setUp(self):
         import importlib.util
-        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "telegram", "working_memory.py")
+
+        _path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram", "working_memory.py"
+        )
         _spec = importlib.util.spec_from_file_location("tg_working_memory", _path)
         self.wm_mod = importlib.util.module_from_spec(_spec)
         sys.modules["tg_working_memory"] = self.wm_mod
@@ -1096,6 +1087,7 @@ class TestWorkingMemoryStore(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_add_and_get(self):
@@ -1207,8 +1199,7 @@ class TestHelpTextGrouping(unittest.TestCase):
 
     def _get_help_text(self):
         """Load help text from telegram_bot module."""
-        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 "telegram_bot.py")
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram_bot.py")
         # Read the file and extract _HELP_TEXT — simpler than importing the full bot
         with open(_bot_path) as f:
             content = f.read()
@@ -1236,8 +1227,7 @@ class TestStatusIcons(unittest.TestCase):
     """Verify status icon mapping exists."""
 
     def _get_bot_content(self):
-        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 "telegram_bot.py")
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram_bot.py")
         with open(_bot_path) as f:
             return f.read()
 
@@ -1267,8 +1257,10 @@ class TestReplyThreading(unittest.TestCase):
 
     def setUp(self):
         import importlib.util
-        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "telegram", "working_memory.py")
+
+        _path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram", "working_memory.py"
+        )
         _spec = importlib.util.spec_from_file_location("tg_wm_thread", _path)
         self.wm_mod = importlib.util.module_from_spec(_spec)
         sys.modules["tg_wm_thread"] = self.wm_mod  # register before exec (dataclass needs it)
@@ -1283,32 +1275,44 @@ class TestReplyThreading(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_message_id_field_exists(self):
         task = self.wm_mod.ActiveTask(
-            task_stem="0042_test", chat_id="123",
-            original_message="test", intent_summary="test",
-            created_at=1000.0, status="pending",
-            context_snapshot=[], message_id=42,
+            task_stem="0042_test",
+            chat_id="123",
+            original_message="test",
+            intent_summary="test",
+            created_at=1000.0,
+            status="pending",
+            context_snapshot=[],
+            message_id=42,
         )
         self.assertEqual(task.message_id, 42)
 
     def test_message_id_default_zero(self):
         task = self.wm_mod.ActiveTask(
-            task_stem="0042_test", chat_id="123",
-            original_message="test", intent_summary="test",
-            created_at=1000.0, status="pending",
+            task_stem="0042_test",
+            chat_id="123",
+            original_message="test",
+            intent_summary="test",
+            created_at=1000.0,
+            status="pending",
             context_snapshot=[],
         )
         self.assertEqual(task.message_id, 0)
 
     def test_message_id_persists_through_save_reload(self):
         task = self.wm_mod.ActiveTask(
-            task_stem="0042_test", chat_id="123",
-            original_message="test", intent_summary="test",
-            created_at=1000.0, status="pending",
-            context_snapshot=[], message_id=999,
+            task_stem="0042_test",
+            chat_id="123",
+            original_message="test",
+            intent_summary="test",
+            created_at=1000.0,
+            status="pending",
+            context_snapshot=[],
+            message_id=999,
         )
         self.store.add(task)
         store2 = self.wm_mod.WorkingMemoryStore()
@@ -1317,10 +1321,14 @@ class TestReplyThreading(unittest.TestCase):
 
     def test_message_id_survives_complete(self):
         task = self.wm_mod.ActiveTask(
-            task_stem="0042_test", chat_id="123",
-            original_message="test", intent_summary="test",
-            created_at=1000.0, status="pending",
-            context_snapshot=[], message_id=42,
+            task_stem="0042_test",
+            chat_id="123",
+            original_message="test",
+            intent_summary="test",
+            created_at=1000.0,
+            status="pending",
+            context_snapshot=[],
+            message_id=42,
         )
         self.store.add(task)
         completed = self.store.complete("0042_test")
@@ -1332,8 +1340,10 @@ class TestStaleWorkingMemoryCleanup(unittest.TestCase):
 
     def setUp(self):
         import importlib.util
-        _path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "telegram", "working_memory.py")
+
+        _path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram", "working_memory.py"
+        )
         _spec = importlib.util.spec_from_file_location("tg_wm_stale", _path)
         self.wm_mod = importlib.util.module_from_spec(_spec)
         sys.modules["tg_wm_stale"] = self.wm_mod  # register before exec (dataclass needs it)
@@ -1348,20 +1358,27 @@ class TestStaleWorkingMemoryCleanup(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_cleanup_removes_old_tasks(self):
         old_task = self.wm_mod.ActiveTask(
-            task_stem="0001_old", chat_id="123",
-            original_message="old task", intent_summary="old",
+            task_stem="0001_old",
+            chat_id="123",
+            original_message="old task",
+            intent_summary="old",
             created_at=time.time() - 100000,  # ~28 hours ago
-            status="pending", context_snapshot=[],
+            status="pending",
+            context_snapshot=[],
         )
         new_task = self.wm_mod.ActiveTask(
-            task_stem="0002_new", chat_id="123",
-            original_message="new task", intent_summary="new",
+            task_stem="0002_new",
+            chat_id="123",
+            original_message="new task",
+            intent_summary="new",
             created_at=time.time(),
-            status="pending", context_snapshot=[],
+            status="pending",
+            context_snapshot=[],
         )
         self.store.add(old_task)
         self.store.add(new_task)
@@ -1373,10 +1390,13 @@ class TestStaleWorkingMemoryCleanup(unittest.TestCase):
 
     def test_cleanup_returns_zero_when_none_stale(self):
         task = self.wm_mod.ActiveTask(
-            task_stem="0001_fresh", chat_id="123",
-            original_message="fresh", intent_summary="fresh",
+            task_stem="0001_fresh",
+            chat_id="123",
+            original_message="fresh",
+            intent_summary="fresh",
             created_at=time.time(),
-            status="pending", context_snapshot=[],
+            status="pending",
+            context_snapshot=[],
         )
         self.store.add(task)
         count = self.store.cleanup_stale(max_age_seconds=86400)
@@ -1384,11 +1404,15 @@ class TestStaleWorkingMemoryCleanup(unittest.TestCase):
 
     def test_cleanup_archives_stale_tasks(self):
         import json
+
         old_task = self.wm_mod.ActiveTask(
-            task_stem="0001_old", chat_id="123",
-            original_message="old task", intent_summary="old",
+            task_stem="0001_old",
+            chat_id="123",
+            original_message="old task",
+            intent_summary="old",
             created_at=time.time() - 100000,
-            status="pending", context_snapshot=[],
+            status="pending",
+            context_snapshot=[],
         )
         self.store.add(old_task)
         self.store.cleanup_stale(max_age_seconds=86400)
@@ -1402,8 +1426,7 @@ class TestEnhancedStatusTitles(unittest.TestCase):
     """Verify /status shows task titles."""
 
     def _get_bot_content(self):
-        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 "telegram_bot.py")
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram_bot.py")
         with open(_bot_path) as f:
             return f.read()
 
@@ -1421,8 +1444,7 @@ class TestRateLimitErrorFix(unittest.TestCase):
     """Verify rate limit tokens aren't consumed on errors."""
 
     def _get_bot_content(self):
-        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 "telegram_bot.py")
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram_bot.py")
         with open(_bot_path) as f:
             return f.read()
 
@@ -1442,8 +1464,7 @@ class TestCompletionReplyThreading(unittest.TestCase):
     """Verify completion notifications use reply_to_message_id."""
 
     def _get_bot_content(self):
-        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 "telegram_bot.py")
+        _bot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "telegram_bot.py")
         with open(_bot_path) as f:
             return f.read()
 

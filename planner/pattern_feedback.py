@@ -28,13 +28,15 @@ LOGS_DIR = Path("/home/nova/nova-core/LOGS")
 # ---------------------------------------------------------------------------
 
 # Bounded set of usefulness values
-USEFULNESS_VALUES = frozenset({
-    "useful",           # patterns injected + execution succeeded well (A/B)
-    "neutral",          # patterns injected + execution ok but unclear benefit
-    "unused",           # patterns found but not injected or not extractable
-    "unknown",          # cannot determine (e.g., execution failed)
-    "not_applicable",   # no pattern retrieval attempted
-})
+USEFULNESS_VALUES = frozenset(
+    {
+        "useful",  # patterns injected + execution succeeded well (A/B)
+        "neutral",  # patterns injected + execution ok but unclear benefit
+        "unused",  # patterns found but not injected or not extractable
+        "unknown",  # cannot determine (e.g., execution failed)
+        "not_applicable",  # no pattern retrieval attempted
+    }
+)
 
 # Grades that indicate strong positive outcome
 _STRONG_GRADES = frozenset({"A", "A+", "B", "B+"})
@@ -46,6 +48,7 @@ _NEUTRAL_GRADES = frozenset({"C", "C+"})
 # ---------------------------------------------------------------------------
 # Trace initialization (post-planning, pre-execution)
 # ---------------------------------------------------------------------------
+
 
 def init_pattern_trace(
     stem: str,
@@ -114,6 +117,7 @@ def init_pattern_trace(
 # Trace finalization (post-execution)
 # ---------------------------------------------------------------------------
 
+
 def finalize_pattern_trace(
     trace: dict[str, Any],
     plan_summary: dict[str, Any],
@@ -147,7 +151,9 @@ def finalize_pattern_trace(
             verifier_rejected=plan_summary.get("verifier_rejected", False),
         )
         trace["rationale"] = _build_rationale(
-            trace["usefulness"], status, grade,
+            trace["usefulness"],
+            status,
+            grade,
         )
 
     except Exception as exc:
@@ -212,6 +218,7 @@ def _build_rationale(usefulness: str, status: str, grade: str) -> str:
 # ---------------------------------------------------------------------------
 # Trace logging (runtime audit, not Obsidian)
 # ---------------------------------------------------------------------------
+
 
 def log_pattern_trace(trace: dict[str, Any]) -> bool:
     """Append a finalized trace to the structured feedback log.

@@ -169,7 +169,7 @@ def check_interference(
                     run_outcomes.append(triggered)
                     if triggered:
                         triggers += 1
-                except Exception:  # noqa: S110
+                except Exception:
                     run_outcomes.append(False)
 
             trigger_rate = triggers / runs_per_query if runs_per_query > 0 else 0.0

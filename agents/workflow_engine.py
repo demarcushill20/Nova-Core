@@ -34,12 +34,13 @@ from agents.policy_engine import ElevatedToolRequest, PolicyEngine, PolicyViolat
 # Phase 7.1 hard limits
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class WorkflowLimits:
     max_concurrent_agents: int = 4
     max_spawn_depth: int = 1
     max_retries_per_subtask: int = 1
-    max_workflow_runtime_s: int = 1800   # 30 minutes
+    max_workflow_runtime_s: int = 1800  # 30 minutes
     max_memory_writes: int = 2
 
 
@@ -47,8 +48,10 @@ class WorkflowLimits:
 # Stop conditions
 # ---------------------------------------------------------------------------
 
+
 class WorkflowHalt(Exception):
     """Raised when a workflow must halt due to a safety condition."""
+
     def __init__(self, reason: str, workflow_id: str):
         self.reason = reason
         self.workflow_id = workflow_id
@@ -68,6 +71,7 @@ HALT_CRITIC_BLOCKED = "critic_blocked_finalization"
 # Workflow engine
 # ---------------------------------------------------------------------------
 
+
 class WorkflowEngine:
     """Orchestrate multi-agent workflows via the blackboard.
 
@@ -80,23 +84,26 @@ class WorkflowEngine:
       6. Halts on any stop condition
     """
 
-    def __init__(self, blackboard: Blackboard | None = None,
-                 policy: PolicyEngine | None = None,
-                 limits: WorkflowLimits | None = None):
+    def __init__(
+        self,
+        blackboard: Blackboard | None = None,
+        policy: PolicyEngine | None = None,
+        limits: WorkflowLimits | None = None,
+    ):
         self.bb = blackboard or Blackboard()
         self.policy = policy or PolicyEngine()
         self.limits = limits or WorkflowLimits()
 
     # --- Workflow lifecycle ---
 
-    def create_workflow(self, workflow_id: str, task_id: str,
-                        budget: dict | None = None) -> WorkflowState:
+    def create_workflow(self, workflow_id: str, task_id: str, budget: dict | None = None) -> WorkflowState:
         """Create a new workflow and persist to blackboard."""
         wf = WorkflowState(
             workflow_id=workflow_id,
             task_id=task_id,
             status="created",
-            budget=budget or {
+            budget=budget
+            or {
                 "max_runtime_s": self.limits.max_workflow_runtime_s,
                 "max_agents": self.limits.max_concurrent_agents,
                 "memory_writes_remaining": self.limits.max_memory_writes,
@@ -105,8 +112,7 @@ class WorkflowEngine:
         self.bb.create_workflow(wf)
         return wf
 
-    def delegate(self, workflow_id: str, subtask_id: str,
-                 agent_id: str, role: str, goal: str) -> Delegation:
+    def delegate(self, workflow_id: str, subtask_id: str, agent_id: str, role: str, goal: str) -> Delegation:
         """Create a delegation entry — the blackboard-based 'send'.
 
         The orchestrator writes delegation entries. Workers poll/read
@@ -135,61 +141,78 @@ class WorkflowEngine:
             self.bb.update_workflow(workflow_id, {"delegations": delegations})
 
         # Set agent runtime state to queued
-        self.bb.set_agent_state(AgentRuntimeState(
-            agent_id=agent_id,
-            workflow_id=workflow_id,
-            status="queued",
-            current_subtask_id=subtask_id,
-            started_at=time.time(),
-        ))
+        self.bb.set_agent_state(
+            AgentRuntimeState(
+                agent_id=agent_id,
+                workflow_id=workflow_id,
+                status="queued",
+                current_subtask_id=subtask_id,
+                started_at=time.time(),
+            )
+        )
 
         return delegation
 
-    def claim_delegation(self, workflow_id: str, subtask_id: str,
-                         agent_id: str) -> None:
+    def claim_delegation(self, workflow_id: str, subtask_id: str, agent_id: str) -> None:
         """Agent claims a delegation — transitions to executing."""
-        self.bb.update_delegation(workflow_id, subtask_id, {
-            "status": "claimed",
-            "claimed_at": time.time(),
-        })
-        self.bb.set_agent_state(AgentRuntimeState(
-            agent_id=agent_id,
-            workflow_id=workflow_id,
-            status="executing",
-            current_subtask_id=subtask_id,
-            started_at=time.time(),
-        ))
+        self.bb.update_delegation(
+            workflow_id,
+            subtask_id,
+            {
+                "status": "claimed",
+                "claimed_at": time.time(),
+            },
+        )
+        self.bb.set_agent_state(
+            AgentRuntimeState(
+                agent_id=agent_id,
+                workflow_id=workflow_id,
+                status="executing",
+                current_subtask_id=subtask_id,
+                started_at=time.time(),
+            )
+        )
 
-    def complete_delegation(self, workflow_id: str, subtask_id: str,
-                            agent_id: str, contract: ChildContract) -> None:
+    def complete_delegation(self, workflow_id: str, subtask_id: str, agent_id: str, contract: ChildContract) -> None:
         """Agent completes delegation — writes contract to blackboard."""
         self.bb.write_child_contract(contract)
-        self.bb.update_delegation(workflow_id, subtask_id, {
-            "status": "completed",
-            "completed_at": time.time(),
-        })
-        self.bb.set_agent_state(AgentRuntimeState(
-            agent_id=agent_id,
-            workflow_id=workflow_id,
-            status="completed",
-            current_subtask_id=subtask_id,
-        ))
+        self.bb.update_delegation(
+            workflow_id,
+            subtask_id,
+            {
+                "status": "completed",
+                "completed_at": time.time(),
+            },
+        )
+        self.bb.set_agent_state(
+            AgentRuntimeState(
+                agent_id=agent_id,
+                workflow_id=workflow_id,
+                status="completed",
+                current_subtask_id=subtask_id,
+            )
+        )
 
-    def fail_delegation(self, workflow_id: str, subtask_id: str,
-                        agent_id: str, error: str) -> None:
+    def fail_delegation(self, workflow_id: str, subtask_id: str, agent_id: str, error: str) -> None:
         """Agent fails delegation — records error on blackboard."""
-        self.bb.update_delegation(workflow_id, subtask_id, {
-            "status": "failed",
-            "completed_at": time.time(),
-            "error": error,
-        })
-        self.bb.set_agent_state(AgentRuntimeState(
-            agent_id=agent_id,
-            workflow_id=workflow_id,
-            status="failed",
-            current_subtask_id=subtask_id,
-            error=error,
-        ))
+        self.bb.update_delegation(
+            workflow_id,
+            subtask_id,
+            {
+                "status": "failed",
+                "completed_at": time.time(),
+                "error": error,
+            },
+        )
+        self.bb.set_agent_state(
+            AgentRuntimeState(
+                agent_id=agent_id,
+                workflow_id=workflow_id,
+                status="failed",
+                current_subtask_id=subtask_id,
+                error=error,
+            )
+        )
 
     # --- Stop condition checks ---
 
@@ -204,56 +227,60 @@ class WorkflowEngine:
         max_runtime = budget.get("max_runtime_s", self.limits.max_workflow_runtime_s)
         elapsed = time.time() - wf.get("created_at", time.time())
         if elapsed > max_runtime:
-            self._halt(workflow_id, HALT_BUDGET_EXHAUSTED,
-                       f"Runtime {elapsed:.0f}s exceeds limit {max_runtime}s")
+            self._halt(workflow_id, HALT_BUDGET_EXHAUSTED, f"Runtime {elapsed:.0f}s exceeds limit {max_runtime}s")
 
-    def check_tool_policy(self, workflow_id: str, agent_id: str,
-                          tool_name: str) -> None:
+    def check_tool_policy(self, workflow_id: str, agent_id: str, tool_name: str) -> None:
         """Check tool policy and halt on violation or elevated tool request."""
         try:
             self.policy.enforce(agent_id, tool_name)
         except PolicyViolation as e:
             self._halt(workflow_id, HALT_POLICY_VIOLATION, str(e))
         except ElevatedToolRequest as e:
-            self._halt(workflow_id, HALT_POLICY_VIOLATION,
-                       f"Elevated tool requires approval: {e}")
+            self._halt(workflow_id, HALT_POLICY_VIOLATION, f"Elevated tool requires approval: {e}")
 
-    def check_verifier_rejections(self, workflow_id: str,
-                                  rejection_count: int) -> None:
+    def check_verifier_rejections(self, workflow_id: str, rejection_count: int) -> None:
         """Halt if verifier rejects a critical step twice."""
         if rejection_count >= 2:
-            self._halt(workflow_id, HALT_VERIFIER_REJECTED,
-                       f"Verifier rejected critical step {rejection_count} times")
+            self._halt(workflow_id, HALT_VERIFIER_REJECTED, f"Verifier rejected critical step {rejection_count} times")
 
     # --- Maker-checker pattern ---
 
-    def request_verification(self, workflow_id: str, subtask_id: str,
-                             agent_id: str, change_summary: dict) -> str:
+    def request_verification(self, workflow_id: str, subtask_id: str, agent_id: str, change_summary: dict) -> str:
         """Coding agent proposes change; write verification request to blackboard.
 
         Returns a verification_request_id that the verifier will read.
         """
         vr_id = f"vr_{workflow_id}_{subtask_id}"
-        self.bb.post_message(workflow_id, agent_id, "verification_request", {
-            "verification_request_id": vr_id,
-            "subtask_id": subtask_id,
-            "proposing_agent": agent_id,
-            "change_summary": change_summary,
-            "requested_at": time.time(),
-        })
+        self.bb.post_message(
+            workflow_id,
+            agent_id,
+            "verification_request",
+            {
+                "verification_request_id": vr_id,
+                "subtask_id": subtask_id,
+                "proposing_agent": agent_id,
+                "change_summary": change_summary,
+                "requested_at": time.time(),
+            },
+        )
         return vr_id
 
-    def submit_verification(self, workflow_id: str, vr_id: str,
-                            verifier_id: str, approved: bool,
-                            notes: str = "") -> None:
+    def submit_verification(
+        self, workflow_id: str, vr_id: str, verifier_id: str, approved: bool, notes: str = ""
+    ) -> None:
         """Verifier submits verification result to blackboard."""
-        self.bb.post_message(workflow_id, verifier_id, "verification_result", {
-            "verification_request_id": vr_id,
-            "verifier": verifier_id,
-            "approved": approved,
-            "notes": notes,
-            "verified_at": time.time(),
-        })
+        self.bb.post_message(
+            workflow_id,
+            verifier_id,
+            "verification_result",
+            {
+                "verification_request_id": vr_id,
+                "verifier": verifier_id,
+                "approved": approved,
+                "notes": notes,
+                "verified_at": time.time(),
+            },
+        )
 
     # --- Synthesis ---
 
@@ -271,14 +298,11 @@ class WorkflowEngine:
         delegations = self.bb.list_delegations(workflow_id)
         metrics = self.bb.workflow_metrics(workflow_id)
 
-        all_completed = all(
-            d.get("status") in ("completed", "failed")
-            for d in delegations
-        )
+        all_completed = all(d.get("status") in ("completed", "failed") for d in delegations)
         any_failed = any(d.get("status") == "failed" for d in delegations)
 
-        final_status = "completed" if all_completed and not any_failed else (
-            "partial" if all_completed else "executing"
+        final_status = (
+            "completed" if all_completed and not any_failed else ("partial" if all_completed else "executing")
         )
 
         synthesis = {
@@ -287,9 +311,7 @@ class WorkflowEngine:
             "status": final_status,
             "child_contracts": contracts,
             "metrics": metrics,
-            "all_artifacts": [
-                a for c in contracts for a in c.get("artifacts", [])
-            ],
+            "all_artifacts": [a for c in contracts for a in c.get("artifacts", [])],
             "synthesized_at": time.time(),
         }
 
@@ -331,16 +353,17 @@ class WorkflowEngine:
         if not allowed:
             # Count rejections and halt if threshold reached
             reports = gate.verifier.list_reports(workflow_id)
-            rejection_count = sum(
-                1 for r in reports if r.verdict == "rejected"
-            )
+            rejection_count = sum(1 for r in reports if r.verdict == "rejected")
             self.check_verifier_rejections(workflow_id, rejection_count)
 
             # Not yet at halt threshold — return blocked status
-            self.bb.update_workflow(workflow_id, {
-                "status": "blocked",
-                "block_reason": reason,
-            })
+            self.bb.update_workflow(
+                workflow_id,
+                {
+                    "status": "blocked",
+                    "block_reason": reason,
+                },
+            )
             return {
                 "workflow_id": workflow_id,
                 "status": "blocked",
@@ -359,22 +382,23 @@ class WorkflowEngine:
     def _check_concurrent_limit(self, workflow_id: str) -> None:
         """Check that we haven't exceeded max concurrent agents."""
         delegations = self.bb.list_delegations(workflow_id)
-        active = [d for d in delegations
-                  if d.get("status") in ("pending", "claimed", "executing")]
+        active = [d for d in delegations if d.get("status") in ("pending", "claimed", "executing")]
         if len(active) >= self.limits.max_concurrent_agents:
             raise WorkflowHalt(
-                f"Concurrent agent limit reached: "
-                f"{len(active)}/{self.limits.max_concurrent_agents}",
+                f"Concurrent agent limit reached: {len(active)}/{self.limits.max_concurrent_agents}",
                 workflow_id,
             )
 
     def _halt(self, workflow_id: str, reason_code: str, detail: str) -> None:
         """Halt workflow and update blackboard state."""
         try:
-            self.bb.update_workflow(workflow_id, {
-                "status": "halted",
-                "halt_reason": f"{reason_code}: {detail}",
-            })
+            self.bb.update_workflow(
+                workflow_id,
+                {
+                    "status": "halted",
+                    "halt_reason": f"{reason_code}: {detail}",
+                },
+            )
         except FileNotFoundError:
             pass
         raise WorkflowHalt(detail, workflow_id)

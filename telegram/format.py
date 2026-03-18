@@ -20,9 +20,7 @@ _END_MARKERS = re.compile(
 )
 
 # Standalone CONTRACT block (no ##) — also an end marker.
-_CONTRACT_BARE = re.compile(
-    r"^CONTRACT\s*$", re.IGNORECASE | re.MULTILINE
-)
+_CONTRACT_BARE = re.compile(r"^CONTRACT\s*$", re.IGNORECASE | re.MULTILINE)
 
 # Metadata header lines produced by the worker.
 _META_LINE = re.compile(

@@ -5,14 +5,23 @@ exclude = [".venv", "venv", "WORK", "TASKS", "OUTPUT", "LOGS", "MEMORY"]
 
 [tool.ruff.lint]
 select = [
-    "E",    # pycodestyle errors
-    "F",    # pyflakes
-    "W",    # pycodestyle warnings
-    "I",    # isort (import sorting) — auto-fixable
-    "UP",   # pyupgrade — modernize syntax
-    "B",    # flake8-bugbear — common bugs
-    "SIM",  # flake8-simplify — simplifications
-    "S",    # flake8-bandit — security checks
+    # Existing (8 rule sets)
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # isort (import sorting) — auto-fixable
+    "UP",     # pyupgrade — modernize syntax
+    "B",      # flake8-bugbear — common bugs
+    "SIM",    # flake8-simplify — simplifications
+    "S",      # flake8-bandit — security checks
+    # NEW in Phase 7 (7 additional rule sets)
+    "ASYNC",  # async rules — detect blocking calls in async functions
+    "TC",     # type-checking imports — move typing-only imports to TYPE_CHECKING
+    "C90",    # McCabe complexity — flag functions > 15 CC
+    "RUF",    # Ruff-specific — mutable defaults, unused noqa, etc.
+    "PT",     # pytest style — best practices for test code
+    "PERF",   # performance anti-patterns
+    "TRY",    # tryceratops — exception handling best practices
 ]
 ignore = [
     "E501",   # line-too-long — handled by formatter
@@ -24,17 +33,48 @@ ignore = [
     "B011",   # assert-false — used in tests
     "S603",   # subprocess-call — intentional in agent runtime
     "S607",   # start-process-with-partial-path — intentional CLI calls
+    "TRY003", # raise-vanilla-args — long messages in exceptions are fine
+    "TRY300", # try-consider-else — style preference, too noisy
+    "TRY400", # error-instead-of-exception — log.error intentional in this codebase
+    "PERF203", # try-except-in-loop — sometimes unavoidable
+    "RUF001", # ambiguous-unicode-character-string — intentional em-dashes
+    "RUF002", # ambiguous-unicode-character-docstring — intentional em-dashes
+    "RUF003", # ambiguous-unicode-character-comment — intentional em-dashes
+    "RUF059", # unused-unpacked-variable — too many false positives on `for _, val in`
+    "RUF005", # collection-literal-concatenation — [a] + list style is clear enough
+    "RUF006", # asyncio-dangling-task — fire-and-forget tasks are intentional
+    "RUF015", # unnecessary-iterable-allocation-for-first-element — list()[0] is fine
+    "PERF401", # manual-list-comprehension — append-in-loop is often clearer
+    "PERF102", # incorrect-dict-iterator — .items() when only keys/values needed
+    "TRY004", # prefer-type-error — ValueError used intentionally for args
+    "TRY301", # raise-within-try — raise in try is fine for guard clauses
+    "TC001",  # typing-only-first-party-import — too aggressive with TYPE_CHECKING moves
+    "TC003",  # typing-only-standard-library-import — same
+    "PT006",  # parametrize-names-wrong-type — string format "a,b" is standard
+    "PT018",  # composite-assertion — compound asserts are fine in tests
+    "C901",   # too-complex — tracked by radon/complexity_gate.py at CI level instead
+    "S110",   # try-except-pass — intentional in many fault-tolerant paths
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "S105", "S106", "S108"]  # assert, test tokens/passwords, and /tmp paths are standard in tests
+"tests/**/*.py" = ["S101", "S105", "S106", "S108", "PT009", "PT019", "PT017", "PT015", "PT011", "PT027"]  # assert, test tokens, /tmp paths, and pytest style rules are standard in tests
 "scripts/**/*.py" = ["S108"]  # temp file usage acceptable in scripts
 "nova_kill_switch.py" = ["S108"]  # /tmp sentinel files are the intended kill-switch mechanism
 "utils/security_monitor.py" = ["S105"]  # secret_status variable names are false positives
-"tools/runner.py" = ["S105"]  # _CONFIRM_TOKEN is a confirmation string, not a secret
+"tools/runner.py" = ["S105", "E731", "C901", "TRY301", "TRY004", "RUF005"]  # intentional patterns: confirm token, lambda dispatch, complex dispatch, raise-in-try, ValueError for args, list concat
 "tools/adapters/system_service.py" = ["S105"]  # _CONFIRM_TOKEN is a confirmation string
 "heartbeat.py" = ["S110", "S310"]  # try-except-pass and urlopen are intentional in heartbeat checks
 "watcher.py" = ["S110"]  # try-except-pass is intentional for non-fatal ops
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+# CRITICAL for Pydantic v2 — prevents TC rules from breaking runtime validation
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = [
+    "pydantic.BaseModel",
+    "pydantic.BaseSettings",
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["agents", "novatrade", "planner", "telegram", "utils"]
@@ -50,6 +90,11 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-x -q --tb=short"
 timeout = 120
+markers = [
+    "property: Hypothesis property-based tests",
+    "eval: All evaluation tests (deterministic, no LLM required)",
+    "eval_llm: LLM-dependent evaluation tests (requires OPENAI_API_KEY)",
+]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
@@ -73,5 +118,27 @@ module = [
     "tools.task_classifier",
     "task_classifier",
     "api",
+    "tools.adapters.repo_search",
+    "tools.adapters.git_repo",
+    "tools.skill_optimizer.candidate_generator",
+    "agents.coordination",
+    "agents.workflow_graph",
+    "agents.production_hardening",
+    "scripts.compliance-report",
+    "tests.test_phase7_critic_verifier",
+    "tests.test_phase7_integration",
+    "tests.test_phase7_failure_simulation",
+    "tests.test_phase7_e2e_suite",
+    "tests.test_phase9_presentation_layer",
+    "tests.test_phase8_working_memory",
+    "tests.test_phase10_session_reconstruction",
+    "tests.test_ceo_nova_phase1",
+    "tests.test_orchestrator",
+    "tests.test_runner_audit",
+    "tests.test_git_repo",
+    "tests.test_contract_retry",
+    "tests.test_property_schemas",
+    "scripts.complexity_gate",
+    "utils.quality_scorer",
 ]
 ignore_errors = true

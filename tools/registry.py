@@ -78,9 +78,7 @@ def validate_registry(registry: dict) -> None:
     for name, defn in tools.items():
         # Name format
         if "." not in name:
-            raise ValueError(
-                f"Tool name {name!r} must contain a dot (e.g. 'files.read')"
-            )
+            raise ValueError(f"Tool name {name!r} must contain a dot (e.g. 'files.read')")
 
         if not isinstance(defn, dict):
             raise ValueError(f"Tool {name!r}: definition must be a JSON object")

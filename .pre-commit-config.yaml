@@ -1,4 +1,14 @@
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: detect-private-key
+
   - repo: local
     hooks:
       - id: novacore-guardrails
@@ -6,13 +16,15 @@ repos:
         entry: scripts/check-guardrails.sh
         language: script
         pass_filenames: false
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.6
+    rev: v0.15.5
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
         args: [--check]
+
   - repo: local
     hooks:
       - id: mypy
@@ -21,4 +33,4 @@ repos:
         language: system
         types: [python]
         require_serial: true
-        exclude: '^\.claude/skills/skill-creator/(scripts|eval-viewer)/'
+        exclude: '^(\.claude/skills/skill-creator/(scripts|eval-viewer)/|scripts/compliance-report\.py)'

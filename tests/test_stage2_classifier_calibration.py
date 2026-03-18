@@ -24,6 +24,7 @@ from tools.task_classifier import (
 # Feature flag helpers
 # ---------------------------------------------------------------------------
 
+
 def _stage2_flags(enabled=True, min_confidence=0.5):
     """Stage 2 feature flags: research + code_review."""
     return {
@@ -42,21 +43,25 @@ def _stage2_flags(enabled=True, min_confidence=0.5):
 # Part 1 — Research classification with natural language
 # ===================================================================
 
+
 class TestResearchClassification:
     """Natural-language research requests classify as research with >= 0.5."""
 
-    @pytest.mark.parametrize("text", [
-        "Research Nova-Core's current rollout architecture",
-        "Analyze the watcher dispatch flow",
-        "Explain how the orchestrator adapter works",
-        "Describe the multi-agent architecture",
-        "Summarize how Stage 2 evidence accumulation works",
-        "Investigate why tasks are not routing correctly",
-        "Explore the current rollout gate criteria",
-        "Compare the Stage 2 and Stage 3 requirements",
-        "Look up how the verifier enforcement works",
-        "Survey the available task classes and their patterns",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Research Nova-Core's current rollout architecture",
+            "Analyze the watcher dispatch flow",
+            "Explain how the orchestrator adapter works",
+            "Describe the multi-agent architecture",
+            "Summarize how Stage 2 evidence accumulation works",
+            "Investigate why tasks are not routing correctly",
+            "Explore the current rollout gate criteria",
+            "Compare the Stage 2 and Stage 3 requirements",
+            "Look up how the verifier enforcement works",
+            "Survey the available task classes and their patterns",
+        ],
+    )
     def test_research_phrasing(self, text):
         cls, conf = classify_task(text)
         assert cls == "research", f"Expected research, got {cls} for: {text}"
@@ -81,21 +86,25 @@ class TestResearchClassification:
 # Part 2 — Code review classification with natural language
 # ===================================================================
 
+
 class TestCodeReviewClassification:
     """Natural-language code review requests classify as code_review with >= 0.5."""
 
-    @pytest.mark.parametrize("text", [
-        "Review agents/rollout_gate.py for edge cases",
-        "Review watcher.py routing logic",
-        "Review tools/orchestrator_adapter.py for correctness",
-        "Inspect the task classifier for safety issues",
-        "Audit the rollout gate",
-        "Check for bugs in the heartbeat monitor",
-        "Check for edge cases in the watcher dispatch logic",
-        "Inspect the verifier enforcement path for issues",
-        "Review code for the Phase 7 orchestrator",
-        "Check for quality issues in the test suite",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Review agents/rollout_gate.py for edge cases",
+            "Review watcher.py routing logic",
+            "Review tools/orchestrator_adapter.py for correctness",
+            "Inspect the task classifier for safety issues",
+            "Audit the rollout gate",
+            "Check for bugs in the heartbeat monitor",
+            "Check for edge cases in the watcher dispatch logic",
+            "Inspect the verifier enforcement path for issues",
+            "Review code for the Phase 7 orchestrator",
+            "Check for quality issues in the test suite",
+        ],
+    )
     def test_code_review_phrasing(self, text):
         cls, conf = classify_task(text)
         assert cls == "code_review", f"Expected code_review, got {cls} for: {text}"
@@ -143,17 +152,21 @@ class TestCodeReviewClassification:
 # Part 3 — Negative safety cases
 # ===================================================================
 
+
 class TestNegativeSafety:
     """Unsupported, mutation-capable, and high-risk tasks fail closed."""
 
-    @pytest.mark.parametrize("text,expected_class", [
-        ("Deploy the new service to production", "system"),
-        ("Implement a new feature for task routing", "code_impl"),
-        ("Fix the bug in the watcher dispatch", "code_impl"),
-        ("Create a function to validate input", "code_impl"),
-        ("Refactor the orchestrator adapter", "code_impl"),
-        ("Build a new monitoring dashboard", "code_impl"),
-    ])
+    @pytest.mark.parametrize(
+        "text,expected_class",
+        [
+            ("Deploy the new service to production", "system"),
+            ("Implement a new feature for task routing", "code_impl"),
+            ("Fix the bug in the watcher dispatch", "code_impl"),
+            ("Create a function to validate input", "code_impl"),
+            ("Refactor the orchestrator adapter", "code_impl"),
+            ("Build a new monitoring dashboard", "code_impl"),
+        ],
+    )
     def test_unsupported_class_not_routed(self, text, expected_class):
         """Tasks for unsupported classes are not routed to orchestrator."""
         cls, conf = classify_task(text)
@@ -162,12 +175,15 @@ class TestNegativeSafety:
         assert eligible is False
         assert "not_in_stageC" in reason
 
-    @pytest.mark.parametrize("text", [
-        "Delete all failed task files",
-        "sudo apt-get install python3",
-        "git push --force origin main",
-        "rm -rf /tmp/old_files",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Delete all failed task files",
+            "sudo apt-get install python3",
+            "git push --force origin main",
+            "rm -rf /tmp/old_files",
+        ],
+    )
     def test_dangerous_commands_not_routed(self, text):
         """Dangerous command text should not route to orchestrator."""
         cls, conf = classify_task(text)
@@ -212,6 +228,7 @@ class TestNegativeSafety:
 # Part 4 — Confidence formula
 # ===================================================================
 
+
 class TestConfidenceFormula:
     """Verify confidence formula produces predictable values."""
 
@@ -238,6 +255,7 @@ class TestConfidenceFormula:
 # ===================================================================
 # Part 5 — End-to-end routing integration
 # ===================================================================
+
 
 class TestEndToEndRouting:
     """Verify calibrated tasks route correctly through classify_and_route."""
@@ -312,6 +330,7 @@ class TestEndToEndRouting:
 # ===================================================================
 # Part 6 — Pattern narrowing regression protection
 # ===================================================================
+
 
 class TestPatternNarrowing:
     """Verify narrowed patterns still catch intended cases."""

@@ -33,6 +33,7 @@ from agents.rollout_gate import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def stage3_root(tmp_path):
     """Set up a minimal Stage 3 test environment."""
@@ -78,15 +79,12 @@ def stage3_root(tmp_path):
         "decision": "ready_to_expand",
         "reason": "Stage 3 expansion applied",
     }
-    (state / "activation_log.jsonl").write_text(
-        json.dumps(activation) + "\n"
-    )
+    (state / "activation_log.jsonl").write_text(json.dumps(activation) + "\n")
 
     return tmp_path
 
 
-def _add_workflow(root, stem, status, task_class="research",
-                  halt_reason=None):
+def _add_workflow(root, stem, status, task_class="research", halt_reason=None):
     """Add a workflow record to the test environment."""
     wf = {
         "workflow_id": stem,
@@ -106,6 +104,7 @@ def _add_workflow(root, stem, status, task_class="research",
 # ===================================================================
 # Part 1 — stable_continue outcome
 # ===================================================================
+
 
 class TestStableContinue:
     """All criteria pass with sufficient code_impl evidence."""
@@ -155,6 +154,7 @@ class TestStableContinue:
 # ===================================================================
 # Part 2 — hold_stage3 outcome
 # ===================================================================
+
 
 class TestHoldStage3:
     """Insufficient evidence or soft concerns → hold."""
@@ -218,9 +218,7 @@ class TestHoldStage3:
         recovery_log = stage3_root / "LOGS" / "recovery.log"
         lines = []
         for i in range(STAGE3_MAX_RECOVERY_ANOMALIES + 1):
-            lines.append(
-                f"--- Recovery at 2026-03-08T09:{i:02d}:00+00:00 ---"
-            )
+            lines.append(f"--- Recovery at 2026-03-08T09:{i:02d}:00+00:00 ---")
             lines.append(f"  [task_requeued] task_{i} — Requeued\n")
         recovery_log.write_text("\n".join(lines))
 
@@ -248,15 +246,14 @@ class TestHoldStage3:
 # Part 3 — rollback_code_impl_recommended outcome
 # ===================================================================
 
+
 class TestRollbackRecommended:
     """Hard failures → rollback code_impl."""
 
     def test_unhealthy_heartbeat_triggers_rollback(self, stage3_root):
         """UNHEALTHY heartbeat → rollback recommended."""
         hb = {"overall": "unhealthy", "findings": []}
-        (stage3_root / "STATE" / "heartbeat_multiagent.json").write_text(
-            json.dumps(hb)
-        )
+        (stage3_root / "STATE" / "heartbeat_multiagent.json").write_text(json.dumps(hb))
         _add_workflow(stage3_root, "ci1", "completed", "code_impl")
         _add_workflow(stage3_root, "ci2", "completed", "code_impl")
 
@@ -291,7 +288,10 @@ class TestRollbackRecommended:
         _add_workflow(stage3_root, "ci1", "completed", "code_impl")
         _add_workflow(stage3_root, "ci2", "completed", "code_impl")
         _add_workflow(
-            stage3_root, "h1", "halted", "code_impl",
+            stage3_root,
+            "h1",
+            "halted",
+            "code_impl",
             halt_reason="budget_exhausted",
         )
 
@@ -301,9 +301,7 @@ class TestRollbackRecommended:
     def test_rollback_next_action_mentions_remove(self, stage3_root):
         """Rollback recommendation mentions removing code_impl."""
         hb = {"overall": "unhealthy", "findings": []}
-        (stage3_root / "STATE" / "heartbeat_multiagent.json").write_text(
-            json.dumps(hb)
-        )
+        (stage3_root / "STATE" / "heartbeat_multiagent.json").write_text(json.dumps(hb))
         _add_workflow(stage3_root, "ci1", "completed", "code_impl")
         _add_workflow(stage3_root, "ci2", "completed", "code_impl")
 
@@ -315,6 +313,7 @@ class TestRollbackRecommended:
 # ===================================================================
 # Part 4 — code_impl metric extraction
 # ===================================================================
+
 
 class TestCodeImplMetrics:
     """Verify code_impl-specific metric extraction."""
@@ -342,8 +341,7 @@ class TestCodeImplMetrics:
             {"task_class": "code_impl", "status": "completed"},
             {"task_class": "code_impl", "status": "completed"},
             {"task_class": "code_impl", "status": "failed"},
-            {"task_class": "code_impl", "status": "failed",
-             "halt_reason": "verifier_rejected"},
+            {"task_class": "code_impl", "status": "failed", "halt_reason": "verifier_rejected"},
             {"task_class": "research", "status": "completed"},
         ]
         m = _collect_code_impl_metrics(wfs)
@@ -376,27 +374,21 @@ class TestCodeImplMetrics:
 # Part 5 — Post-activation recovery counting
 # ===================================================================
 
+
 class TestPostActivationRecoveries:
     """Verify recovery event counting relative to activation timestamp."""
 
     def test_no_recovery_log(self, tmp_path):
         """No recovery log → 0 recoveries."""
-        count = _count_post_activation_recoveries(
-            tmp_path, "2026-03-08T08:00:00Z"
-        )
+        count = _count_post_activation_recoveries(tmp_path, "2026-03-08T08:00:00Z")
         assert count == 0
 
     def test_all_before_activation(self, tmp_path):
         """All recovery events before activation → 0."""
         log = tmp_path / "LOGS" / "recovery.log"
         log.parent.mkdir(parents=True)
-        log.write_text(
-            "--- Recovery at 2026-03-08T07:00:00+00:00 ---\n"
-            "  [task_requeued] old_task\n"
-        )
-        count = _count_post_activation_recoveries(
-            tmp_path, "2026-03-08T08:00:00Z"
-        )
+        log.write_text("--- Recovery at 2026-03-08T07:00:00+00:00 ---\n  [task_requeued] old_task\n")
+        count = _count_post_activation_recoveries(tmp_path, "2026-03-08T08:00:00Z")
         assert count == 0
 
     def test_all_after_activation(self, tmp_path):
@@ -409,9 +401,7 @@ class TestPostActivationRecoveries:
             "--- Recovery at 2026-03-08T10:00:00+00:00 ---\n"
             "  [task_requeued] new_task_2\n"
         )
-        count = _count_post_activation_recoveries(
-            tmp_path, "2026-03-08T08:00:00Z"
-        )
+        count = _count_post_activation_recoveries(tmp_path, "2026-03-08T08:00:00Z")
         assert count == 2
 
     def test_mixed_before_and_after(self, tmp_path):
@@ -426,9 +416,7 @@ class TestPostActivationRecoveries:
             "--- Recovery at 2026-03-08T09:00:00+00:00 ---\n"
             "  [task_requeued] after_1\n"
         )
-        count = _count_post_activation_recoveries(
-            tmp_path, "2026-03-08T08:00:00Z"
-        )
+        count = _count_post_activation_recoveries(tmp_path, "2026-03-08T08:00:00Z")
         assert count == 1
 
 
@@ -436,34 +424,24 @@ class TestPostActivationRecoveries:
 # Part 6 — Decision logic
 # ===================================================================
 
+
 class TestDecisionLogic:
     """Verify decide_stage3_stability produces correct decisions."""
 
     def _passing_criteria(self):
         """Build a set of all-passing criteria."""
         return [
-            RolloutCriterion("heartbeat_healthy", True, "healthy",
-                             "not unhealthy", "OK", "hard"),
-            RolloutCriterion("overall_failure_rate", True, 0.0, 0.3,
-                             "OK", "hard"),
-            RolloutCriterion("no_policy_violations", True, 0, 0,
-                             "OK", "hard"),
-            RolloutCriterion("no_budget_exhaustions", True, 0, 0,
-                             "OK", "hard"),
-            RolloutCriterion("code_impl_minimum_runs", True, 2, 2,
-                             "OK", "soft"),
-            RolloutCriterion("code_impl_failure_rate", True, 0.0, 0.5,
-                             "OK", "soft"),
-            RolloutCriterion("verifier_rejection_rate", True, None, 0.5,
-                             "OK", "soft"),
-            RolloutCriterion("contract_failure_rate", True, 0.0, 0.3,
-                             "OK", "soft"),
-            RolloutCriterion("recovery_anomalies", True, 0, 3,
-                             "OK", "soft"),
-            RolloutCriterion("no_orphaned_agents", True, 0, 0,
-                             "OK", "soft"),
-            RolloutCriterion("no_stale_leases", True, 0, 0,
-                             "OK", "soft"),
+            RolloutCriterion("heartbeat_healthy", True, "healthy", "not unhealthy", "OK", "hard"),
+            RolloutCriterion("overall_failure_rate", True, 0.0, 0.3, "OK", "hard"),
+            RolloutCriterion("no_policy_violations", True, 0, 0, "OK", "hard"),
+            RolloutCriterion("no_budget_exhaustions", True, 0, 0, "OK", "hard"),
+            RolloutCriterion("code_impl_minimum_runs", True, 2, 2, "OK", "soft"),
+            RolloutCriterion("code_impl_failure_rate", True, 0.0, 0.5, "OK", "soft"),
+            RolloutCriterion("verifier_rejection_rate", True, None, 0.5, "OK", "soft"),
+            RolloutCriterion("contract_failure_rate", True, 0.0, 0.3, "OK", "soft"),
+            RolloutCriterion("recovery_anomalies", True, 0, 3, "OK", "soft"),
+            RolloutCriterion("no_orphaned_agents", True, 0, 0, "OK", "soft"),
+            RolloutCriterion("no_stale_leases", True, 0, 0, "OK", "soft"),
         ]
 
     def test_all_pass_is_stable(self):
@@ -475,41 +453,29 @@ class TestDecisionLogic:
     def test_hard_failure_is_rollback(self):
         """Any hard failure → rollback."""
         criteria = self._passing_criteria()
-        criteria[0] = RolloutCriterion(
-            "heartbeat_healthy", False, "unhealthy",
-            "not unhealthy", "FAIL", "hard"
-        )
+        criteria[0] = RolloutCriterion("heartbeat_healthy", False, "unhealthy", "not unhealthy", "FAIL", "hard")
         decision, _ = decide_stage3_stability(criteria)
         assert decision == "rollback_code_impl_recommended"
 
     def test_insufficient_impl_runs_is_hold(self):
         """Insufficient code_impl runs → hold."""
         criteria = self._passing_criteria()
-        criteria[4] = RolloutCriterion(
-            "code_impl_minimum_runs", False, 1, 2, "FAIL", "soft"
-        )
+        criteria[4] = RolloutCriterion("code_impl_minimum_runs", False, 1, 2, "FAIL", "soft")
         decision, _ = decide_stage3_stability(criteria)
         assert decision == "hold_stage3"
 
     def test_soft_failure_is_hold(self):
         """Soft failure (not impl_runs) → hold."""
         criteria = self._passing_criteria()
-        criteria[9] = RolloutCriterion(
-            "no_orphaned_agents", False, 1, 0, "FAIL", "soft"
-        )
+        criteria[9] = RolloutCriterion("no_orphaned_agents", False, 1, 0, "FAIL", "soft")
         decision, _ = decide_stage3_stability(criteria)
         assert decision == "hold_stage3"
 
     def test_hard_overrides_soft(self):
         """Hard failure takes precedence over soft failure."""
         criteria = self._passing_criteria()
-        criteria[0] = RolloutCriterion(
-            "heartbeat_healthy", False, "unhealthy",
-            "not unhealthy", "FAIL", "hard"
-        )
-        criteria[4] = RolloutCriterion(
-            "code_impl_minimum_runs", False, 0, 2, "FAIL", "soft"
-        )
+        criteria[0] = RolloutCriterion("heartbeat_healthy", False, "unhealthy", "not unhealthy", "FAIL", "hard")
+        criteria[4] = RolloutCriterion("code_impl_minimum_runs", False, 0, 2, "FAIL", "soft")
         decision, _ = decide_stage3_stability(criteria)
         assert decision == "rollback_code_impl_recommended"
 
@@ -517,6 +483,7 @@ class TestDecisionLogic:
 # ===================================================================
 # Part 7 — Artifact generation
 # ===================================================================
+
 
 class TestArtifactGeneration:
     """Verify stability review artifacts are correct and auditable."""
@@ -582,9 +549,7 @@ class TestArtifactGeneration:
     def test_rollback_markdown_mentions_remove_code_impl(self, stage3_root):
         """Rollback recommendation markdown mentions code_impl removal."""
         hb = {"overall": "unhealthy", "findings": []}
-        (stage3_root / "STATE" / "heartbeat_multiagent.json").write_text(
-            json.dumps(hb)
-        )
+        (stage3_root / "STATE" / "heartbeat_multiagent.json").write_text(json.dumps(hb))
         _add_workflow(stage3_root, "ci1", "completed", "code_impl")
         _add_workflow(stage3_root, "ci2", "completed", "code_impl")
 
@@ -598,6 +563,7 @@ class TestArtifactGeneration:
 # Part 8 — Activation record retrieval
 # ===================================================================
 
+
 class TestActivationRecord:
     """Verify activation record retrieval from audit log."""
 
@@ -610,13 +576,9 @@ class TestActivationRecord:
     def test_prefers_activated_over_blocked(self, stage3_root):
         """If multiple entries, returns last 'activated' one."""
         log = stage3_root / "STATE" / "activation_log.jsonl"
-        blocked = {"attempted_at": "2026-03-08T09:00:00Z",
-                    "outcome": "blocked", "decision": "hold"}
-        activated = {"attempted_at": "2026-03-08T10:00:00Z",
-                     "outcome": "activated", "decision": "ready_to_expand"}
-        log.write_text(
-            json.dumps(blocked) + "\n" + json.dumps(activated) + "\n"
-        )
+        blocked = {"attempted_at": "2026-03-08T09:00:00Z", "outcome": "blocked", "decision": "hold"}
+        activated = {"attempted_at": "2026-03-08T10:00:00Z", "outcome": "activated", "decision": "ready_to_expand"}
+        log.write_text(json.dumps(blocked) + "\n" + json.dumps(activated) + "\n")
         record = _get_latest_activation(stage3_root)
         assert record["outcome"] == "activated"
         assert record["attempted_at"] == "2026-03-08T10:00:00Z"
@@ -630,6 +592,7 @@ class TestActivationRecord:
 # ===================================================================
 # Part 9 — Criteria evaluation integration
 # ===================================================================
+
 
 class TestCriteriaEvaluation:
     """Verify evaluate_stage3_stability produces correct criteria."""
@@ -705,8 +668,11 @@ class TestCriteriaEvaluation:
             "stale_leases": 0,
         }
         code_impl_metrics = {
-            "total_runs": 2, "completed": 2, "failed": 0,
-            "verifier_rejected": 0, "failure_rate": 0.0,
+            "total_runs": 2,
+            "completed": 2,
+            "failed": 0,
+            "verifier_rejected": 0,
+            "failure_rate": 0.0,
         }
         criteria = evaluate_stage3_stability(evidence, code_impl_metrics, 0)
         hard = {c.name for c in criteria if c.severity == "hard"}

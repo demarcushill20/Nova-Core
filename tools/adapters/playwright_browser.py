@@ -139,15 +139,12 @@ def _validate_url(url: str) -> None:
     if not url or not isinstance(url, str):
         raise ValueError("URL is required and must be a non-empty string")
     if not _URL_RE.match(url):
-        raise ValueError(
-            f"Invalid URL: must start with http:// or https://. Got: {url!r}"
-        )
+        raise ValueError(f"Invalid URL: must start with http:// or https://. Got: {url!r}")
     if len(url) > 2048:
         raise ValueError("URL exceeds 2048 character limit")
 
 
-def _validate_output_path(filename: str, output_dir: Path,
-                          extension: str) -> Path:
+def _validate_output_path(filename: str, output_dir: Path, extension: str) -> Path:
     """Validate and resolve the output file path within sandbox."""
     if not filename or not isinstance(filename, str):
         raise ValueError("filename is required")
@@ -168,8 +165,7 @@ def _validate_output_path(filename: str, output_dir: Path,
     stem = Path(basename).stem
     if not _SAFE_FILENAME_RE.match(stem):
         raise ValueError(
-            f"filename contains unsafe characters: {stem!r}. "
-            "Use alphanumeric, dash, underscore, dot, or space."
+            f"filename contains unsafe characters: {stem!r}. Use alphanumeric, dash, underscore, dot, or space."
         )
 
     output_path = output_dir / basename
@@ -190,8 +186,7 @@ def _run_playwright_cli(args: list[str], timeout: int = _TIMEOUT) -> dict:
             return {
                 "exit_code": 127,
                 "stdout": "",
-                "stderr": f"Chromium not found and auto-install failed: "
-                          f"{install['message']}",
+                "stderr": f"Chromium not found and auto-install failed: {install['message']}",
             }
         chromium = install["chromium_path"]
 
@@ -234,10 +229,9 @@ def _run_playwright_cli(args: list[str], timeout: int = _TIMEOUT) -> dict:
 # --- Tool implementations ---------------------------------------------------
 
 
-def browser_screenshot(url: str, filename: str = "",
-                       full_page: bool = False,
-                       wait_timeout: int = 0,
-                       _sandbox: Path | None = None) -> dict:
+def browser_screenshot(
+    url: str, filename: str = "", full_page: bool = False, wait_timeout: int = 0, _sandbox: Path | None = None
+) -> dict:
     """Take a screenshot of a URL using Playwright CLI.
 
     Args:
@@ -307,10 +301,9 @@ def browser_screenshot(url: str, filename: str = "",
     }
 
 
-def browser_pdf(url: str, filename: str = "",
-                paper_format: str = "A4",
-                wait_timeout: int = 0,
-                _sandbox: Path | None = None) -> dict:
+def browser_pdf(
+    url: str, filename: str = "", paper_format: str = "A4", wait_timeout: int = 0, _sandbox: Path | None = None
+) -> dict:
     """Generate a PDF of a URL using Playwright CLI.
 
     Args:
@@ -337,19 +330,24 @@ def browser_pdf(url: str, filename: str = "",
 
     # Validate paper format
     valid_formats = {
-        "letter", "legal", "tabloid", "ledger",
-        "a0", "a1", "a2", "a3", "a4", "a5", "a6",
+        "letter",
+        "legal",
+        "tabloid",
+        "ledger",
+        "a0",
+        "a1",
+        "a2",
+        "a3",
+        "a4",
+        "a5",
+        "a6",
     }
     fmt = paper_format.strip()
     if fmt.lower() not in valid_formats:
-        raise ValueError(
-            f"Invalid paper format: {fmt!r}. "
-            f"Must be one of: {', '.join(sorted(valid_formats))}"
-        )
+        raise ValueError(f"Invalid paper format: {fmt!r}. Must be one of: {', '.join(sorted(valid_formats))}")
 
     # Build CLI args
-    cli_args = ["pdf", "--browser", "chromium",
-                "--paper-format", fmt]
+    cli_args = ["pdf", "--browser", "chromium", "--paper-format", fmt]
     if wait_timeout:
         wait_timeout = max(0, min(wait_timeout, 10_000))
         cli_args.extend(["--wait-for-timeout", str(wait_timeout)])

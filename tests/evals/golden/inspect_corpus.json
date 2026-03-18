@@ -1,0 +1,32 @@
+[
+  {
+    "input": "Generate a heartbeat report for the NovaCore runtime. Include system metrics (CPU, memory, disk), service statuses, open threads, and any anomalies detected.",
+    "target": "A structured heartbeat report with system metrics showing CPU/memory/disk usage, service statuses for novacore-watcher/telegram/notifier, a list of open threads, anomaly section, and next actions.",
+    "id": "heartbeat_001",
+    "metadata": {"category": "heartbeat"}
+  },
+  {
+    "input": "Read the task file 'research_circuit_breakers.md' from TASKS/, research circuit breaker patterns for distributed systems, and write a structured research summary to OUTPUT/.",
+    "target": "A research summary written to OUTPUT/ with key findings on circuit breaker patterns (three-state model, rolling windows, exponential backoff), citations from authoritative sources, recommendations for NovaCore, and a confidence rating.",
+    "id": "research_001",
+    "metadata": {"category": "research"}
+  },
+  {
+    "input": "Implement a retry decorator with exponential backoff. Write the implementation to a Python file and include unit tests.",
+    "target": "A Python file containing a retry decorator using functools.wraps with configurable max_attempts, base_delay, and backoff_factor parameters, along with unit tests covering success-first-try and eventual-success scenarios.",
+    "id": "codegen_001",
+    "metadata": {"category": "codegen"}
+  },
+  {
+    "input": "Create a deployment plan for migrating NovaCore from single-agent to multi-agent architecture. Include phases, dependencies, risk assessment, and rollback strategy.",
+    "target": "A phased deployment plan with clear milestones, dependency graph between components, risk assessment for each phase, rollback procedures, testing checkpoints, and estimated timelines.",
+    "id": "plan_001",
+    "metadata": {"category": "plan"}
+  },
+  {
+    "input": "Design a NovaTrade strategy specification for a mean-reversion forex strategy on EUR/USD. Include entry/exit rules, risk parameters, FTMO compliance constraints, and position sizing.",
+    "target": "A strategy specification with entry rules based on mean-reversion signals, exit rules with take-profit and stop-loss levels, risk parameters including max drawdown and position sizing, and FTMO compliance constraints for daily/total drawdown limits.",
+    "id": "novatrade_001",
+    "metadata": {"category": "novatrade"}
+  }
+]

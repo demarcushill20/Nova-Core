@@ -16,7 +16,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def checkpoint_dir(tmp_path, monkeypatch):
     """Redirect checkpoint storage to a temp directory."""
     cp_dir = tmp_path / "checkpoints"

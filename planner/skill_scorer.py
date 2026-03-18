@@ -30,67 +30,127 @@ DEFAULT_SKILLS_CATALOG: list[dict] = [
         "name": "log_triage",
         "description": "Diagnose and triage errors from log files and tracebacks",
         "keywords": [
-            "diagnose", "logs", "failure", "error", "traceback",
-            "crash", "exception", "debug", "investigate", "why did",
-            "root cause", "stack trace", "stderr", "log file",
+            "diagnose",
+            "logs",
+            "failure",
+            "error",
+            "traceback",
+            "crash",
+            "exception",
+            "debug",
+            "investigate",
+            "why did",
+            "root cause",
+            "stack trace",
+            "stderr",
+            "log file",
         ],
     },
     {
         "name": "code_improve",
         "description": "Fix bugs, apply patches, refactor and improve code quality",
         "keywords": [
-            "fix", "patch", "change code", "refactor", "improve",
-            "clean up", "code quality", "lint", "bug", "typo",
-            "rename", "simplify", "optimize", "dead code",
+            "fix",
+            "patch",
+            "change code",
+            "refactor",
+            "improve",
+            "clean up",
+            "code quality",
+            "lint",
+            "bug",
+            "typo",
+            "rename",
+            "simplify",
+            "optimize",
+            "dead code",
         ],
     },
     {
         "name": "service_ops",
         "description": "Manage systemd services: restart, check status, monitor health",
         "keywords": [
-            "restart", "service", "status", "systemctl", "daemon",
-            "reload", "enable", "disable", "uptime", "health check",
-            "process", "pid", "systemd",
+            "restart",
+            "service",
+            "status",
+            "systemctl",
+            "daemon",
+            "reload",
+            "enable",
+            "disable",
+            "uptime",
+            "health check",
+            "process",
+            "pid",
+            "systemd",
         ],
     },
     {
         "name": "system_supervisor",
         "description": "Validate outputs, check contracts, audit compliance, review results",
         "keywords": [
-            "validate", "verify", "contract", "check", "audit",
-            "supervisor", "review", "inspect", "compliance",
+            "validate",
+            "verify",
+            "contract",
+            "check",
+            "audit",
+            "supervisor",
+            "review",
+            "inspect",
+            "compliance",
         ],
     },
     {
         "name": "task_execution",
         "description": "Execute and manage task queue, dispatch workflows, process work items",
         "keywords": [
-            "task", "execute", "run task", "process task", "queue",
-            "dispatch", "workflow",
+            "task",
+            "execute",
+            "run task",
+            "process task",
+            "queue",
+            "dispatch",
+            "workflow",
         ],
     },
     {
         "name": "file_ops",
         "description": "Create, read, write, edit, move, and rename files",
         "keywords": [
-            "create file", "write file", "edit file", "move file",
-            "rename file", "read file", "copy file",
+            "create file",
+            "write file",
+            "edit file",
+            "move file",
+            "rename file",
+            "read file",
+            "copy file",
         ],
     },
     {
         "name": "shell_ops",
         "description": "Run shell commands, execute scripts, manage terminal operations",
         "keywords": [
-            "run command", "shell", "bash", "script", "pip install",
-            "execute command", "terminal",
+            "run command",
+            "shell",
+            "bash",
+            "script",
+            "pip install",
+            "execute command",
+            "terminal",
         ],
     },
     {
         "name": "web_research",
         "description": "Search the web, find information, research topics, look up documentation",
         "keywords": [
-            "research", "search", "find information", "look up",
-            "web search", "google", "what is", "how to",
+            "research",
+            "search",
+            "find information",
+            "look up",
+            "web search",
+            "google",
+            "what is",
+            "how to",
         ],
     },
 ]
@@ -126,9 +186,7 @@ class SkillScorer:
         matched_keywords: list[str] = []
         if keywords:
             matched_keywords = [kw for kw in keywords if kw.lower() in goal_lower]
-            activation_rules = round(
-                min(0.2, (len(matched_keywords) / len(keywords)) * 0.2), 4
-            )
+            activation_rules = round(min(0.2, (len(matched_keywords) / len(keywords)) * 0.2), 4)
         else:
             activation_rules = 0.0
 
@@ -140,18 +198,14 @@ class SkillScorer:
         sr_raw = history_store.get_success_rate(skill_name)
         success_rate = round(sr_raw * 0.2, 4)
 
-        total_score = round(
-            semantic_match + activation_rules + recency + success_rate, 4
-        )
+        total_score = round(semantic_match + activation_rules + recency + success_rate, 4)
 
         # Build reasons list
         reasons: list[str] = []
         if semantic_match > 0:
             reasons.append(f"semantic_match={semantic_match}")
         if activation_rules > 0:
-            reasons.append(
-                f"activation: {', '.join(matched_keywords)}"
-            )
+            reasons.append(f"activation: {', '.join(matched_keywords)}")
         if recency_raw != 0.5:
             reasons.append(f"recency={recency} (raw={recency_raw:.3f})")
         if sr_raw != 0.5:

@@ -83,10 +83,16 @@ class TestTelegramSendFile:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_client.post.return_value = mock_response
 
-        with patch.dict("os.environ", {
-            "TELEGRAM_BOT_TOKEN": "fake:token",
-            "ALLOWED_CHAT_ID": "123456",
-        }), patch("tools.adapters.telegram_send_file.httpx.Client", return_value=mock_client):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "TELEGRAM_BOT_TOKEN": "fake:token",
+                    "ALLOWED_CHAT_ID": "123456",
+                },
+            ),
+            patch("tools.adapters.telegram_send_file.httpx.Client", return_value=mock_client),
+        ):
             result = telegram_send_file(
                 path="OUTPUT/test.pdf",
                 caption="Test caption",
@@ -115,10 +121,16 @@ class TestTelegramSendFile:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_client.post.return_value = mock_response
 
-        with patch.dict("os.environ", {
-            "TELEGRAM_BOT_TOKEN": "fake:token",
-            "ALLOWED_CHAT_ID": "123456",
-        }), patch("tools.adapters.telegram_send_file.httpx.Client", return_value=mock_client):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "TELEGRAM_BOT_TOKEN": "fake:token",
+                    "ALLOWED_CHAT_ID": "123456",
+                },
+            ),
+            patch("tools.adapters.telegram_send_file.httpx.Client", return_value=mock_client),
+        ):
             result = telegram_send_file(
                 path="OUTPUT/test.pdf",
                 _sandbox=tmp_sandbox,
@@ -135,12 +147,14 @@ class TestRunnerIntegration:
     def test_pdf_generate_registered(self):
         """pdf.generate appears in the tool registry."""
         from tools.registry import load_registry
+
         reg = load_registry()
         assert "pdf.generate" in reg["tools"]
 
     def test_telegram_send_file_registered(self):
         """telegram.send_file appears in the tool registry."""
         from tools.registry import load_registry
+
         reg = load_registry()
         assert "telegram.send_file" in reg["tools"]
 

@@ -70,6 +70,7 @@ def main():
         creds.refresh(Request())
     else:
         import socketserver
+
         socketserver.TCPServer.allow_reuse_address = True
 
         port = int(os.environ.get("GW_AUTH_PORT", "9090"))

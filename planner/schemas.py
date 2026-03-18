@@ -158,10 +158,7 @@ class HealthFinding:
 
     def __post_init__(self):
         if self.severity not in VALID_SEVERITIES:
-            raise ValueError(
-                f"Invalid severity '{self.severity}': "
-                f"must be one of {VALID_SEVERITIES}"
-            )
+            raise ValueError(f"Invalid severity '{self.severity}': must be one of {VALID_SEVERITIES}")
 
 
 @dataclass

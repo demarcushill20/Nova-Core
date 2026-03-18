@@ -52,10 +52,7 @@ def repo_read(
     try:
         rel_path = target.relative_to(root)
     except ValueError:
-        raise ValueError(
-            f"Path escapes sandbox: {path!r} resolves to {target} "
-            f"which is outside {root}"
-        ) from None
+        raise ValueError(f"Path escapes sandbox: {path!r} resolves to {target} which is outside {root}") from None
 
     # Normalized repo-relative path for output
     norm_path = str(rel_path)
@@ -103,10 +100,7 @@ def _resolve_and_check(path: str, sandbox: Path | None) -> tuple[Path, Path, str
     try:
         rel_path = target.relative_to(root)
     except ValueError:
-        raise ValueError(
-            f"Path escapes sandbox: {path!r} resolves to {target} "
-            f"which is outside {root}"
-        ) from None
+        raise ValueError(f"Path escapes sandbox: {path!r} resolves to {target} which is outside {root}") from None
 
     return root, target, str(rel_path)
 
@@ -397,6 +391,5 @@ def repo_patch(
         "operations_applied": ops_applied,
         "created": created,
         "verified": True,
-        "message": f"{ops_applied} operation(s) applied"
-        + (" (file created)" if created else ""),
+        "message": f"{ops_applied} operation(s) applied" + (" (file created)" if created else ""),
     }

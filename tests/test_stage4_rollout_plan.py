@@ -38,6 +38,7 @@ from agents.rollout_gate import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def plan_root(tmp_path):
     """Set up a Stage 3 environment with Stage 4 evaluation ready."""
@@ -83,9 +84,7 @@ def plan_root(tmp_path):
         "decision": "ready_to_expand",
         "reason": "Stage 3 expansion applied",
     }
-    (state / "activation_log.jsonl").write_text(
-        json.dumps(activation) + "\n"
-    )
+    (state / "activation_log.jsonl").write_text(json.dumps(activation) + "\n")
 
     # Add enough workflows for Stage 4 evaluation to pass
     for i in range(5):
@@ -118,6 +117,7 @@ def plan_root(tmp_path):
 # Part 1 — Plan structure and completeness
 # ===================================================================
 
+
 class TestPlanStructure:
     """Rollout plan has all required fields."""
 
@@ -126,12 +126,18 @@ class TestPlanStructure:
         plan = build_stage4_rollout_plan(plan_root)
         d = plan.to_dict()
         required = {
-            "plan_status", "initial_scope",
-            "allowed_operations", "blocked_operations",
-            "allowed_skills", "blocked_skills",
-            "activation_prerequisites", "success_criteria",
-            "abort_conditions", "rollback_procedure",
-            "system_class_status", "stage4_evaluation_decision",
+            "plan_status",
+            "initial_scope",
+            "allowed_operations",
+            "blocked_operations",
+            "allowed_skills",
+            "blocked_skills",
+            "activation_prerequisites",
+            "success_criteria",
+            "abort_conditions",
+            "rollback_procedure",
+            "system_class_status",
+            "stage4_evaluation_decision",
             "generated_at",
         }
         assert required <= set(d.keys())
@@ -168,6 +174,7 @@ class TestPlanStructure:
 # Part 2 — Allowed vs blocked operations
 # ===================================================================
 
+
 class TestOperationsScope:
     """Verify allowed and blocked operations are correct."""
 
@@ -176,15 +183,15 @@ class TestOperationsScope:
         read_only_keywords = {"check", "inspect", "review", "audit", "monitor", "scan"}
         for op in STAGE4_ALLOWED_OPERATIONS:
             # Each allowed operation should relate to inspection
-            assert any(kw in op for kw in read_only_keywords), \
-                f"Allowed operation '{op}' doesn't appear read-only"
+            assert any(kw in op for kw in read_only_keywords), f"Allowed operation '{op}' doesn't appear read-only"
 
     def test_blocked_operations_are_mutation(self):
         """All blocked operations involve mutation."""
         mutation_keywords = {"modif", "deploy", "manage", "change", "mutation", "operation"}
         for op in STAGE4_BLOCKED_OPERATIONS:
-            assert any(kw in op for kw in mutation_keywords), \
+            assert any(kw in op for kw in mutation_keywords), (
                 f"Blocked operation '{op}' doesn't appear mutation-capable"
+            )
 
     def test_no_overlap_between_allowed_and_blocked(self):
         """No operation appears in both allowed and blocked."""
@@ -198,8 +205,11 @@ class TestOperationsScope:
     def test_dangerous_ops_are_blocked(self):
         """Specifically dangerous operations are in blocked set."""
         must_block = {
-            "deployment", "service_modification", "self_modification",
-            "permission_changes", "user_management",
+            "deployment",
+            "service_modification",
+            "self_modification",
+            "permission_changes",
+            "user_management",
         }
         assert must_block <= STAGE4_BLOCKED_OPERATIONS
 
@@ -213,6 +223,7 @@ class TestOperationsScope:
 # ===================================================================
 # Part 3 — Allowed vs blocked skills
 # ===================================================================
+
 
 class TestSkillsScope:
     """Verify skill allowlist and blocklist."""
@@ -246,6 +257,7 @@ class TestSkillsScope:
 # ===================================================================
 # Part 4 — Signal patterns
 # ===================================================================
+
 
 class TestSignalPatterns:
     """Verify inspect and mutate signal pattern coverage."""
@@ -296,6 +308,7 @@ class TestSignalPatterns:
 # Part 5 — Activation prerequisites
 # ===================================================================
 
+
 class TestActivationPrerequisites:
     """Verify activation prerequisites are complete."""
 
@@ -331,6 +344,7 @@ class TestActivationPrerequisites:
 # ===================================================================
 # Part 6 — Success criteria and abort conditions
 # ===================================================================
+
 
 class TestSuccessCriteriaAndAbort:
     """Verify success criteria and abort conditions."""
@@ -378,13 +392,13 @@ class TestSuccessCriteriaAndAbort:
 
     def test_abort_includes_operator_cancel(self):
         """Abort on operator manual cancel."""
-        assert any("operator" in c.lower() or "cancel" in c.lower()
-                    for c in STAGE4_ABORT_CONDITIONS)
+        assert any("operator" in c.lower() or "cancel" in c.lower() for c in STAGE4_ABORT_CONDITIONS)
 
 
 # ===================================================================
 # Part 7 — Rollback procedure
 # ===================================================================
+
 
 class TestRollbackProcedure:
     """Verify rollback steps are complete."""
@@ -402,25 +416,23 @@ class TestRollbackProcedure:
     def test_rollback_restarts_watcher(self, plan_root):
         """Rollback restarts the watcher service."""
         plan = build_stage4_rollout_plan(plan_root)
-        assert any("restart" in s.lower() and "watcher" in s.lower()
-                    for s in plan.rollback_procedure)
+        assert any("restart" in s.lower() and "watcher" in s.lower() for s in plan.rollback_procedure)
 
     def test_rollback_writes_audit(self, plan_root):
         """Rollback writes to activation audit log."""
         plan = build_stage4_rollout_plan(plan_root)
-        assert any("activation_log" in s or "audit" in s.lower()
-                    for s in plan.rollback_procedure)
+        assert any("activation_log" in s or "audit" in s.lower() for s in plan.rollback_procedure)
 
     def test_rollback_has_verification_step(self, plan_root):
         """Rollback includes a verification step."""
         plan = build_stage4_rollout_plan(plan_root)
-        assert any("verify" in s.lower() or "confirm" in s.lower()
-                    for s in plan.rollback_procedure)
+        assert any("verify" in s.lower() or "confirm" in s.lower() for s in plan.rollback_procedure)
 
 
 # ===================================================================
 # Part 8 — Artifact generation
 # ===================================================================
+
 
 class TestArtifactGeneration:
     """Test markdown rendering and file writing."""
@@ -513,6 +525,7 @@ class TestArtifactGeneration:
 # Part 9 — Plan does not modify state
 # ===================================================================
 
+
 class TestPlanReadOnly:
     """Verify plan building does not modify any state."""
 
@@ -526,9 +539,7 @@ class TestPlanReadOnly:
     def test_system_not_added_to_classes(self, plan_root):
         """system not added to supported_classes."""
         build_stage4_rollout_plan(plan_root)
-        flags = json.loads(
-            (plan_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        flags = json.loads((plan_root / "STATE" / "config" / "feature_flags.json").read_text())
         assert "system" not in flags["phase7_orchestrator"]["supported_classes"]
 
     def test_activation_log_unchanged(self, plan_root):
@@ -542,6 +553,7 @@ class TestPlanReadOnly:
 # ===================================================================
 # Part 10 — Scope narrowness validation
 # ===================================================================
+
 
 class TestScopeNarrowness:
     """Verify the plan defines the narrowest safe initial slice."""

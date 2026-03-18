@@ -76,6 +76,7 @@ Prefer specific noun phrases over generic verbs in query construction.
 # Eligibility
 # ===================================================================
 
+
 class TestEligibility:
     def test_research_eligible(self):
         ok, reason = is_eligible_for_pattern_retrieval("research", "find information")
@@ -104,22 +105,19 @@ class TestEligibility:
         assert not ok
 
     def test_runtime_state_always_skipped(self):
-        ok, reason = is_eligible_for_pattern_retrieval(
-            "research", "check systemctl status"
-        )
+        ok, reason = is_eligible_for_pattern_retrieval("research", "check systemctl status")
         assert not ok
         assert "runtime_state" in reason
 
     def test_runtime_watcher_skipped(self):
-        ok, reason = is_eligible_for_pattern_retrieval(
-            "code_impl", "restart the watcher daemon"
-        )
+        ok, reason = is_eligible_for_pattern_retrieval("code_impl", "restart the watcher daemon")
         assert not ok
 
 
 # ===================================================================
 # Keyword extraction
 # ===================================================================
+
 
 class TestKeywordExtraction:
     def test_basic_extraction(self):
@@ -148,6 +146,7 @@ class TestKeywordExtraction:
 # Title extraction
 # ===================================================================
 
+
 class TestTitleExtraction:
     def test_from_frontmatter(self):
         title = _extract_title(_SAMPLE_PATTERN_NOTE)
@@ -164,6 +163,7 @@ class TestTitleExtraction:
 # ===================================================================
 # Section extraction
 # ===================================================================
+
 
 class TestSectionExtraction:
     def test_extracts_summary(self):
@@ -202,6 +202,7 @@ class TestSectionExtraction:
 # Pattern search
 # ===================================================================
 
+
 class TestSearchAgentPatterns:
     def test_search_scoped_to_pattern_folder(self):
         """vault_search is called with the pattern folder."""
@@ -229,10 +230,7 @@ class TestSearchAgentPatterns:
         def mock_vault_search(query, folder=""):
             return {
                 "results_count": 5,
-                "results": [
-                    {"path": f"20-agent-patterns/p{i}.md", "snippet": f"pat {i}"}
-                    for i in range(5)
-                ],
+                "results": [{"path": f"20-agent-patterns/p{i}.md", "snippet": f"pat {i}"} for i in range(5)],
             }
 
         with patch(f"{_VS}.vault_search", mock_vault_search):
@@ -263,6 +261,7 @@ class TestSearchAgentPatterns:
 # ===================================================================
 # Read pattern guidance
 # ===================================================================
+
 
 class TestReadPatternGuidance:
     def test_reads_and_extracts(self):
@@ -306,13 +305,16 @@ class TestReadPatternGuidance:
 # Context formatting
 # ===================================================================
 
+
 class TestFormatPatternGuidance:
     def test_formats_single_pattern(self):
-        patterns = [{
-            "title": "Test Pattern",
-            "path": "20-agent-patterns/test.md",
-            "sections": {"Summary": "A useful method", "Guidance": "Do X then Y"},
-        }]
+        patterns = [
+            {
+                "title": "Test Pattern",
+                "path": "20-agent-patterns/test.md",
+                "sections": {"Summary": "A useful method", "Guidance": "Do X then Y"},
+            }
+        ]
         result = format_pattern_guidance(patterns)
         assert "Agent Pattern Guidance" in result
         assert "advisory" in result
@@ -324,11 +326,13 @@ class TestFormatPatternGuidance:
         assert format_pattern_guidance([]) == ""
 
     def test_advisory_label(self):
-        patterns = [{
-            "title": "Test",
-            "path": "test.md",
-            "sections": {"Summary": "test"},
-        }]
+        patterns = [
+            {
+                "title": "Test",
+                "path": "test.md",
+                "sections": {"Summary": "test"},
+            }
+        ]
         result = format_pattern_guidance(patterns)
         assert "not runtime facts" in result
         assert "advisory" in result
@@ -336,10 +340,7 @@ class TestFormatPatternGuidance:
     def test_truncation(self):
         # Generate a very large pattern to trigger truncation
         big_sections = {s: "x" * 500 for s in _GUIDANCE_SECTIONS}
-        patterns = [
-            {"title": f"Pat {i}", "path": f"p{i}.md", "sections": big_sections}
-            for i in range(3)
-        ]
+        patterns = [{"title": f"Pat {i}", "path": f"p{i}.md", "sections": big_sections} for i in range(3)]
         result = format_pattern_guidance(patterns)
         assert len(result) <= MAX_PATTERN_CONTEXT_SIZE
 
@@ -347,6 +348,7 @@ class TestFormatPatternGuidance:
 # ===================================================================
 # Main integration function
 # ===================================================================
+
 
 class TestRetrievePatternGuidance:
     def test_ineligible_class_skips(self):
@@ -364,9 +366,7 @@ class TestRetrievePatternGuidance:
             return {"results_count": 0, "results": []}
 
         with patch(f"{_VS}.vault_search", mock_vault_search):
-            result = retrieve_pattern_guidance(
-                "research", "multi-query research strategy"
-            )
+            result = retrieve_pattern_guidance("research", "multi-query research strategy")
         assert not result["pattern_retrieval_activated"]
         assert "no_patterns_found" in result["retrieval_reason"]
 
@@ -374,20 +374,19 @@ class TestRetrievePatternGuidance:
         def mock_vault_search(query, folder=""):
             return {
                 "results_count": 1,
-                "results": [{
-                    "path": "20-agent-patterns/test.md",
-                    "snippet": "research strategy",
-                }],
+                "results": [
+                    {
+                        "path": "20-agent-patterns/test.md",
+                        "snippet": "research strategy",
+                    }
+                ],
             }
 
         def mock_vault_read(path):
             return {"path": path, "size": 100, "content": _SAMPLE_PATTERN_NOTE}
 
-        with patch(f"{_VS}.vault_search", mock_vault_search), \
-             patch(f"{_VS}.vault_read", mock_vault_read):
-            result = retrieve_pattern_guidance(
-                "research", "multi-query research strategy"
-            )
+        with patch(f"{_VS}.vault_search", mock_vault_search), patch(f"{_VS}.vault_read", mock_vault_read):
+            result = retrieve_pattern_guidance("research", "multi-query research strategy")
 
         assert result["pattern_retrieval_activated"]
         assert len(result["selected_patterns"]) == 1
@@ -397,23 +396,23 @@ class TestRetrievePatternGuidance:
 
     def test_no_extractable_guidance(self):
         """Pattern found but has no extractable sections."""
+
         def mock_vault_search(query, folder=""):
             return {
                 "results_count": 1,
-                "results": [{
-                    "path": "20-agent-patterns/bad.md",
-                    "snippet": "no sections",
-                }],
+                "results": [
+                    {
+                        "path": "20-agent-patterns/bad.md",
+                        "snippet": "no sections",
+                    }
+                ],
             }
 
         def mock_vault_read(path):
             return {"path": path, "size": 10, "content": "No useful sections here"}
 
-        with patch(f"{_VS}.vault_search", mock_vault_search), \
-             patch(f"{_VS}.vault_read", mock_vault_read):
-            result = retrieve_pattern_guidance(
-                "research", "multi-query research strategy"
-            )
+        with patch(f"{_VS}.vault_search", mock_vault_search), patch(f"{_VS}.vault_read", mock_vault_read):
+            result = retrieve_pattern_guidance("research", "multi-query research strategy")
 
         assert not result["pattern_retrieval_activated"]
         assert "no_extractable_guidance" in result["retrieval_reason"]
@@ -429,9 +428,7 @@ class TestRetrievePatternGuidance:
         assert "errors" in result
 
     def test_runtime_state_skips(self):
-        result = retrieve_pattern_guidance(
-            "research", "check watcher pid and systemctl status"
-        )
+        result = retrieve_pattern_guidance("research", "check watcher pid and systemctl status")
         assert not result["pattern_retrieval_activated"]
         assert "runtime_state" in result["retrieval_reason"]
 
@@ -440,10 +437,12 @@ class TestRetrievePatternGuidance:
 # Orchestrator integration
 # ===================================================================
 
+
 class TestOrchestratorIntegration:
     def test_pattern_retriever_imported(self):
         """orchestrator_adapter imports retrieve_pattern_guidance."""
         from planner.pattern_retriever import retrieve_pattern_guidance
+
         assert callable(retrieve_pattern_guidance)
 
     def test_pattern_guidance_in_build_plan(self):
@@ -451,6 +450,7 @@ class TestOrchestratorIntegration:
         import inspect
 
         import tools.orchestrator_adapter as oa
+
         source = inspect.getsource(oa.build_plan_from_task)
         assert "retrieve_pattern_guidance" in source
         assert "pattern_guidance" in source
@@ -460,6 +460,7 @@ class TestOrchestratorIntegration:
         import inspect
 
         import tools.orchestrator_adapter as oa
+
         source = inspect.getsource(oa._claude_step_executor)
         assert "pattern_guidance" in source
         assert "pattern_section" in source

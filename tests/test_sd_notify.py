@@ -34,7 +34,7 @@ class TestSdNotifyNoSocket:
 class TestSdNotifyWithSocket:
     """Tests with a real Unix datagram socket to verify correct payloads."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def notify_socket(self, tmp_path, monkeypatch):
         """Create a real Unix datagram socket and set NOTIFY_SOCKET."""
         sock_path = str(tmp_path / "notify.sock")

@@ -56,7 +56,7 @@ def _campaign_label(cfg: NovaTradeCfg) -> str:
     return ""
 
 
-def _build_adapter(cfg: NovaTradeCfg):  # noqa: ANN202
+def _build_adapter(cfg: NovaTradeCfg):
     from novatrade.adapter.metaapi_provider import MetaApiAdapter
 
     return MetaApiAdapter(cfg.metaapi)
@@ -83,7 +83,7 @@ async def _cmd_preflight(cfg: NovaTradeCfg, args: argparse.Namespace) -> int:
     finally:
         try:
             await adapter.disconnect()
-        except Exception:  # noqa: S110
+        except Exception:
             pass
 
     campaign = _campaign_label(cfg)
@@ -149,7 +149,7 @@ async def _cmd_dry_run(cfg: NovaTradeCfg, args: argparse.Namespace) -> int:
     finally:
         try:
             await adapter.disconnect()
-        except Exception:  # noqa: S110
+        except Exception:
             pass
 
     mode_label = "LIVE DEMO" if args.live and not cfg.dry_run else "DRY RUN"
@@ -204,7 +204,7 @@ async def _cmd_health(cfg: NovaTradeCfg, args: argparse.Namespace) -> int:
     finally:
         try:
             await adapter.disconnect()
-        except Exception:  # noqa: S110
+        except Exception:
             pass
 
     if args.json_output:

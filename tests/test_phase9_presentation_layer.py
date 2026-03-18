@@ -3,6 +3,7 @@
 Tests persona rewrite, notifier deference, artifact classification,
 and trio identity model.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -16,8 +17,17 @@ from pathlib import Path
 
 # Load local telegram modules via importlib (same pattern as telegram_bot.py)
 _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _mod_name in ("parse", "conversation", "llm", "persona", "format", "delegation",
-                   "goals", "hardening", "working_memory"):
+for _mod_name in (
+    "parse",
+    "conversation",
+    "llm",
+    "persona",
+    "format",
+    "delegation",
+    "goals",
+    "hardening",
+    "working_memory",
+):
     _path = os.path.join(_here, "telegram", f"{_mod_name}.py")
     if os.path.exists(_path):
         _spec = importlib.util.spec_from_file_location(_mod_name, _path)
@@ -155,6 +165,7 @@ class TestDelegationMarkers(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_write_delegation_marker_creates_file(self):
@@ -210,6 +221,7 @@ class TestNotifierDeference(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_stem_extraction_from_output_name(self):

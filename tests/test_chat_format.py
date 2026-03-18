@@ -13,6 +13,7 @@ from telegram.parse import classify_intent
 # classify_intent
 # ---------------------------------------------------------------------------
 
+
 class TestClassifyIntent:
     def test_plain_question_is_chat(self):
         assert classify_intent("How do I enter tmux?") == "chat"
@@ -230,6 +231,7 @@ class TestStripReportSections:
 # ---------------------------------------------------------------------------
 # Integration: classify + strip together
 # ---------------------------------------------------------------------------
+
 
 class TestIntegration:
     def test_chat_intent_gets_clean_output(self):

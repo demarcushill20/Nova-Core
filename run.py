@@ -10,18 +10,22 @@ TASKS_DIR = ROOT / "TASKS"
 OUTPUT_DIR = ROOT / "OUTPUT"
 LOGS_DIR = ROOT / "LOGS"
 
+
 def now_stamp() -> str:
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+
 
 def log(msg: str) -> None:
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     line = f"[{dt.datetime.now().isoformat(timespec='seconds')}] {msg}\n"
     (LOGS_DIR / "runner.log").open("a", encoding="utf-8").write(line)
 
+
 def ensure_dirs() -> None:
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def process_task_file(task_path: Path) -> Path:
     content = task_path.read_text(encoding="utf-8")
@@ -36,6 +40,7 @@ def process_task_file(task_path: Path) -> Path:
     )
     out_path.write_text(out_body, encoding="utf-8")
     return out_path
+
 
 def main() -> int:
     ensure_dirs()
@@ -58,6 +63,7 @@ def main() -> int:
             print(f"ERROR processing {task_path.name}: {e!r}")
     log("Processing complete.")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

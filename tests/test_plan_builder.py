@@ -33,6 +33,7 @@ def _ranked_skill(name: str, score: float = 0.5) -> SkillScore:
 
 # -- single-skill plan --------------------------------------------------------
 
+
 def test_single_skill_plan(builder: PlanBuilder, tmp_path: Path):
     intent = _intent("run the task and dispatch workflow")
     store = SkillHistoryStore(path=tmp_path / "h.json")
@@ -56,6 +57,7 @@ def test_single_skill_from_ranked(builder: PlanBuilder):
 
 
 # -- multi-skill chain -------------------------------------------------------
+
 
 def test_multi_skill_diagnose_chain(builder: PlanBuilder):
     intent = _intent("diagnose the failure in the logs")
@@ -87,6 +89,7 @@ def test_multi_skill_service_chain(builder: PlanBuilder):
 
 # -- fallback to top-ranked skill ---------------------------------------------
 
+
 def test_fallback_to_top_ranked(builder: PlanBuilder, tmp_path: Path):
     intent = _intent("search for information about Python web frameworks")
     store = SkillHistoryStore(path=tmp_path / "h.json")
@@ -105,6 +108,7 @@ def test_fallback_empty_plan_no_match(builder: PlanBuilder):
 
 # -- deterministic plan IDs ---------------------------------------------------
 
+
 def test_plan_id_derived_from_task_id(builder: PlanBuilder):
     intent = _intent("fix the bug", task_id="0099")
     plan = builder.build_plan(intent, [])
@@ -119,6 +123,7 @@ def test_plan_id_stable(builder: PlanBuilder):
 
 
 # -- success criteria included ------------------------------------------------
+
 
 def test_multi_skill_success_criteria(builder: PlanBuilder):
     intent = _intent("diagnose the crash")
@@ -136,6 +141,7 @@ def test_single_skill_success_criteria(builder: PlanBuilder):
 
 # -- build_intent exact fields ------------------------------------------------
 
+
 def test_build_intent_sets_goal(builder: PlanBuilder):
     intent = builder.build_intent("t001", "diagnose the error and fix the code")
     assert intent.goal == "diagnose the error and fix the code"
@@ -152,6 +158,7 @@ def test_build_intent_default_fields(builder: PlanBuilder):
 
 # -- status defaults ----------------------------------------------------------
 
+
 def test_plan_initial_status(builder: PlanBuilder):
     intent = _intent("diagnose the crash")
     plan = builder.build_plan(intent, [])
@@ -166,6 +173,7 @@ def test_step_initial_status(builder: PlanBuilder):
 
 
 # -- step inputs field --------------------------------------------------------
+
 
 def test_step_has_inputs_field(builder: PlanBuilder):
     intent = _intent("fix the bug")

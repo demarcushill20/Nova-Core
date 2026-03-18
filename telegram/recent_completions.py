@@ -7,6 +7,7 @@ has moved them out of active context.
 Storage: STATE/recent_completions.json
 Retention: 4 hours (configurable)
 """
+
 from __future__ import annotations
 
 import json
@@ -82,9 +83,7 @@ def get_recent(
     entries = _load()
     cutoff = time.time() - max_age_seconds
     results = [
-        e for e in entries
-        if e.get("completed_at", 0) > cutoff
-        and (chat_id is None or e.get("chat_id") == chat_id)
+        e for e in entries if e.get("completed_at", 0) > cutoff and (chat_id is None or e.get("chat_id") == chat_id)
     ]
     # Most recent first
     results.sort(key=lambda e: e.get("completed_at", 0), reverse=True)

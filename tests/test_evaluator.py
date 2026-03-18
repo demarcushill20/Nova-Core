@@ -105,21 +105,15 @@ def test_perfect_step_has_all_fields(evaluator: Evaluator):
 
 def test_one_retry_lowers_score(evaluator: Evaluator):
     step = _step()
-    no_retry = evaluator.evaluate_step(
-        step, _result(retry_count=0), duration_ms=100
-    )
-    one_retry = evaluator.evaluate_step(
-        step, _result(retry_count=1), duration_ms=100
-    )
+    no_retry = evaluator.evaluate_step(step, _result(retry_count=0), duration_ms=100)
+    one_retry = evaluator.evaluate_step(step, _result(retry_count=1), duration_ms=100)
     assert one_retry.total_score < no_retry.total_score
     assert one_retry.retry_penalty == _RETRY_PENALTY_PER
 
 
 def test_two_retries_penalty(evaluator: Evaluator):
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(retry_count=2), duration_ms=100
-    )
+    ev = evaluator.evaluate_step(step, _result(retry_count=2), duration_ms=100)
     assert ev.retry_penalty == 2 * _RETRY_PENALTY_PER
     assert ev.total_score == round(1.0 - 2 * _RETRY_PENALTY_PER, 2)
 
@@ -127,9 +121,7 @@ def test_two_retries_penalty(evaluator: Evaluator):
 def test_retry_penalty_capped(evaluator: Evaluator):
     """Retry penalty should not exceed cap even with high retry count."""
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(retry_count=10), duration_ms=100
-    )
+    ev = evaluator.evaluate_step(step, _result(retry_count=10), duration_ms=100)
     assert ev.retry_penalty == 0.15  # capped
     assert "retry_penalty_applied:0.15" in ev.reasons
 
@@ -139,12 +131,8 @@ def test_retry_penalty_capped(evaluator: Evaluator):
 
 def test_invalid_contract_lowers_score(evaluator: Evaluator):
     step = _step()
-    valid = evaluator.evaluate_step(
-        step, _result(contract_valid=True), duration_ms=100
-    )
-    invalid = evaluator.evaluate_step(
-        step, _result(contract_valid=False), duration_ms=100
-    )
+    valid = evaluator.evaluate_step(step, _result(contract_valid=True), duration_ms=100)
+    invalid = evaluator.evaluate_step(step, _result(contract_valid=False), duration_ms=100)
     assert invalid.total_score < valid.total_score
     assert invalid.contract_valid is False
     assert "contract_invalid" in invalid.reasons
@@ -154,9 +142,7 @@ def test_invalid_contract_loses_contract_bonus_and_verification(
     evaluator: Evaluator,
 ):
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(contract_valid=False), duration_ms=100
-    )
+    ev = evaluator.evaluate_step(step, _result(contract_valid=False), duration_ms=100)
     # Should lose _CONTRACT_BONUS (0.25) and _VERIFICATION_MAX (0.20)
     expected = _EXECUTION_BASE + _DURATION_MAX  # 0.40 + 0.15 = 0.55
     assert ev.total_score == expected
@@ -167,9 +153,7 @@ def test_invalid_contract_loses_contract_bonus_and_verification(
 
 def test_failed_execution_score(evaluator: Evaluator):
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(status="failed", contract_valid=False), duration_ms=100
-    )
+    ev = evaluator.evaluate_step(step, _result(status="failed", contract_valid=False), duration_ms=100)
     assert ev.execution_success is False
     assert ev.tests_passed is False
     assert ev.total_score == _DURATION_MAX  # only duration score
@@ -178,9 +162,7 @@ def test_failed_execution_score(evaluator: Evaluator):
 
 def test_skipped_step_score(evaluator: Evaluator):
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(status="skipped", contract_valid=False), duration_ms=0
-    )
+    ev = evaluator.evaluate_step(step, _result(status="skipped", contract_valid=False), duration_ms=0)
     assert ev.execution_success is False
     assert ev.tests_passed is False
     assert ev.total_score <= _DURATION_MAX
@@ -201,9 +183,7 @@ def test_grade_B(evaluator: Evaluator):
     """Score 0.75–0.89 → B."""
     step = _step()
     # Success + valid + fast + 3 retries: 1.0 - 0.15 = 0.85
-    ev = evaluator.evaluate_step(
-        step, _result(retry_count=3), duration_ms=100
-    )
+    ev = evaluator.evaluate_step(step, _result(retry_count=3), duration_ms=100)
     assert ev.grade == "B"
 
 
@@ -215,9 +195,7 @@ def test_grade_C(evaluator: Evaluator):
     # For C: need ~0.65. Success + valid + slow (>=30s): 0.40 + 0.25 + 0.20 + 0.00 = 0.85 → B
     # Success + valid + slow + 2 retries: 0.85 - 0.10 = 0.75 → B (boundary)
     # Success + valid + slow + 3 retries: 0.85 - 0.15 = 0.70 → C
-    ev = evaluator.evaluate_step(
-        step, _result(retry_count=3), duration_ms=31000
-    )
+    ev = evaluator.evaluate_step(step, _result(retry_count=3), duration_ms=31000)
     assert ev.grade == "C"
 
 
@@ -261,9 +239,7 @@ def test_score_bounded_at_zero(evaluator: Evaluator):
 def test_score_bounded_at_one(evaluator: Evaluator):
     """Score should not exceed 1.0."""
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(status="success", contract_valid=True), duration_ms=0
-    )
+    ev = evaluator.evaluate_step(step, _result(status="success", contract_valid=True), duration_ms=0)
     assert ev.total_score <= 1.0
 
 
@@ -283,17 +259,13 @@ def test_reasons_populated(evaluator: Evaluator):
 
 def test_reasons_include_retry_penalty_when_applied(evaluator: Evaluator):
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(retry_count=1), duration_ms=100
-    )
+    ev = evaluator.evaluate_step(step, _result(retry_count=1), duration_ms=100)
     assert any("retry_penalty_applied" in r for r in ev.reasons)
 
 
 def test_reasons_no_retry_penalty_when_none(evaluator: Evaluator):
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(retry_count=0), duration_ms=100
-    )
+    ev = evaluator.evaluate_step(step, _result(retry_count=0), duration_ms=100)
     assert not any("retry_penalty_applied" in r for r in ev.reasons)
 
 
@@ -302,17 +274,13 @@ def test_reasons_no_retry_penalty_when_none(evaluator: Evaluator):
 
 def test_tests_passed_true_when_contract_valid(evaluator: Evaluator):
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(contract_valid=True), duration_ms=100
-    )
+    ev = evaluator.evaluate_step(step, _result(contract_valid=True), duration_ms=100)
     assert ev.tests_passed is True
 
 
 def test_tests_passed_false_when_failed(evaluator: Evaluator):
     step = _step()
-    ev = evaluator.evaluate_step(
-        step, _result(status="failed", contract_valid=False), duration_ms=100
-    )
+    ev = evaluator.evaluate_step(step, _result(status="failed", contract_valid=False), duration_ms=100)
     assert ev.tests_passed is False
 
 

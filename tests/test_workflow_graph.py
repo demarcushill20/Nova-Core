@@ -55,9 +55,15 @@ def _make_workflow(bb: Blackboard, wf_id="wf_001", task_id="task_test"):
     return wf
 
 
-def _make_delegation(bb: Blackboard, wf_id="wf_001", subtask_id="sub_1",
-                     agent_id="research_001", role="research",
-                     goal="Gather data", status="completed"):
+def _make_delegation(
+    bb: Blackboard,
+    wf_id="wf_001",
+    subtask_id="sub_1",
+    agent_id="research_001",
+    role="research",
+    goal="Gather data",
+    status="completed",
+):
     d = Delegation(
         workflow_id=wf_id,
         subtask_id=subtask_id,
@@ -77,9 +83,13 @@ def _make_delegation(bb: Blackboard, wf_id="wf_001", subtask_id="sub_1",
     return d
 
 
-def _make_contract(bb: Blackboard, subtask_id="sub_1",
-                   agent_id="research_001", wf_id="wf_001",
-                   summary="Research completed successfully"):
+def _make_contract(
+    bb: Blackboard,
+    subtask_id="sub_1",
+    agent_id="research_001",
+    wf_id="wf_001",
+    summary="Research completed successfully",
+):
     c = ChildContract(
         agent_id=agent_id,
         workflow_id=wf_id,
@@ -94,8 +104,7 @@ def _make_contract(bb: Blackboard, subtask_id="sub_1",
     return c
 
 
-def _make_agent_state(bb: Blackboard, agent_id="research_001",
-                      wf_id="wf_001", status="completed"):
+def _make_agent_state(bb: Blackboard, agent_id="research_001", wf_id="wf_001", status="completed"):
     s = AgentRuntimeState(
         agent_id=agent_id,
         workflow_id=wf_id,
@@ -109,6 +118,7 @@ def _make_agent_state(bb: Blackboard, agent_id="research_001",
 # ---------------------------------------------------------------------------
 # Build tests
 # ---------------------------------------------------------------------------
+
 
 class TestGraphBuild:
     def test_build_missing_workflow(self, bb):
@@ -142,8 +152,7 @@ class TestGraphBuild:
         builder = WorkflowGraphBuilder(bb)
         graph = builder.build("wf_001")
         deleg_node = graph.root.children[0]
-        contract_nodes = [c for c in deleg_node.children
-                          if c.node_type == "contract"]
+        contract_nodes = [c for c in deleg_node.children if c.node_type == "contract"]
         assert len(contract_nodes) == 1
         assert contract_nodes[0].status == "completed"
         assert "research_results.md" in str(contract_nodes[0].metadata)
@@ -155,17 +164,16 @@ class TestGraphBuild:
         builder = WorkflowGraphBuilder(bb)
         graph = builder.build("wf_001")
         deleg_node = graph.root.children[0]
-        agent_nodes = [c for c in deleg_node.children
-                       if c.node_type == "agent"]
+        agent_nodes = [c for c in deleg_node.children if c.node_type == "agent"]
         assert len(agent_nodes) == 1
         assert agent_nodes[0].metadata["action_count"] == 5
 
     def test_build_multiple_delegations(self, bb):
         _make_workflow(bb)
-        _make_delegation(bb, subtask_id="sub_1", agent_id="research_001",
-                         role="research", goal="Research phase")
-        _make_delegation(bb, subtask_id="sub_2", agent_id="coder_001",
-                         role="coder", goal="Implement changes", status="executing")
+        _make_delegation(bb, subtask_id="sub_1", agent_id="research_001", role="research", goal="Research phase")
+        _make_delegation(
+            bb, subtask_id="sub_2", agent_id="coder_001", role="coder", goal="Implement changes", status="executing"
+        )
         _make_contract(bb, subtask_id="sub_1")
         builder = WorkflowGraphBuilder(bb)
         graph = builder.build("wf_001")
@@ -207,6 +215,7 @@ class TestGraphBuild:
 # ---------------------------------------------------------------------------
 # Render tests
 # ---------------------------------------------------------------------------
+
 
 class TestRenderMarkdown:
     def test_render_empty_workflow(self, bb):
@@ -261,8 +270,9 @@ class TestRenderASCII:
     def test_ascii_tree(self, bb):
         _make_workflow(bb)
         _make_delegation(bb, subtask_id="sub_1", goal="Research task")
-        _make_delegation(bb, subtask_id="sub_2", agent_id="coder_001",
-                         role="coder", goal="Code task", status="executing")
+        _make_delegation(
+            bb, subtask_id="sub_2", agent_id="coder_001", role="coder", goal="Code task", status="executing"
+        )
         _make_contract(bb, subtask_id="sub_1")
         builder = WorkflowGraphBuilder(bb)
         graph = builder.build("wf_001")
@@ -297,6 +307,7 @@ class TestConvenienceFunctions:
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     def test_contract_without_delegation(self, bb):

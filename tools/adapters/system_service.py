@@ -130,8 +130,7 @@ def service_restart(name: str, sandbox: Path | None = None) -> dict:
             "success": False,
             "blocked": True,
             "reason": (
-                "BLOCKED: service restart requires approval. "
-                "Set env NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE to override."
+                "BLOCKED: service restart requires approval. Set env NOVACORE_CONFIRM=ALLOW_DESTRUCTIVE to override."
             ),
             "active_state": "",
             "sub_state": "",
@@ -175,7 +174,6 @@ def service_restart(name: str, sandbox: Path | None = None) -> dict:
         "sub_state": sub_state,
         "main_pid": main_pid,
         "verification": (
-            f"active (running), PID {main_pid}" if is_running
-            else f"post-restart state: {active_state} ({sub_state})"
+            f"active (running), PID {main_pid}" if is_running else f"post-restart state: {active_state} ({sub_state})"
         ),
     }

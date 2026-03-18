@@ -47,6 +47,7 @@ from agents.rollout_gate import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_workflow(task_class: str, status: str = "completed", **extra) -> dict:
     return {"task_class": task_class, "status": status, **extra}
 
@@ -70,8 +71,11 @@ def _populate_broader_env(root: Path, num_system_runs: int = 15) -> None:
             "system_allowed_operations": sorted(STAGE4_ALLOWED_OPERATIONS),
             "system_blocked_operations": sorted(STAGE4_BLOCKED_OPERATIONS),
             "system_allowed_skills": [
-                "file-ops", "http-fetch", "reading-obsidian-memory",
-                "self-verification", "web-research",
+                "file-ops",
+                "http-fetch",
+                "reading-obsidian-memory",
+                "self-verification",
+                "web-research",
             ],
             "system_blocked_skills": ["git-ops", "shell-ops", "task-execution"],
         },
@@ -91,24 +95,30 @@ def _populate_broader_env(root: Path, num_system_runs: int = 15) -> None:
 
     # Activation log — Stage D activated 10 hours ago
     log_entries = [
-        json.dumps({
-            "attempted_at": "2026-03-07T12:00:00Z",
-            "outcome": "activated",
-            "decision": "ready_to_expand",
-            "reason": "Stage 3 expansion",
-            "pre_config": {}, "post_config": {},
-            "blocking_criteria": [],
-        }),
-        json.dumps({
-            "attempted_at": "2026-03-08T08:00:00Z",
-            "outcome": "activated",
-            "gate_decision": "ready_to_activate_stage4",
-            "reason": "Stage 4 activation",
-            "activated_scope": "system_inspect",
-            "pre_config": {}, "post_config": {},
-            "blocking_criteria": [],
-            "plan_validation": {"valid": True, "errors": []},
-        }),
+        json.dumps(
+            {
+                "attempted_at": "2026-03-07T12:00:00Z",
+                "outcome": "activated",
+                "decision": "ready_to_expand",
+                "reason": "Stage 3 expansion",
+                "pre_config": {},
+                "post_config": {},
+                "blocking_criteria": [],
+            }
+        ),
+        json.dumps(
+            {
+                "attempted_at": "2026-03-08T08:00:00Z",
+                "outcome": "activated",
+                "gate_decision": "ready_to_activate_stage4",
+                "reason": "Stage 4 activation",
+                "activated_scope": "system_inspect",
+                "pre_config": {},
+                "post_config": {},
+                "blocking_criteria": [],
+                "plan_validation": {"valid": True, "errors": []},
+            }
+        ),
     ]
     (state / "activation_log.jsonl").write_text("\n".join(log_entries) + "\n")
 
@@ -170,15 +180,18 @@ def _all_pass_criteria():
         _healthy_sys_metrics(20),
         BROADER_REQUIRED_EXTENDED_DECISION,
         _no_recoveries(),
-        0, _intact_scope(),
+        0,
+        _intact_scope(),
         10 * 3600,  # 10h > 8h required
-        0.0, 0,
+        0.0,
+        0,
     )
 
 
 # ---------------------------------------------------------------------------
 # TestReadyForPlanning
 # ---------------------------------------------------------------------------
+
 
 class TestReadyForPlanning:
     def test_all_criteria_pass(self):
@@ -218,15 +231,14 @@ class TestReadyForPlanning:
     def test_integration_with_review(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
         result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"  # 10h after activation
+            tmp_path,
+            now_override="2026-03-08T18:00:00Z",  # 10h after activation
         )
         assert result.decision == "ready_for_broader_system_scope_planning"
 
     def test_remaining_requirements_empty(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         assert result.remaining_requirements == []
 
 
@@ -234,14 +246,19 @@ class TestReadyForPlanning:
 # TestHoldBroaderScope
 # ---------------------------------------------------------------------------
 
+
 class TestHoldBroaderScope:
     def test_insufficient_runs(self):
         criteria = evaluate_broader_system_scope(
             _healthy_evidence(),
             _healthy_sys_metrics(10),  # 10 < 15 required
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "hold_broader_system_scope"
@@ -251,9 +268,12 @@ class TestHoldBroaderScope:
             _healthy_evidence(),
             _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
+            _no_recoveries(),
+            0,
+            _intact_scope(),
             3 * 3600,  # 3h < 8h required
-            0.0, 0,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "hold_broader_system_scope"
@@ -278,8 +298,12 @@ class TestHoldBroaderScope:
             _healthy_evidence(),
             _healthy_sys_metrics(10),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         _, next_action = decide_broader_system_scope(criteria)
         assert "held" in next_action.lower() or "hold" in next_action.lower()
@@ -287,24 +311,18 @@ class TestHoldBroaderScope:
 
     def test_integration_insufficient_runs(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=10)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         assert result.decision == "hold_broader_system_scope"
 
     def test_integration_insufficient_time(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
         # Only 3h after activation (08:00 + 3h = 11:00)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T11:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T11:00:00Z")
         assert result.decision == "hold_broader_system_scope"
 
     def test_remaining_requirements_populated(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=10)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         assert len(result.remaining_requirements) > 0
 
 
@@ -312,14 +330,19 @@ class TestHoldBroaderScope:
 # TestBlockBroaderScope
 # ---------------------------------------------------------------------------
 
+
 class TestBlockBroaderScope:
     def test_extended_not_sustained(self):
         criteria = evaluate_broader_system_scope(
             _healthy_evidence(),
             _healthy_sys_metrics(20),
             "stageD_continue_monitoring",  # not sustained
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "block_broader_system_scope"
@@ -328,10 +351,15 @@ class TestBlockBroaderScope:
         ev = _healthy_evidence()
         ev["heartbeat_overall"] = "degraded"
         criteria = evaluate_broader_system_scope(
-            ev, _healthy_sys_metrics(20),
+            ev,
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "block_broader_system_scope"
@@ -340,10 +368,15 @@ class TestBlockBroaderScope:
         ev = _healthy_evidence()
         ev["policy_violations"] = 1
         criteria = evaluate_broader_system_scope(
-            ev, _healthy_sys_metrics(20),
+            ev,
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "block_broader_system_scope"
@@ -352,25 +385,37 @@ class TestBlockBroaderScope:
         ev = _healthy_evidence()
         ev["budget_exhaustions"] = 1
         criteria = evaluate_broader_system_scope(
-            ev, _healthy_sys_metrics(20),
+            ev,
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "block_broader_system_scope"
 
     def test_scope_violated(self):
         broken = {
-            "intact": False, "reason": "scope tampered",
-            "system_scope": "mutate", "system_in_classes": True,
+            "intact": False,
+            "reason": "scope tampered",
+            "system_scope": "mutate",
+            "system_in_classes": True,
             "stage": "D",
         }
         criteria = evaluate_broader_system_scope(
-            _healthy_evidence(), _healthy_sys_metrics(20),
+            _healthy_evidence(),
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, broken,
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            broken,
+            10 * 3600,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "block_broader_system_scope"
@@ -379,10 +424,15 @@ class TestBlockBroaderScope:
         ev = _healthy_evidence()
         ev["rollout_stage"] = "stage3_research_code_review_code_impl"
         criteria = evaluate_broader_system_scope(
-            ev, _healthy_sys_metrics(20),
+            ev,
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "block_broader_system_scope"
@@ -391,10 +441,15 @@ class TestBlockBroaderScope:
         ev = _healthy_evidence()
         ev["supported_classes"] = ["research", "code_review", "code_impl"]
         criteria = evaluate_broader_system_scope(
-            ev, _healthy_sys_metrics(20),
+            ev,
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "block_broader_system_scope"
@@ -402,20 +457,29 @@ class TestBlockBroaderScope:
     def test_unresolved_recovery(self):
         rc = {"total": 1, "resolved": 0, "unresolved": 1, "details": []}
         criteria = evaluate_broader_system_scope(
-            _healthy_evidence(), _healthy_sys_metrics(20),
+            _healthy_evidence(),
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            rc, 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            rc,
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "block_broader_system_scope"
 
     def test_stageD_rollback_history(self):
         criteria = evaluate_broader_system_scope(
-            _healthy_evidence(), _healthy_sys_metrics(20),
+            _healthy_evidence(),
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
             stageD_rollback_count=1,  # had a prior rollback
         )
         decision, _ = decide_broader_system_scope(criteria)
@@ -428,8 +492,12 @@ class TestBlockBroaderScope:
             ev,
             _healthy_sys_metrics(5),  # soft fail too
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            1 * 3600, 0.0, 0,  # soft fail too
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            1 * 3600,
+            0.0,
+            0,  # soft fail too
         )
         decision, _ = decide_broader_system_scope(criteria)
         assert decision == "block_broader_system_scope"
@@ -438,10 +506,15 @@ class TestBlockBroaderScope:
         ev = _healthy_evidence()
         ev["policy_violations"] = 2
         criteria = evaluate_broader_system_scope(
-            ev, _healthy_sys_metrics(20),
+            ev,
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         _, next_action = decide_broader_system_scope(criteria)
         assert "blocked" in next_action.lower()
@@ -452,6 +525,7 @@ class TestBlockBroaderScope:
 # TestDecisionLogic
 # ---------------------------------------------------------------------------
 
+
 class TestDecisionLogic:
     def test_all_pass_ready(self):
         d, _ = decide_broader_system_scope(_all_pass_criteria())
@@ -461,10 +535,15 @@ class TestDecisionLogic:
         ev = _healthy_evidence()
         ev["heartbeat_overall"] = "degraded"
         criteria = evaluate_broader_system_scope(
-            ev, _healthy_sys_metrics(20),
+            ev,
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         d, _ = decide_broader_system_scope(criteria)
         assert d == "block_broader_system_scope"
@@ -474,8 +553,12 @@ class TestDecisionLogic:
             _healthy_evidence(),
             _healthy_sys_metrics(10),  # insufficient
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         d, _ = decide_broader_system_scope(criteria)
         assert d == "hold_broader_system_scope"
@@ -485,8 +568,12 @@ class TestDecisionLogic:
             _healthy_evidence(),
             _healthy_sys_metrics(BROADER_MIN_SYSTEM_INSPECT_RUNS),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         d, _ = decide_broader_system_scope(criteria)
         assert d == "ready_for_broader_system_scope_planning"
@@ -496,8 +583,12 @@ class TestDecisionLogic:
             _healthy_evidence(),
             _healthy_sys_metrics(BROADER_MIN_SYSTEM_INSPECT_RUNS - 1),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         d, _ = decide_broader_system_scope(criteria)
         assert d == "hold_broader_system_scope"
@@ -507,9 +598,12 @@ class TestDecisionLogic:
             _healthy_evidence(),
             _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
+            _no_recoveries(),
+            0,
+            _intact_scope(),
             BROADER_MIN_ELAPSED_SECONDS,
-            0.0, 0,
+            0.0,
+            0,
         )
         d, _ = decide_broader_system_scope(criteria)
         assert d == "ready_for_broader_system_scope_planning"
@@ -519,9 +613,12 @@ class TestDecisionLogic:
             _healthy_evidence(),
             _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
+            _no_recoveries(),
+            0,
+            _intact_scope(),
             BROADER_MIN_ELAPSED_SECONDS - 1,
-            0.0, 0,
+            0.0,
+            0,
         )
         d, _ = decide_broader_system_scope(criteria)
         assert d == "hold_broader_system_scope"
@@ -531,17 +628,23 @@ class TestDecisionLogic:
 # TestCriteriaClassification
 # ---------------------------------------------------------------------------
 
+
 class TestCriteriaClassification:
     def test_all_criteria_names(self):
         criteria = _all_pass_criteria()
         names = {c.name for c in criteria}
         expected = {
             "extended_monitoring_sustained_stable",
-            "heartbeat_healthy", "no_policy_violations",
-            "no_budget_exhaustions", "scope_integrity",
-            "stage_is_D", "system_class_active",
-            "no_recovery_anomalies", "no_stageD_rollback_history",
-            "minimum_system_inspect_runs", "minimum_elapsed_time",
+            "heartbeat_healthy",
+            "no_policy_violations",
+            "no_budget_exhaustions",
+            "scope_integrity",
+            "stage_is_D",
+            "system_class_active",
+            "no_recovery_anomalies",
+            "no_stageD_rollback_history",
+            "minimum_system_inspect_runs",
+            "minimum_elapsed_time",
             "blocked_mutation_attempts",
         }
         assert names == expected
@@ -552,13 +655,18 @@ class TestCriteriaClassification:
         soft_names = {c.name for c in criteria if c.severity == "soft"}
         expected_hard = {
             "extended_monitoring_sustained_stable",
-            "heartbeat_healthy", "no_policy_violations",
-            "no_budget_exhaustions", "scope_integrity",
-            "stage_is_D", "system_class_active",
-            "no_recovery_anomalies", "no_stageD_rollback_history",
+            "heartbeat_healthy",
+            "no_policy_violations",
+            "no_budget_exhaustions",
+            "scope_integrity",
+            "stage_is_D",
+            "system_class_active",
+            "no_recovery_anomalies",
+            "no_stageD_rollback_history",
         }
         expected_soft = {
-            "minimum_system_inspect_runs", "minimum_elapsed_time",
+            "minimum_system_inspect_runs",
+            "minimum_elapsed_time",
             "blocked_mutation_attempts",
         }
         assert hard_names == expected_hard
@@ -567,9 +675,15 @@ class TestCriteriaClassification:
     def test_resolved_recovery_passes(self):
         rc = {"total": 2, "resolved": 2, "unresolved": 0, "details": []}
         criteria = evaluate_broader_system_scope(
-            _healthy_evidence(), _healthy_sys_metrics(20),
+            _healthy_evidence(),
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            rc, 0, _intact_scope(), 10 * 3600, 0.0, 0,
+            rc,
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         rec = next(c for c in criteria if c.name == "no_recovery_anomalies")
         assert rec.passed
@@ -580,15 +694,18 @@ class TestCriteriaClassification:
 # TestStageDRollbackHistory
 # ---------------------------------------------------------------------------
 
+
 class TestStageDRollbackHistory:
     def test_no_rollbacks(self, tmp_path):
         state = tmp_path / "STATE"
         state.mkdir(parents=True)
         log_entries = [
-            json.dumps({
-                "pre_config": {"stage": "C"},
-                "post_config": {"stage": "D"},
-            }),
+            json.dumps(
+                {
+                    "pre_config": {"stage": "C"},
+                    "post_config": {"stage": "D"},
+                }
+            ),
         ]
         (state / "activation_log.jsonl").write_text("\n".join(log_entries) + "\n")
         assert _count_stageD_rollbacks(tmp_path) == 0
@@ -597,14 +714,18 @@ class TestStageDRollbackHistory:
         state = tmp_path / "STATE"
         state.mkdir(parents=True)
         log_entries = [
-            json.dumps({
-                "pre_config": {"stage": "C"},
-                "post_config": {"stage": "D"},
-            }),
-            json.dumps({
-                "pre_config": {"stage": "D"},
-                "post_config": {"stage": "C"},  # rollback!
-            }),
+            json.dumps(
+                {
+                    "pre_config": {"stage": "C"},
+                    "post_config": {"stage": "D"},
+                }
+            ),
+            json.dumps(
+                {
+                    "pre_config": {"stage": "D"},
+                    "post_config": {"stage": "C"},  # rollback!
+                }
+            ),
         ]
         (state / "activation_log.jsonl").write_text("\n".join(log_entries) + "\n")
         assert _count_stageD_rollbacks(tmp_path) == 1
@@ -618,10 +739,12 @@ class TestStageDRollbackHistory:
         state = tmp_path / "STATE"
         state.mkdir(parents=True)
         log_entries = [
-            json.dumps({
-                "pre_config": {"stage": "B"},
-                "post_config": {"stage": "C"},
-            }),
+            json.dumps(
+                {
+                    "pre_config": {"stage": "B"},
+                    "post_config": {"stage": "C"},
+                }
+            ),
         ]
         (state / "activation_log.jsonl").write_text("\n".join(log_entries) + "\n")
         assert _count_stageD_rollbacks(tmp_path) == 0
@@ -630,6 +753,7 @@ class TestStageDRollbackHistory:
 # ---------------------------------------------------------------------------
 # TestThresholdTightening
 # ---------------------------------------------------------------------------
+
 
 class TestThresholdTightening:
     """Verify broader-scope thresholds are tighter than extended."""
@@ -663,6 +787,7 @@ class TestThresholdTightening:
 # TestArtifactGeneration
 # ---------------------------------------------------------------------------
 
+
 class TestArtifactGeneration:
     def test_ready_markdown(self):
         criteria = _all_pass_criteria()
@@ -675,8 +800,10 @@ class TestArtifactGeneration:
             evidence_summary={},
             extended_monitoring_decision="stageD_sustained_stable",
             observation_window={
-                "activation_at": "T1", "review_at": "T2",
-                "elapsed_hours": 10.0, "elapsed_seconds": 36000.0,
+                "activation_at": "T1",
+                "review_at": "T2",
+                "elapsed_hours": 10.0,
+                "elapsed_seconds": 36000.0,
                 "scope": "system_inspect (read-only)",
             },
             scope_integrity=_intact_scope(),
@@ -688,10 +815,15 @@ class TestArtifactGeneration:
 
     def test_hold_markdown(self):
         criteria = evaluate_broader_system_scope(
-            _healthy_evidence(), _healthy_sys_metrics(10),
+            _healthy_evidence(),
+            _healthy_sys_metrics(10),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            3 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            3 * 3600,
+            0.0,
+            0,
         )
         review = BroaderSystemScopeEvaluation(
             decision="hold_broader_system_scope",
@@ -700,8 +832,10 @@ class TestArtifactGeneration:
             evidence_summary={},
             extended_monitoring_decision="stageD_sustained_stable",
             observation_window={
-                "activation_at": "T1", "review_at": "T2",
-                "elapsed_hours": 3.0, "elapsed_seconds": 10800.0,
+                "activation_at": "T1",
+                "review_at": "T2",
+                "elapsed_hours": 3.0,
+                "elapsed_seconds": 10800.0,
                 "scope": "test",
             },
             scope_integrity=_intact_scope(),
@@ -713,10 +847,15 @@ class TestArtifactGeneration:
         ev = _healthy_evidence()
         ev["heartbeat_overall"] = "unhealthy"
         criteria = evaluate_broader_system_scope(
-            ev, _healthy_sys_metrics(20),
+            ev,
+            _healthy_sys_metrics(20),
             BROADER_REQUIRED_EXTENDED_DECISION,
-            _no_recoveries(), 0, _intact_scope(),
-            10 * 3600, 0.0, 0,
+            _no_recoveries(),
+            0,
+            _intact_scope(),
+            10 * 3600,
+            0.0,
+            0,
         )
         review = BroaderSystemScopeEvaluation(
             decision="block_broader_system_scope",
@@ -725,8 +864,10 @@ class TestArtifactGeneration:
             evidence_summary={},
             extended_monitoring_decision="stageD_sustained_stable",
             observation_window={
-                "activation_at": "T1", "review_at": "T2",
-                "elapsed_hours": 10.0, "elapsed_seconds": 36000.0,
+                "activation_at": "T1",
+                "review_at": "T2",
+                "elapsed_hours": 10.0,
+                "elapsed_seconds": 36000.0,
                 "scope": "test",
             },
             scope_integrity=_intact_scope(),
@@ -744,8 +885,10 @@ class TestArtifactGeneration:
             evidence_summary={},
             extended_monitoring_decision="stageD_sustained_stable",
             observation_window={
-                "activation_at": "T1", "review_at": "T2",
-                "elapsed_hours": 10.0, "elapsed_seconds": 36000.0,
+                "activation_at": "T1",
+                "review_at": "T2",
+                "elapsed_hours": 10.0,
+                "elapsed_seconds": 36000.0,
                 "scope": "test",
             },
             scope_integrity=_intact_scope(),
@@ -757,36 +900,28 @@ class TestArtifactGeneration:
 
     def test_file_creation(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         md_path, json_path = write_broader_system_scope_evaluation(result, tmp_path)
         assert md_path.exists()
         assert json_path.exists()
 
     def test_json_valid(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         _, json_path = write_broader_system_scope_evaluation(result, tmp_path)
         data = json.loads(json_path.read_text())
         assert data["decision"] == "ready_for_broader_system_scope_planning"
 
     def test_json_roundtrip(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         d = result.to_dict()
         assert d["decision"] == "ready_for_broader_system_scope_planning"
         assert len(d["criteria"]) == 12
 
     def test_file_paths(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         md_path, json_path = write_broader_system_scope_evaluation(result, tmp_path)
         assert md_path.name == "phase7_broader_system_scope_evaluation.md"
         assert json_path.name == "broader_system_scope_evaluation.json"
@@ -796,48 +931,35 @@ class TestArtifactGeneration:
 # TestNoScopeExpansion
 # ---------------------------------------------------------------------------
 
+
 class TestNoScopeExpansion:
     def test_feature_flags_unchanged(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
-        flags_before = json.loads(
-            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
-        )
-        review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
-        flags_after = json.loads(
-            (tmp_path / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        flags_before = json.loads((tmp_path / "STATE" / "config" / "feature_flags.json").read_text())
+        review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
+        flags_after = json.loads((tmp_path / "STATE" / "config" / "feature_flags.json").read_text())
         assert flags_before == flags_after
 
     def test_activation_log_unchanged(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
         log_before = (tmp_path / "STATE" / "activation_log.jsonl").read_text()
-        review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         log_after = (tmp_path / "STATE" / "activation_log.jsonl").read_text()
         assert log_before == log_after
 
     def test_classes_not_expanded(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         assert result.enabled_classes == ["research", "code_review", "code_impl", "system"]
 
     def test_scope_remains_inspect_only(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
-        result = review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        result = review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         assert result.scope_integrity["system_scope"] == "inspect_only"
 
     def test_extended_monitoring_file_unchanged(self, tmp_path):
         _populate_broader_env(tmp_path, num_system_runs=20)
         ext_before = (tmp_path / "STATE" / "stageD_extended_monitoring.json").read_text()
-        review_broader_system_scope(
-            tmp_path, now_override="2026-03-08T18:00:00Z"
-        )
+        review_broader_system_scope(tmp_path, now_override="2026-03-08T18:00:00Z")
         ext_after = (tmp_path / "STATE" / "stageD_extended_monitoring.json").read_text()
         assert ext_before == ext_after

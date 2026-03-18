@@ -157,7 +157,7 @@ def generate_candidates(
                 original_description=current_description,
                 proposed_description="",
                 mutation_type="description",
-                policy_violations=[f"generation_error: {str(e)}"],
+                policy_violations=[f"generation_error: {e!s}"],
                 is_valid=False,
                 generation_time=round(gen_time, 2),
                 model=model,

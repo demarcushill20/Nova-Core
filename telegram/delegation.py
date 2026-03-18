@@ -4,6 +4,7 @@ When CEO Nova delegates work to the task queue, this tracker records
 the (task_stem, chat_id) pair so the bot can proactively notify the
 user with a natural summary when the task completes.
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,10 +50,7 @@ def find_completed_output(task_stem: str) -> Path | None:
     """
     if not OUTPUT.exists():
         return None
-    candidates = [
-        p for p in OUTPUT.iterdir()
-        if p.is_file() and p.name.startswith(task_stem) and p.suffix == ".md"
-    ]
+    candidates = [p for p in OUTPUT.iterdir() if p.is_file() and p.name.startswith(task_stem) and p.suffix == ".md"]
     if not candidates:
         return None
     return max(candidates, key=lambda p: p.stat().st_mtime)
@@ -90,6 +88,7 @@ def get_recent_completions(max_age_seconds: int = 3600, limit: int = 3) -> list[
     completed within max_age_seconds, most recent first.
     """
     import time
+
     if not OUTPUT.exists():
         return []
     cutoff = time.time() - max_age_seconds

@@ -37,6 +37,7 @@ from agents.rollout_gate import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_workflow(task_class: str, status: str = "completed", **extra) -> dict:
     return {"task_class": task_class, "status": status, **extra}
 
@@ -61,8 +62,11 @@ def _populate_stageD_env(root: Path) -> None:
             "system_allowed_operations": sorted(STAGE4_ALLOWED_OPERATIONS),
             "system_blocked_operations": sorted(STAGE4_BLOCKED_OPERATIONS),
             "system_allowed_skills": [
-                "file-ops", "http-fetch", "reading-obsidian-memory",
-                "self-verification", "web-research",
+                "file-ops",
+                "http-fetch",
+                "reading-obsidian-memory",
+                "self-verification",
+                "web-research",
             ],
             "system_blocked_skills": ["git-ops", "shell-ops", "task-execution"],
         },
@@ -78,26 +82,30 @@ def _populate_stageD_env(root: Path) -> None:
 
     # Activation log with Stage D activation
     log_entries = [
-        json.dumps({
-            "attempted_at": "2026-03-07T12:00:00Z",
-            "outcome": "activated",
-            "decision": "ready_to_expand",
-            "reason": "Stage 3 expansion applied",
-            "pre_config": {},
-            "post_config": {},
-            "blocking_criteria": [],
-        }),
-        json.dumps({
-            "attempted_at": "2026-03-08T14:00:00Z",
-            "outcome": "activated",
-            "gate_decision": "ready_to_activate_stage4",
-            "reason": "Stage 4 activation applied",
-            "activated_scope": "system_inspect",
-            "pre_config": {},
-            "post_config": {},
-            "blocking_criteria": [],
-            "plan_validation": {"valid": True, "errors": []},
-        }),
+        json.dumps(
+            {
+                "attempted_at": "2026-03-07T12:00:00Z",
+                "outcome": "activated",
+                "decision": "ready_to_expand",
+                "reason": "Stage 3 expansion applied",
+                "pre_config": {},
+                "post_config": {},
+                "blocking_criteria": [],
+            }
+        ),
+        json.dumps(
+            {
+                "attempted_at": "2026-03-08T14:00:00Z",
+                "outcome": "activated",
+                "gate_decision": "ready_to_activate_stage4",
+                "reason": "Stage 4 activation applied",
+                "activated_scope": "system_inspect",
+                "pre_config": {},
+                "post_config": {},
+                "blocking_criteria": [],
+                "plan_validation": {"valid": True, "errors": []},
+            }
+        ),
     ]
     (state / "activation_log.jsonl").write_text("\n".join(log_entries) + "\n")
 
@@ -174,6 +182,7 @@ def _intact_scope() -> dict:
 # Test System Inspect Metrics Collection
 # ===========================================================================
 
+
 class TestSystemInspectMetrics:
     """Tests for _collect_system_inspect_metrics()."""
 
@@ -231,6 +240,7 @@ class TestSystemInspectMetrics:
 # Test Blocked Mutation Attempts
 # ===========================================================================
 
+
 class TestBlockedMutationAttempts:
     """Tests for _count_blocked_mutation_attempts()."""
 
@@ -242,11 +252,13 @@ class TestBlockedMutationAttempts:
     def test_system_class_denial(self, tmp_path):
         state = tmp_path / "STATE"
         state.mkdir(parents=True)
-        denial = json.dumps({
-            "task_class": "system",
-            "reason": "blocked operation",
-            "timestamp": "2026-03-08T15:00:00Z",
-        })
+        denial = json.dumps(
+            {
+                "task_class": "system",
+                "reason": "blocked operation",
+                "timestamp": "2026-03-08T15:00:00Z",
+            }
+        )
         (state / "policy_denials.jsonl").write_text(denial + "\n")
         count = _count_blocked_mutation_attempts(tmp_path)
         assert count == 1
@@ -254,11 +266,13 @@ class TestBlockedMutationAttempts:
     def test_mutate_reason_denial(self, tmp_path):
         state = tmp_path / "STATE"
         state.mkdir(parents=True)
-        denial = json.dumps({
-            "task_class": "unknown",
-            "reason": "system_mutate pattern detected",
-            "timestamp": "2026-03-08T15:00:00Z",
-        })
+        denial = json.dumps(
+            {
+                "task_class": "unknown",
+                "reason": "system_mutate pattern detected",
+                "timestamp": "2026-03-08T15:00:00Z",
+            }
+        )
         (state / "policy_denials.jsonl").write_text(denial + "\n")
         count = _count_blocked_mutation_attempts(tmp_path)
         assert count == 1
@@ -267,31 +281,35 @@ class TestBlockedMutationAttempts:
         state = tmp_path / "STATE"
         state.mkdir(parents=True)
         denials = [
-            json.dumps({
-                "task_class": "system",
-                "reason": "blocked",
-                "timestamp": "2026-03-07T10:00:00Z",
-            }),
-            json.dumps({
-                "task_class": "system",
-                "reason": "blocked",
-                "timestamp": "2026-03-08T16:00:00Z",
-            }),
+            json.dumps(
+                {
+                    "task_class": "system",
+                    "reason": "blocked",
+                    "timestamp": "2026-03-07T10:00:00Z",
+                }
+            ),
+            json.dumps(
+                {
+                    "task_class": "system",
+                    "reason": "blocked",
+                    "timestamp": "2026-03-08T16:00:00Z",
+                }
+            ),
         ]
         (state / "policy_denials.jsonl").write_text("\n".join(denials) + "\n")
-        count = _count_blocked_mutation_attempts(
-            tmp_path, since_ts="2026-03-08T14:00:00Z"
-        )
+        count = _count_blocked_mutation_attempts(tmp_path, since_ts="2026-03-08T14:00:00Z")
         assert count == 1
 
     def test_non_system_non_mutate_ignored(self, tmp_path):
         state = tmp_path / "STATE"
         state.mkdir(parents=True)
-        denial = json.dumps({
-            "task_class": "research",
-            "reason": "rate limited",
-            "timestamp": "2026-03-08T15:00:00Z",
-        })
+        denial = json.dumps(
+            {
+                "task_class": "research",
+                "reason": "rate limited",
+                "timestamp": "2026-03-08T15:00:00Z",
+            }
+        )
         (state / "policy_denials.jsonl").write_text(denial + "\n")
         count = _count_blocked_mutation_attempts(tmp_path)
         assert count == 0
@@ -300,6 +318,7 @@ class TestBlockedMutationAttempts:
 # ===========================================================================
 # Test Scope Integrity Verification
 # ===========================================================================
+
 
 class TestScopeIntegrity:
     """Tests for _verify_scope_integrity()."""
@@ -407,6 +426,7 @@ class TestScopeIntegrity:
 # Test Stable Continue Decision
 # ===========================================================================
 
+
 class TestStableContinue:
     """Tests for healthy Stage D -> stable_continue_stageD."""
 
@@ -416,7 +436,11 @@ class TestStableContinue:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, next_action = decide_stageD_stability(criteria)
         assert decision == "stable_continue_stageD"
@@ -427,7 +451,11 @@ class TestStableContinue:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         assert len(criteria) == 13
 
@@ -437,7 +465,11 @@ class TestStableContinue:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         for c in criteria:
             assert c.passed, f"Expected {c.name} to pass, got: {c.detail}"
@@ -448,7 +480,11 @@ class TestStableContinue:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         hard = [c for c in criteria if c.severity == "hard"]
         assert len(hard) == 7
@@ -459,7 +495,11 @@ class TestStableContinue:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         soft = [c for c in criteria if c.severity == "soft"]
         assert len(soft) == 6
@@ -491,6 +531,7 @@ class TestStableContinue:
 # Test Hold Decision
 # ===========================================================================
 
+
 class TestHoldStageD:
     """Tests for insufficient evidence -> hold_stageD."""
 
@@ -506,7 +547,11 @@ class TestHoldStageD:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "hold_stageD"
@@ -523,7 +568,11 @@ class TestHoldStageD:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "hold_stageD"
@@ -534,7 +583,8 @@ class TestHoldStageD:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics,
+            evidence,
+            sys_metrics,
             post_activation_recoveries=1,  # > STAGED_MAX_RECOVERY_ANOMALIES (0)
             blocked_mutation_attempts=0,
             scope_integrity=scope,
@@ -548,7 +598,9 @@ class TestHoldStageD:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0,
+            evidence,
+            sys_metrics,
+            0,
             blocked_mutation_attempts=STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS + 1,
             scope_integrity=scope,
         )
@@ -562,7 +614,11 @@ class TestHoldStageD:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "hold_stageD"
@@ -574,7 +630,11 @@ class TestHoldStageD:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "hold_stageD"
@@ -591,7 +651,11 @@ class TestHoldStageD:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         _, next_action = decide_stageD_stability(criteria)
         assert "Insufficient" in next_action or "evidence" in next_action.lower()
@@ -612,6 +676,7 @@ class TestHoldStageD:
 # Test Rollback Decision
 # ===========================================================================
 
+
 class TestRollbackRecommended:
     """Tests for hard failures -> rollback_system_inspect_recommended."""
 
@@ -622,7 +687,11 @@ class TestRollbackRecommended:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -635,7 +704,11 @@ class TestRollbackRecommended:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -647,7 +720,11 @@ class TestRollbackRecommended:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -659,7 +736,11 @@ class TestRollbackRecommended:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -671,7 +752,11 @@ class TestRollbackRecommended:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -688,7 +773,11 @@ class TestRollbackRecommended:
         }
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -700,7 +789,11 @@ class TestRollbackRecommended:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -712,7 +805,11 @@ class TestRollbackRecommended:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -724,7 +821,11 @@ class TestRollbackRecommended:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         _, next_action = decide_stageD_stability(criteria)
         assert "Stage C" in next_action or "revert" in next_action.lower()
@@ -744,7 +845,11 @@ class TestRollbackRecommended:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         decision, _ = decide_stageD_stability(criteria)
         assert decision == "rollback_system_inspect_recommended"
@@ -753,6 +858,7 @@ class TestRollbackRecommended:
 # ===========================================================================
 # Test Decision Logic
 # ===========================================================================
+
 
 class TestDecisionLogic:
     """Tests for decide_stageD_stability() decision logic."""
@@ -807,8 +913,12 @@ class TestDecisionLogic:
         criteria = [
             RolloutCriterion("c1", True, 0, 0, "ok", "hard"),
             RolloutCriterion(
-                "system_inspect_minimum_runs", False, 1,
-                STAGED_MIN_SYSTEM_INSPECT_RUNS, "too few", "soft",
+                "system_inspect_minimum_runs",
+                False,
+                1,
+                STAGED_MIN_SYSTEM_INSPECT_RUNS,
+                "too few",
+                "soft",
             ),
             RolloutCriterion("c3", False, 0, 0, "fail", "soft"),
         ]
@@ -821,6 +931,7 @@ class TestDecisionLogic:
 # Test Blocked Mutation Influence
 # ===========================================================================
 
+
 class TestBlockedMutationInfluence:
     """Tests that blocked mutation attempts correctly influence Stage D review."""
 
@@ -830,7 +941,9 @@ class TestBlockedMutationInfluence:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0,
+            evidence,
+            sys_metrics,
+            0,
             blocked_mutation_attempts=2,  # within threshold
             scope_integrity=scope,
         )
@@ -844,7 +957,9 @@ class TestBlockedMutationInfluence:
 
         # Exactly at threshold — should still pass
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0,
+            evidence,
+            sys_metrics,
+            0,
             blocked_mutation_attempts=STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS,
             scope_integrity=scope,
         )
@@ -857,7 +972,9 @@ class TestBlockedMutationInfluence:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0,
+            evidence,
+            sys_metrics,
+            0,
             blocked_mutation_attempts=STAGED_MAX_BLOCKED_MUTATION_ATTEMPTS + 1,
             scope_integrity=scope,
         )
@@ -870,7 +987,9 @@ class TestBlockedMutationInfluence:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0,
+            evidence,
+            sys_metrics,
+            0,
             blocked_mutation_attempts=3,
             scope_integrity=scope,
         )
@@ -883,6 +1002,7 @@ class TestBlockedMutationInfluence:
 # Test Criteria Evaluation Details
 # ===========================================================================
 
+
 class TestCriteriaEvaluation:
     """Tests for specific criteria evaluation behavior."""
 
@@ -893,7 +1013,11 @@ class TestCriteriaEvaluation:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         hb = next(c for c in criteria if c.name == "heartbeat_healthy")
         assert hb.passed is True
@@ -906,7 +1030,11 @@ class TestCriteriaEvaluation:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         hb = next(c for c in criteria if c.name == "heartbeat_healthy")
         assert hb.passed is False
@@ -919,7 +1047,11 @@ class TestCriteriaEvaluation:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         fr = next(c for c in criteria if c.name == "overall_failure_rate")
         assert fr.passed is True
@@ -936,7 +1068,11 @@ class TestCriteriaEvaluation:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         sifr = next(c for c in criteria if c.name == "system_inspect_failure_rate")
         assert sifr.passed is True  # 0.2 == threshold
@@ -953,7 +1089,11 @@ class TestCriteriaEvaluation:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         sifr = next(c for c in criteria if c.name == "system_inspect_failure_rate")
         assert sifr.passed is False
@@ -964,7 +1104,11 @@ class TestCriteriaEvaluation:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         hard_names = {c.name for c in criteria if c.severity == "hard"}
         expected_hard = {
@@ -984,7 +1128,11 @@ class TestCriteriaEvaluation:
         scope = _intact_scope()
 
         criteria = evaluate_stageD_stability(
-            evidence, sys_metrics, 0, 0, scope,
+            evidence,
+            sys_metrics,
+            0,
+            0,
+            scope,
         )
         names = [c.name for c in criteria]
         expected = [
@@ -1008,6 +1156,7 @@ class TestCriteriaEvaluation:
 # ===========================================================================
 # Test Artifact Generation
 # ===========================================================================
+
 
 class TestArtifactGeneration:
     """Tests for markdown rendering and file writing."""
@@ -1039,8 +1188,11 @@ class TestArtifactGeneration:
             rollout_stage="stage4_research_code_review_code_impl_system_inspect",
             enabled_classes=["research", "code_review", "code_impl", "system"],
             system_inspect_metrics={
-                "total_runs": 0, "completed": 0, "failed": 0,
-                "verifier_rejected": 0, "failure_rate": None,
+                "total_runs": 0,
+                "completed": 0,
+                "failed": 0,
+                "verifier_rejected": 0,
+                "failure_rate": None,
             },
             evidence_summary={
                 "heartbeat_overall": "healthy",
@@ -1207,17 +1359,14 @@ class TestArtifactGeneration:
 # Test No Scope Expansion
 # ===========================================================================
 
+
 class TestNoScopeExpansion:
     """Tests that Stage D review never changes live state."""
 
     def test_feature_flags_unchanged(self, stageD_root):
-        pre = json.loads(
-            (stageD_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        pre = json.loads((stageD_root / "STATE" / "config" / "feature_flags.json").read_text())
         review_stageD_stability(stageD_root)
-        post = json.loads(
-            (stageD_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        post = json.loads((stageD_root / "STATE" / "config" / "feature_flags.json").read_text())
         assert pre == post
 
     def test_activation_log_unchanged(self, stageD_root):

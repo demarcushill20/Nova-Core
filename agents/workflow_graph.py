@@ -23,18 +23,20 @@ from agents.blackboard import Blackboard
 # Graph data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GraphNode:
     """A single node in the workflow graph."""
+
     node_id: str
-    node_type: str          # workflow | delegation | contract | agent
+    node_type: str  # workflow | delegation | contract | agent
     label: str
     status: str
     metadata: dict = field(default_factory=dict)
     children: list["GraphNode"] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        d = {
+        d: dict[str, object] = {
             "node_id": self.node_id,
             "type": self.node_type,
             "label": self.label,
@@ -50,9 +52,10 @@ class GraphNode:
 @dataclass
 class GraphEdge:
     """A directed edge in the workflow graph."""
+
     source: str
     target: str
-    edge_type: str          # delegates | produces | verifies
+    edge_type: str  # delegates | produces | verifies
     label: str = ""
 
     def to_dict(self) -> dict:
@@ -65,6 +68,7 @@ class GraphEdge:
 @dataclass
 class WorkflowGraph:
     """Complete graph of a workflow execution."""
+
     workflow_id: str
     root: GraphNode | None = None
     edges: list[GraphEdge] = field(default_factory=list)
@@ -85,19 +89,19 @@ class WorkflowGraph:
 
 _STATUS_ICON = {
     "completed": "[OK]",
-    "failed":    "[FAIL]",
+    "failed": "[FAIL]",
     "executing": "[RUN]",
-    "claimed":   "[RUN]",
-    "pending":   "[..]",
-    "queued":    "[..]",
-    "idle":      "[--]",
-    "halted":    "[HALT]",
-    "created":   "[NEW]",
-    "planning":  "[PLAN]",
-    "partial":   "[PART]",
-    "waiting":   "[WAIT]",
-    "blocked":   "[BLK]",
-    "stale":     "[STALE]",
+    "claimed": "[RUN]",
+    "pending": "[..]",
+    "queued": "[..]",
+    "idle": "[--]",
+    "halted": "[HALT]",
+    "created": "[NEW]",
+    "planning": "[PLAN]",
+    "partial": "[PART]",
+    "waiting": "[WAIT]",
+    "blocked": "[BLK]",
+    "stale": "[STALE]",
 }
 
 
@@ -116,6 +120,7 @@ def _fmt_duration(seconds: float | None) -> str:
 # ---------------------------------------------------------------------------
 # Graph builder
 # ---------------------------------------------------------------------------
+
 
 class WorkflowGraphBuilder:
     """Build a WorkflowGraph from blackboard state.
@@ -164,10 +169,7 @@ class WorkflowGraphBuilder:
 
         # Attach delegation nodes with child contracts
         delegations = self.bb.list_delegations(workflow_id)
-        contracts_by_subtask = {
-            c["subtask_id"]: c
-            for c in self.bb.list_child_contracts(workflow_id)
-        }
+        contracts_by_subtask = {c["subtask_id"]: c for c in self.bb.list_child_contracts(workflow_id)}
 
         seen_node_ids: set[str] = set()
 
@@ -196,12 +198,14 @@ class WorkflowGraphBuilder:
             )
 
             # Edge: workflow → delegation
-            graph.edges.append(GraphEdge(
-                source=workflow_id,
-                target=subtask_id,
-                edge_type="delegates",
-                label=role,
-            ))
+            graph.edges.append(
+                GraphEdge(
+                    source=workflow_id,
+                    target=subtask_id,
+                    edge_type="delegates",
+                    label=role,
+                )
+            )
 
             # If a child contract exists, attach it
             contract = contracts_by_subtask.get(subtask_id)
@@ -214,11 +218,13 @@ class WorkflowGraphBuilder:
                     metadata=_contract_metadata(contract),
                 )
                 deleg_node.children.append(contract_node)
-                graph.edges.append(GraphEdge(
-                    source=subtask_id,
-                    target=f"contract_{subtask_id}",
-                    edge_type="produces",
-                ))
+                graph.edges.append(
+                    GraphEdge(
+                        source=subtask_id,
+                        target=f"contract_{subtask_id}",
+                        edge_type="produces",
+                    )
+                )
 
             # Attach agent runtime state if available
             agent_state = self.bb.get_agent_state(agent_id)
@@ -248,11 +254,13 @@ class WorkflowGraphBuilder:
                 status=ns.get("status", "pending"),
                 metadata=_node_state_metadata(ns),
             )
-            graph.edges.append(GraphEdge(
-                source=workflow_id,
-                target=nid,
-                edge_type="delegates",
-            ))
+            graph.edges.append(
+                GraphEdge(
+                    source=workflow_id,
+                    target=nid,
+                    edge_type="delegates",
+                )
+            )
             root.children.append(coord_node)
 
         return graph
@@ -272,6 +280,7 @@ class WorkflowGraphBuilder:
 # ---------------------------------------------------------------------------
 # Metadata extractors
 # ---------------------------------------------------------------------------
+
 
 def _workflow_metadata(wf: dict) -> dict:
     meta: dict[str, Any] = {}
@@ -293,13 +302,9 @@ def _delegation_metadata(deleg: dict) -> dict:
         "role": deleg.get("role"),
     }
     if deleg.get("claimed_at") and deleg.get("completed_at"):
-        meta["duration"] = _fmt_duration(
-            deleg["completed_at"] - deleg["claimed_at"]
-        )
+        meta["duration"] = _fmt_duration(deleg["completed_at"] - deleg["claimed_at"])
     elif deleg.get("claimed_at"):
-        meta["running_for"] = _fmt_duration(
-            time.time() - deleg["claimed_at"]
-        )
+        meta["running_for"] = _fmt_duration(time.time() - deleg["claimed_at"])
     if deleg.get("error"):
         meta["error"] = deleg["error"]
     return meta
@@ -330,15 +335,14 @@ def _node_state_metadata(ns: dict) -> dict:
     if ns.get("error"):
         meta["error"] = ns["error"]
     if ns.get("claimed_at") and ns.get("completed_at"):
-        meta["coord_duration"] = _fmt_duration(
-            ns["completed_at"] - ns["claimed_at"]
-        )
+        meta["coord_duration"] = _fmt_duration(ns["completed_at"] - ns["claimed_at"])
     return meta
 
 
 # ---------------------------------------------------------------------------
 # Renderers
 # ---------------------------------------------------------------------------
+
 
 def render_json(graph: WorkflowGraph) -> str:
     """Render graph as pretty-printed JSON."""
@@ -379,8 +383,7 @@ def render_markdown(graph: WorkflowGraph) -> str:
 
         icon = _icon(deleg_node.status)
         dmeta = deleg_node.metadata
-        duration = (dmeta.get("duration") or dmeta.get("coord_duration")
-                    or dmeta.get("running_for", "—"))
+        duration = dmeta.get("duration") or dmeta.get("coord_duration") or dmeta.get("running_for", "—")
         lines.append(f"### {icon} {deleg_node.label}")
         lines.append(f"- **Agent:** {dmeta.get('agent_id') or dmeta.get('assigned_agent', '?')}")
         if dmeta.get("role"):
@@ -407,8 +410,9 @@ def render_markdown(graph: WorkflowGraph) -> str:
                 if cmeta.get("verification"):
                     v = cmeta["verification"]
                     if isinstance(v, dict):
-                        lines.append(f"  **Verification:** {v.get('result', '?')} "
-                                     f"(confidence: {v.get('confidence', '?')})")
+                        lines.append(
+                            f"  **Verification:** {v.get('result', '?')} (confidence: {v.get('confidence', '?')})"
+                        )
                     else:
                         lines.append(f"  **Verification:** {v}")
                 if cmeta.get("handoff"):
@@ -417,8 +421,7 @@ def render_markdown(graph: WorkflowGraph) -> str:
 
             elif child.node_type == "agent":
                 agent_meta = child.metadata
-                lines.append(f"  **Agent state:** {_icon(child.status)} "
-                             f"actions={agent_meta.get('action_count', 0)}")
+                lines.append(f"  **Agent state:** {_icon(child.status)} actions={agent_meta.get('action_count', 0)}")
                 if agent_meta.get("error"):
                     lines.append(f"  **Agent error:** {agent_meta['error']}")
                 lines.append("")
@@ -437,8 +440,7 @@ def render_ascii_tree(graph: WorkflowGraph) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _tree_node(node: GraphNode, lines: list[str],
-               prefix: str, is_last: bool) -> None:
+def _tree_node(node: GraphNode, lines: list[str], prefix: str, is_last: bool) -> None:
     connector = "└── " if is_last else "├── "
     icon = _icon(node.status)
     lines.append(f"{prefix}{connector}{icon} {node.label}")
@@ -452,24 +454,22 @@ def _tree_node(node: GraphNode, lines: list[str],
 # Convenience: build + render in one call
 # ---------------------------------------------------------------------------
 
-def workflow_graph_markdown(workflow_id: str,
-                            blackboard: Blackboard | None = None) -> str:
+
+def workflow_graph_markdown(workflow_id: str, blackboard: Blackboard | None = None) -> str:
     """One-shot: build graph and render as Markdown."""
     builder = WorkflowGraphBuilder(blackboard)
     graph = builder.build(workflow_id)
     return render_markdown(graph)
 
 
-def workflow_graph_json(workflow_id: str,
-                        blackboard: Blackboard | None = None) -> str:
+def workflow_graph_json(workflow_id: str, blackboard: Blackboard | None = None) -> str:
     """One-shot: build graph and render as JSON."""
     builder = WorkflowGraphBuilder(blackboard)
     graph = builder.build(workflow_id)
     return render_json(graph)
 
 
-def workflow_graph_tree(workflow_id: str,
-                        blackboard: Blackboard | None = None) -> str:
+def workflow_graph_tree(workflow_id: str, blackboard: Blackboard | None = None) -> str:
     """One-shot: build graph and render as ASCII tree."""
     builder = WorkflowGraphBuilder(blackboard)
     graph = builder.build(workflow_id)
@@ -491,7 +491,6 @@ def all_workflows_summary(blackboard: Blackboard | None = None) -> str:
         icon = _icon(root.status)
         n_deleg = root.metadata.get("delegation_count", 0)
         elapsed = root.metadata.get("elapsed", "—")
-        lines.append(f"- {icon} **{g.workflow_id}** — "
-                     f"{root.status} | {n_deleg} delegations | {elapsed}")
+        lines.append(f"- {icon} **{g.workflow_id}** — {root.status} | {n_deleg} delegations | {elapsed}")
     lines.append("")
     return "\n".join(lines) + "\n"

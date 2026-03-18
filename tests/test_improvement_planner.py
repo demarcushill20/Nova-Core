@@ -32,9 +32,7 @@ def planner() -> ImprovementPlanner:
 def tmp_improvement_dir(tmp_path: Path, monkeypatch):
     """Redirect IMPROVEMENT_DIR to a temp directory."""
     imp_dir = tmp_path / "improvement_runs"
-    monkeypatch.setattr(
-        "planner.improvement_planner.IMPROVEMENT_DIR", imp_dir
-    )
+    monkeypatch.setattr("planner.improvement_planner.IMPROVEMENT_DIR", imp_dir)
     return imp_dir
 
 
@@ -143,9 +141,7 @@ class TestBuildHealthFindings:
         assert "s1" in cf[0].summary
         assert cf[0].severity == "medium"
 
-    def test_multiple_contract_failures_high_severity(
-        self, planner: ImprovementPlanner
-    ):
+    def test_multiple_contract_failures_high_severity(self, planner: ImprovementPlanner):
         """Multiple contract failures → high severity."""
         pe = _plan_eval(
             grade="D",
@@ -192,9 +188,7 @@ class TestBuildHealthFindings:
         assert len(se) == 1
         assert se[0].severity == "low"
 
-    def test_slow_execution_skips_failed_steps(
-        self, planner: ImprovementPlanner
-    ):
+    def test_slow_execution_skips_failed_steps(self, planner: ImprovementPlanner):
         """Slow but failed steps are not flagged as slow_execution."""
         pe = _plan_eval(
             grade="D",
@@ -211,9 +205,7 @@ class TestBuildHealthFindings:
         se = [f for f in findings if f.category == CAT_SLOW_EXECUTION]
         assert len(se) == 0
 
-    def test_verification_weakness_finding(
-        self, planner: ImprovementPlanner
-    ):
+    def test_verification_weakness_finding(self, planner: ImprovementPlanner):
         """Steps with low verification score → verification_weakness."""
         pe = _plan_eval(
             grade="B",
@@ -231,9 +223,7 @@ class TestBuildHealthFindings:
         assert len(vw) == 1
         assert vw[0].severity == "medium"
 
-    def test_verification_weakness_skips_failed(
-        self, planner: ImprovementPlanner
-    ):
+    def test_verification_weakness_skips_failed(self, planner: ImprovementPlanner):
         """Failed steps with low verification are not flagged."""
         pe = _plan_eval(
             grade="D",
@@ -308,15 +298,11 @@ class TestBuildHealthFindings:
         ]
         findings = planner.build_health_findings(pe, recent)
         systemic = [
-            f for f in findings
-            if f.category == CAT_LOW_GRADE and f.severity == "critical"
-            and "systemic" in f.summary
+            f for f in findings if f.category == CAT_LOW_GRADE and f.severity == "critical" and "systemic" in f.summary
         ]
         assert len(systemic) == 1
 
-    def test_no_cross_plan_finding_with_one_low_grade(
-        self, planner: ImprovementPlanner
-    ):
+    def test_no_cross_plan_finding_with_one_low_grade(self, planner: ImprovementPlanner):
         """Single D/F in recent plans → no systemic finding."""
         pe = _plan_eval(grade="D", aggregate_score=0.42)
         recent = [
@@ -330,10 +316,7 @@ class TestBuildHealthFindings:
             },
         ]
         findings = planner.build_health_findings(pe, recent)
-        systemic = [
-            f for f in findings
-            if "systemic" in f.summary
-        ]
+        systemic = [f for f in findings if "systemic" in f.summary]
         assert len(systemic) == 0
 
 
@@ -373,9 +356,7 @@ class TestBuildImprovementPlan:
         assert len(plan.goals) >= 1
         assert len(plan.allowed_skills) >= 1
 
-    def test_critical_finding_requires_human_review(
-        self, planner: ImprovementPlanner
-    ):
+    def test_critical_finding_requires_human_review(self, planner: ImprovementPlanner):
         """Critical severity → requires_human_review=True."""
         findings = [
             HealthFinding(
@@ -388,9 +369,7 @@ class TestBuildImprovementPlan:
         plan = planner.build_improvement_plan(findings)
         assert plan.requires_human_review is True
 
-    def test_non_critical_no_human_review(
-        self, planner: ImprovementPlanner
-    ):
+    def test_non_critical_no_human_review(self, planner: ImprovementPlanner):
         """Medium severity only → requires_human_review=False."""
         findings = [
             HealthFinding(
@@ -431,9 +410,7 @@ class TestBuildImprovementPlan:
         assert "code_improve" in plan.allowed_skills
         assert "repo_health_check" in plan.allowed_skills
 
-    def test_goals_derived_from_categories(
-        self, planner: ImprovementPlanner
-    ):
+    def test_goals_derived_from_categories(self, planner: ImprovementPlanner):
         """Goals correspond to finding categories."""
         findings = [
             HealthFinding(
@@ -468,9 +445,7 @@ class TestBuildImprovementPlan:
         assert plan.improvement_id.startswith("imp_")
         assert len(plan.improvement_id) > 4
 
-    def test_high_severity_increases_max_files(
-        self, planner: ImprovementPlanner
-    ):
+    def test_high_severity_increases_max_files(self, planner: ImprovementPlanner):
         """High-severity finding allows more files to be changed."""
         medium_findings = [
             HealthFinding(
@@ -501,9 +476,7 @@ class TestBuildImprovementPlan:
 class TestShouldExecute:
     """Tests for ImprovementPlanner.should_execute."""
 
-    def test_queued_plan_with_findings_executes(
-        self, planner: ImprovementPlanner
-    ):
+    def test_queued_plan_with_findings_executes(self, planner: ImprovementPlanner):
         """Queued plan with findings and max_steps > 0 → True."""
         plan = ImprovementPlan(
             improvement_id="imp_1",
@@ -520,9 +493,7 @@ class TestShouldExecute:
         )
         assert planner.should_execute(plan) is True
 
-    def test_no_findings_does_not_execute(
-        self, planner: ImprovementPlanner
-    ):
+    def test_no_findings_does_not_execute(self, planner: ImprovementPlanner):
         """No findings → False."""
         plan = ImprovementPlan(
             improvement_id="imp_1",
@@ -532,9 +503,7 @@ class TestShouldExecute:
         )
         assert planner.should_execute(plan) is False
 
-    def test_non_queued_does_not_execute(
-        self, planner: ImprovementPlanner
-    ):
+    def test_non_queued_does_not_execute(self, planner: ImprovementPlanner):
         """Status not 'queued' → False."""
         plan = ImprovementPlan(
             improvement_id="imp_1",
@@ -551,9 +520,7 @@ class TestShouldExecute:
         )
         assert planner.should_execute(plan) is False
 
-    def test_human_review_blocks_execution(
-        self, planner: ImprovementPlanner
-    ):
+    def test_human_review_blocks_execution(self, planner: ImprovementPlanner):
         """requires_human_review → False."""
         plan = ImprovementPlan(
             improvement_id="imp_1",
@@ -571,9 +538,7 @@ class TestShouldExecute:
         )
         assert planner.should_execute(plan) is False
 
-    def test_zero_max_steps_does_not_execute(
-        self, planner: ImprovementPlanner
-    ):
+    def test_zero_max_steps_does_not_execute(self, planner: ImprovementPlanner):
         """max_steps=0 → False."""
         plan = ImprovementPlan(
             improvement_id="imp_1",
@@ -590,9 +555,7 @@ class TestShouldExecute:
         )
         assert planner.should_execute(plan) is False
 
-    def test_skipped_status_does_not_execute(
-        self, planner: ImprovementPlanner
-    ):
+    def test_skipped_status_does_not_execute(self, planner: ImprovementPlanner):
         """Status 'skipped' → False."""
         plan = ImprovementPlan(
             improvement_id="imp_1",
@@ -720,12 +683,8 @@ class TestHealthFindingDataclass:
         assert hf.evidence == []
 
     def test_evidence_default_factory(self):
-        hf1 = HealthFinding(
-            finding_id="hf_a", category="x", severity="low", summary="a"
-        )
-        hf2 = HealthFinding(
-            finding_id="hf_b", category="x", severity="low", summary="b"
-        )
+        hf1 = HealthFinding(finding_id="hf_a", category="x", severity="low", summary="a")
+        hf2 = HealthFinding(finding_id="hf_b", category="x", severity="low", summary="b")
         hf1.evidence.append("item")
         assert "item" not in hf2.evidence
 

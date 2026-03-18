@@ -115,9 +115,7 @@ class BudgetEnforcer:
     # Public API
     # ------------------------------------------------------------------
 
-    def can_proceed(
-        self, estimated_tokens: int = 0, scope: str = "daily"
-    ) -> tuple[bool, str]:
+    def can_proceed(self, estimated_tokens: int = 0, scope: str = "daily") -> tuple[bool, str]:
         """Pre-flight check: can we afford *estimated_tokens* more input tokens?
 
         Args:
@@ -367,9 +365,7 @@ class BudgetEnforcer:
         return round((used / limit) * 100, 1)
 
     @staticmethod
-    def _check_threshold_alerts(
-        alerts: list[str], label: str, used: float, limit: float
-    ) -> None:
+    def _check_threshold_alerts(alerts: list[str], label: str, used: float, limit: float) -> None:
         if limit <= 0:
             return
         ratio = used / limit
@@ -377,19 +373,14 @@ class BudgetEnforcer:
             if ratio >= threshold:
                 pct = int(threshold * 100)
                 alerts.append(
-                    f"WARNING: {label} at {ratio:.0%} of limit "
-                    f"({used:,.0f} / {limit:,.0f}) — exceeds {pct}% threshold"
+                    f"WARNING: {label} at {ratio:.0%} of limit ({used:,.0f} / {limit:,.0f}) — exceeds {pct}% threshold"
                 )
                 break  # only emit the highest crossed threshold
 
-    def _calculate_cost(
-        self, input_tokens: int, output_tokens: int, model: str
-    ) -> float:
+    def _calculate_cost(self, input_tokens: int, output_tokens: int, model: str) -> float:
         """Calculate cost in USD for a given token usage and model."""
         pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
-        cost = (input_tokens / 1_000_000) * pricing["input"] + (
-            output_tokens / 1_000_000
-        ) * pricing["output"]
+        cost = (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing["output"]
         return cost
 
     # ------------------------------------------------------------------
@@ -409,9 +400,7 @@ class BudgetEnforcer:
                 merged = {**DEFAULT_LIMITS}
                 for key in DEFAULT_LIMITS:
                     if key in data:
-                        if isinstance(DEFAULT_LIMITS[key], dict) and isinstance(
-                            data[key], dict
-                        ):
+                        if isinstance(DEFAULT_LIMITS[key], dict) and isinstance(data[key], dict):
                             merged[key] = {**DEFAULT_LIMITS[key], **data[key]}
                         else:
                             merged[key] = data[key]

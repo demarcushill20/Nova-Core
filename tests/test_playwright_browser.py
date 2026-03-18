@@ -94,14 +94,12 @@ class TestValidateOutputPath:
         assert result.name == "my_shot.png"
 
     def test_strips_path_traversal(self):
-        result = _validate_output_path("../../etc/passwd.png",
-                                       self.output_dir, ".png")
+        result = _validate_output_path("../../etc/passwd.png", self.output_dir, ".png")
         assert result.parent == self.output_dir
         assert result.name == "passwd.png"
 
     def test_strips_absolute_path(self):
-        result = _validate_output_path("/etc/shadow.png",
-                                       self.output_dir, ".png")
+        result = _validate_output_path("/etc/shadow.png", self.output_dir, ".png")
         assert result.parent == self.output_dir
         assert result.name == "shadow.png"
 
@@ -119,8 +117,7 @@ class TestValidateOutputPath:
             _validate_output_path("file;rm -rf.png", self.output_dir, ".png")
 
     def test_allows_spaces_dashes_underscores(self):
-        result = _validate_output_path("my file-name_v2.png",
-                                       self.output_dir, ".png")
+        result = _validate_output_path("my file-name_v2.png", self.output_dir, ".png")
         assert result.name == "my file-name_v2.png"
 
     def test_pdf_extension(self):
@@ -272,6 +269,7 @@ class TestBrowserScreenshot:
 
     def teardown_method(self):
         import shutil
+
         if self.sandbox.exists():
             shutil.rmtree(self.sandbox, ignore_errors=True)
 
@@ -302,8 +300,7 @@ class TestBrowserPdf:
             # Just verify no ValueError on format validation
             # (will still fail on CLI, but that's mocked in other tests)
             try:
-                browser_pdf(url="https://example.com", paper_format=fmt,
-                            _sandbox=self.sandbox)
+                browser_pdf(url="https://example.com", paper_format=fmt, _sandbox=self.sandbox)
             except ValueError as e:
                 if "paper format" in str(e).lower():
                     pytest.fail(f"Format {fmt} should be valid but was rejected")
@@ -381,6 +378,7 @@ class TestBrowserPdf:
 
     def teardown_method(self):
         import shutil
+
         if self.sandbox.exists():
             shutil.rmtree(self.sandbox, ignore_errors=True)
 
@@ -389,44 +387,39 @@ class TestBrowserPdf:
 
 
 class TestRunPlaywrightCli:
-    @patch("tools.adapters.playwright_browser._find_chromium",
-           return_value="/fake/chrome")
-    @patch("tools.adapters.playwright_browser._find_ld_library_path",
-           return_value="/fake/libs")
+    @patch("tools.adapters.playwright_browser._find_chromium", return_value="/fake/chrome")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path", return_value="/fake/libs")
     @patch("tools.adapters.playwright_browser.subprocess.run")
     def test_timeout_returns_error(self, mock_run, _ld, _cr):
         import subprocess as sp
 
         from tools.adapters.playwright_browser import _run_playwright_cli
+
         mock_run.side_effect = sp.TimeoutExpired(cmd=["npx"], timeout=30)
 
         result = _run_playwright_cli(["screenshot", "http://x.com", "/tmp/x.png"])
         assert result["exit_code"] == -1
         assert "timed out" in result["stderr"]
 
-    @patch("tools.adapters.playwright_browser._find_chromium",
-           return_value="/fake/chrome")
-    @patch("tools.adapters.playwright_browser._find_ld_library_path",
-           return_value="/fake/libs")
+    @patch("tools.adapters.playwright_browser._find_chromium", return_value="/fake/chrome")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path", return_value="/fake/libs")
     @patch("tools.adapters.playwright_browser.subprocess.run")
     def test_npx_not_found(self, mock_run, _ld, _cr):
         from tools.adapters.playwright_browser import _run_playwright_cli
+
         mock_run.side_effect = FileNotFoundError()
 
         result = _run_playwright_cli(["screenshot", "http://x.com", "/tmp/x.png"])
         assert result["exit_code"] == 127
         assert "npx not found" in result["stderr"]
 
-    @patch("tools.adapters.playwright_browser._find_chromium",
-           return_value="/detected/chrome")
-    @patch("tools.adapters.playwright_browser._find_ld_library_path",
-           return_value="/detected/libs")
+    @patch("tools.adapters.playwright_browser._find_chromium", return_value="/detected/chrome")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path", return_value="/detected/libs")
     @patch("tools.adapters.playwright_browser.subprocess.run")
     def test_sets_chromium_env_from_autodetect(self, mock_run, _ld, _cr):
         from tools.adapters.playwright_browser import _run_playwright_cli
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="ok", stderr=""
-        )
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
 
         _run_playwright_cli(["screenshot", "http://x.com", "/tmp/x.png"])
 
@@ -435,26 +428,23 @@ class TestRunPlaywrightCli:
         assert env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] == "/detected/chrome"
         assert env["LD_LIBRARY_PATH"] == "/detected/libs"
 
-    @patch("tools.adapters.playwright_browser._find_chromium",
-           return_value="/fake/chrome")
-    @patch("tools.adapters.playwright_browser._find_ld_library_path",
-           return_value="/fake/libs")
+    @patch("tools.adapters.playwright_browser._find_chromium", return_value="/fake/chrome")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path", return_value="/fake/libs")
     @patch("tools.adapters.playwright_browser.subprocess.run")
     def test_truncates_output(self, mock_run, _ld, _cr):
         from tools.adapters.playwright_browser import _run_playwright_cli
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="x" * 20_000, stderr="y" * 20_000
-        )
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="x" * 20_000, stderr="y" * 20_000)
 
         result = _run_playwright_cli(["screenshot", "http://x.com", "/tmp/x.png"])
         assert len(result["stdout"]) == 10_000
         assert len(result["stderr"]) == 10_000
 
-    @patch("tools.adapters.playwright_browser._find_chromium",
-           return_value="")
+    @patch("tools.adapters.playwright_browser._find_chromium", return_value="")
     @patch("tools.adapters.playwright_browser.ensure_chromium")
     def test_auto_install_on_missing_chromium(self, mock_install, _cr):
         from tools.adapters.playwright_browser import _run_playwright_cli
+
         mock_install.return_value = {
             "ok": False,
             "chromium_path": "",
@@ -467,24 +457,20 @@ class TestRunPlaywrightCli:
         assert "auto-install failed" in result["stderr"]
         mock_install.assert_called_once()
 
-    @patch("tools.adapters.playwright_browser._find_chromium",
-           return_value="")
-    @patch("tools.adapters.playwright_browser._find_ld_library_path",
-           return_value="/fake/libs")
+    @patch("tools.adapters.playwright_browser._find_chromium", return_value="")
+    @patch("tools.adapters.playwright_browser._find_ld_library_path", return_value="/fake/libs")
     @patch("tools.adapters.playwright_browser.ensure_chromium")
     @patch("tools.adapters.playwright_browser.subprocess.run")
-    def test_auto_install_success_then_runs(self, mock_run, mock_install,
-                                            _ld, _cr):
+    def test_auto_install_success_then_runs(self, mock_run, mock_install, _ld, _cr):
         from tools.adapters.playwright_browser import _run_playwright_cli
+
         mock_install.return_value = {
             "ok": True,
             "chromium_path": "/new/chrome",
             "installed": True,
             "message": "installed",
         }
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="done", stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="done", stderr="")
 
         result = _run_playwright_cli(["screenshot", "http://x.com", "/tmp/x.png"])
         assert result["exit_code"] == 0
@@ -504,8 +490,7 @@ class TestAutoDetection:
         assert "chrome" in Path(path).name
 
     def test_find_chromium_env_override(self):
-        with patch.dict(os.environ,
-                        {"PLAYWRIGHT_CHROMIUM_PATH": "/tmp/fake_chrome"}):
+        with patch.dict(os.environ, {"PLAYWRIGHT_CHROMIUM_PATH": "/tmp/fake_chrome"}):
             # Won't return this because file doesn't exist
             result = _find_chromium()
             # Falls through to glob detection
@@ -517,8 +502,7 @@ class TestAutoDetection:
         assert Path(path).is_dir()
 
     def test_find_ld_library_path_env_override(self):
-        with patch.dict(os.environ,
-                        {"PLAYWRIGHT_LD_LIBRARY_PATH": "/tmp"}):
+        with patch.dict(os.environ, {"PLAYWRIGHT_LD_LIBRARY_PATH": "/tmp"}):
             result = _find_ld_library_path()
             assert result == "/tmp"
 
@@ -528,19 +512,15 @@ class TestAutoDetection:
         assert result["installed"] is False  # already there
         assert result["chromium_path"]
 
-    @patch("tools.adapters.playwright_browser._find_chromium",
-           return_value="")
+    @patch("tools.adapters.playwright_browser._find_chromium", return_value="")
     @patch("tools.adapters.playwright_browser.subprocess.run")
     def test_ensure_chromium_install_fails(self, mock_run, _cr):
-        mock_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="network error"
-        )
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="network error")
         result = ensure_chromium()
         assert result["ok"] is False
         assert "Install failed" in result["message"]
 
-    @patch("tools.adapters.playwright_browser._find_chromium",
-           return_value="")
+    @patch("tools.adapters.playwright_browser._find_chromium", return_value="")
     @patch("tools.adapters.playwright_browser.subprocess.run")
     def test_ensure_chromium_npx_missing(self, mock_run, _cr):
         mock_run.side_effect = FileNotFoundError()

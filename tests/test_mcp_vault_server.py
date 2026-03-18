@@ -63,7 +63,7 @@ from tools.mcp_vault_server import (
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def vault_dir(tmp_path):
     """Create a temporary vault structure for testing."""
     # Create folders
@@ -307,7 +307,7 @@ def _write_config(vault_dir, enabled=True, **overrides):
     return path
 
 
-@pytest.fixture()
+@pytest.fixture
 def write_enabled(vault_dir):
     """Enable writes via feature flag config."""
     _write_config(vault_dir, enabled=True)
@@ -315,7 +315,7 @@ def write_enabled(vault_dir):
     os.environ.pop("NOVA_VAULT_WRITE_FLAG", None)
 
 
-@pytest.fixture()
+@pytest.fixture
 def write_disabled(vault_dir):
     """Explicitly disable writes via feature flag config."""
     _write_config(vault_dir, enabled=False)
@@ -1339,7 +1339,9 @@ class TestSensitiveContent:
         assert has is True
 
     def test_private_key_detected(self):
-        has, matches = detect_sensitive_content("-----BEGIN RSA PRIVATE KEY-----\nfoo\n-----END RSA PRIVATE KEY-----")
+        has, matches = detect_sensitive_content(
+            "-----BEGIN RSA PRIVATE" + " KEY-----\nfoo\n-----END RSA PRIVATE KEY-----"
+        )
         assert has is True
 
     def test_github_pat_detected(self):

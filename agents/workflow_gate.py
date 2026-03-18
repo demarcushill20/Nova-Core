@@ -21,9 +21,14 @@ from agents.verifier import VerificationReport, VerifierEngine
 # Shared contract field requirements (single source of truth)
 # ---------------------------------------------------------------------------
 
-REQUIRED_CONTRACT_FIELDS = frozenset({
-    "summary", "files_changed", "verification", "confidence",
-})
+REQUIRED_CONTRACT_FIELDS = frozenset(
+    {
+        "summary",
+        "files_changed",
+        "verification",
+        "confidence",
+    }
+)
 
 VALID_CONFIDENCE_VALUES = frozenset({"high", "medium", "low"})
 
@@ -55,6 +60,7 @@ def validate_contract_fields(contract: dict) -> tuple[bool, list[str]]:
 # Reroute decision (orchestrator-consumable)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RerouteDecision:
     """Deterministic reroute/replan decision for the orchestrator.
@@ -62,8 +68,9 @@ class RerouteDecision:
     Produced when pending replan signals exist. The orchestrator reads this
     to decide whether to retry, reassign, or halt a workflow node.
     """
+
     workflow_id: str
-    action: str                         # retry | reassign | halt
+    action: str  # retry | reassign | halt
     affected_node: str
     reason_code: str
     remediation_hint: str
@@ -77,6 +84,7 @@ class RerouteDecision:
 # ---------------------------------------------------------------------------
 # Workflow gate
 # ---------------------------------------------------------------------------
+
 
 class WorkflowGate:
     """Governs workflow completion through critic review and verifier approval.
@@ -148,15 +156,17 @@ class WorkflowGate:
             # Determine action based on reason code
             action = self._decide_reroute_action(signal)
 
-            decisions.append(RerouteDecision(
-                workflow_id=workflow_id,
-                action=action,
-                affected_node=signal.affected_node,
-                reason_code=signal.reason_code,
-                remediation_hint=signal.remediation_hint,
-                source_signal_id=signal.signal_id,
-                source_review_id=signal.source_review_id,
-            ))
+            decisions.append(
+                RerouteDecision(
+                    workflow_id=workflow_id,
+                    action=action,
+                    affected_node=signal.affected_node,
+                    reason_code=signal.reason_code,
+                    remediation_hint=signal.remediation_hint,
+                    source_signal_id=signal.signal_id,
+                    source_review_id=signal.source_review_id,
+                )
+            )
 
             # Mark the signal as acknowledged
             self.critic.acknowledge_replan(signal.signal_id)
@@ -173,8 +183,10 @@ class WorkflowGate:
         """
         # Reason codes that are retryable
         retryable = {
-            "empty_deliverable", "contract_field_missing",
-            "empty_file", "file_not_found",
+            "empty_deliverable",
+            "contract_field_missing",
+            "empty_file",
+            "file_not_found",
         }
         # Reason codes that require reassignment
         reassignable = {
@@ -224,7 +236,8 @@ class WorkflowGate:
     # --- Contract validation gate ---
 
     def validate_contracts_for_completion(
-        self, contracts: list[dict],
+        self,
+        contracts: list[dict],
     ) -> tuple[bool, list[str]]:
         """Validate all contracts meet required structure for gated paths.
 

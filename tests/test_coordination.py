@@ -48,17 +48,20 @@ def setup_tmpdir(tmp_path):
 
 def make_blackboard(tmp_path):
     from agents.blackboard import Blackboard
+
     return Blackboard(base=tmp_path)
 
 
 def make_coord(tmp_path):
     from agents.coordination import CoordinationLayer
+
     bb = make_blackboard(tmp_path)
     return CoordinationLayer(blackboard=bb)
 
 
 def create_test_workflow(tmp_path, workflow_id="wf-001", task_id="task-001"):
     from agents.blackboard import WorkflowState
+
     bb = make_blackboard(tmp_path)
     wf = WorkflowState(workflow_id=workflow_id, task_id=task_id, status="executing")
     bb.create_workflow(wf)
@@ -68,6 +71,7 @@ def create_test_workflow(tmp_path, workflow_id="wf-001", task_id="task-001"):
 # =========================================================================
 # Lease tests
 # =========================================================================
+
 
 class TestLeaseAcquisition:
     """Test basic lease acquire/release lifecycle."""
@@ -274,6 +278,7 @@ class TestStaleLease:
 # Node state tests
 # =========================================================================
 
+
 class TestNodeStates:
     """Test node-level state persistence within workflows."""
 
@@ -285,8 +290,7 @@ class TestNodeStates:
 
         nodes = [
             NodeState(node_id="n1", workflow_id="wf-001", status="pending"),
-            NodeState(node_id="n2", workflow_id="wf-001", status="pending",
-                      depends_on=["n1"]),
+            NodeState(node_id="n2", workflow_id="wf-001", status="pending", depends_on=["n1"]),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -305,10 +309,14 @@ class TestNodeStates:
         nodes = [NodeState(node_id="n1", workflow_id="wf-001")]
         coord.save_node_states("wf-001", nodes)
 
-        updated = coord.update_node_state("wf-001", "n1", {
-            "status": "executing",
-            "assigned_agent": "agent-1",
-        })
+        updated = coord.update_node_state(
+            "wf-001",
+            "n1",
+            {
+                "status": "executing",
+                "assigned_agent": "agent-1",
+            },
+        )
 
         assert updated.status == "executing"
         assert updated.assigned_agent == "agent-1"
@@ -333,6 +341,7 @@ class TestNodeStates:
 # Checkpoint tests
 # =========================================================================
 
+
 class TestCheckpoints:
     """Test checkpoint save/restore for resume support."""
 
@@ -340,11 +349,14 @@ class TestCheckpoints:
         create_test_workflow(tmp_path)
         coord = make_coord(tmp_path)
 
-        coord.save_checkpoint("wf-001", {
-            "step_index": 2,
-            "completed_nodes": ["n1", "n2"],
-            "phase": "execution",
-        })
+        coord.save_checkpoint(
+            "wf-001",
+            {
+                "step_index": 2,
+                "completed_nodes": ["n1", "n2"],
+                "phase": "execution",
+            },
+        )
 
         cp = coord.get_latest_checkpoint("wf-001")
         assert cp is not None
@@ -376,6 +388,7 @@ class TestCheckpoints:
 # Resume after interruption
 # =========================================================================
 
+
 class TestResumeAfterInterruption:
     """Orchestrator can resume after restart from state."""
 
@@ -389,10 +402,8 @@ class TestResumeAfterInterruption:
         nodes = [
             NodeState(node_id="n1", workflow_id="wf-001", status="completed"),
             NodeState(node_id="n2", workflow_id="wf-001", status="pending"),
-            NodeState(node_id="n3", workflow_id="wf-001", status="pending",
-                      depends_on=["n2"]),
-            NodeState(node_id="n4", workflow_id="wf-001", status="failed",
-                      error="timeout"),
+            NodeState(node_id="n3", workflow_id="wf-001", status="pending", depends_on=["n2"]),
+            NodeState(node_id="n4", workflow_id="wf-001", status="failed", error="timeout"),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -411,8 +422,7 @@ class TestResumeAfterInterruption:
 
         # Node is "executing" but has no valid lease
         nodes = [
-            NodeState(node_id="n1", workflow_id="wf-001",
-                      status="executing", assigned_agent="agent-1"),
+            NodeState(node_id="n1", workflow_id="wf-001", status="executing", assigned_agent="agent-1"),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -426,8 +436,7 @@ class TestResumeAfterInterruption:
         coord = make_coord(tmp_path)
 
         nodes = [
-            NodeState(node_id="n1", workflow_id="wf-001",
-                      status="executing", assigned_agent="agent-1"),
+            NodeState(node_id="n1", workflow_id="wf-001", status="executing", assigned_agent="agent-1"),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -457,12 +466,18 @@ class TestResumeAfterInterruption:
         bb = create_test_workflow(tmp_path)
         coord = make_coord(tmp_path)
 
-        bb.create_delegation(Delegation(
-            workflow_id="wf-001", subtask_id="sub-1",
-            agent_id="agent-1", role="coder", goal="write code",
-        ))
+        bb.create_delegation(
+            Delegation(
+                workflow_id="wf-001",
+                subtask_id="sub-1",
+                agent_id="agent-1",
+                role="coder",
+                goal="write code",
+            )
+        )
 
         from agents.coordination import NodeState
+
         nodes = [NodeState(node_id="sub-1", workflow_id="wf-001")]
         coord.save_node_states("wf-001", nodes)
 
@@ -480,6 +495,7 @@ class TestResumeAfterInterruption:
 # Workflow recovery after crash
 # =========================================================================
 
+
 class TestWorkflowRecovery:
     """Recover workflow state after crash: stale leases, reset nodes."""
 
@@ -491,9 +507,14 @@ class TestWorkflowRecovery:
 
         # Node executing with expired lease
         nodes = [
-            NodeState(node_id="n1", workflow_id="wf-001",
-                      status="executing", assigned_agent="agent-1",
-                      retry_count=0, max_retries=1),
+            NodeState(
+                node_id="n1",
+                workflow_id="wf-001",
+                status="executing",
+                assigned_agent="agent-1",
+                retry_count=0,
+                max_retries=1,
+            ),
         ]
         coord.save_node_states("wf-001", nodes)
         coord.acquire_lease("wf-001", "n1", "agent-1", ttl_s=0.01)
@@ -503,8 +524,7 @@ class TestWorkflowRecovery:
 
         # Node should have been reset to pending
         assert "n1" in state["pending_nodes"]
-        assert any(a["action"] == "node_reset_for_retry"
-                   for a in state["recovery_actions"])
+        assert any(a["action"] == "node_reset_for_retry" for a in state["recovery_actions"])
 
     def test_recovery_fails_exhausted_retries(self, tmp_path):
         from agents.coordination import NodeState
@@ -513,9 +533,14 @@ class TestWorkflowRecovery:
         coord = make_coord(tmp_path)
 
         nodes = [
-            NodeState(node_id="n1", workflow_id="wf-001",
-                      status="executing", assigned_agent="agent-1",
-                      retry_count=1, max_retries=1),
+            NodeState(
+                node_id="n1",
+                workflow_id="wf-001",
+                status="executing",
+                assigned_agent="agent-1",
+                retry_count=1,
+                max_retries=1,
+            ),
         ]
         coord.save_node_states("wf-001", nodes)
         coord.acquire_lease("wf-001", "n1", "agent-1", ttl_s=0.01)
@@ -524,8 +549,7 @@ class TestWorkflowRecovery:
         state = coord.recover_workflow("wf-001")
 
         assert "n1" in state["failed_nodes"]
-        assert any(a["action"] == "node_failed_max_retries"
-                   for a in state["recovery_actions"])
+        assert any(a["action"] == "node_failed_max_retries" for a in state["recovery_actions"])
 
     def test_recovery_preserves_healthy_nodes(self, tmp_path):
         from agents.coordination import NodeState
@@ -548,6 +572,7 @@ class TestWorkflowRecovery:
 # =========================================================================
 # Coordinated node claiming
 # =========================================================================
+
 
 class TestCoordinatedClaiming:
     """Test claim_node / complete_node / fail_node integration."""
@@ -621,6 +646,7 @@ class TestCoordinatedClaiming:
 # Dependency resolution
 # =========================================================================
 
+
 class TestDependencyResolution:
     """Test get_ready_nodes for dependency-aware scheduling."""
 
@@ -647,8 +673,7 @@ class TestDependencyResolution:
 
         nodes = [
             NodeState(node_id="n1", workflow_id="wf-001"),
-            NodeState(node_id="n2", workflow_id="wf-001",
-                      depends_on=["n1"]),
+            NodeState(node_id="n2", workflow_id="wf-001", depends_on=["n1"]),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -663,8 +688,7 @@ class TestDependencyResolution:
 
         nodes = [
             NodeState(node_id="n1", workflow_id="wf-001", status="completed"),
-            NodeState(node_id="n2", workflow_id="wf-001",
-                      depends_on=["n1"]),
+            NodeState(node_id="n2", workflow_id="wf-001", depends_on=["n1"]),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -679,12 +703,9 @@ class TestDependencyResolution:
 
         nodes = [
             NodeState(node_id="n1", workflow_id="wf-001", status="completed"),
-            NodeState(node_id="n2", workflow_id="wf-001", status="completed",
-                      depends_on=["n1"]),
-            NodeState(node_id="n3", workflow_id="wf-001",
-                      depends_on=["n1", "n2"]),
-            NodeState(node_id="n4", workflow_id="wf-001",
-                      depends_on=["n3"]),
+            NodeState(node_id="n2", workflow_id="wf-001", status="completed", depends_on=["n1"]),
+            NodeState(node_id="n3", workflow_id="wf-001", depends_on=["n1", "n2"]),
+            NodeState(node_id="n4", workflow_id="wf-001", depends_on=["n3"]),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -710,6 +731,7 @@ class TestDependencyResolution:
 # Integration: child results visible through workflow graph
 # =========================================================================
 
+
 class TestWorkflowGraphVisibility:
     """Child results should be visible through the workflow graph."""
 
@@ -720,8 +742,7 @@ class TestWorkflowGraphVisibility:
         coord = make_coord(tmp_path)
 
         nodes = [
-            NodeState(node_id="n1", workflow_id="wf-001", status="completed",
-                      output_ref="OUTPUT/n1_result.md"),
+            NodeState(node_id="n1", workflow_id="wf-001", status="completed", output_ref="OUTPUT/n1_result.md"),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -773,10 +794,14 @@ class TestWorkflowGraphVisibility:
 
         # Coordination-only nodes (no delegation records)
         nodes = [
-            NodeState(node_id="n1", workflow_id="wf-001", status="completed",
-                      assigned_agent="agent-1", output_ref="OUTPUT/n1.md"),
-            NodeState(node_id="n2", workflow_id="wf-001", status="executing",
-                      assigned_agent="agent-2"),
+            NodeState(
+                node_id="n1",
+                workflow_id="wf-001",
+                status="completed",
+                assigned_agent="agent-1",
+                output_ref="OUTPUT/n1.md",
+            ),
+            NodeState(node_id="n2", workflow_id="wf-001", status="executing", assigned_agent="agent-2"),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -813,17 +838,26 @@ class TestWorkflowGraphVisibility:
         coord = make_coord(tmp_path)
 
         # Create a delegation (status=pending)
-        bb.create_delegation(Delegation(
-            workflow_id="wf-001", subtask_id="sub-1",
-            agent_id="agent-1", role="coder", goal="write code",
-            status="pending",
-        ))
+        bb.create_delegation(
+            Delegation(
+                workflow_id="wf-001",
+                subtask_id="sub-1",
+                agent_id="agent-1",
+                role="coder",
+                goal="write code",
+                status="pending",
+            )
+        )
 
         # Coordination layer advances it to completed
         nodes = [
-            NodeState(node_id="sub-1", workflow_id="wf-001",
-                      status="completed", assigned_agent="agent-1",
-                      output_ref="OUTPUT/sub1.md"),
+            NodeState(
+                node_id="sub-1",
+                workflow_id="wf-001",
+                status="completed",
+                assigned_agent="agent-1",
+                output_ref="OUTPUT/sub1.md",
+            ),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -845,8 +879,13 @@ class TestWorkflowGraphVisibility:
         coord = make_coord(tmp_path)
 
         nodes = [
-            NodeState(node_id="n1", workflow_id="wf-001", status="completed",
-                      assigned_agent="agent-1", output_ref="OUTPUT/result.md"),
+            NodeState(
+                node_id="n1",
+                workflow_id="wf-001",
+                status="completed",
+                assigned_agent="agent-1",
+                output_ref="OUTPUT/result.md",
+            ),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -866,8 +905,13 @@ class TestWorkflowGraphVisibility:
         coord = make_coord(tmp_path)
 
         nodes = [
-            NodeState(node_id="n1", workflow_id="wf-001", status="failed",
-                      assigned_agent="agent-1", error="timeout after 300s"),
+            NodeState(
+                node_id="n1",
+                workflow_id="wf-001",
+                status="failed",
+                assigned_agent="agent-1",
+                error="timeout after 300s",
+            ),
         ]
         coord.save_node_states("wf-001", nodes)
 
@@ -887,16 +931,20 @@ class TestWorkflowGraphVisibility:
 # Edge cases
 # =========================================================================
 
-class TestEdgeCases:
 
+class TestEdgeCases:
     def test_update_node_creates_if_not_exists(self, tmp_path):
         create_test_workflow(tmp_path)
         coord = make_coord(tmp_path)
 
         # Update a node that doesn't exist yet in node_states
-        ns = coord.update_node_state("wf-001", "new-node", {
-            "status": "pending",
-        })
+        ns = coord.update_node_state(
+            "wf-001",
+            "new-node",
+            {
+                "status": "pending",
+            },
+        )
         assert ns.node_id == "new-node"
         assert ns.workflow_id == "wf-001"
 
@@ -917,9 +965,12 @@ class TestEdgeCases:
 
         create_test_workflow(tmp_path)
         coord1 = make_coord(tmp_path)
-        coord1.save_node_states("wf-001", [
-            NodeState(node_id="n1", workflow_id="wf-001", status="executing"),
-        ])
+        coord1.save_node_states(
+            "wf-001",
+            [
+                NodeState(node_id="n1", workflow_id="wf-001", status="executing"),
+            ],
+        )
 
         coord2 = make_coord(tmp_path)
         states = coord2.get_node_states("wf-001")

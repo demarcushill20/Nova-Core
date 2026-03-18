@@ -39,6 +39,7 @@ from agents.rollout_gate import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def stage4_root(tmp_path):
     """Set up a minimal Stage 3 environment suitable for Stage 4 evaluation."""
@@ -84,15 +85,12 @@ def stage4_root(tmp_path):
         "decision": "ready_to_expand",
         "reason": "Stage 3 expansion applied",
     }
-    (state / "activation_log.jsonl").write_text(
-        json.dumps(activation) + "\n"
-    )
+    (state / "activation_log.jsonl").write_text(json.dumps(activation) + "\n")
 
     return tmp_path
 
 
-def _add_workflow(root, stem, status, task_class="research",
-                  halt_reason=None):
+def _add_workflow(root, stem, status, task_class="research", halt_reason=None):
     """Add a workflow record to the test environment."""
     wf = {
         "workflow_id": stem,
@@ -122,6 +120,7 @@ def _populate_healthy_stage4(root):
 # ===================================================================
 # Part 1 — ready_for_stage4_planning outcome
 # ===================================================================
+
 
 class TestReadyForStage4Planning:
     """All criteria pass with sufficient evidence."""
@@ -156,8 +155,7 @@ class TestReadyForStage4Planning:
         _populate_healthy_stage4(stage4_root)
 
         evaluation = evaluate_stage4(stage4_root)
-        assert "activate" in evaluation.next_action.lower() or \
-               "activation" in evaluation.next_action.lower()
+        assert "activate" in evaluation.next_action.lower() or "activation" in evaluation.next_action.lower()
 
     def test_ready_no_remaining_requirements(self, stage4_root):
         """Ready state has empty remaining requirements."""
@@ -177,6 +175,7 @@ class TestReadyForStage4Planning:
 # ===================================================================
 # Part 2 — hold_stage4 outcome
 # ===================================================================
+
 
 class TestHoldStage4:
     """Insufficient evidence or soft concerns → hold."""
@@ -296,9 +295,7 @@ class TestHoldStage4:
         ver_dir = stage4_root / "STATE" / "verifications"
         for i in range(4):
             verdict = "rejected" if i < 2 else "approved"
-            (ver_dir / f"ver_{i}.json").write_text(
-                json.dumps({"verdict": verdict})
-            )
+            (ver_dir / f"ver_{i}.json").write_text(json.dumps({"verdict": verdict}))
         # 2/4 = 50% > 30%
 
         evaluation = evaluate_stage4(stage4_root)
@@ -313,9 +310,7 @@ class TestHoldStage4:
             "contract_success": {"_total": 3},
             "contract_failure": {"_total": 1},  # 25% > 20%
         }
-        (stage4_root / "STATE" / "metrics.json").write_text(
-            json.dumps(metrics)
-        )
+        (stage4_root / "STATE" / "metrics.json").write_text(json.dumps(metrics))
 
         evaluation = evaluate_stage4(stage4_root)
         assert evaluation.decision == "hold_stage4"
@@ -325,6 +320,7 @@ class TestHoldStage4:
 # Part 3 — block_stage4 outcome
 # ===================================================================
 
+
 class TestBlockStage4:
     """Hard failures → block."""
 
@@ -332,12 +328,8 @@ class TestBlockStage4:
         """Unhealthy heartbeat → block_stage4."""
         _populate_healthy_stage4(stage4_root)
 
-        hb = {"overall": "unhealthy", "findings": [
-            {"severity": "unhealthy", "message": "test failure"}
-        ]}
-        (stage4_root / "STATE" / "heartbeat_multiagent.json").write_text(
-            json.dumps(hb)
-        )
+        hb = {"overall": "unhealthy", "findings": [{"severity": "unhealthy", "message": "test failure"}]}
+        (stage4_root / "STATE" / "heartbeat_multiagent.json").write_text(json.dumps(hb))
 
         evaluation = evaluate_stage4(stage4_root)
         assert evaluation.decision == "block_stage4"
@@ -356,8 +348,7 @@ class TestBlockStage4:
         """Budget exhaustion → block_stage4."""
         _populate_healthy_stage4(stage4_root)
 
-        _add_workflow(stage4_root, "halted_1", "halted", "code_impl",
-                      halt_reason="budget exceeded")
+        _add_workflow(stage4_root, "halted_1", "halted", "code_impl", halt_reason="budget exceeded")
 
         evaluation = evaluate_stage4(stage4_root)
         assert evaluation.decision == "block_stage4"
@@ -399,16 +390,11 @@ class TestBlockStage4:
 
     def test_block_next_action_mentions_system_blocked(self, stage4_root):
         """Block decision reminds that system must stay blocked."""
-        hb = {"overall": "unhealthy", "findings": [
-            {"severity": "unhealthy", "message": "test"}
-        ]}
-        (stage4_root / "STATE" / "heartbeat_multiagent.json").write_text(
-            json.dumps(hb)
-        )
+        hb = {"overall": "unhealthy", "findings": [{"severity": "unhealthy", "message": "test"}]}
+        (stage4_root / "STATE" / "heartbeat_multiagent.json").write_text(json.dumps(hb))
 
         evaluation = evaluate_stage4(stage4_root)
-        assert "blocked" in evaluation.next_action.lower() or \
-               "system" in evaluation.next_action.lower()
+        assert "blocked" in evaluation.next_action.lower() or "system" in evaluation.next_action.lower()
 
     def test_hard_overrides_soft(self, stage4_root):
         """Hard failure overrides soft concerns → block, not hold."""
@@ -425,6 +411,7 @@ class TestBlockStage4:
 # ===================================================================
 # Part 4 — Criteria evaluation
 # ===================================================================
+
 
 class TestCriteriaEvaluation:
     """Test individual criteria evaluation."""
@@ -501,6 +488,7 @@ class TestCriteriaEvaluation:
 # Part 5 — Decision logic
 # ===================================================================
 
+
 class TestDecisionLogic:
     """Test the decide_stage4_readiness function directly."""
 
@@ -530,8 +518,12 @@ class TestDecisionLogic:
 
         return [
             RolloutCriterion(
-                name=name, passed=passed, value="test",
-                threshold="test", detail="test", severity=severity,
+                name=name,
+                passed=passed,
+                value="test",
+                threshold="test",
+                detail="test",
+                severity=severity,
             )
             for name, (severity, passed) in defaults.items()
         ]
@@ -562,19 +554,23 @@ class TestDecisionLogic:
 
     def test_hard_overrides_soft(self):
         """Hard failure overrides soft concerns → block, not hold."""
-        criteria = self._make_criteria({
-            "stage3_stable": False,
-            "code_impl_minimum_runs": False,
-        })
+        criteria = self._make_criteria(
+            {
+                "stage3_stable": False,
+                "code_impl_minimum_runs": False,
+            }
+        )
         decision, _ = decide_stage4_readiness(criteria)
         assert decision == "block_stage4"
 
     def test_multiple_hard_failures_in_block_reason(self):
         """Multiple hard failures listed in next_action."""
-        criteria = self._make_criteria({
-            "heartbeat_healthy": False,
-            "no_policy_violations": False,
-        })
+        criteria = self._make_criteria(
+            {
+                "heartbeat_healthy": False,
+                "no_policy_violations": False,
+            }
+        )
         _, next_action = decide_stage4_readiness(criteria)
         assert "heartbeat_healthy" in next_action
         assert "no_policy_violations" in next_action
@@ -583,6 +579,7 @@ class TestDecisionLogic:
 # ===================================================================
 # Part 6 — Artifact generation
 # ===================================================================
+
 
 class TestArtifactGeneration:
     """Test markdown rendering and file writing."""
@@ -634,12 +631,8 @@ class TestArtifactGeneration:
     def test_markdown_block_shows_failures(self, stage4_root):
         """Block decision markdown shows failing criteria."""
         # Trigger block via unhealthy heartbeat
-        hb = {"overall": "unhealthy", "findings": [
-            {"severity": "unhealthy", "message": "test"}
-        ]}
-        (stage4_root / "STATE" / "heartbeat_multiagent.json").write_text(
-            json.dumps(hb)
-        )
+        hb = {"overall": "unhealthy", "findings": [{"severity": "unhealthy", "message": "test"}]}
+        (stage4_root / "STATE" / "heartbeat_multiagent.json").write_text(json.dumps(hb))
 
         evaluation = evaluate_stage4(stage4_root)
         md = render_stage4_evaluation_markdown(evaluation)
@@ -696,6 +689,7 @@ class TestArtifactGeneration:
 # Part 7 — Threshold tightening
 # ===================================================================
 
+
 class TestThresholdTightening:
     """Verify Stage 4 thresholds are tighter than Stage 3."""
 
@@ -728,6 +722,7 @@ class TestThresholdTightening:
 # Part 8 — Edge cases
 # ===================================================================
 
+
 class TestEdgeCases:
     """Edge cases and boundary conditions."""
 
@@ -753,9 +748,13 @@ class TestEdgeCases:
 
         leases_dir = stage4_root / "STATE" / "leases"
         leases_dir.mkdir(parents=True)
-        (leases_dir / "stale.json").write_text(json.dumps({
-            "expires_at": time.time() - 3600,
-        }))
+        (leases_dir / "stale.json").write_text(
+            json.dumps(
+                {
+                    "expires_at": time.time() - 3600,
+                }
+            )
+        )
 
         evaluation = evaluate_stage4(stage4_root)
         # Stale leases fail Stage 3 stability (soft) → stage3_stable hard fail
@@ -777,7 +776,5 @@ class TestEdgeCases:
 
         evaluate_stage4(stage4_root)
 
-        flags = json.loads(
-            (stage4_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        flags = json.loads((stage4_root / "STATE" / "config" / "feature_flags.json").read_text())
         assert "system" not in flags["phase7_orchestrator"]["supported_classes"]

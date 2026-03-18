@@ -6,6 +6,7 @@ accuracy prompt injection detection.
 
 Scans both user input and LLM output for security issues.
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,6 +23,7 @@ FLAG_CONFIDENCE = 0.5
 @dataclass
 class ScanResult:
     """Result of scanning text through LLM Guard."""
+
     safe: bool
     confidence: float  # 0.0 = safe, 1.0 = definitely malicious
     findings: list[str] = field(default_factory=list)
@@ -32,23 +34,32 @@ class ScanResult:
 
 _INPUT_PATTERNS: list[tuple[str, float, str]] = [
     # Direct instruction override
-    (r"(?i)(?:ignore|disregard|forget)\s+(?:all\s+)?"
-     r"(?:previous|above|prior)\s+(?:instructions?|rules?|constraints?)",
-     0.9, "instruction_override"),
+    (
+        r"(?i)(?:ignore|disregard|forget)\s+(?:all\s+)?"
+        r"(?:previous|above|prior)\s+(?:instructions?|rules?|constraints?)",
+        0.9,
+        "instruction_override",
+    ),
     # Role impersonation
     (r"(?i)you\s+are\s+(?:now|actually)\s+(?:a|an|the)\s+", 0.7, "role_impersonation"),
     # System prompt extraction
-    (r"(?i)(?:show|reveal|display|print|output)\s+(?:your|the)"
-     r"\s+(?:system|initial|original)\s+(?:prompt|instructions?|message)",
-     0.85, "prompt_extraction"),
+    (
+        r"(?i)(?:show|reveal|display|print|output)\s+(?:your|the)"
+        r"\s+(?:system|initial|original)\s+(?:prompt|instructions?|message)",
+        0.85,
+        "prompt_extraction",
+    ),
     # Delimiter escape
     (r"(?:<<<|>>>|```system|<\|im_start\|>|<\|endoftext\|>)", 0.8, "delimiter_escape"),
     # Payload smuggling
     (r"(?i)(?:base64|eval|exec)\s*\(", 0.6, "payload_smuggling"),
     # Context manipulation
-    (r"(?i)(?:pretend|imagine|hypothetically|"
-     r"in\s+a\s+(?:fictional|hypothetical)\s+(?:scenario|world))",
-     0.5, "context_manipulation"),
+    (
+        r"(?i)(?:pretend|imagine|hypothetically|"
+        r"in\s+a\s+(?:fictional|hypothetical)\s+(?:scenario|world))",
+        0.5,
+        "context_manipulation",
+    ),
     # Data exfil requests
     (r"(?i)(?:send|post|upload|transmit)\s+(?:to|this\s+to)\s+(?:https?://|webhook|api)", 0.75, "exfil_request"),
     # Instruction injection via formatting
@@ -89,6 +100,7 @@ def scan_input(text: str) -> ScanResult:
     # Try ML-based detection if available
     try:
         from llm_guard.input_scanners import PromptInjection
+
         scanner = PromptInjection()
         sanitized, is_valid, risk_score = scanner.scan("", text)
         if risk_score > max_confidence:
@@ -115,7 +127,9 @@ def scan_input(text: str) -> ScanResult:
     if findings:
         _log.info(
             "INPUT_SCAN: confidence=%.2f action=%s findings=%s",
-            max_confidence, action, findings,
+            max_confidence,
+            action,
+            findings,
         )
 
     return result
@@ -137,6 +151,7 @@ def scan_output(text: str) -> ScanResult:
     # Try ML-based output scanning if available
     try:
         from llm_guard.output_scanners import MaliciousURLs, Sensitive
+
         for scanner_cls in [Sensitive, MaliciousURLs]:
             scanner = scanner_cls()
             sanitized, is_valid, risk_score = scanner.scan("", text)
@@ -164,7 +179,9 @@ def scan_output(text: str) -> ScanResult:
     if findings:
         _log.info(
             "OUTPUT_SCAN: confidence=%.2f action=%s findings=%s",
-            max_confidence, action, findings,
+            max_confidence,
+            action,
+            findings,
         )
 
     return result

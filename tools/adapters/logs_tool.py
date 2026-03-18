@@ -33,8 +33,7 @@ def logs_tail(service: str, lines: int = 200, sandbox: Path | None = None) -> di
 
     cwd = sandbox or Path.cwd()
     result = run_subprocess(
-        ["journalctl", "-u", service, "-n", str(lines),
-         "--no-pager", "-o", "short-iso"],
+        ["journalctl", "-u", service, "-n", str(lines), "--no-pager", "-o", "short-iso"],
         cwd=cwd,
         timeout=15,
     )

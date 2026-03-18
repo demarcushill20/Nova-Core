@@ -26,18 +26,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Task classes that benefit from prior vault context
-_ELIGIBLE_TASK_CLASSES = frozenset({
-    "research",
-    "code_impl",
-    "code_review",
-})
+_ELIGIBLE_TASK_CLASSES = frozenset(
+    {
+        "research",
+        "code_impl",
+        "code_review",
+    }
+)
 
 # Task classes that should NOT get vault context
 # (trivial, runtime-focused, or unsupported)
-_INELIGIBLE_TASK_CLASSES = frozenset({
-    "simple",
-    "unknown",
-})
+_INELIGIBLE_TASK_CLASSES = frozenset(
+    {
+        "simple",
+        "unknown",
+    }
+)
 
 # Patterns indicating runtime-state queries (never inject vault context)
 _RUNTIME_STATE_PATTERNS = re.compile(
@@ -53,20 +57,84 @@ MAX_VAULT_NOTES = 3
 MAX_CONTEXT_SIZE = 2048
 
 # Stopwords to exclude from keyword extraction
-_STOPWORDS = frozenset({
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "is", "are", "was", "were", "be", "been", "being",
-    "do", "does", "did", "will", "would", "could", "should", "may", "might",
-    "can", "it", "its", "this", "that", "these", "those", "i", "we", "you",
-    "they", "he", "she", "not", "no", "from", "as", "if", "then", "than",
-    "so", "just", "about", "up", "out", "all", "also", "how", "what",
-    "when", "where", "which", "who", "make", "use", "new", "get", "set",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "can",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "we",
+        "you",
+        "they",
+        "he",
+        "she",
+        "not",
+        "no",
+        "from",
+        "as",
+        "if",
+        "then",
+        "than",
+        "so",
+        "just",
+        "about",
+        "up",
+        "out",
+        "all",
+        "also",
+        "how",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "make",
+        "use",
+        "new",
+        "get",
+        "set",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Eligibility check
 # ---------------------------------------------------------------------------
+
 
 def is_eligible_for_vault_context(
     task_class: str,
@@ -99,6 +167,7 @@ def is_eligible_for_vault_context(
 # Keyword extraction
 # ---------------------------------------------------------------------------
 
+
 def extract_keywords(task_text: str, max_keywords: int = 5) -> list[str]:
     """Extract search keywords from task text.
 
@@ -125,6 +194,7 @@ def extract_keywords(task_text: str, max_keywords: int = 5) -> list[str]:
 # ---------------------------------------------------------------------------
 # Vault retrieval (uses MCP tools via import)
 # ---------------------------------------------------------------------------
+
 
 def retrieve_vault_context(
     task_class: str,
@@ -177,13 +247,15 @@ def retrieve_vault_context(
             seen_paths.add(path)
 
             # Extract summary from search result (avoid extra vault_read)
-            results.append({
-                "path": path,
-                "title": hit.get("title", path),
-                "snippet": hit.get("snippet", "")[:300],
-                "score": hit.get("score", 0),
-                "source": "obsidian_vault",
-            })
+            results.append(
+                {
+                    "path": path,
+                    "title": hit.get("title", path),
+                    "snippet": hit.get("snippet", "")[:300],
+                    "score": hit.get("score", 0),
+                    "source": "obsidian_vault",
+                }
+            )
 
             if len(results) >= max_notes:
                 break
@@ -197,6 +269,7 @@ def retrieve_vault_context(
 # ---------------------------------------------------------------------------
 # Context formatting
 # ---------------------------------------------------------------------------
+
 
 def format_vault_context(
     notes: list[dict[str, Any]],
@@ -236,7 +309,7 @@ def format_vault_context(
 
     # Hard cap
     if len(result) > MAX_CONTEXT_SIZE:
-        result = result[:MAX_CONTEXT_SIZE - 20] + "\n\n...(truncated)\n"
+        result = result[: MAX_CONTEXT_SIZE - 20] + "\n\n...(truncated)\n"
 
     return result
 
@@ -244,6 +317,7 @@ def format_vault_context(
 # ---------------------------------------------------------------------------
 # Main integration function
 # ---------------------------------------------------------------------------
+
 
 def inject_vault_context(
     task_class: str,
@@ -314,7 +388,9 @@ def inject_vault_context(
 
     logger.info(
         "Vault context injected: %d notes for task_class=%s, keywords=%s",
-        len(notes), task_class, keywords[:3],
+        len(notes),
+        task_class,
+        keywords[:3],
     )
 
     return {

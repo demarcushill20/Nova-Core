@@ -5,9 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 # Canonical task classes recognised by the classifier / orchestrator.
-KNOWN_TASK_CLASSES = frozenset({
-    "research", "code_impl", "code_review", "system", "simple", "unknown",
-})
+KNOWN_TASK_CLASSES = frozenset(
+    {
+        "research",
+        "code_impl",
+        "code_review",
+        "system",
+        "simple",
+        "unknown",
+    }
+)
 
 
 def extract_task_class(record: Any) -> str | None:

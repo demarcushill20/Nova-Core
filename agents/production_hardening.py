@@ -24,6 +24,7 @@ BASE = Path(os.environ.get("NOVACORE_ROOT", "/home/nova/nova-core"))
 # Feature Flags — fail-closed access to rollout controls
 # ---------------------------------------------------------------------------
 
+
 class FeatureFlags:
     """Centralized feature flag access. Fail-closed on missing/corrupt data.
 
@@ -145,8 +146,7 @@ class RateLimiter:
         tmp.write_text(json.dumps(state, indent=2))
         tmp.rename(self._state_path)
 
-    def check_rate(self, category: str, limit: int,
-                   window_s: int) -> RateCheckResult:
+    def check_rate(self, category: str, limit: int, window_s: int) -> RateCheckResult:
         """Check if an action is within its rate limit window."""
         now = time.time()
         state = self._load_state()
@@ -180,12 +180,10 @@ class RateLimiter:
         self._save_state(state)
 
     def check_workflow_launch(self) -> RateCheckResult:
-        return self.check_rate("workflow_launch",
-                               MAX_WORKFLOWS_PER_HOUR, 3600)
+        return self.check_rate("workflow_launch", MAX_WORKFLOWS_PER_HOUR, 3600)
 
     def check_agent_spawn(self) -> RateCheckResult:
-        return self.check_rate("agent_spawn",
-                               MAX_AGENT_SPAWNS_PER_HOUR, 3600)
+        return self.check_rate("agent_spawn", MAX_AGENT_SPAWNS_PER_HOUR, 3600)
 
     def check_retry_burst(self) -> RateCheckResult:
         """Check retry burst limit (max 5 retries per 10 minutes)."""
@@ -196,10 +194,12 @@ class RateLimiter:
 # Graceful Degradation — safe fallback on subsystem failures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class DegradationResult:
     """Outcome of a degradation check."""
-    action: str         # "proceed" | "degrade" | "halt"
+
+    action: str  # "proceed" | "degrade" | "halt"
     reason: str
     fallback: str = ""  # description of fallback path taken
 
@@ -214,9 +214,7 @@ class GracefulDegradation:
     def __init__(self, base: Path | None = None):
         self.base = base or BASE
 
-    def check_orchestrator_available(
-        self, task_class: str
-    ) -> DegradationResult:
+    def check_orchestrator_available(self, task_class: str) -> DegradationResult:
         """Check if orchestrator is available for this task class.
 
         Returns degrade action with fallback to single-agent when disabled.
@@ -294,8 +292,7 @@ class GracefulDegradation:
         if not spawn_check.allowed:
             return DegradationResult(
                 action="halt",
-                reason=(f"agent_spawn_rate_exceeded:"
-                        f"{spawn_check.count}/{spawn_check.limit}"),
+                reason=(f"agent_spawn_rate_exceeded:{spawn_check.count}/{spawn_check.limit}"),
             )
 
         return DegradationResult(
@@ -314,8 +311,7 @@ class GracefulDegradation:
         if not wf_check.allowed:
             return DegradationResult(
                 action="degrade",
-                reason=(f"workflow_rate_exceeded:"
-                        f"{wf_check.count}/{wf_check.limit}"),
+                reason=(f"workflow_rate_exceeded:{wf_check.count}/{wf_check.limit}"),
                 fallback="single_agent_worker",
             )
 
@@ -324,9 +320,7 @@ class GracefulDegradation:
             reason=f"workflow_allowed:{wf_check.remaining}_remaining",
         )
 
-    def handle_spawn_failure(
-        self, workflow_id: str, agent_id: str, error: str
-    ) -> DegradationResult:
+    def handle_spawn_failure(self, workflow_id: str, agent_id: str, error: str) -> DegradationResult:
         """Handle a child agent spawn failure safely.
 
         Logs the failure and returns halt with operator-visible status.
@@ -337,18 +331,14 @@ class GracefulDegradation:
             reason=f"spawn_failed:{agent_id}:{error}",
         )
 
-    def handle_missing_artifact(
-        self, artifact_path: str, context: str
-    ) -> DegradationResult:
+    def handle_missing_artifact(self, artifact_path: str, context: str) -> DegradationResult:
         """Handle a missing runtime artifact safely."""
         return DegradationResult(
             action="halt",
             reason=f"missing_artifact:{artifact_path}:{context}",
         )
 
-    def handle_verifier_unavailable(
-        self, workflow_id: str
-    ) -> DegradationResult:
+    def handle_verifier_unavailable(self, workflow_id: str) -> DegradationResult:
         """Handle verifier subsystem being unavailable.
 
         Falls back to halting the workflow rather than silently skipping
@@ -364,9 +354,9 @@ class GracefulDegradation:
 # Archive / Cleanup — bounded, explicit, auditable
 # ---------------------------------------------------------------------------
 
-ARCHIVE_AFTER_S = 86400      # archive after 24 hours
-MAX_ARCHIVE_KEEP = 100       # keep last 100 archived items per category
-STALE_TMP_THRESHOLD_S = 3600 # orphan .tmp files older than 1 hour
+ARCHIVE_AFTER_S = 86400  # archive after 24 hours
+MAX_ARCHIVE_KEEP = 100  # keep last 100 archived items per category
+STALE_TMP_THRESHOLD_S = 3600  # orphan .tmp files older than 1 hour
 
 
 class ArchiveManager:
@@ -385,9 +375,7 @@ class ArchiveManager:
             return float(value)
         if isinstance(value, str) and value:
             try:
-                return datetime.fromisoformat(
-                    value.replace("Z", "+00:00")
-                ).timestamp()
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
             except ValueError:
                 pass
         if fallback_path and fallback_path.exists():
@@ -565,8 +553,7 @@ class ArchiveManager:
             if not archive_dir.exists():
                 continue
 
-            files = sorted(archive_dir.glob("*.json"),
-                           key=lambda f: f.stat().st_mtime)
+            files = sorted(archive_dir.glob("*.json"), key=lambda f: f.stat().st_mtime)
             excess = len(files) - MAX_ARCHIVE_KEEP
             if excess > 0:
                 for f in files[:excess]:
@@ -576,7 +563,7 @@ class ArchiveManager:
 
     def run_cleanup(self) -> dict:
         """Execute all cleanup tasks. Returns summary dict."""
-        result = {
+        result: dict[str, object] = {
             "archived_workflows": self.archive_completed_workflows(),
             "archived_agents": self.archive_agent_runtime(),
             "archived_delegations": self.archive_completed_delegations(),
@@ -592,10 +579,12 @@ class ArchiveManager:
 # Manual Approval Hooks — optional, bounded, for high-risk actions only
 # ---------------------------------------------------------------------------
 
-HIGH_RISK_TOOLS = frozenset({
-    "repo.git.commit",
-    "system.service.restart",
-})
+HIGH_RISK_TOOLS = frozenset(
+    {
+        "repo.git.commit",
+        "system.service.restart",
+    }
+)
 
 APPROVAL_TIMEOUT_S = 300  # 5 minutes
 
@@ -623,8 +612,7 @@ class ApprovalGate:
             return False
         return tool_name in HIGH_RISK_TOOLS
 
-    def request_approval(self, action_id: str, tool_name: str,
-                         agent_id: str, detail: str) -> Path:
+    def request_approval(self, action_id: str, tool_name: str, agent_id: str, detail: str) -> Path:
         """Write a pending approval request. Returns the request path."""
         self._approvals_dir.mkdir(parents=True, exist_ok=True)
         request = {
@@ -686,8 +674,7 @@ class ApprovalGate:
         path.write_text(json.dumps(data, indent=2))
         return True
 
-    def deny(self, action_id: str, reason: str = "denied",
-             denier: str = "admin") -> bool:
+    def deny(self, action_id: str, reason: str = "denied", denier: str = "admin") -> bool:
         """Deny a pending action."""
         path = self._approvals_dir / f"{action_id}.json"
         if not path.exists():
@@ -710,8 +697,8 @@ class ApprovalGate:
 # Policy Denial Auditing
 # ---------------------------------------------------------------------------
 
-def audit_policy_denial(agent_id: str, tool_name: str, reason: str,
-                        base: Path | None = None) -> None:
+
+def audit_policy_denial(agent_id: str, tool_name: str, reason: str, base: Path | None = None) -> None:
     """Append a policy denial record to STATE/policy_denials.jsonl.
 
     Provides a dedicated audit trail for denied tool calls, separate
@@ -735,6 +722,7 @@ def audit_policy_denial(agent_id: str, tool_name: str, reason: str,
 # ---------------------------------------------------------------------------
 # Restart Recovery — reconcile state from persisted artifacts
 # ---------------------------------------------------------------------------
+
 
 class RestartRecovery:
     """Reconcile workflow, lease, and task state after service restart.
@@ -773,8 +761,7 @@ class RestartRecovery:
             except (ProcessLookupError, ValueError, OSError):
                 # Stale lock — remove and retry
                 lock_path.unlink(missing_ok=True)
-                fd = os.open(str(lock_path),
-                             os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.write(fd, str(os.getpid()).encode())
                 os.close(fd)
 
@@ -809,11 +796,13 @@ class RestartRecovery:
                 os.kill(pid, 0)  # Check if process exists
             except ProcessLookupError:
                 pid_file.unlink()
-                actions.append({
-                    "type": "stale_pid_removed",
-                    "file": pid_file.name,
-                    "detail": f"PID {pid} no longer running",
-                })
+                actions.append(
+                    {
+                        "type": "stale_pid_removed",
+                        "file": pid_file.name,
+                        "detail": f"PID {pid} no longer running",
+                    }
+                )
             except (ValueError, PermissionError, OSError):
                 pass
 
@@ -843,11 +832,13 @@ class RestartRecovery:
 
             if now > expires_at:
                 lease_file.unlink()
-                actions.append({
-                    "type": "lease_recovered",
-                    "file": lease_file.name,
-                    "detail": f"Expired {now - expires_at:.0f}s ago",
-                })
+                actions.append(
+                    {
+                        "type": "lease_recovered",
+                        "file": lease_file.name,
+                        "detail": f"Expired {now - expires_at:.0f}s ago",
+                    }
+                )
 
         return actions
 
@@ -886,11 +877,13 @@ class RestartRecovery:
                 data["halt_reason"] = "restart_recovery_stale"
                 data["recovered_at"] = now
                 wf_file.write_text(json.dumps(data, indent=2))
-                actions.append({
-                    "type": "workflow_halted",
-                    "file": wf_file.name,
-                    "detail": "Stale beyond 2x SLA, halted on restart",
-                })
+                actions.append(
+                    {
+                        "type": "workflow_halted",
+                        "file": wf_file.name,
+                        "detail": "Stale beyond 2x SLA, halted on restart",
+                    }
+                )
             else:
                 # Reset executing/claimed nodes to pending
                 node_states = data.get("node_states", {})
@@ -922,11 +915,13 @@ class RestartRecovery:
                         detail_parts.append(f"reset {reset_count}")
                     if failed_count:
                         detail_parts.append(f"failed {failed_count} (retries exhausted)")
-                    actions.append({
-                        "type": "workflow_nodes_reset",
-                        "file": wf_file.name,
-                        "detail": ", ".join(detail_parts),
-                    })
+                    actions.append(
+                        {
+                            "type": "workflow_nodes_reset",
+                            "file": wf_file.name,
+                            "detail": ", ".join(detail_parts),
+                        }
+                    )
 
         return actions
 
@@ -955,8 +950,7 @@ class RestartRecovery:
                         pid = int(pid_file.read_text().strip())
                         os.kill(pid, 0)
                         worker_alive = True
-                    except (ProcessLookupError, ValueError,
-                            PermissionError, OSError):
+                    except (ProcessLookupError, ValueError, PermissionError, OSError):
                         pass
 
             if not worker_alive:
@@ -964,11 +958,13 @@ class RestartRecovery:
                 original_name = stem.replace(".inprogress", "")
                 original = ip_file.parent / original_name
                 ip_file.rename(original)
-                actions.append({
-                    "type": "task_requeued",
-                    "file": stem,
-                    "detail": "Requeued abandoned task (no worker running)",
-                })
+                actions.append(
+                    {
+                        "type": "task_requeued",
+                        "file": stem,
+                        "detail": "Requeued abandoned task (no worker running)",
+                    }
+                )
 
         return actions
 
@@ -996,9 +992,7 @@ class RestartRecovery:
             return float(value)
         if isinstance(value, str) and value:
             try:
-                return datetime.fromisoformat(
-                    value.replace("Z", "+00:00")
-                ).timestamp()
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
             except ValueError:
                 pass
         if fallback_path and fallback_path.exists():
@@ -1009,6 +1003,7 @@ class RestartRecovery:
 # ---------------------------------------------------------------------------
 # Integration entry point — called from heartbeat.py
 # ---------------------------------------------------------------------------
+
 
 def run_production_hardening(base: Path | None = None) -> dict:
     """Run all production hardening maintenance tasks.

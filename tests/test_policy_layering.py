@@ -9,6 +9,7 @@ Covers:
 - Elevated tool flagging
 - Backward compatibility with existing enforce/check_budget/check_spawn
 """
+
 import json
 import sys
 import tempfile
@@ -227,8 +228,7 @@ class TestElevatedTools(unittest.TestCase):
 
     def test_enforce_raises_elevated(self):
         tmp = Path(tempfile.mkdtemp())
-        agent = {**_BASIC_AGENT, "allowed_tools": ["repo.git.push"],
-                 "denied_tools": []}
+        agent = {**_BASIC_AGENT, "allowed_tools": ["repo.git.push"], "denied_tools": []}
         engine = _make_engine(tmp, [agent], _BASIC_GLOBAL)
         with self.assertRaises(ElevatedToolRequest) as ctx:
             engine.enforce("test_agent", "repo.git.push")
@@ -236,8 +236,7 @@ class TestElevatedTools(unittest.TestCase):
 
     def test_check_without_elevation_allows_elevated(self):
         tmp = Path(tempfile.mkdtemp())
-        agent = {**_BASIC_AGENT, "allowed_tools": ["repo.git.push"],
-                 "denied_tools": []}
+        agent = {**_BASIC_AGENT, "allowed_tools": ["repo.git.push"], "denied_tools": []}
         engine = _make_engine(tmp, [agent], _BASIC_GLOBAL)
         decision = engine.check_without_elevation("test_agent", "repo.git.push")
         self.assertTrue(decision.allowed)
@@ -379,18 +378,14 @@ class TestGlobalPolicyFileExists(unittest.TestCase):
         self.assertTrue(gp.exists())
 
     def test_has_required_keys(self):
-        gp = json.loads(
-            Path("/home/nova/nova-core/STATE/policies/global_policy.json").read_text()
-        )
+        gp = json.loads(Path("/home/nova/nova-core/STATE/policies/global_policy.json").read_text())
         self.assertIn("global_deny", gp)
         self.assertIn("global_allow", gp)
         self.assertIn("elevated", gp)
         self.assertIn("default", gp)
 
     def test_destructive_ops_globally_denied(self):
-        gp = json.loads(
-            Path("/home/nova/nova-core/STATE/policies/global_policy.json").read_text()
-        )
+        gp = json.loads(Path("/home/nova/nova-core/STATE/policies/global_policy.json").read_text())
         deny = gp["global_deny"]
         self.assertIn("shell.rm_rf", deny)
         self.assertIn("system.shutdown", deny)

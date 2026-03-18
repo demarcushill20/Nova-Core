@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from schemas.vault_note_schema import (  # noqa: E402
+from schemas.vault_note_schema import (
     VALID_PLAN_STATUSES,
     validate_frontmatter,
 )

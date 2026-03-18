@@ -63,6 +63,7 @@ def _get_creds():
 def _build_service(api, version):
     """Build a Google API service client."""
     from googleapiclient.discovery import build
+
     return build(api, version, credentials=_get_creds(), cache_discovery=False)
 
 
@@ -73,11 +74,10 @@ def _json_out(data):
 
 # ── Gmail ────────────────────────────────────────────────────────────────
 
+
 def gmail_search(args):
     svc = _build_service("gmail", "v1")
-    results = svc.users().messages().list(
-        userId="me", q=args.query, maxResults=args.max_results
-    ).execute()
+    results = svc.users().messages().list(userId="me", q=args.query, maxResults=args.max_results).execute()
 
     messages = results.get("messages", [])
     if not messages:
@@ -86,21 +86,25 @@ def gmail_search(args):
 
     out = []
     for msg_stub in messages:
-        msg = svc.users().messages().get(
-            userId="me", id=msg_stub["id"], format="metadata",
-            metadataHeaders=["From", "To", "Subject", "Date"]
-        ).execute()
+        msg = (
+            svc.users()
+            .messages()
+            .get(userId="me", id=msg_stub["id"], format="metadata", metadataHeaders=["From", "To", "Subject", "Date"])
+            .execute()
+        )
         headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
-        out.append({
-            "id": msg["id"],
-            "thread_id": msg["threadId"],
-            "from": headers.get("From", ""),
-            "to": headers.get("To", ""),
-            "subject": headers.get("Subject", ""),
-            "date": headers.get("Date", ""),
-            "snippet": msg.get("snippet", ""),
-            "labels": msg.get("labelIds", []),
-        })
+        out.append(
+            {
+                "id": msg["id"],
+                "thread_id": msg["threadId"],
+                "from": headers.get("From", ""),
+                "to": headers.get("To", ""),
+                "subject": headers.get("Subject", ""),
+                "date": headers.get("Date", ""),
+                "snippet": msg.get("snippet", ""),
+                "labels": msg.get("labelIds", []),
+            }
+        )
 
     _json_out({"count": len(out), "messages": out})
 
@@ -116,24 +120,28 @@ def gmail_read(args):
     payload = msg.get("payload", {})
     if payload.get("body", {}).get("data"):
         import base64
+
         body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
     elif payload.get("parts"):
         for part in payload["parts"]:
             if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
                 import base64
+
                 body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8", errors="replace")
                 break
 
-    _json_out({
-        "id": msg["id"],
-        "thread_id": msg["threadId"],
-        "from": headers.get("From", ""),
-        "to": headers.get("To", ""),
-        "subject": headers.get("Subject", ""),
-        "date": headers.get("Date", ""),
-        "body": body[:10000],  # cap at 10k chars
-        "labels": msg.get("labelIds", []),
-    })
+    _json_out(
+        {
+            "id": msg["id"],
+            "thread_id": msg["threadId"],
+            "from": headers.get("From", ""),
+            "to": headers.get("To", ""),
+            "subject": headers.get("Subject", ""),
+            "date": headers.get("Date", ""),
+            "body": body[:10000],  # cap at 10k chars
+            "labels": msg.get("labelIds", []),
+        }
+    )
 
 
 def gmail_send(args):
@@ -156,16 +164,13 @@ def gmail_send(args):
 def gmail_labels(args):
     svc = _build_service("gmail", "v1")
     results = svc.users().labels().list(userId="me").execute()
-    labels = [{"id": lbl["id"], "name": lbl["name"], "type": lbl["type"]}
-              for lbl in results.get("labels", [])]
+    labels = [{"id": lbl["id"], "name": lbl["name"], "type": lbl["type"]} for lbl in results.get("labels", [])]
     _json_out({"count": len(labels), "labels": labels})
 
 
 def gmail_threads(args):
     svc = _build_service("gmail", "v1")
-    results = svc.users().threads().list(
-        userId="me", q=args.query, maxResults=args.max_results
-    ).execute()
+    results = svc.users().threads().list(userId="me", q=args.query, maxResults=args.max_results).execute()
 
     threads = results.get("threads", [])
     if not threads:
@@ -174,52 +179,65 @@ def gmail_threads(args):
 
     out = []
     for t in threads:
-        thread = svc.users().threads().get(userId="me", id=t["id"], format="metadata",
-                                            metadataHeaders=["From", "Subject", "Date"]).execute()
+        thread = (
+            svc.users()
+            .threads()
+            .get(userId="me", id=t["id"], format="metadata", metadataHeaders=["From", "Subject", "Date"])
+            .execute()
+        )
         msgs = thread.get("messages", [])
         first_headers = {h["name"]: h["value"] for h in msgs[0].get("payload", {}).get("headers", [])} if msgs else {}
-        out.append({
-            "id": t["id"],
-            "message_count": len(msgs),
-            "subject": first_headers.get("Subject", ""),
-            "from": first_headers.get("From", ""),
-            "snippet": t.get("snippet", ""),
-        })
+        out.append(
+            {
+                "id": t["id"],
+                "message_count": len(msgs),
+                "subject": first_headers.get("Subject", ""),
+                "from": first_headers.get("From", ""),
+                "snippet": t.get("snippet", ""),
+            }
+        )
 
     _json_out({"count": len(out), "threads": out})
 
 
 # ── Calendar ─────────────────────────────────────────────────────────────
 
+
 def calendar_list(args):
     svc = _build_service("calendar", "v3")
     now = datetime.now(timezone.utc)
     end = now + timedelta(days=args.days)
 
-    events_result = svc.events().list(
-        calendarId="primary",
-        timeMin=now.isoformat(),
-        timeMax=end.isoformat(),
-        maxResults=args.max_results,
-        singleEvents=True,
-        orderBy="startTime",
-    ).execute()
+    events_result = (
+        svc.events()
+        .list(
+            calendarId="primary",
+            timeMin=now.isoformat(),
+            timeMax=end.isoformat(),
+            maxResults=args.max_results,
+            singleEvents=True,
+            orderBy="startTime",
+        )
+        .execute()
+    )
 
     events = events_result.get("items", [])
     out = []
     for e in events:
         start = e.get("start", {}).get("dateTime", e.get("start", {}).get("date", ""))
         end_time = e.get("end", {}).get("dateTime", e.get("end", {}).get("date", ""))
-        out.append({
-            "id": e["id"],
-            "summary": e.get("summary", "(no title)"),
-            "start": start,
-            "end": end_time,
-            "location": e.get("location", ""),
-            "description": (e.get("description") or "")[:500],
-            "status": e.get("status", ""),
-            "attendees": [a.get("email") for a in e.get("attendees", [])],
-        })
+        out.append(
+            {
+                "id": e["id"],
+                "summary": e.get("summary", "(no title)"),
+                "start": start,
+                "end": end_time,
+                "location": e.get("location", ""),
+                "description": (e.get("description") or "")[:500],
+                "status": e.get("status", ""),
+                "attendees": [a.get("email") for a in e.get("attendees", [])],
+            }
+        )
 
     _json_out({"count": len(out), "days": args.days, "events": out})
 
@@ -240,13 +258,15 @@ def calendar_create(args):
         event["attendees"] = [{"email": e.strip()} for e in args.attendees.split(",")]
 
     result = svc.events().insert(calendarId="primary", body=event).execute()
-    _json_out({
-        "status": "created",
-        "id": result["id"],
-        "link": result.get("htmlLink", ""),
-        "summary": result.get("summary", ""),
-        "start": result.get("start", {}),
-    })
+    _json_out(
+        {
+            "status": "created",
+            "id": result["id"],
+            "link": result.get("htmlLink", ""),
+            "summary": result.get("summary", ""),
+            "start": result.get("start", {}),
+        }
+    )
 
 
 def calendar_delete(args):
@@ -276,6 +296,7 @@ def calendar_update(args):
 
 # ── Drive ────────────────────────────────────────────────────────────────
 
+
 def drive_search(args):
     svc = _build_service("drive", "v3")
 
@@ -283,12 +304,16 @@ def drive_search(args):
     if args.mime_type:
         query += f" and mimeType = '{args.mime_type}'"
 
-    results = svc.files().list(
-        q=query,
-        pageSize=args.max_results,
-        fields="files(id, name, mimeType, modifiedTime, size, parents, webViewLink)",
-        orderBy="modifiedTime desc",
-    ).execute()
+    results = (
+        svc.files()
+        .list(
+            q=query,
+            pageSize=args.max_results,
+            fields="files(id, name, mimeType, modifiedTime, size, parents, webViewLink)",
+            orderBy="modifiedTime desc",
+        )
+        .execute()
+    )
 
     files = results.get("files", [])
     _json_out({"count": len(files), "files": files})
@@ -301,12 +326,16 @@ def drive_list(args):
     if args.folder_id:
         query += f" and '{args.folder_id}' in parents"
 
-    results = svc.files().list(
-        q=query,
-        pageSize=args.max_results,
-        fields="files(id, name, mimeType, modifiedTime, size, webViewLink)",
-        orderBy="modifiedTime desc",
-    ).execute()
+    results = (
+        svc.files()
+        .list(
+            q=query,
+            pageSize=args.max_results,
+            fields="files(id, name, mimeType, modifiedTime, size, webViewLink)",
+            orderBy="modifiedTime desc",
+        )
+        .execute()
+    )
 
     files = results.get("files", [])
     _json_out({"count": len(files), "files": files})
@@ -342,13 +371,15 @@ def drive_download(args):
         while not done:
             _, done = downloader.next_chunk()
 
-    _json_out({
-        "status": "downloaded",
-        "file_id": args.file_id,
-        "name": file_meta.get("name", ""),
-        "output": str(output_path),
-        "size_bytes": output_path.stat().st_size,
-    })
+    _json_out(
+        {
+            "status": "downloaded",
+            "file_id": args.file_id,
+            "name": file_meta.get("name", ""),
+            "output": str(output_path),
+            "size_bytes": output_path.stat().st_size,
+        }
+    )
 
 
 def drive_upload(args):
@@ -366,15 +397,18 @@ def drive_upload(args):
 
     media = MediaFileUpload(str(file_path), resumable=True)
     result = svc.files().create(body=file_metadata, media_body=media, fields="id,name,webViewLink").execute()
-    _json_out({
-        "status": "uploaded",
-        "id": result["id"],
-        "name": result["name"],
-        "link": result.get("webViewLink", ""),
-    })
+    _json_out(
+        {
+            "status": "uploaded",
+            "id": result["id"],
+            "name": result["name"],
+            "link": result.get("webViewLink", ""),
+        }
+    )
 
 
 # ── Docs ─────────────────────────────────────────────────────────────────
+
 
 def docs_read(args):
     svc = _build_service("docs", "v1")
@@ -390,12 +424,14 @@ def docs_read(args):
                 if text_run:
                     text += text_run.get("content", "")
 
-    _json_out({
-        "id": doc["documentId"],
-        "title": doc.get("title", ""),
-        "text": text[:20000],  # cap at 20k chars
-        "revision_id": doc.get("revisionId", ""),
-    })
+    _json_out(
+        {
+            "id": doc["documentId"],
+            "title": doc.get("title", ""),
+            "text": text[:20000],  # cap at 20k chars
+            "revision_id": doc.get("revisionId", ""),
+        }
+    )
 
 
 def docs_create(args):
@@ -407,12 +443,14 @@ def docs_create(args):
         requests = [{"insertText": {"location": {"index": 1}, "text": args.body}}]
         svc.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
 
-    _json_out({
-        "status": "created",
-        "id": doc_id,
-        "title": doc.get("title", ""),
-        "link": f"https://docs.google.com/document/d/{doc_id}/edit",
-    })
+    _json_out(
+        {
+            "status": "created",
+            "id": doc_id,
+            "title": doc.get("title", ""),
+            "link": f"https://docs.google.com/document/d/{doc_id}/edit",
+        }
+    )
 
 
 def docs_append(args):
@@ -432,21 +470,22 @@ def docs_append(args):
 
 # ── Sheets ───────────────────────────────────────────────────────────────
 
+
 def sheets_read(args):
     svc = _build_service("sheets", "v4")
     range_name = args.range or "Sheet1"
 
-    result = svc.spreadsheets().values().get(
-        spreadsheetId=args.spreadsheet_id, range=range_name
-    ).execute()
+    result = svc.spreadsheets().values().get(spreadsheetId=args.spreadsheet_id, range=range_name).execute()
 
     values = result.get("values", [])
-    _json_out({
-        "spreadsheet_id": args.spreadsheet_id,
-        "range": result.get("range", range_name),
-        "rows": len(values),
-        "values": values[:500],  # cap at 500 rows
-    })
+    _json_out(
+        {
+            "spreadsheet_id": args.spreadsheet_id,
+            "range": result.get("range", range_name),
+            "rows": len(values),
+            "values": values[:500],  # cap at 500 rows
+        }
+    )
 
 
 def sheets_write(args):
@@ -456,35 +495,45 @@ def sheets_write(args):
     values = json.loads(args.values)
     body = {"values": values}
 
-    result = svc.spreadsheets().values().update(
-        spreadsheetId=args.spreadsheet_id,
-        range=range_name,
-        valueInputOption="USER_ENTERED",
-        body=body,
-    ).execute()
+    result = (
+        svc.spreadsheets()
+        .values()
+        .update(
+            spreadsheetId=args.spreadsheet_id,
+            range=range_name,
+            valueInputOption="USER_ENTERED",
+            body=body,
+        )
+        .execute()
+    )
 
-    _json_out({
-        "status": "written",
-        "spreadsheet_id": args.spreadsheet_id,
-        "updated_range": result.get("updatedRange", ""),
-        "updated_rows": result.get("updatedRows", 0),
-        "updated_cells": result.get("updatedCells", 0),
-    })
+    _json_out(
+        {
+            "status": "written",
+            "spreadsheet_id": args.spreadsheet_id,
+            "updated_range": result.get("updatedRange", ""),
+            "updated_rows": result.get("updatedRows", 0),
+            "updated_cells": result.get("updatedCells", 0),
+        }
+    )
 
 
 def sheets_create(args):
     svc = _build_service("sheets", "v4")
     spreadsheet = {"properties": {"title": args.title}}
     result = svc.spreadsheets().create(body=spreadsheet).execute()
-    _json_out({
-        "status": "created",
-        "id": result["spreadsheetId"],
-        "title": result["properties"]["title"],
-        "link": result.get("spreadsheetUrl", ""),
-    })
+    _json_out(
+        {
+            "status": "created",
+            "id": result["spreadsheetId"],
+            "title": result["properties"]["title"],
+            "link": result.get("spreadsheetUrl", ""),
+        }
+    )
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────
+
 
 def auth_status(args):
     if not TOKEN_FILE.exists():
@@ -492,18 +541,22 @@ def auth_status(args):
         return
 
     from google.oauth2.credentials import Credentials
+
     creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-    _json_out({
-        "authenticated": True,
-        "valid": creds.valid,
-        "expired": creds.expired,
-        "token_file": str(TOKEN_FILE),
-        "scopes": list(creds.scopes) if creds.scopes else SCOPES,
-        "has_refresh_token": bool(creds.refresh_token),
-    })
+    _json_out(
+        {
+            "authenticated": True,
+            "valid": creds.valid,
+            "expired": creds.expired,
+            "token_file": str(TOKEN_FILE),
+            "scopes": list(creds.scopes) if creds.scopes else SCOPES,
+            "has_refresh_token": bool(creds.refresh_token),
+        }
+    )
 
 
 # ── Argument Parser ──────────────────────────────────────────────────────
+
 
 def build_parser():
     parser = argparse.ArgumentParser(

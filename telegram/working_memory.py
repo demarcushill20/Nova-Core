@@ -8,6 +8,7 @@ when tasks complete — even hours later.
 Storage: STATE/working_memory.json (flat JSON, loaded on startup).
 Archive: STATE/working_memory_archive.json (completed tasks, last 100).
 """
+
 from __future__ import annotations
 
 import json
@@ -27,13 +28,13 @@ WM_ARCHIVE = STATE_DIR / "working_memory_archive.json"
 class ActiveTask:
     task_stem: str
     chat_id: str
-    original_message: str       # What the user actually said
-    intent_summary: str         # 1-line summary of the goal
+    original_message: str  # What the user actually said
+    intent_summary: str  # 1-line summary of the goal
     created_at: float
-    status: str                 # "pending" | "running" | "completed" | "failed"
-    context_snapshot: list      # Last N conversation messages at delegation time
-    task_file: str = ""         # Path to TASKS/ file (proof of delegation)
-    message_id: int = 0         # Telegram message_id for reply threading
+    status: str  # "pending" | "running" | "completed" | "failed"
+    context_snapshot: list  # Last N conversation messages at delegation time
+    task_file: str = ""  # Path to TASKS/ file (proof of delegation)
+    message_id: int = 0  # Telegram message_id for reply threading
 
 
 class WorkingMemoryStore:
@@ -47,8 +48,7 @@ class WorkingMemoryStore:
         """Record a new delegated task."""
         self._tasks[task.task_stem] = task
         self._save()
-        _log.info("WM_ADD stem=%s chat=%s summary=%r",
-                  task.task_stem, task.chat_id, task.intent_summary[:80])
+        _log.info("WM_ADD stem=%s chat=%s summary=%r", task.task_stem, task.chat_id, task.intent_summary[:80])
 
     def get(self, task_stem: str) -> ActiveTask | None:
         return self._tasks.get(task_stem)
@@ -59,10 +59,9 @@ class WorkingMemoryStore:
             task.status = status
             self._save()
 
-    def complete(self, task_stem: str,
-                 output_file: str = "",
-                 output_summary_line: str = "",
-                 completion_response: str = "") -> ActiveTask | None:
+    def complete(
+        self, task_stem: str, output_file: str = "", output_summary_line: str = "", completion_response: str = ""
+    ) -> ActiveTask | None:
         """Mark task completed, archive it, record in recent completions, return task."""
         task = self._tasks.pop(task_stem, None)
         if task:
@@ -74,6 +73,7 @@ class WorkingMemoryStore:
             # Record in recent completions store for session reconstruction
             try:
                 from telegram.recent_completions import record_completion
+
                 record_completion(
                     task_stem=task_stem,
                     chat_id=task.chat_id,
@@ -84,8 +84,7 @@ class WorkingMemoryStore:
                     completion_response=completion_response,
                 )
             except Exception as e:
-                _log.warning("Failed to record recent completion for %s: %s",
-                             task_stem, e)
+                _log.warning("Failed to record recent completion for %s: %s", task_stem, e)
         return task
 
     def active_tasks(self) -> list[ActiveTask]:
@@ -104,8 +103,7 @@ class WorkingMemoryStore:
             task = self._tasks.pop(stem)
             task.status = "stale"
             self._archive(task)
-            _log.info("WM_STALE stem=%s age_h=%.1f", stem,
-                      (time.time() - task.created_at) / 3600)
+            _log.info("WM_STALE stem=%s age_h=%.1f", stem, (time.time() - task.created_at) / 3600)
         if stale:
             self._save()
         return len(stale)
@@ -119,13 +117,13 @@ class WorkingMemoryStore:
         for t in tasks:
             age_min = int((time.time() - t.created_at) / 60)
             lines.append(f"- [{t.status}] {t.intent_summary} (started {age_min}m ago)")
-            lines.append(f"  Original request: \"{t.original_message[:120]}\"")
+            lines.append(f'  Original request: "{t.original_message[:120]}"')
         return "\n".join(lines)
 
     def format_completion_context(self, task: ActiveTask) -> str:
         """Format a completed task's original context for the completion prompt."""
         lines = [
-            f"ORIGINAL USER REQUEST: \"{task.original_message}\"",
+            f'ORIGINAL USER REQUEST: "{task.original_message}"',
             f"GOAL: {task.intent_summary}",
         ]
         if task.context_snapshot:

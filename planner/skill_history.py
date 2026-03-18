@@ -87,13 +87,9 @@ class SkillHistoryStore:
             entry["failures"] += 1
 
         # Running average for duration
-        entry["avg_duration_ms"] = round(
-            ((entry["avg_duration_ms"] * old_runs) + duration_ms) / entry["runs"]
-        )
+        entry["avg_duration_ms"] = round(((entry["avg_duration_ms"] * old_runs) + duration_ms) / entry["runs"])
 
-        entry["last_used_ts"] = datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
+        entry["last_used_ts"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         entry["total_retries"] += retries
 
         self.save(data)
@@ -135,9 +131,7 @@ class SkillHistoryStore:
             "known": True,
             "success_rate": self.get_success_rate(skill_name),
             "avg_duration_ms": stats.get("avg_duration_ms", 0),
-            "avg_retries_per_run": round(
-                stats["total_retries"] / stats["runs"], 2
-            ),
+            "avg_retries_per_run": round(stats["total_retries"] / stats["runs"], 2),
         }
 
     def get_success_rate(self, skill_name: str) -> float:

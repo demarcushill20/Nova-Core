@@ -94,7 +94,7 @@ class SimpleCircuitBreaker:
         self._redis = redis_client
         if self._redis is None:
             try:
-                import redis as _redis_mod  # noqa: F811
+                import redis as _redis_mod
 
                 _r = _redis_mod.Redis(host="localhost", port=6379, db=3, socket_connect_timeout=1)
                 _r.ping()
@@ -135,7 +135,7 @@ class SimpleCircuitBreaker:
             if self._consecutive_failures > 0 and self._last_failure_time > 0:
                 for _ in range(self._consecutive_failures):
                     self._window.append((self._last_failure_time, False))
-        except Exception:  # noqa: S110 — intentional: degrade to in-memory
+        except Exception:
             pass
 
     def _persist_to_redis(self) -> None:
@@ -153,7 +153,7 @@ class SimpleCircuitBreaker:
             )
             # Auto-expire after 24h to avoid stale keys
             self._redis.expire(self._redis_key, 86400)
-        except Exception:  # noqa: S110 — intentional: degrade to in-memory
+        except Exception:
             pass
 
     # -- Public API -----------------------------------------------------------
@@ -220,7 +220,7 @@ class SimpleCircuitBreaker:
         if fire_callback and self.on_open is not None:
             try:
                 self.on_open(self.name)
-            except Exception:  # noqa: S110 — intentional: callback must not break breaker
+            except Exception:
                 pass
 
     def record_success(self) -> None:

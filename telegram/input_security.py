@@ -6,6 +6,7 @@ and shell metacharacter injection.
 
 Phase 1.1 of Security Hardening Plan (2026-03-12).
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,9 +30,11 @@ BURST_WINDOW = 10  # seconds
 
 # --- Data classes ---
 
+
 @dataclass
 class SanitizationResult:
     """Result of the sanitization pipeline."""
+
     text: str
     is_safe: bool
     risk_score: int = 0
@@ -47,6 +50,7 @@ class SanitizationResult:
 
 # --- Stage 2: Length enforcement ---
 
+
 def _enforce_length(text: str) -> tuple[str, bool, str]:
     """Truncate oversized input. Returns (text, truncated, warning)."""
     if len(text) > MAX_MESSAGE_LENGTH:
@@ -55,6 +59,7 @@ def _enforce_length(text: str) -> tuple[str, bool, str]:
 
 
 # --- Stage 3: Unicode NFKC normalization ---
+
 
 def _normalize_unicode(text: str) -> str:
     """NFKC normalization collapses homoglyphs to canonical forms."""
@@ -107,12 +112,12 @@ def _detect_encoding_attacks(text: str) -> list[str]:
 # --- Stage 6: Shell metacharacter neutralization ---
 
 _SHELL_DANGEROUS = re.compile(
-    r"`[^`]+`"           # backtick command substitution
-    r"|\$\([^)]+\)"      # $() command substitution
-    r"|\$\{[^}]+\}"      # ${} variable expansion
+    r"`[^`]+`"  # backtick command substitution
+    r"|\$\([^)]+\)"  # $() command substitution
+    r"|\$\{[^}]+\}"  # ${} variable expansion
     r"|;\s*(?:rm|curl|wget|bash|sh|python|perl|nc|ncat|socat)\b"  # chained dangerous commands
     r"|\|\s*(?:bash|sh|python|perl)\b"  # piped to shell
-    r"|>\s*/(?:etc|proc|sys|dev)\b"     # redirect to system paths
+    r"|>\s*/(?:etc|proc|sys|dev)\b"  # redirect to system paths
 )
 
 
@@ -142,38 +147,53 @@ def _neutralize_shell_chars(text: str, for_task: bool = False) -> tuple[str, lis
 
 _INJECTION_PATTERNS = [
     # Direct instruction override
-    (r"(?i)ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)"
-     r"\s+(?:instructions?|prompts?|rules?|directions?)", 30, "instruction_override"),
-    (r"(?i)disregard\s+(?:all\s+)?(?:previous|prior|above|earlier)"
-     r"\s+(?:instructions?|prompts?|rules?)", 30, "instruction_override"),
-    (r"(?i)forget\s+(?:all\s+)?(?:your|the)"
-     r"\s+(?:instructions?|rules?|guidelines?|constraints?)", 25, "instruction_override"),
-
+    (
+        r"(?i)ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)"
+        r"\s+(?:instructions?|prompts?|rules?|directions?)",
+        30,
+        "instruction_override",
+    ),
+    (
+        r"(?i)disregard\s+(?:all\s+)?(?:previous|prior|above|earlier)"
+        r"\s+(?:instructions?|prompts?|rules?)",
+        30,
+        "instruction_override",
+    ),
+    (
+        r"(?i)forget\s+(?:all\s+)?(?:your|the)"
+        r"\s+(?:instructions?|rules?|guidelines?|constraints?)",
+        25,
+        "instruction_override",
+    ),
     # Role-play coercion
     (r"(?i)you\s+are\s+now\s+(?:a\s+)?(?:different|new|unrestricted|evil|DAN)", 35, "role_coercion"),
     (r"(?i)act\s+as\s+(?:if\s+)?(?:you\s+(?:are|were)\s+)?(?:a\s+)?(?:hacker|admin|root|system)", 30, "role_coercion"),
     (r"(?i)pretend\s+(?:to\s+be|you\s+are)\s+", 20, "role_coercion"),
     (r"(?i)(?:enter|switch\s+to|activate)\s+(?:developer|god|admin|root|sudo|DAN)\s+mode", 35, "role_coercion"),
-
     # System prompt extraction
-    (r"(?i)(?:show|reveal|display|print|output|repeat|tell\s+me)"
-     r"\s+(?:\w+\s+){0,3}(?:your|the)\s+"
-     r"(?:(?:system|initial|original|hidden|internal|secret)\s+)+"
-     r"(?:prompt|instructions?|message|rules?)", 25, "prompt_extraction"),
+    (
+        r"(?i)(?:show|reveal|display|print|output|repeat|tell\s+me)"
+        r"\s+(?:\w+\s+){0,3}(?:your|the)\s+"
+        r"(?:(?:system|initial|original|hidden|internal|secret)\s+)+"
+        r"(?:prompt|instructions?|message|rules?)",
+        25,
+        "prompt_extraction",
+    ),
     (r"(?i)what\s+(?:is|are)\s+your\s+(?:system\s+)?(?:instructions?|rules?|prompt)", 15, "prompt_extraction"),
-
     # Delimiter breaking
     (r"(?:###|---|\*\*\*|===)\s*(?:END|STOP|IGNORE|NEW)\s*(?:INSTRUCTIONS?|PROMPT|CONTEXT)", 25, "delimiter_break"),
     (r"<\|(?:endoftext|im_end|end_turn|system|assistant)\|>", 30, "delimiter_break"),
     (r"\[INST\]|\[/INST\]|<<SYS>>|<</SYS>>", 25, "delimiter_break"),
-
     # Indirect injection / data exfiltration
-    (r"(?i)(?:send|post|upload|transmit|exfiltrate)"
-     r"\s+(?:\w+\s+){0,4}"
-     r"(?:data|contents?|secrets?|keys?|tokens?|passwords?|credentials?|info(?:rmation)?)"
-     r"(?:\s+\w+){0,4}\s+(?:to|via)", 30, "exfiltration_attempt"),
+    (
+        r"(?i)(?:send|post|upload|transmit|exfiltrate)"
+        r"\s+(?:\w+\s+){0,4}"
+        r"(?:data|contents?|secrets?|keys?|tokens?|passwords?|credentials?|info(?:rmation)?)"
+        r"(?:\s+\w+){0,4}\s+(?:to|via)",
+        30,
+        "exfiltration_attempt",
+    ),
     (r"(?i)(?:curl|wget|fetch|http)\s+(?:https?://)", 15, "url_in_input"),
-
     # Jailbreak keywords
     (r"(?i)\b(?:jailbreak|DAN|do\s+anything\s+now|STAN|DUDE|AIM)\b", 20, "jailbreak_keyword"),
 ]
@@ -193,6 +213,7 @@ def _detect_prompt_injection(text: str) -> tuple[int, list[str]]:
 
 
 # --- Stage 8: Combined risk scoring ---
+
 
 def _compute_risk_score(
     truncated: bool,
@@ -230,6 +251,7 @@ def _check_burst(user_id: str) -> bool:
 
 
 # --- Main pipeline ---
+
 
 def sanitize_input(
     text: str,
@@ -283,8 +305,11 @@ def sanitize_input(
 
     # Stage 8: Combined risk scoring
     risk_score = _compute_risk_score(
-        truncated, invisible_count, encoding_attacks,
-        shell_warnings, injection_score,
+        truncated,
+        invisible_count,
+        encoding_attacks,
+        shell_warnings,
+        injection_score,
     )
     result.risk_score = risk_score
 
@@ -295,13 +320,17 @@ def sanitize_input(
         result.block_reason = f"risk_score={risk_score} (threshold={INJECTION_BLOCK_THRESHOLD})"
         _log.warning(
             "INPUT_BLOCKED user=%s risk=%d patterns=%s",
-            user_id, risk_score, result.stages_triggered,
+            user_id,
+            risk_score,
+            result.stages_triggered,
         )
     elif risk_score >= INJECTION_FLAG_THRESHOLD:
         result.is_safe = True  # allow but flag
         _log.info(
             "INPUT_FLAGGED user=%s risk=%d patterns=%s",
-            user_id, risk_score, result.stages_triggered,
+            user_id,
+            risk_score,
+            result.stages_triggered,
         )
 
     # Stage 9: Burst detection

@@ -72,6 +72,7 @@ from agents.workflow_gate import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _bb(tmp_path: Path) -> Blackboard:
     return Blackboard(base=tmp_path)
 
@@ -111,8 +112,7 @@ def _setup_registry(tmp_path: Path) -> None:
                 "agent_id": "researcher_001",
                 "role": "researcher",
                 "allowed_tools": ["web.search", "http.fetch"],
-                "denied_tools": ["repo.files.write", "repo.git.commit",
-                                 "shell.run"],
+                "denied_tools": ["repo.files.write", "repo.git.commit", "shell.run"],
                 "max_actions": 30,
                 "max_runtime_seconds": 180,
                 "max_retries": 1,
@@ -123,8 +123,7 @@ def _setup_registry(tmp_path: Path) -> None:
     (reg_dir / "registry.json").write_text(json.dumps(registry))
 
 
-def _setup_flags(tmp_path: Path, enabled: bool = True,
-                 archive: bool = True) -> None:
+def _setup_flags(tmp_path: Path, enabled: bool = True, archive: bool = True) -> None:
     config_dir = tmp_path / "STATE" / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     flags = {
@@ -142,6 +141,7 @@ def _setup_flags(tmp_path: Path, enabled: bool = True,
 # 1. Child contract missing / malformed
 # ===========================================================================
 
+
 class TestChildContractMissing:
     """Fail: workflows block when child contracts are missing or malformed."""
 
@@ -155,8 +155,12 @@ class TestChildContractMissing:
 
         # Write contract WITHOUT required fields
         contract = ChildContract(
-            agent_id="a1", workflow_id="wf_miss_1", subtask_id="sub1",
-            role="coder", status="completed", summary="Done",
+            agent_id="a1",
+            workflow_id="wf_miss_1",
+            subtask_id="sub1",
+            role="coder",
+            status="completed",
+            summary="Done",
         )
         engine.complete_delegation("wf_miss_1", "sub1", "a1", contract)
 
@@ -212,6 +216,7 @@ class TestChildContractMissing:
 # 2. Verifier rejection — single and halt-on-double
 # ===========================================================================
 
+
 class TestVerifierRejection:
     """Fail: verifier rejection blocks completion; double rejection halts."""
 
@@ -223,15 +228,20 @@ class TestVerifierRejection:
         engine.delegate("wf_rej_1", "sub1", "a1", "coder", "Do X")
         engine.claim_delegation("wf_rej_1", "sub1", "a1")
         contract = ChildContract(
-            agent_id="a1", workflow_id="wf_rej_1", subtask_id="sub1",
-            role="coder", status="completed", summary="Done",
+            agent_id="a1",
+            workflow_id="wf_rej_1",
+            subtask_id="sub1",
+            role="coder",
+            status="completed",
+            summary="Done",
         )
         engine.complete_delegation("wf_rej_1", "sub1", "a1", contract)
 
         # governed_synthesize will block on contract validation
         out = _make_file(tmp_path, "OUTPUT/r1.md", "content")
         synthesis = engine.governed_synthesize(
-            "wf_rej_1", deliverables={"r1.md": out},
+            "wf_rej_1",
+            deliverables={"r1.md": out},
         )
         assert synthesis["status"] == "blocked"
 
@@ -269,6 +279,7 @@ class TestVerifierRejection:
 # 3. Critic blocking objection → replan signal → reroute
 # ===========================================================================
 
+
 class TestCriticObjectionReplan:
     """Fail: critic objections produce deterministic replan signals."""
 
@@ -276,8 +287,7 @@ class TestCriticObjectionReplan:
         bb = _bb(tmp_path)
         gate = WorkflowGate(blackboard=bb)
 
-        review = gate.run_critic_review("wf_obj_1", "node_a",
-                                         deliverables={})
+        review = gate.run_critic_review("wf_obj_1", "node_a", deliverables={})
         assert review.verdict == "objection"
         assert review.blocking is True
 
@@ -304,7 +314,8 @@ class TestCriticObjectionReplan:
         # Empty deliverable value → empty_deliverable reason_code → retryable
         _make_file(tmp_path, "out.md", "content")
         review = gate.run_critic_review(
-            "wf_obj_3", "node_c",
+            "wf_obj_3",
+            "node_c",
             deliverables={"empty_val": ""},  # empty string → high severity
         )
         # May or may not produce objection depending on severity
@@ -359,19 +370,25 @@ class TestCriticObjectionReplan:
 # 4. Stale lease → resume after interruption
 # ===========================================================================
 
+
 class TestStaleLease:
     """Fail: stale leases are recovered and nodes become retryable."""
 
     def test_expired_lease_allows_takeover(self, tmp_path):
         bb = _bb(tmp_path)
         coord = CoordinationLayer(blackboard=bb)
-        bb.create_workflow(WorkflowState(
-            workflow_id="wf_stale_1", task_id="t_s1",
-        ))
-        coord.save_node_states("wf_stale_1", [
-            NodeState(node_id="A", workflow_id="wf_stale_1",
-                      status="pending"),
-        ])
+        bb.create_workflow(
+            WorkflowState(
+                workflow_id="wf_stale_1",
+                task_id="t_s1",
+            )
+        )
+        coord.save_node_states(
+            "wf_stale_1",
+            [
+                NodeState(node_id="A", workflow_id="wf_stale_1", status="pending"),
+            ],
+        )
 
         # Acquire with very short TTL
         coord.claim_node("wf_stale_1", "A", "agent_1", ttl_s=0.01)
@@ -385,17 +402,21 @@ class TestStaleLease:
         bb = _bb(tmp_path)
         coord = CoordinationLayer(blackboard=bb)
 
-        bb.create_workflow(WorkflowState(
-            workflow_id="wf_stale_2", task_id="t_s2",
-        ))
-        coord.save_node_states("wf_stale_2", [
-            NodeState(node_id="A", workflow_id="wf_stale_2",
-                      status="executing", retry_count=0),
-        ])
+        bb.create_workflow(
+            WorkflowState(
+                workflow_id="wf_stale_2",
+                task_id="t_s2",
+            )
+        )
+        coord.save_node_states(
+            "wf_stale_2",
+            [
+                NodeState(node_id="A", workflow_id="wf_stale_2", status="executing", retry_count=0),
+            ],
+        )
 
         # Create expired lease
-        lease = Lease(workflow_id="wf_stale_2", node_id="A", holder="agent_1",
-                      acquired_at=time.time() - 1000, ttl_s=1)
+        lease = Lease(workflow_id="wf_stale_2", node_id="A", holder="agent_1", acquired_at=time.time() - 1000, ttl_s=1)
         coord._write_lease(lease)
 
         # Recover
@@ -411,17 +432,21 @@ class TestStaleLease:
         bb = _bb(tmp_path)
         coord = CoordinationLayer(blackboard=bb)
 
-        bb.create_workflow(WorkflowState(
-            workflow_id="wf_stale_3", task_id="t_s3",
-        ))
-        coord.save_node_states("wf_stale_3", [
-            NodeState(node_id="A", workflow_id="wf_stale_3",
-                      status="executing", retry_count=1, max_retries=1),
-        ])
+        bb.create_workflow(
+            WorkflowState(
+                workflow_id="wf_stale_3",
+                task_id="t_s3",
+            )
+        )
+        coord.save_node_states(
+            "wf_stale_3",
+            [
+                NodeState(node_id="A", workflow_id="wf_stale_3", status="executing", retry_count=1, max_retries=1),
+            ],
+        )
 
         # Create expired lease
-        lease = Lease(workflow_id="wf_stale_3", node_id="A", holder="agent_1",
-                      acquired_at=time.time() - 1000, ttl_s=1)
+        lease = Lease(workflow_id="wf_stale_3", node_id="A", holder="agent_1", acquired_at=time.time() - 1000, ttl_s=1)
         coord._write_lease(lease)
 
         # Recover — should fail the node
@@ -433,17 +458,20 @@ class TestStaleLease:
         bb = _bb(tmp_path)
         coord = CoordinationLayer(blackboard=bb)
 
-        bb.create_workflow(WorkflowState(
-            workflow_id="wf_stale_4", task_id="t_s4",
-        ))
-        coord.save_node_states("wf_stale_4", [
-            NodeState(node_id="A", workflow_id="wf_stale_4",
-                      status="completed"),
-            NodeState(node_id="B", workflow_id="wf_stale_4",
-                      status="pending", depends_on=["A"]),
-            NodeState(node_id="C", workflow_id="wf_stale_4",
-                      status="pending", depends_on=["B"]),
-        ])
+        bb.create_workflow(
+            WorkflowState(
+                workflow_id="wf_stale_4",
+                task_id="t_s4",
+            )
+        )
+        coord.save_node_states(
+            "wf_stale_4",
+            [
+                NodeState(node_id="A", workflow_id="wf_stale_4", status="completed"),
+                NodeState(node_id="B", workflow_id="wf_stale_4", status="pending", depends_on=["A"]),
+                NodeState(node_id="C", workflow_id="wf_stale_4", status="pending", depends_on=["B"]),
+            ],
+        )
 
         state = coord.resume_workflow("wf_stale_4")
         assert "A" in state["completed_nodes"]
@@ -455,6 +483,7 @@ class TestStaleLease:
 # 5. Orphaned child agent detection
 # ===========================================================================
 
+
 class TestOrphanedAgentDetection:
     """Observability correctly detects orphaned agents."""
 
@@ -462,12 +491,14 @@ class TestOrphanedAgentDetection:
         bb = _bb(tmp_path)
 
         # Create an agent that's been "executing" beyond SLA
-        bb.set_agent_state(AgentRuntimeState(
-            agent_id="orphan_agent",
-            workflow_id="wf_orphan",
-            status="executing",
-            started_at=time.time() - 1200,  # 20 min ago
-        ))
+        bb.set_agent_state(
+            AgentRuntimeState(
+                agent_id="orphan_agent",
+                workflow_id="wf_orphan",
+                status="executing",
+                started_at=time.time() - 1200,  # 20 min ago
+            )
+        )
 
         findings = detect_health_issues(base=tmp_path)
         stuck = [f for f in findings if f.category == "agent_stuck"]
@@ -480,9 +511,9 @@ class TestOrphanedAgentDetection:
         coord = CoordinationLayer(blackboard=bb)
 
         # Create an expired lease (orphan)
-        lease = Lease(workflow_id="wf_orphan_2", node_id="A",
-                      holder="dead_agent",
-                      acquired_at=time.time() - 2000, ttl_s=600)
+        lease = Lease(
+            workflow_id="wf_orphan_2", node_id="A", holder="dead_agent", acquired_at=time.time() - 2000, ttl_s=600
+        )
         coord._write_lease(lease)
 
         findings = detect_health_issues(base=tmp_path)
@@ -493,12 +524,14 @@ class TestOrphanedAgentDetection:
         bb = _bb(tmp_path)
 
         # Stuck agent
-        bb.set_agent_state(AgentRuntimeState(
-            agent_id="stuck_1",
-            workflow_id="wf_m",
-            status="executing",
-            started_at=time.time() - 1200,
-        ))
+        bb.set_agent_state(
+            AgentRuntimeState(
+                agent_id="stuck_1",
+                workflow_id="wf_m",
+                status="executing",
+                started_at=time.time() - 1200,
+            )
+        )
 
         metrics = collect_metrics(base=tmp_path)
         assert metrics.orphaned_agent_count >= 1
@@ -507,6 +540,7 @@ class TestOrphanedAgentDetection:
 # ===========================================================================
 # 6. Dependency wait timeout detection
 # ===========================================================================
+
 
 class TestDependencyTimeout:
     """Observability detects agents waiting too long on dependencies."""
@@ -535,6 +569,7 @@ class TestDependencyTimeout:
 # ===========================================================================
 # 7. Policy denial on delegated action (anti-bypass)
 # ===========================================================================
+
 
 class TestPolicyDenialAntiBypass:
     """Anti-bypass: agents cannot circumvent policy through delegation."""
@@ -608,8 +643,7 @@ class TestPolicyDenialAntiBypass:
         engine.create_workflow("wf_pol_1", "task_p1")
 
         with pytest.raises(WorkflowHalt):
-            engine.check_tool_policy("wf_pol_1", "coder_001",
-                                     "system.service.restart")
+            engine.check_tool_policy("wf_pol_1", "coder_001", "system.service.restart")
 
         wf = bb.get_workflow("wf_pol_1")
         assert wf["status"] == "halted"
@@ -632,10 +666,7 @@ class TestPolicyDenialAntiBypass:
         )
 
         # Exceed action budget
-        decision = policy.check_budget("coder_001",
-                                        action_count=100,
-                                        runtime_s=10,
-                                        retry_count=0)
+        decision = policy.check_budget("coder_001", action_count=100, runtime_s=10, retry_count=0)
         assert decision.allowed is False
         assert "action" in decision.reason.lower()
 
@@ -646,8 +677,7 @@ class TestPolicyDenialAntiBypass:
             registry_path=tmp_path / "STATE" / "agents" / "registry.json",
         )
 
-        for tool in ["repo.files.write", "repo.files.patch",
-                      "repo.git.commit", "shell.run"]:
+        for tool in ["repo.files.write", "repo.files.patch", "repo.git.commit", "shell.run"]:
             assert policy.requires_verification(tool) is True
 
         for tool in ["repo.files.read", "web.search", "http.fetch"]:
@@ -658,6 +688,7 @@ class TestPolicyDenialAntiBypass:
 # 8. Budget exhaustion
 # ===========================================================================
 
+
 class TestBudgetExhaustionFailure:
     """Workflow halts when budgets are exceeded."""
 
@@ -665,8 +696,7 @@ class TestBudgetExhaustionFailure:
         bb = _bb(tmp_path)
         engine = WorkflowEngine(blackboard=bb)
 
-        engine.create_workflow("wf_bud_1", "task_b1",
-                               budget={"max_runtime_s": 0})
+        engine.create_workflow("wf_bud_1", "task_b1", budget={"max_runtime_s": 0})
 
         with pytest.raises(WorkflowHalt):
             engine.check_stop_conditions("wf_bud_1")
@@ -675,27 +705,32 @@ class TestBudgetExhaustionFailure:
         bb = _bb(tmp_path)
 
         # Workflow with very little runtime remaining
-        bb.create_workflow(WorkflowState(
-            workflow_id="wf_bud_2", task_id="t_b2",
-            status="executing",
-            budget={"max_runtime_s": 10},
-            created_at=time.time() - 9,  # 9s elapsed of 10s budget
-        ))
+        bb.create_workflow(
+            WorkflowState(
+                workflow_id="wf_bud_2",
+                task_id="t_b2",
+                status="executing",
+                budget={"max_runtime_s": 10},
+                created_at=time.time() - 9,  # 9s elapsed of 10s budget
+            )
+        )
 
         findings = detect_health_issues(base=tmp_path)
-        budget_issues = [f for f in findings
-                         if "budget" in f.category.lower()]
+        budget_issues = [f for f in findings if "budget" in f.category.lower()]
         assert len(budget_issues) >= 1
 
     def test_budget_exhausted_in_metrics(self, tmp_path):
         bb = _bb(tmp_path)
 
         # Halted workflow with budget reason
-        bb.create_workflow(WorkflowState(
-            workflow_id="wf_bud_3", task_id="t_b3",
-            status="halted",
-            halt_reason="budget_exhausted: Runtime exceeded",
-        ))
+        bb.create_workflow(
+            WorkflowState(
+                workflow_id="wf_bud_3",
+                task_id="t_b3",
+                status="halted",
+                halt_reason="budget_exhausted: Runtime exceeded",
+            )
+        )
 
         metrics = collect_metrics(base=tmp_path)
         assert metrics.halted_workflows == 1
@@ -705,6 +740,7 @@ class TestBudgetExhaustionFailure:
 # ===========================================================================
 # 9. Malformed memory artifact rejection
 # ===========================================================================
+
 
 class TestMalformedMemory:
     """Memory engine rejects invalid artifacts (fail-closed)."""
@@ -799,6 +835,7 @@ class TestMalformedMemory:
 # 10. Restart recovery after in-progress workflow
 # ===========================================================================
 
+
 class TestRestartRecovery:
     """RestartRecovery correctly reconciles state after crash."""
 
@@ -837,8 +874,7 @@ class TestRestartRecovery:
             "updated_at": time.time() - 100,
             "budget": {"max_runtime_s": 1800},
             "node_states": {
-                "A": {"status": "executing", "retry_count": 0,
-                       "max_retries": 1},
+                "A": {"status": "executing", "retry_count": 0, "max_retries": 1},
                 "B": {"status": "completed"},
             },
         }
@@ -847,8 +883,7 @@ class TestRestartRecovery:
         recovery = RestartRecovery(base=tmp_path)
         result = recovery.reconcile()
 
-        reset_actions = [a for a in result["actions"]
-                         if a["type"] == "workflow_nodes_reset"]
+        reset_actions = [a for a in result["actions"] if a["type"] == "workflow_nodes_reset"]
         assert len(reset_actions) == 1
 
         data = json.loads((wf_dir / "wf_rec_2.json").read_text())
@@ -884,8 +919,7 @@ class TestRestartRecovery:
         recovery = RestartRecovery(base=tmp_path)
         result = recovery.reconcile()
 
-        lease_actions = [a for a in result["actions"]
-                         if a["type"] == "lease_recovered"]
+        lease_actions = [a for a in result["actions"] if a["type"] == "lease_recovered"]
         assert len(lease_actions) == 1
         assert not (leases_dir / "wf_rec_3_A.json").exists()
 
@@ -913,6 +947,7 @@ class TestRestartRecovery:
 # ===========================================================================
 # 11. Archive/cleanup of completed workflows
 # ===========================================================================
+
 
 class TestArchiveCleanup:
     """Archive manager correctly archives old state."""
@@ -984,6 +1019,7 @@ class TestArchiveCleanup:
         tmp_file.write_text("orphaned data")
         # Set mtime to the past
         import os
+
         old_time = time.time() - 7200
         os.utime(tmp_file, (old_time, old_time))
 
@@ -1005,6 +1041,7 @@ class TestArchiveCleanup:
 # ===========================================================================
 # 12. Feature-flag-off fallback to safe path
 # ===========================================================================
+
 
 class TestFeatureFlagOff:
     """When feature flags are off, system falls back to safe single-agent mode."""
@@ -1040,6 +1077,7 @@ class TestFeatureFlagOff:
 # ===========================================================================
 # 13. Anti-bypass: maker-checker enforced under failure
 # ===========================================================================
+
 
 class TestMakerCheckerAntiBypass:
     """Maker-checker cannot be bypassed even in failure scenarios."""
@@ -1117,6 +1155,7 @@ class TestMakerCheckerAntiBypass:
 # 14. Rate limiting
 # ===========================================================================
 
+
 class TestRateLimiting:
     """Rate limiter correctly bounds event rates."""
 
@@ -1158,6 +1197,7 @@ class TestRateLimiting:
 # ===========================================================================
 # 15. Approval gate (manual approval hooks)
 # ===========================================================================
+
 
 class TestApprovalGate:
     """Manual approval gate works correctly."""

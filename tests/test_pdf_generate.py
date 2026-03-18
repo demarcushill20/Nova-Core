@@ -1,6 +1,5 @@
 """Tests for tools/adapters/pdf_generate.py"""
 
-
 import pytest
 
 from tools.adapters.pdf_generate import _build_styles, _inline_markup, _markdown_to_paragraphs, pdf_generate

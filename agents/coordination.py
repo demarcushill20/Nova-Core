@@ -32,9 +32,11 @@ DEFAULT_LEASE_TTL_S = 600
 # Node state tracking
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class NodeState:
     """State of a single node within a workflow DAG."""
+
     node_id: str
     workflow_id: str
     status: str = "pending"  # pending|blocked|claimed|executing|completed|failed|stale
@@ -62,6 +64,7 @@ class NodeState:
 # Lease model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Lease:
     """File-based lease for a workflow node.
@@ -70,9 +73,10 @@ class Lease:
     Leases expire after ttl_s seconds and can be recovered by
     other claimants.
     """
+
     workflow_id: str
     node_id: str
-    holder: str           # agent_id or process identifier
+    holder: str  # agent_id or process identifier
     acquired_at: float = field(default_factory=time.time)
     ttl_s: float = DEFAULT_LEASE_TTL_S
     renewed_at: float | None = None
@@ -101,6 +105,7 @@ class Lease:
 # Coordination layer
 # ---------------------------------------------------------------------------
 
+
 class CoordinationLayer:
     """Shared coordination substrate for workflow and delegation persistence.
 
@@ -126,8 +131,7 @@ class CoordinationLayer:
     def _lease_path(self, workflow_id: str, node_id: str) -> Path:
         return self.leases_dir / f"{workflow_id}_{node_id}.json"
 
-    def acquire_lease(self, workflow_id: str, node_id: str, holder: str,
-                      ttl_s: float = DEFAULT_LEASE_TTL_S) -> Lease:
+    def acquire_lease(self, workflow_id: str, node_id: str, holder: str, ttl_s: float = DEFAULT_LEASE_TTL_S) -> Lease:
         """Attempt to acquire an exclusive lease on a workflow node.
 
         Raises:
@@ -141,8 +145,7 @@ class CoordinationLayer:
             lease = Lease.from_dict(existing)
             if not lease.is_expired:
                 raise LeaseConflict(
-                    f"Node {workflow_id}/{node_id} already held by "
-                    f"{lease.holder} until {lease.expires_at:.0f}"
+                    f"Node {workflow_id}/{node_id} already held by {lease.holder} until {lease.expires_at:.0f}"
                 )
             # Stale lease — allow takeover, but record it
             self._record_stale_recovery(workflow_id, node_id, lease.holder, holder)
@@ -158,8 +161,7 @@ class CoordinationLayer:
         self._write_lease(new_lease)
         return new_lease
 
-    def renew_lease(self, workflow_id: str, node_id: str,
-                    holder: str) -> Lease:
+    def renew_lease(self, workflow_id: str, node_id: str, holder: str) -> Lease:
         """Renew an existing lease. Only the holder can renew.
 
         Raises:
@@ -173,16 +175,13 @@ class CoordinationLayer:
 
         lease = Lease.from_dict(existing)
         if lease.holder != holder:
-            raise LeaseConflict(
-                f"Lease held by {lease.holder}, not {holder}"
-            )
+            raise LeaseConflict(f"Lease held by {lease.holder}, not {holder}")
 
         lease.renewed_at = time.time()
         self._write_lease(lease)
         return lease
 
-    def release_lease(self, workflow_id: str, node_id: str,
-                      holder: str) -> None:
+    def release_lease(self, workflow_id: str, node_id: str, holder: str) -> None:
         """Release a lease. Only the holder can release.
 
         Silently succeeds if the lease doesn't exist (idempotent).
@@ -194,9 +193,7 @@ class CoordinationLayer:
 
         lease = Lease.from_dict(existing)
         if lease.holder != holder and not lease.is_expired:
-            raise LeaseConflict(
-                f"Cannot release: lease held by {lease.holder}, not {holder}"
-            )
+            raise LeaseConflict(f"Cannot release: lease held by {lease.holder}, not {holder}")
 
         # Remove lease file
         try:
@@ -242,8 +239,7 @@ class CoordinationLayer:
         path = self._lease_path(lease.workflow_id, lease.node_id)
         self.bb._write_json(path, lease.to_dict())
 
-    def _record_stale_recovery(self, workflow_id: str, node_id: str,
-                               old_holder: str, new_holder: str) -> None:
+    def _record_stale_recovery(self, workflow_id: str, node_id: str, old_holder: str, new_holder: str) -> None:
         """Log stale lease recovery for auditability."""
         log_path = self.bb.state / "leases" / "recovery.jsonl"
         record = {
@@ -260,17 +256,19 @@ class CoordinationLayer:
     # Enhanced workflow persistence (node-level state + checkpoints)
     # -----------------------------------------------------------------------
 
-    def save_node_states(self, workflow_id: str,
-                         nodes: list[NodeState]) -> None:
+    def save_node_states(self, workflow_id: str, nodes: list[NodeState]) -> None:
         """Persist node-level state into the workflow state file.
 
         Merges node_states into the existing workflow JSON so that
         orchestrators can reconstruct the full DAG state after restart.
         """
         node_dicts = {n.node_id: n.to_dict() for n in nodes}
-        self.bb.update_workflow(workflow_id, {
-            "node_states": node_dicts,
-        })
+        self.bb.update_workflow(
+            workflow_id,
+            {
+                "node_states": node_dicts,
+            },
+        )
 
     def get_node_states(self, workflow_id: str) -> dict[str, NodeState]:
         """Read node-level state from the workflow file."""
@@ -280,8 +278,7 @@ class CoordinationLayer:
         raw = wf.get("node_states", {})
         return {nid: NodeState.from_dict(ns) for nid, ns in raw.items()}
 
-    def update_node_state(self, workflow_id: str, node_id: str,
-                          updates: dict) -> NodeState:
+    def update_node_state(self, workflow_id: str, node_id: str, updates: dict) -> NodeState:
         """Update a single node's state within the workflow.
 
         Returns the updated NodeState.
@@ -291,8 +288,7 @@ class CoordinationLayer:
             raise FileNotFoundError(f"Workflow not found: {workflow_id}")
 
         node_states = wf.get("node_states", {})
-        current = node_states.get(node_id, {"node_id": node_id,
-                                             "workflow_id": workflow_id})
+        current = node_states.get(node_id, {"node_id": node_id, "workflow_id": workflow_id})
         current.update(updates)
         current["node_id"] = node_id
         current["workflow_id"] = workflow_id
@@ -381,9 +377,7 @@ class CoordinationLayer:
             elif ns.status == "pending":
                 # Check if dependencies are satisfied
                 deps_satisfied = all(
-                    node_states.get(dep, NodeState(node_id=dep,
-                                                   workflow_id=workflow_id)
-                                    ).status == "completed"
+                    node_states.get(dep, NodeState(node_id=dep, workflow_id=workflow_id)).status == "completed"
                     for dep in ns.depends_on
                 )
                 if deps_satisfied:
@@ -418,16 +412,18 @@ class CoordinationLayer:
         Returns the same structure as resume_workflow() plus a
         recovery_actions list.
         """
-        recovery_actions = []
+        recovery_actions: list[dict[str, object]] = []
 
         # 1. Recover stale leases
         stale_leases = self.recover_stale_leases(workflow_id)
         for sl in stale_leases:
-            recovery_actions.append({
-                "action": "stale_lease_removed",
-                "node_id": sl.node_id,
-                "old_holder": sl.holder,
-            })
+            recovery_actions.append(
+                {
+                    "action": "stale_lease_removed",
+                    "node_id": sl.node_id,
+                    "old_holder": sl.holder,
+                }
+            )
 
         # 2. Reset stale nodes
         node_states = self.get_node_states(workflow_id)
@@ -437,28 +433,40 @@ class CoordinationLayer:
                 lease = self.get_lease(workflow_id, nid)
                 if lease is None or lease.is_expired:
                     if ns.retry_count < ns.max_retries:
-                        self.update_node_state(workflow_id, nid, {
-                            "status": "pending",
-                            "assigned_agent": None,
-                            "claimed_at": None,
-                            "started_at": None,
-                            "retry_count": ns.retry_count + 1,
-                        })
-                        recovery_actions.append({
-                            "action": "node_reset_for_retry",
-                            "node_id": nid,
-                            "retry_count": ns.retry_count + 1,
-                        })
+                        self.update_node_state(
+                            workflow_id,
+                            nid,
+                            {
+                                "status": "pending",
+                                "assigned_agent": None,
+                                "claimed_at": None,
+                                "started_at": None,
+                                "retry_count": ns.retry_count + 1,
+                            },
+                        )
+                        recovery_actions.append(
+                            {
+                                "action": "node_reset_for_retry",
+                                "node_id": nid,
+                                "retry_count": ns.retry_count + 1,
+                            }
+                        )
                     else:
-                        self.update_node_state(workflow_id, nid, {
-                            "status": "failed",
-                            "error": "max retries exceeded after stale lease",
-                            "completed_at": time.time(),
-                        })
-                        recovery_actions.append({
-                            "action": "node_failed_max_retries",
-                            "node_id": nid,
-                        })
+                        self.update_node_state(
+                            workflow_id,
+                            nid,
+                            {
+                                "status": "failed",
+                                "error": "max retries exceeded after stale lease",
+                                "completed_at": time.time(),
+                            },
+                        )
+                        recovery_actions.append(
+                            {
+                                "action": "node_failed_max_retries",
+                                "node_id": nid,
+                            }
+                        )
 
         # 3. Return resume state with recovery info
         state = self.resume_workflow(workflow_id)
@@ -469,8 +477,7 @@ class CoordinationLayer:
     # Coordinated node claiming (combines lease + node state + delegation)
     # -----------------------------------------------------------------------
 
-    def claim_node(self, workflow_id: str, node_id: str,
-                   agent_id: str, ttl_s: float = DEFAULT_LEASE_TTL_S) -> Lease:
+    def claim_node(self, workflow_id: str, node_id: str, agent_id: str, ttl_s: float = DEFAULT_LEASE_TTL_S) -> Lease:
         """Atomically claim a workflow node: acquire lease + update state.
 
         This is the primary coordination entry point. It ensures:
@@ -485,66 +492,88 @@ class CoordinationLayer:
         lease = self.acquire_lease(workflow_id, node_id, agent_id, ttl_s)
 
         # Update node state
-        self.update_node_state(workflow_id, node_id, {
-            "status": "claimed",
-            "assigned_agent": agent_id,
-            "claimed_at": time.time(),
-        })
+        self.update_node_state(
+            workflow_id,
+            node_id,
+            {
+                "status": "claimed",
+                "assigned_agent": agent_id,
+                "claimed_at": time.time(),
+            },
+        )
 
         # Update delegation if one exists
         try:
-            self.bb.update_delegation(workflow_id, node_id, {
-                "status": "claimed",
-                "claimed_at": time.time(),
-            })
+            self.bb.update_delegation(
+                workflow_id,
+                node_id,
+                {
+                    "status": "claimed",
+                    "claimed_at": time.time(),
+                },
+            )
         except FileNotFoundError:
             pass  # No delegation record — that's fine for direct node claims
 
         return lease
 
-    def complete_node(self, workflow_id: str, node_id: str,
-                      agent_id: str, output_ref: str | None = None) -> None:
+    def complete_node(self, workflow_id: str, node_id: str, agent_id: str, output_ref: str | None = None) -> None:
         """Mark a node as completed and release its lease.
 
         Updates node state, releases the lease, and updates the
         delegation record if one exists.
         """
         # Update node state
-        self.update_node_state(workflow_id, node_id, {
-            "status": "completed",
-            "completed_at": time.time(),
-            "output_ref": output_ref,
-        })
+        self.update_node_state(
+            workflow_id,
+            node_id,
+            {
+                "status": "completed",
+                "completed_at": time.time(),
+                "output_ref": output_ref,
+            },
+        )
 
         # Release lease
         self.release_lease(workflow_id, node_id, agent_id)
 
         # Update delegation if one exists
         try:
-            self.bb.update_delegation(workflow_id, node_id, {
-                "status": "completed",
-                "completed_at": time.time(),
-            })
+            self.bb.update_delegation(
+                workflow_id,
+                node_id,
+                {
+                    "status": "completed",
+                    "completed_at": time.time(),
+                },
+            )
         except FileNotFoundError:
             pass
 
-    def fail_node(self, workflow_id: str, node_id: str,
-                  agent_id: str, error: str) -> None:
+    def fail_node(self, workflow_id: str, node_id: str, agent_id: str, error: str) -> None:
         """Mark a node as failed and release its lease."""
-        self.update_node_state(workflow_id, node_id, {
-            "status": "failed",
-            "completed_at": time.time(),
-            "error": error,
-        })
+        self.update_node_state(
+            workflow_id,
+            node_id,
+            {
+                "status": "failed",
+                "completed_at": time.time(),
+                "error": error,
+            },
+        )
 
         self.release_lease(workflow_id, node_id, agent_id)
 
         try:
-            self.bb.update_delegation(workflow_id, node_id, {
-                "status": "failed",
-                "completed_at": time.time(),
-                "error": error,
-            })
+            self.bb.update_delegation(
+                workflow_id,
+                node_id,
+                {
+                    "status": "failed",
+                    "completed_at": time.time(),
+                    "error": error,
+                },
+            )
         except FileNotFoundError:
             pass
 
@@ -561,9 +590,7 @@ class CoordinationLayer:
             if ns.status != "pending":
                 continue
             deps_satisfied = all(
-                node_states.get(dep, NodeState(node_id=dep,
-                                               workflow_id=workflow_id)
-                                ).status == "completed"
+                node_states.get(dep, NodeState(node_id=dep, workflow_id=workflow_id)).status == "completed"
                 for dep in ns.depends_on
             )
             if deps_satisfied:
@@ -575,11 +602,14 @@ class CoordinationLayer:
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class LeaseConflict(Exception):
     """Raised when a lease cannot be acquired due to an active holder."""
+
     pass
 
 
 class LeaseNotFound(Exception):
     """Raised when a lease operation targets a non-existent lease."""
+
     pass

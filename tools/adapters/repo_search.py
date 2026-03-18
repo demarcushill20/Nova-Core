@@ -122,11 +122,13 @@ def repo_search(
                         rel = str(filepath.resolve().relative_to(root))
                     except ValueError:
                         continue
-                    matches.append({
-                        "path": rel,
-                        "line": line_num,
-                        "snippet": line.rstrip(),
-                    })
+                    matches.append(
+                        {
+                            "path": rel,
+                            "line": line_num,
+                            "snippet": line.rstrip(),
+                        }
+                    )
                     if len(matches) >= max_results:
                         break
 

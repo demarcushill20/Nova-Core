@@ -52,16 +52,85 @@ MAX_PATTERN_CONTEXT_SIZE = 1536
 _MAX_NOTE_READ = 4096
 
 # Stopwords for keyword extraction
-_STOPWORDS = frozenset({
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "is", "are", "was", "were", "be", "been", "being",
-    "do", "does", "did", "will", "would", "could", "should", "may", "might",
-    "can", "it", "its", "this", "that", "these", "those", "i", "we", "you",
-    "they", "he", "she", "not", "no", "from", "as", "if", "then", "than",
-    "so", "just", "about", "up", "out", "all", "also", "how", "what",
-    "when", "where", "which", "who", "make", "use", "new", "get", "set",
-    "task", "step", "execute", "output", "input", "file", "run",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "can",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "we",
+        "you",
+        "they",
+        "he",
+        "she",
+        "not",
+        "no",
+        "from",
+        "as",
+        "if",
+        "then",
+        "than",
+        "so",
+        "just",
+        "about",
+        "up",
+        "out",
+        "all",
+        "also",
+        "how",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "make",
+        "use",
+        "new",
+        "get",
+        "set",
+        "task",
+        "step",
+        "execute",
+        "output",
+        "input",
+        "file",
+        "run",
+    }
+)
 
 # Guidance sections to extract from pattern body (in priority order)
 _GUIDANCE_SECTIONS = [
@@ -76,6 +145,7 @@ _GUIDANCE_SECTIONS = [
 # ---------------------------------------------------------------------------
 # Eligibility
 # ---------------------------------------------------------------------------
+
 
 def is_eligible_for_pattern_retrieval(
     task_class: str,
@@ -101,6 +171,7 @@ def is_eligible_for_pattern_retrieval(
 # Keyword extraction (reuses same logic as vault_context.py)
 # ---------------------------------------------------------------------------
 
+
 def extract_pattern_keywords(task_text: str, max_keywords: int = 5) -> list[str]:
     """Extract search keywords from task text for pattern matching."""
     tokens = re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{2,}", task_text.lower())
@@ -117,6 +188,7 @@ def extract_pattern_keywords(task_text: str, max_keywords: int = 5) -> list[str]
 # ---------------------------------------------------------------------------
 # Pattern search and read
 # ---------------------------------------------------------------------------
+
 
 def search_agent_patterns(
     keywords: list[str],
@@ -162,10 +234,12 @@ def search_agent_patterns(
         if path in seen or not path:
             continue
         seen.add(path)
-        selected.append({
-            "path": path,
-            "snippet": hit.get("snippet", ""),
-        })
+        selected.append(
+            {
+                "path": path,
+                "snippet": hit.get("snippet", ""),
+            }
+        )
         if len(selected) >= max_results:
             break
 
@@ -223,7 +297,7 @@ def _extract_title(content: str) -> str:
         return m.group(1).strip()
 
     # Try first heading
-    m = re.search(r'^#+\s+(.+)$', content, re.MULTILINE)
+    m = re.search(r"^#+\s+(.+)$", content, re.MULTILINE)
     if m:
         return m.group(1).strip()
 
@@ -252,7 +326,7 @@ def _extract_sections(content: str) -> dict[str, str]:
         start = match.end()
         next_heading = re.search(r"^##\s+", content[start:], re.MULTILINE)
         if next_heading:
-            section_content = content[start:start + next_heading.start()]
+            section_content = content[start : start + next_heading.start()]
         else:
             section_content = content[start:]
 
@@ -267,12 +341,13 @@ def _extract_sections(content: str) -> dict[str, str]:
 def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
-    return text[:max_len - 3] + "..."
+    return text[: max_len - 3] + "..."
 
 
 # ---------------------------------------------------------------------------
 # Context formatting
 # ---------------------------------------------------------------------------
+
 
 def format_pattern_guidance(
     patterns: list[dict[str, Any]],
@@ -316,7 +391,7 @@ def format_pattern_guidance(
 
     # Hard cap
     if len(result) > MAX_PATTERN_CONTEXT_SIZE:
-        result = result[:MAX_PATTERN_CONTEXT_SIZE - 20] + "\n\n...(truncated)\n"
+        result = result[: MAX_PATTERN_CONTEXT_SIZE - 20] + "\n\n...(truncated)\n"
 
     return result
 
@@ -324,6 +399,7 @@ def format_pattern_guidance(
 # ---------------------------------------------------------------------------
 # Main integration function
 # ---------------------------------------------------------------------------
+
 
 def retrieve_pattern_guidance(
     task_class: str,
@@ -389,10 +465,12 @@ def retrieve_pattern_guidance(
         guidance = read_pattern_guidance(hit["path"])
         if guidance and guidance.get("sections"):
             patterns_with_guidance.append(guidance)
-            result["selected_patterns"].append({
-                "title": guidance["title"],
-                "path": guidance["path"],
-            })
+            result["selected_patterns"].append(
+                {
+                    "title": guidance["title"],
+                    "path": guidance["path"],
+                }
+            )
 
     if not patterns_with_guidance:
         result["retrieval_reason"] = "no_extractable_guidance"
@@ -407,7 +485,9 @@ def retrieve_pattern_guidance(
 
     logger.info(
         "PATTERN GUIDANCE INJECTED: %d pattern(s) for task_class=%s, keywords=%s",
-        len(patterns_with_guidance), task_class, keywords[:3],
+        len(patterns_with_guidance),
+        task_class,
+        keywords[:3],
     )
 
     return result

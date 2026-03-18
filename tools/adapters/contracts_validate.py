@@ -85,7 +85,7 @@ def _extract_first_contract(text: str) -> list[str] | None:
 
     # Collect lines until next heading (##) or end
     result = []
-    for line in lines[start_idx + 1:]:
+    for line in lines[start_idx + 1 :]:
         stripped = line.strip()
         # Stop at any markdown heading (including another ## CONTRACT)
         if stripped.startswith("## "):

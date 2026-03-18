@@ -45,6 +45,7 @@ from tools.task_classifier import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_temp_repo():
     """Create a temp directory with minimal Nova-Core state structure."""
     tmp = tempfile.mkdtemp()
@@ -68,8 +69,11 @@ def _write_feature_flags(root, system_scope="inspect_only", extra=None):
         "rollout_stage": "stage4_research_code_review_code_impl_system_inspect",
         "system_scope": system_scope,
         "system_allowed_skills": [
-            "file-ops", "http-fetch", "reading-obsidian-memory",
-            "self-verification", "web-research",
+            "file-ops",
+            "http-fetch",
+            "reading-obsidian-memory",
+            "self-verification",
+            "web-research",
         ],
         "system_blocked_skills": ["git-ops", "shell-ops", "task-execution"],
         "min_confidence": 0.5,
@@ -77,28 +81,27 @@ def _write_feature_flags(root, system_scope="inspect_only", extra=None):
     if extra:
         orch.update(extra)
     data = {"phase7_orchestrator": orch, "version": 8, "updated_at": "2026-03-08T14:33:13Z"}
-    (root / "STATE" / "config" / "feature_flags.json").write_text(
-        json.dumps(data, indent=2) + "\n"
-    )
+    (root / "STATE" / "config" / "feature_flags.json").write_text(json.dumps(data, indent=2) + "\n")
     return data
 
 
 def _write_heartbeat(root, overall="healthy"):
     (root / "STATE" / "heartbeat_multiagent.json").write_text(
-        json.dumps({
-            "overall": overall,
-            "metrics": {
-                "budget_exhaustion_count": 0,
-                "policy_violation_count": 0,
-            },
-        }) + "\n"
+        json.dumps(
+            {
+                "overall": overall,
+                "metrics": {
+                    "budget_exhaustion_count": 0,
+                    "policy_violation_count": 0,
+                },
+            }
+        )
+        + "\n"
     )
 
 
 def _write_broader_scope(root, decision="ready_for_broader_system_scope_planning"):
-    (root / "STATE" / "broader_system_scope_evaluation.json").write_text(
-        json.dumps({"decision": decision}) + "\n"
-    )
+    (root / "STATE" / "broader_system_scope_evaluation.json").write_text(json.dumps({"decision": decision}) + "\n")
 
 
 def _write_activation_log(root, entries=None):
@@ -115,9 +118,12 @@ def _make_ready_repo():
     _write_feature_flags(root)
     _write_heartbeat(root)
     _write_broader_scope(root)
-    _write_activation_log(root, [
-        {"event": "stage_D_activation", "stage": "D", "timestamp": "2026-03-08T14:33:13Z"},
-    ])
+    _write_activation_log(
+        root,
+        [
+            {"event": "stage_D_activation", "stage": "D", "timestamp": "2026-03-08T14:33:13Z"},
+        ],
+    )
     return root
 
 
@@ -139,6 +145,7 @@ def _all_pass_kwargs():
 # ============================================================================
 # Shell Allowlist Validation Tests
 # ============================================================================
+
 
 class TestShellAllowlist:
     """Test validate_system_shell_command."""
@@ -297,6 +304,7 @@ class TestShellEdgeCases:
 # Activation Gate Criteria Tests
 # ============================================================================
 
+
 class TestActivationGateCriteria:
     """Test evaluate_system_report_activation criteria."""
 
@@ -380,6 +388,7 @@ class TestActivationGateCriteria:
 # Decision Logic Tests
 # ============================================================================
 
+
 class TestDecisionLogic:
     """Test decide_system_report_activation."""
 
@@ -416,6 +425,7 @@ class TestDecisionLogic:
 # Shell Enforcement Verification Tests
 # ============================================================================
 
+
 class TestShellEnforcementVerification:
     """Test _verify_shell_enforcement smoke tests."""
 
@@ -426,6 +436,7 @@ class TestShellEnforcementVerification:
 # ============================================================================
 # Activation / Deactivation Tests
 # ============================================================================
+
 
 class TestActivation:
     """Test activate_system_report_scope and deactivate_system_report_scope."""
@@ -509,6 +520,7 @@ class TestActivation:
 # ============================================================================
 # Orchestrator Routing Tests
 # ============================================================================
+
 
 class TestOrchestratorRouting:
     """Test system_report plan building and validation."""
@@ -608,15 +620,18 @@ class TestGetSystemScope:
 # Skill Set Tests
 # ============================================================================
 
+
 class TestSkillSets:
     """Verify report skill sets are correct supersets of inspect."""
 
     def test_report_superset_of_inspect(self):
         from tools.orchestrator_adapter import _STAGE_D_ALLOWED_SKILLS
+
         assert _STAGE_D_ALLOWED_SKILLS.issubset(_STAGE_D_REPORT_ALLOWED_SKILLS)
 
     def test_report_adds_shell_ops(self):
         from tools.orchestrator_adapter import _STAGE_D_ALLOWED_SKILLS
+
         diff = _STAGE_D_REPORT_ALLOWED_SKILLS - _STAGE_D_ALLOWED_SKILLS
         assert diff == {"shell-ops"}
 
@@ -630,6 +645,7 @@ class TestSkillSets:
 # ============================================================================
 # Artifact Generation Tests
 # ============================================================================
+
 
 class TestArtifactGeneration:
     """Test write_system_report_activation_gate."""
@@ -691,6 +707,7 @@ class TestArtifactGeneration:
 # Integration Test
 # ============================================================================
 
+
 class TestIntegration:
     """End-to-end integration with temp repo."""
 
@@ -700,6 +717,7 @@ class TestIntegration:
         # Review gate
         gate = None
         from agents.rollout_gate import review_system_report_activation
+
         gate = review_system_report_activation(root)
         assert gate.decision == "ready_to_activate_system_report"
 
@@ -729,6 +747,7 @@ class TestIntegration:
         _write_heartbeat(root, overall="unhealthy")
 
         from agents.rollout_gate import review_system_report_activation
+
         gate = review_system_report_activation(root)
         assert gate.decision == "block_system_report_activation"
 

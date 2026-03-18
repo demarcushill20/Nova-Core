@@ -33,24 +33,26 @@ SESSION_DIR = STATE_DIR / "sessions"
 OUTPUT_DIR = BASE / "OUTPUT"
 
 # Tunables
-SESSION_TIMEOUT_S = 2 * 3600       # 2 hours — matches conversation buffer
+SESSION_TIMEOUT_S = 2 * 3600  # 2 hours — matches conversation buffer
 MAX_CONTEXT_INJECTION_BYTES = 3072  # 3 KB cap on injected context
-MAX_RECENT_SUMMARIES = 5            # max prior task summaries to inject
-MAX_SUMMARY_LENGTH = 400            # per-task summary char cap
+MAX_RECENT_SUMMARIES = 5  # max prior task summaries to inject
+MAX_SUMMARY_LENGTH = 400  # per-task summary char cap
 
 
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TaskRecord:
     """Record of a single task execution within a session."""
+
     stem: str
-    status: str = "pending"          # pending|completed|failed
+    status: str = "pending"  # pending|completed|failed
     started_at: float = 0.0
     completed_at: float = 0.0
-    summary: str = ""                # compact summary from CONTRACT block
+    summary: str = ""  # compact summary from CONTRACT block
     files_changed: str = ""
     confidence: str = ""
 
@@ -58,10 +60,11 @@ class TaskRecord:
 @dataclass
 class Session:
     """A bounded execution session for the watcher."""
+
     session_id: str
     created_at: float = 0.0
     last_activity: float = 0.0
-    status: str = "active"           # active|expired|archived
+    status: str = "active"  # active|expired|archived
     tasks: list[dict] = field(default_factory=list)
 
     def is_expired(self) -> bool:
@@ -118,11 +121,11 @@ def extract_contract(text: str) -> dict:
 # Session manager
 # ---------------------------------------------------------------------------
 
+
 class SessionManager:
     """Manage watcher task sessions with persistence and context injection."""
 
-    def __init__(self, session_dir: Path | None = None,
-                 output_dir: Path | None = None):
+    def __init__(self, session_dir: Path | None = None, output_dir: Path | None = None):
         self._session_dir = session_dir or SESSION_DIR
         self._output_dir = output_dir or OUTPUT_DIR
         self._session_dir.mkdir(parents=True, exist_ok=True)
@@ -198,10 +201,9 @@ class SessionManager:
 
         # Gather completed tasks from current session (excluding current task)
         completed = [
-            t for t in session.tasks
-            if t["status"] in ("completed", "failed")
-            and t["stem"] != current_stem
-            and t.get("summary")
+            t
+            for t in session.tasks
+            if t["status"] in ("completed", "failed") and t["stem"] != current_stem and t.get("summary")
         ]
 
         if not completed:
@@ -217,23 +219,20 @@ class SessionManager:
         lines = ["SESSION CONTEXT — recent work in this execution window:"]
         for t in recent:
             status_icon = "done" if t["status"] == "completed" else "FAILED"
-            lines.append(
-                f"  [{status_icon}] {t['stem']}: {t.get('summary', 'no summary')}"
-            )
+            lines.append(f"  [{status_icon}] {t['stem']}: {t.get('summary', 'no summary')}")
             if t.get("files_changed") and t["files_changed"] != "none":
                 lines.append(f"         files: {t['files_changed']}")
 
         lines.append("")
         lines.append(
-            "Use this context to avoid duplicating work or contradicting "
-            "prior decisions. Do not re-do completed tasks."
+            "Use this context to avoid duplicating work or contradicting prior decisions. Do not re-do completed tasks."
         )
 
         result = "\n".join(lines)
 
         # Hard cap
         if len(result.encode("utf-8")) > MAX_CONTEXT_INJECTION_BYTES:
-            result = result[:MAX_CONTEXT_INJECTION_BYTES - 20] + "\n  ...(truncated)"
+            result = result[: MAX_CONTEXT_INJECTION_BYTES - 20] + "\n  ...(truncated)"
 
         return result
 
@@ -244,9 +243,7 @@ class SessionManager:
         try:
             path = self._session_dir / f"{session.session_id}.json"
             tmp = path.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps(session.to_dict(), indent=2, default=str) + "\n"
-            )
+            tmp.write_text(json.dumps(session.to_dict(), indent=2, default=str) + "\n")
             tmp.rename(path)
         except OSError:
             pass  # best-effort persistence
@@ -289,11 +286,9 @@ class SessionManager:
             return []
         candidates.sort(key=lambda x: x[0], reverse=True)
         latest = candidates[0][1]
-        return [
-            t for t in latest.get("tasks", [])
-            if t.get("status") in ("completed", "failed")
-            and t.get("summary")
-        ][-MAX_RECENT_SUMMARIES:]
+        return [t for t in latest.get("tasks", []) if t.get("status") in ("completed", "failed") and t.get("summary")][
+            -MAX_RECENT_SUMMARIES:
+        ]
 
     def _extract_task_summary(self, stem: str) -> dict:
         """Find the most recent output report for a task stem and extract CONTRACT."""

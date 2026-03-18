@@ -6,6 +6,7 @@ and canary token detection for system prompt leaks.
 
 Phase 3.1 of Security Hardening Plan (2026-03-12).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -45,9 +46,7 @@ _ZERO_WIDTH = re.compile(
 _UNICODE_TAGS = re.compile(r"[\U000e0001-\U000e007f]")
 
 # Control characters except \n (\x0a) and \t (\x09).
-_CONTROL_CHARS = re.compile(
-    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
-)
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 # ---------------------------------------------------------------------------
 # Prompt injection patterns (used for MCP response scanning)
@@ -59,45 +58,68 @@ _INJECTION_PATTERNS: list[tuple[re.Pattern[str], int, str]] = []
 
 try:
     from telegram.input_security import _INJECTION_RE as _IMPORTED_INJECTION_RE  # type: ignore[import-untyped]
+
     _INJECTION_PATTERNS = list(_IMPORTED_INJECTION_RE)
-except Exception:  # noqa: BLE001
+except Exception:
     _FALLBACK_INJECTION = [
-        (r"(?i)ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)"
-         r"\s+(?:instructions?|prompts?|rules?)", 30, "instruction_override"),
-        (r"(?i)disregard\s+(?:all\s+)?(?:previous|prior|above)"
-         r"\s+(?:instructions?|prompts?)", 30, "instruction_override"),
+        (
+            r"(?i)ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)"
+            r"\s+(?:instructions?|prompts?|rules?)",
+            30,
+            "instruction_override",
+        ),
+        (
+            r"(?i)disregard\s+(?:all\s+)?(?:previous|prior|above)"
+            r"\s+(?:instructions?|prompts?)",
+            30,
+            "instruction_override",
+        ),
         (r"(?i)forget\s+(?:all\s+)?(?:your|the)\s+(?:instructions?|rules?|guidelines?)", 25, "instruction_override"),
         (r"(?i)you\s+are\s+now\s+(?:a\s+)?(?:different|new|unrestricted|evil|DAN)", 35, "role_coercion"),
         (r"(?i)(?:enter|switch\s+to|activate)\s+(?:developer|god|admin|root|sudo|DAN)\s+mode", 35, "role_coercion"),
-        (r"(?i)(?:show|reveal|display|print|output|repeat|tell\s+me)"
-         r"\s+(?:your|the)\s+(?:system|initial|original|hidden)"
-         r"\s+(?:prompt|instructions?|message)", 25, "prompt_extraction"),
+        (
+            r"(?i)(?:show|reveal|display|print|output|repeat|tell\s+me)"
+            r"\s+(?:your|the)\s+(?:system|initial|original|hidden)"
+            r"\s+(?:prompt|instructions?|message)",
+            25,
+            "prompt_extraction",
+        ),
         (r"<\|(?:endoftext|im_end|end_turn|system|assistant)\|>", 30, "delimiter_break"),
         (r"\[INST\]|\[/INST\]|<<SYS>>|<</SYS>>", 25, "delimiter_break"),
         (r"(?i)\b(?:jailbreak|DAN|do\s+anything\s+now|STAN|DUDE|AIM)\b", 20, "jailbreak_keyword"),
     ]
-    _INJECTION_PATTERNS = [
-        (re.compile(p), score, name) for p, score, name in _FALLBACK_INJECTION
-    ]
+    _INJECTION_PATTERNS = [(re.compile(p), score, name) for p, score, name in _FALLBACK_INJECTION]
 
 # Additional instruction-like language patterns specific to MCP responses.
 _INSTRUCTION_PATTERNS = [
     (re.compile(r"(?i)\byou\s+must\b"), 15, "instruction_language"),
     (re.compile(r"(?i)\bignore\s+previous\b"), 30, "instruction_language"),
     (re.compile(r"(?i)\byour\s+new\s+instructions?\b"), 35, "instruction_language"),
-    (re.compile(
-        r"(?i)\bdo\s+not\s+(?:follow|obey)"
-        r"\s+(?:your|the)\s+(?:original|previous)\b"),
-     30, "instruction_language"),
-    (re.compile(
-        r"(?i)\boverride\s+(?:your|all)"
-        r"\s+(?:previous|prior|existing)\b"),
-     30, "instruction_language"),
+    (
+        re.compile(
+            r"(?i)\bdo\s+not\s+(?:follow|obey)"
+            r"\s+(?:your|the)\s+(?:original|previous)\b"
+        ),
+        30,
+        "instruction_language",
+    ),
+    (
+        re.compile(
+            r"(?i)\boverride\s+(?:your|all)"
+            r"\s+(?:previous|prior|existing)\b"
+        ),
+        30,
+        "instruction_language",
+    ),
     (re.compile(r"(?i)\bfrom\s+now\s+on\s+you\s+(?:are|will|should|must)\b"), 25, "instruction_language"),
-    (re.compile(
-        r"(?i)\bact\s+as\s+(?:if\s+)?(?:you\s+(?:are|were)\s+)?"
-        r"(?:a\s+)?(?:hacker|admin|root|system)\b"),
-     30, "instruction_language"),
+    (
+        re.compile(
+            r"(?i)\bact\s+as\s+(?:if\s+)?(?:you\s+(?:are|were)\s+)?"
+            r"(?:a\s+)?(?:hacker|admin|root|system)\b"
+        ),
+        30,
+        "instruction_language",
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -109,8 +131,9 @@ _SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = []
 
 try:
     from utils.task_validator import _SECRET_RE as _IMPORTED_SECRET_RE  # type: ignore[import-untyped]
+
     _SECRET_PATTERNS = list(_IMPORTED_SECRET_RE)
-except Exception:  # noqa: BLE001
+except Exception:
     _FALLBACK_SECRETS = [
         (r"sk-ant-api03-[A-Za-z0-9_-]{90,}", "anthropic_api_key"),
         (r"sk-proj-[A-Za-z0-9_-]{80,200}", "openai_api_key"),
@@ -120,14 +143,13 @@ except Exception:  # noqa: BLE001
         (r"AKIA[0-9A-Z]{16}", "aws_access_key"),
         (r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "private_key"),
     ]
-    _SECRET_PATTERNS = [
-        (re.compile(p), name) for p, name in _FALLBACK_SECRETS
-    ]
+    _SECRET_PATTERNS = [(re.compile(p), name) for p, name in _FALLBACK_SECRETS]
 
 
 # ===================================================================
 # SanitizeResult
 # ===================================================================
+
 
 @dataclass
 class SanitizeResult:
@@ -144,6 +166,7 @@ class SanitizeResult:
 # ===================================================================
 # ToolIntegrityMonitor
 # ===================================================================
+
 
 class ToolIntegrityMonitor:
     """Detects rug-pull attacks by tracking tool description hashes.
@@ -210,7 +233,9 @@ class ToolIntegrityMonitor:
                 self._modified.add(name)
                 _log.warning(
                     "TOOL_DESCRIPTION_CHANGED tool=%s old_hash=%.12s new_hash=%.12s",
-                    name, existing, new_hash,
+                    name,
+                    existing,
+                    new_hash,
                 )
             self._hashes[name] = new_hash
             self._save()
@@ -229,7 +254,9 @@ class ToolIntegrityMonitor:
                 self._modified.add(name)
                 _log.warning(
                     "TOOL_INTEGRITY_FAIL tool=%s expected=%.12s got=%.12s",
-                    name, existing, new_hash,
+                    name,
+                    existing,
+                    new_hash,
                 )
                 return False
             return True
@@ -243,6 +270,7 @@ class ToolIntegrityMonitor:
 # ===================================================================
 # MCPResponseSanitizer
 # ===================================================================
+
 
 class MCPResponseSanitizer:
     """Sanitize MCP tool responses before they reach the LLM.
@@ -287,7 +315,9 @@ class MCPResponseSanitizer:
             patterns_found.append("size_truncated")
             _log.info(
                 "MCP_RESPONSE_TRUNCATED tool=%s original=%d truncated=%d",
-                tool_name, original_length, len(text),
+                tool_name,
+                original_length,
+                len(text),
             )
 
         # --- Strip invisible unicode ---
@@ -299,7 +329,9 @@ class MCPResponseSanitizer:
             text = _UNICODE_TAGS.sub("", text)
             patterns_found.append(f"invisible_chars_stripped:{invisible_count}")
             _log.info(
-                "MCP_INVISIBLE_CHARS tool=%s count=%d", tool_name, invisible_count,
+                "MCP_INVISIBLE_CHARS tool=%s count=%d",
+                tool_name,
+                invisible_count,
             )
 
         # --- Strip control characters (except \n, \t) ---
@@ -326,7 +358,8 @@ class MCPResponseSanitizer:
             injection_detected = True
             _log.warning(
                 "MCP_INJECTION_DETECTED tool=%s score=%d patterns=%s",
-                tool_name, injection_score,
+                tool_name,
+                injection_score,
                 [p for p in patterns_found if p.startswith(("injection:", "instruction:"))],
             )
 
@@ -337,7 +370,9 @@ class MCPResponseSanitizer:
                 secrets_detected = True
                 patterns_found.append(f"secret:{name}")
                 _log.warning(
-                    "MCP_SECRET_DETECTED tool=%s pattern=%s", tool_name, name,
+                    "MCP_SECRET_DETECTED tool=%s pattern=%s",
+                    tool_name,
+                    name,
                 )
 
         return SanitizeResult(
@@ -353,6 +388,7 @@ class MCPResponseSanitizer:
 # ===================================================================
 # CanaryTokenManager
 # ===================================================================
+
 
 class CanaryTokenManager:
     """Manages canary tokens for detecting system prompt leakage.
@@ -407,10 +443,7 @@ class CanaryTokenManager:
             contains the canary token.
         """
         canary_id = self.generate_canary(context="system_prompt")
-        modified = (
-            f"{system_prompt}\n"
-            f"<!-- TRACKING: {canary_id} -->"
-        )
+        modified = f"{system_prompt}\n<!-- TRACKING: {canary_id} -->"
         return modified, canary_id
 
     def check_for_canary(self, text: str) -> list[str]:
@@ -433,7 +466,9 @@ class CanaryTokenManager:
                     found.append(canary_id)
                     context = self._canaries[canary_id]
                     _log.warning(
-                        "CANARY_LEAKED id=%s context=%s", canary_id, context,
+                        "CANARY_LEAKED id=%s context=%s",
+                        canary_id,
+                        context,
                     )
         return found
 
@@ -441,6 +476,7 @@ class CanaryTokenManager:
 # ===================================================================
 # ToolRateLimiter
 # ===================================================================
+
 
 class ToolRateLimiter:
     """Per-tool sliding-window rate limiter.
@@ -493,7 +529,10 @@ class ToolRateLimiter:
             if len(window) >= self.max_calls:
                 _log.warning(
                     "MCP_RATE_LIMIT tool=%s calls=%d limit=%d window=%.0fs",
-                    tool_name, len(window), self.max_calls, self.window_seconds,
+                    tool_name,
+                    len(window),
+                    self.max_calls,
+                    self.window_seconds,
                 )
                 return False
             return True

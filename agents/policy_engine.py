@@ -31,7 +31,7 @@ class PolicyDecision:
     tool_name: str
     reason: str
     checked_at: float
-    layer: str = ""        # which policy layer made the decision
+    layer: str = ""  # which policy layer made the decision
     elevated: bool = False  # tool requires operator approval before execution
 
 
@@ -40,10 +40,7 @@ class PolicyViolation(Exception):
 
     def __init__(self, decision: PolicyDecision):
         self.decision = decision
-        super().__init__(
-            f"POLICY VIOLATION: agent={decision.agent_id} "
-            f"tool={decision.tool_name} — {decision.reason}"
-        )
+        super().__init__(f"POLICY VIOLATION: agent={decision.agent_id} tool={decision.tool_name} — {decision.reason}")
 
 
 class ElevatedToolRequest(Exception):
@@ -51,10 +48,7 @@ class ElevatedToolRequest(Exception):
 
     def __init__(self, decision: PolicyDecision):
         self.decision = decision
-        super().__init__(
-            f"ELEVATED TOOL: agent={decision.agent_id} "
-            f"tool={decision.tool_name} — requires approval"
-        )
+        super().__init__(f"ELEVATED TOOL: agent={decision.agent_id} tool={decision.tool_name} — requires approval")
 
 
 # Default global policy when no file exists
@@ -92,9 +86,12 @@ class PolicyEngine:
     Elevated tools are allowed but flagged for operator approval.
     """
 
-    def __init__(self, registry_path: Path | None = None,
-                 policies_path: Path | None = None,
-                 global_policy_path: Path | None = None):
+    def __init__(
+        self,
+        registry_path: Path | None = None,
+        policies_path: Path | None = None,
+        global_policy_path: Path | None = None,
+    ):
         self._registry_path = registry_path or (STATE / "agents" / "registry.json")
         self._policies_path = policies_path or (STATE / "policies" / "agent_policies.json")
         self._global_policy_path = global_policy_path or (STATE / "policies" / "global_policy.json")
@@ -154,42 +151,51 @@ class PolicyEngine:
         for pattern in gp.get("global_deny", []):
             if self._matches(tool_name, pattern):
                 return PolicyDecision(
-                    allowed=False, agent_id=agent_id, tool_name=tool_name,
+                    allowed=False,
+                    agent_id=agent_id,
+                    tool_name=tool_name,
                     reason=f"Tool {tool_name!r} is globally denied",
-                    checked_at=now, layer="global_deny",
+                    checked_at=now,
+                    layer="global_deny",
                 )
 
         # Agent lookup (needed for layers 2-5)
         agent_def = self._get_agent_def(agent_id)
         if agent_def is None:
             return PolicyDecision(
-                allowed=False, agent_id=agent_id, tool_name=tool_name,
+                allowed=False,
+                agent_id=agent_id,
+                tool_name=tool_name,
                 reason=f"Agent {agent_id!r} not found in registry",
-                checked_at=now, layer="agent_lookup",
+                checked_at=now,
+                layer="agent_lookup",
             )
 
         # --- Layer 2: Agent deny ---
         for pattern in agent_def.get("denied_tools", []):
             if self._matches(tool_name, pattern):
                 return PolicyDecision(
-                    allowed=False, agent_id=agent_id, tool_name=tool_name,
+                    allowed=False,
+                    agent_id=agent_id,
+                    tool_name=tool_name,
                     reason=f"Tool {tool_name!r} is in denied_tools for {agent_id}",
-                    checked_at=now, layer="agent_deny",
+                    checked_at=now,
+                    layer="agent_deny",
                 )
 
         # Check if tool is elevated (for flagging, not blocking)
-        is_elevated = any(
-            self._matches(tool_name, p)
-            for p in gp.get("elevated", [])
-        )
+        is_elevated = any(self._matches(tool_name, p) for p in gp.get("elevated", []))
 
         # --- Layer 3: Global allow ---
         for pattern in gp.get("global_allow", []):
             if self._matches(tool_name, pattern):
                 return PolicyDecision(
-                    allowed=True, agent_id=agent_id, tool_name=tool_name,
+                    allowed=True,
+                    agent_id=agent_id,
+                    tool_name=tool_name,
                     reason=f"Tool {tool_name!r} permitted by global allow",
-                    checked_at=now, layer="global_allow",
+                    checked_at=now,
+                    layer="global_allow",
                     elevated=is_elevated,
                 )
 
@@ -197,9 +203,12 @@ class PolicyEngine:
         for pattern in agent_def.get("allowed_tools", []):
             if self._matches(tool_name, pattern):
                 return PolicyDecision(
-                    allowed=True, agent_id=agent_id, tool_name=tool_name,
+                    allowed=True,
+                    agent_id=agent_id,
+                    tool_name=tool_name,
                     reason=f"Tool {tool_name!r} permitted by agent allowlist",
-                    checked_at=now, layer="agent_allow",
+                    checked_at=now,
+                    layer="agent_allow",
                     elevated=is_elevated,
                 )
 
@@ -207,16 +216,22 @@ class PolicyEngine:
         agent_default = agent_def.get("default_policy", gp.get("default", "deny"))
         if agent_default == "allow":
             return PolicyDecision(
-                allowed=True, agent_id=agent_id, tool_name=tool_name,
+                allowed=True,
+                agent_id=agent_id,
+                tool_name=tool_name,
                 reason=f"Tool {tool_name!r} permitted by default-allow policy",
-                checked_at=now, layer="default",
+                checked_at=now,
+                layer="default",
                 elevated=is_elevated,
             )
 
         return PolicyDecision(
-            allowed=False, agent_id=agent_id, tool_name=tool_name,
+            allowed=False,
+            agent_id=agent_id,
+            tool_name=tool_name,
             reason=f"Tool {tool_name!r} not in any allow list for {agent_id}",
-            checked_at=now, layer="default",
+            checked_at=now,
+            layer="default",
         )
 
     def enforce(self, agent_id: str, tool_name: str) -> PolicyDecision:
@@ -238,28 +253,24 @@ class PolicyEngine:
     def is_globally_denied(self, tool_name: str) -> bool:
         """Check if a tool is in the global deny list (absolute block)."""
         gp = self._load_global_policy()
-        return any(
-            self._matches(tool_name, p)
-            for p in gp.get("global_deny", [])
-        )
+        return any(self._matches(tool_name, p) for p in gp.get("global_deny", []))
 
     def is_elevated(self, tool_name: str) -> bool:
         """Check if a tool requires operator approval."""
         gp = self._load_global_policy()
-        return any(
-            self._matches(tool_name, p)
-            for p in gp.get("elevated", [])
-        )
+        return any(self._matches(tool_name, p) for p in gp.get("elevated", []))
 
-    def check_budget(self, agent_id: str, action_count: int,
-                     runtime_s: float, retry_count: int) -> PolicyDecision:
+    def check_budget(self, agent_id: str, action_count: int, runtime_s: float, retry_count: int) -> PolicyDecision:
         """Check whether agent is within budget limits."""
         now = time.time()
         agent_def = self._get_agent_def(agent_id)
         if agent_def is None:
             return PolicyDecision(
-                allowed=False, agent_id=agent_id, tool_name="*",
-                reason=f"Agent {agent_id!r} not found", checked_at=now,
+                allowed=False,
+                agent_id=agent_id,
+                tool_name="*",
+                reason=f"Agent {agent_id!r} not found",
+                checked_at=now,
             )
 
         max_actions = agent_def.get("max_actions", 50)
@@ -268,28 +279,37 @@ class PolicyEngine:
 
         if action_count >= max_actions:
             return PolicyDecision(
-                allowed=False, agent_id=agent_id, tool_name="*",
+                allowed=False,
+                agent_id=agent_id,
+                tool_name="*",
                 reason=f"Action budget exhausted: {action_count}/{max_actions}",
                 checked_at=now,
             )
 
         if runtime_s >= max_runtime:
             return PolicyDecision(
-                allowed=False, agent_id=agent_id, tool_name="*",
+                allowed=False,
+                agent_id=agent_id,
+                tool_name="*",
                 reason=f"Runtime budget exhausted: {runtime_s:.0f}s/{max_runtime}s",
                 checked_at=now,
             )
 
         if retry_count > max_retries:
             return PolicyDecision(
-                allowed=False, agent_id=agent_id, tool_name="*",
+                allowed=False,
+                agent_id=agent_id,
+                tool_name="*",
                 reason=f"Retry budget exhausted: {retry_count}/{max_retries}",
                 checked_at=now,
             )
 
         return PolicyDecision(
-            allowed=True, agent_id=agent_id, tool_name="*",
-            reason="Within budget limits", checked_at=now,
+            allowed=True,
+            agent_id=agent_id,
+            tool_name="*",
+            reason="Within budget limits",
+            checked_at=now,
         )
 
     def check_spawn_allowed(self, agent_id: str) -> PolicyDecision:
@@ -298,28 +318,38 @@ class PolicyEngine:
         agent_def = self._get_agent_def(agent_id)
         if agent_def is None:
             return PolicyDecision(
-                allowed=False, agent_id=agent_id, tool_name="agent.spawn",
-                reason="Agent not found", checked_at=now,
+                allowed=False,
+                agent_id=agent_id,
+                tool_name="agent.spawn",
+                reason="Agent not found",
+                checked_at=now,
             )
 
         flags = agent_def.get("feature_flags", {})
         if not flags.get("allow_delegation", False):
             return PolicyDecision(
-                allowed=False, agent_id=agent_id, tool_name="agent.spawn",
+                allowed=False,
+                agent_id=agent_id,
+                tool_name="agent.spawn",
                 reason=f"Agent {agent_id} does not have allow_delegation flag",
                 checked_at=now,
             )
 
         return PolicyDecision(
-            allowed=True, agent_id=agent_id, tool_name="agent.spawn",
-            reason="Delegation permitted", checked_at=now,
+            allowed=True,
+            agent_id=agent_id,
+            tool_name="agent.spawn",
+            reason="Delegation permitted",
+            checked_at=now,
         )
 
     def requires_verification(self, tool_name: str) -> bool:
         """Check if a tool call requires verifier approval (maker-checker)."""
         mutation_tools = {
-            "repo.files.write", "repo.files.patch",
-            "repo.git.commit", "shell.run",
+            "repo.files.write",
+            "repo.files.patch",
+            "repo.git.commit",
+            "shell.run",
         }
         return tool_name in mutation_tools
 

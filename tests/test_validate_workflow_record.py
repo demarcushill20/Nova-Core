@@ -6,6 +6,7 @@ from utils.validate_workflow_record import VALID_STATUSES, validate_workflow_rec
 
 # ── happy path ──────────────────────────────────────────────────────────
 
+
 def _good_record(**overrides):
     base = {"task_id": "0099", "workflow_id": "0099_test", "status": "completed", "task_class": "research"}
     base.update(overrides)
@@ -31,6 +32,7 @@ def test_all_known_statuses_accepted(status):
 
 # ── missing keys ────────────────────────────────────────────────────────
 
+
 @pytest.mark.parametrize("key", ["task_id", "workflow_id", "status", "task_class"])
 def test_missing_required_key(key):
     rec = _good_record()
@@ -47,6 +49,7 @@ def test_all_keys_missing():
 
 
 # ── wrong types ─────────────────────────────────────────────────────────
+
 
 def test_not_a_dict():
     ok, errs = validate_workflow_record([1, 2, 3])
@@ -67,6 +70,7 @@ def test_numeric_status():
 
 # ── blank / whitespace values ──────────────────────────────────────────
 
+
 def test_blank_workflow_id():
     ok, errs = validate_workflow_record(_good_record(workflow_id="  "))
     assert ok is False
@@ -79,6 +83,7 @@ def test_blank_status():
 
 
 # ── unknown status value ───────────────────────────────────────────────
+
 
 def test_unknown_status_value():
     ok, errs = validate_workflow_record(_good_record(status="banana"))

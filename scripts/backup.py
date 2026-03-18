@@ -48,6 +48,7 @@ def send_telegram_alert(text: str) -> None:
         return
     try:
         import httpx
+
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         payload = {"chat_id": chat_id, "text": text}
         with httpx.Client(timeout=25) as client:

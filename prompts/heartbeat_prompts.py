@@ -10,7 +10,7 @@ since heartbeat.py imports from this module.
 
 import json
 import subprocess
-from datetime import datetime, timezone  # noqa: F401
+from datetime import datetime, timezone
 
 
 def _gather_extended_state(checks: list) -> str:
@@ -84,7 +84,7 @@ def _gather_extended_state(checks: list) -> str:
                 parts.append(f"\n## Active Goals ({len(active)})")
                 for g in active:
                     parts.append(f"  - [{g.get('id', '?')}] {g.get('text', '?')}")
-        except Exception:  # noqa: S110
+        except Exception:
             pass
 
     # Last heartbeat agent action (to avoid repeating)
@@ -94,7 +94,7 @@ def _gather_extended_state(checks: list) -> str:
             if lines:
                 parts.append("\n## Last Agent Action")
                 parts.append(f"  {lines[-1][:200]}")
-        except Exception:  # noqa: S110
+        except Exception:
             pass
 
     return "\n".join(parts)
@@ -118,7 +118,7 @@ def _scan_codebase() -> str:
         if result.stdout.strip():
             parts.append("### Recent Commits (last 15)")
             parts.append(result.stdout.strip())
-    except Exception:  # noqa: S110
+    except Exception:
         pass
 
     # File tree — top-level + key directories
@@ -145,7 +145,7 @@ def _scan_codebase() -> str:
             parts.append(f"\n### Python Modules ({len(py_files)})")
             for f in py_files:
                 parts.append(f"  {f}")
-    except Exception:  # noqa: S110
+    except Exception:
         pass
 
     # Code stats — lines of Python
@@ -156,11 +156,11 @@ def _scan_codebase() -> str:
                 continue
             try:
                 total_lines += len(py.read_text().splitlines())
-            except Exception:  # noqa: S110
+            except Exception:
                 pass
         parts.append("\n### Code Stats")
         parts.append(f"  Total Python lines: {total_lines:,}")
-    except Exception:  # noqa: S110
+    except Exception:
         pass
 
     # Recent file changes (modified in last 24h)
@@ -177,7 +177,7 @@ def _scan_codebase() -> str:
             parts.append("\n### Recently Modified (last 24h)")
             for f, age in sorted(recently_modified, key=lambda x: x[1]):  # type: ignore[assignment]
                 parts.append(f"  {f} ({age}h ago)")
-    except Exception:  # noqa: S110
+    except Exception:
         pass
 
     # Uncommitted changes
@@ -194,7 +194,7 @@ def _scan_codebase() -> str:
             parts.append(f"\n### Uncommitted Changes ({len(lines)})")
             for line in lines[:20]:
                 parts.append(f"  {line}")
-    except Exception:  # noqa: S110
+    except Exception:
         pass
 
     return "\n".join(parts) if parts else "(codebase scan failed)"
@@ -226,7 +226,7 @@ def _build_research_prompt() -> str:
             active = [g for g in goals_list if g.get("status") != "done"]
             if active:
                 goals_str = "\n".join(f"  - [{g.get('id', '?')}] {g.get('text', '?')}" for g in active)
-        except Exception:  # noqa: S110
+        except Exception:
             pass
 
     # Scan the codebase
@@ -397,7 +397,7 @@ def _build_planning_prompt() -> str:
             active = [g for g in goals_list if g.get("status") != "done"]
             if active:
                 goals_str = "\n".join(f"  - [{g.get('id', '?')}] {g.get('text', '?')}" for g in active)
-        except Exception:  # noqa: S110
+        except Exception:
             pass
 
     return f"""\

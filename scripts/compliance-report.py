@@ -36,7 +36,9 @@ def check_systemd_hardening(service: str) -> dict:
     try:
         result = subprocess.run(
             ["systemd-analyze", "security", service],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         # Parse the overall score from the last line
         lines = result.stdout.strip().splitlines()
@@ -54,7 +56,9 @@ def check_audit_chain() -> dict:
         # Run the verifier
         result = subprocess.run(
             [sys.executable, str(BASE / "scripts" / "verify-audit-chain.py")],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         return {
             "valid": result.returncode == 0,
@@ -69,7 +73,9 @@ def check_secret_permissions() -> dict:
     try:
         result = subprocess.run(
             ["bash", str(BASE / "scripts" / "check-secret-perms.sh")],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return {
             "passed": result.returncode == 0,
@@ -244,25 +250,29 @@ def main():
         status = "Installed" if info["exists"] else "MISSING"
         md_lines.append(f"| {name} | {status} |")
 
-    md_lines.extend([
-        "",
-        f"## OWASP Agentic Top 10: {owasp['coverage_pct']}%",
-        "",
-        "| Risk | Status | Controls |",
-        "|------|--------|----------|",
-    ])
+    md_lines.extend(
+        [
+            "",
+            f"## OWASP Agentic Top 10: {owasp['coverage_pct']}%",
+            "",
+            "| Risk | Status | Controls |",
+            "|------|--------|----------|",
+        ]
+    )
     for risk, detail in owasp["details"].items():
         md_lines.append(f"| {risk} | {detail['status']} | {', '.join(detail['controls'])} |")
 
-    md_lines.extend([
-        "",
-        "## EU AI Act Art. 12",
-        "",
-        f"- Automatic logging: {'Yes' if report['sections']['eu_ai_act_art12']['automatic_logging'] else 'No'}",
-        f"- Log immutability: {report['sections']['eu_ai_act_art12']['log_immutability']}",
-        f"- Retention: {report['sections']['eu_ai_act_art12']['retention']}",
-        f"- Traceability: {report['sections']['eu_ai_act_art12']['traceability']}",
-    ])
+    md_lines.extend(
+        [
+            "",
+            "## EU AI Act Art. 12",
+            "",
+            f"- Automatic logging: {'Yes' if report['sections']['eu_ai_act_art12']['automatic_logging'] else 'No'}",
+            f"- Log immutability: {report['sections']['eu_ai_act_art12']['log_immutability']}",
+            f"- Retention: {report['sections']['eu_ai_act_art12']['retention']}",
+            f"- Traceability: {report['sections']['eu_ai_act_art12']['traceability']}",
+        ]
+    )
 
     md_path.write_text("\n".join(md_lines), encoding="utf-8")
 

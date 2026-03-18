@@ -22,15 +22,9 @@ from planner.schemas import (
 # Checked in order; first match wins.
 # ---------------------------------------------------------------------------
 
-_DIAGNOSE_WORDS = re.compile(
-    r"\b(diagnose|logs?|failure|crash|traceback|error)\b", re.I
-)
-_FIX_WORDS = re.compile(
-    r"\b(fix|patch|change\s+code|repair|correct)\b", re.I
-)
-_SERVICE_WORDS = re.compile(
-    r"\b(restart|service|status|systemctl|daemon|reload)\b", re.I
-)
+_DIAGNOSE_WORDS = re.compile(r"\b(diagnose|logs?|failure|crash|traceback|error)\b", re.I)
+_FIX_WORDS = re.compile(r"\b(fix|patch|change\s+code|repair|correct)\b", re.I)
+_SERVICE_WORDS = re.compile(r"\b(restart|service|status|systemctl|daemon|reload)\b", re.I)
 
 CHAIN_RULES: list[tuple[re.Pattern, list[tuple[str, str]]]] = [
     # diagnose + fix → log_triage → code_improve → system_supervisor

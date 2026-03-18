@@ -42,6 +42,7 @@ from tools.task_classifier import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_workflow(task_class: str, status: str = "completed", **extra) -> dict:
     return {"task_class": task_class, "status": status, **extra}
 
@@ -113,9 +114,7 @@ def _populate_healthy_env(root: Path) -> None:
         wf = _make_workflow("research", "completed")
         (state / "workflows" / f"research_{i}.json").write_text(json.dumps(wf))
 
-    (state / "stage4_rollout_plan.json").write_text(
-        json.dumps(_make_valid_plan(), indent=2)
-    )
+    (state / "stage4_rollout_plan.json").write_text(json.dumps(_make_valid_plan(), indent=2))
 
 
 @pytest.fixture
@@ -140,6 +139,7 @@ def _stageD_flags() -> dict:
 # Test Activation Procedure
 # ===========================================================================
 
+
 class TestActivationProcedure:
     """Tests for activate_stage4()."""
 
@@ -154,9 +154,7 @@ class TestActivationProcedure:
 
     def test_config_updated(self, act_root):
         activate_stage4(act_root)
-        ff = json.loads(
-            (act_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff = json.loads((act_root / "STATE" / "config" / "feature_flags.json").read_text())
         orch = ff["phase7_orchestrator"]
         assert "system" in orch["supported_classes"]
         assert orch["stage"] == "D"
@@ -165,23 +163,17 @@ class TestActivationProcedure:
 
     def test_supported_classes_correct(self, act_root):
         activate_stage4(act_root)
-        ff = json.loads(
-            (act_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff = json.loads((act_root / "STATE" / "config" / "feature_flags.json").read_text())
         assert ff["phase7_orchestrator"]["supported_classes"] == STAGE4_CLASSES
 
     def test_allowed_roles_updated(self, act_root):
         activate_stage4(act_root)
-        ff = json.loads(
-            (act_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff = json.loads((act_root / "STATE" / "config" / "feature_flags.json").read_text())
         assert ff["phase7_orchestrator"]["allowed_roles"] == STAGE4_ALLOWED_ROLES
 
     def test_system_scope_persisted(self, act_root):
         activate_stage4(act_root)
-        ff = json.loads(
-            (act_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff = json.loads((act_root / "STATE" / "config" / "feature_flags.json").read_text())
         orch = ff["phase7_orchestrator"]
         assert orch["system_allowed_operations"] == sorted(STAGE4_ALLOWED_OPERATIONS)
         assert orch["system_blocked_operations"] == sorted(STAGE4_BLOCKED_OPERATIONS)
@@ -207,19 +199,16 @@ class TestActivationProcedure:
         assert record.plan_validation["valid"] is True
 
     def test_version_incremented(self, act_root):
-        ff_before = json.loads(
-            (act_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff_before = json.loads((act_root / "STATE" / "config" / "feature_flags.json").read_text())
         activate_stage4(act_root)
-        ff_after = json.loads(
-            (act_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff_after = json.loads((act_root / "STATE" / "config" / "feature_flags.json").read_text())
         assert ff_after["version"] == ff_before["version"] + 1
 
 
 # ===========================================================================
 # Test Fail-Closed Behavior
 # ===========================================================================
+
 
 class TestFailClosed:
     """Tests for activation failing closed when gate doesn't pass."""
@@ -231,15 +220,11 @@ class TestFailClosed:
         assert record.outcome == "blocked"
         assert record.activated_scope == ""
         # Config unchanged
-        ff = json.loads(
-            (act_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff = json.loads((act_root / "STATE" / "config" / "feature_flags.json").read_text())
         assert "system" not in ff["phase7_orchestrator"]["supported_classes"]
 
     def test_policy_violation_blocks(self, act_root):
-        (act_root / "STATE" / "policy_denials.jsonl").write_text(
-            json.dumps({"reason": "test"}) + "\n"
-        )
+        (act_root / "STATE" / "policy_denials.jsonl").write_text(json.dumps({"reason": "test"}) + "\n")
         record = activate_stage4(act_root)
         assert record.outcome == "blocked"
 
@@ -269,63 +254,50 @@ class TestFailClosed:
 # Test Stage D Classifier Routing
 # ===========================================================================
 
+
 class TestStageDRouting:
     """Tests for Stage D system_inspect routing in task_classifier."""
 
     def test_system_inspect_eligible(self):
         flags = _stageD_flags()
-        eligible, reason = is_stageD_eligible(
-            "system", 0.5, "check the status of the watcher service", flags
-        )
+        eligible, reason = is_stageD_eligible("system", 0.5, "check the status of the watcher service", flags)
         assert eligible is True
         assert reason == "stageD_system_inspect_eligible"
 
     def test_system_mutate_rejected(self):
         flags = _stageD_flags()
-        eligible, reason = is_stageD_eligible(
-            "system", 0.5, "deploy the new version and restart the service", flags
-        )
+        eligible, reason = is_stageD_eligible("system", 0.5, "deploy the new version and restart the service", flags)
         assert eligible is False
         assert "system_mutate_signals_detected" in reason
 
     def test_research_still_eligible(self):
         flags = _stageD_flags()
-        eligible, reason = is_stageD_eligible(
-            "research", 0.5, "research best practices for monitoring", flags
-        )
+        eligible, reason = is_stageD_eligible("research", 0.5, "research best practices for monitoring", flags)
         assert eligible is True
         assert reason == "stageD_research_eligible"
 
     def test_coding_still_eligible(self):
         flags = _stageD_flags()
-        eligible, reason = is_stageD_eligible(
-            "code_impl", 0.5, "implement a utility function", flags
-        )
+        eligible, reason = is_stageD_eligible("code_impl", 0.5, "implement a utility function", flags)
         assert eligible is True
         assert reason == "stageD_coding_eligible"
 
     def test_wrong_stage_rejected(self):
         flags = _stageD_flags()
         flags["stage"] = "C"
-        eligible, reason = is_stageD_eligible(
-            "system", 0.5, "check status", flags
-        )
+        eligible, reason = is_stageD_eligible("system", 0.5, "check status", flags)
         assert eligible is False
         assert "not_D" in reason
 
     def test_disabled_rejected(self):
         flags = _stageD_flags()
         flags["enabled"] = False
-        eligible, reason = is_stageD_eligible(
-            "system", 0.5, "check status", flags
-        )
+        eligible, reason = is_stageD_eligible("system", 0.5, "check status", flags)
         assert eligible is False
 
     def test_low_confidence_rejected(self):
         flags = _stageD_flags()
-        eligible, reason = is_stageD_eligible(
-            "system", 0.3, "check status", flags
-        )
+        eligible, reason = is_stageD_eligible("system", 0.3, "check status", flags)
         assert eligible is False
         assert "below" in reason
 
@@ -333,6 +305,7 @@ class TestStageDRouting:
         """classify_and_route handles stage D correctly."""
         # We need to mock load_feature_flags since it reads from disk
         import tools.task_classifier as tc
+
         original = tc.load_feature_flags
         tc.load_feature_flags = lambda: _stageD_flags()
         try:
@@ -348,6 +321,7 @@ class TestStageDRouting:
 # ===========================================================================
 # Test System Mutate Signal Detection
 # ===========================================================================
+
 
 class TestSystemMutateSignals:
     """Tests for has_system_mutate_signals()."""
@@ -386,16 +360,19 @@ class TestSystemMutateSignals:
 # Test Stage D Plan Validation
 # ===========================================================================
 
+
 class TestStageDPlanValidation:
     """Tests for validate_stageD_plan()."""
 
     def test_valid_inspect_plan(self, act_root):
         plan = build_plan_from_task(
-            "test", "check system status",
+            "test",
+            "check system status",
             routing={"stage": "D"},
         )
         # Force system class steps
         from planner.schemas import PlanStep
+
         plan.steps = [
             PlanStep(step_id="inspect", skill_name="file-ops", goal="inspect", inputs={}),
             PlanStep(step_id="verify", skill_name="self-verification", goal="verify", inputs={}),
@@ -405,6 +382,7 @@ class TestStageDPlanValidation:
 
     def test_blocked_skill_rejected(self):
         from planner.schemas import ExecutionPlan, PlanStep
+
         plan = ExecutionPlan(
             plan_id="test",
             task_id="test",
@@ -420,6 +398,7 @@ class TestStageDPlanValidation:
 
     def test_missing_verifier_rejected(self):
         from planner.schemas import ExecutionPlan, PlanStep
+
         plan = ExecutionPlan(
             plan_id="test",
             task_id="test",
@@ -443,12 +422,14 @@ class TestStageDPlanValidation:
 # Test Stage D Plan Building
 # ===========================================================================
 
+
 class TestStageDPlanBuilding:
     """Tests for _build_stageD_inspect_steps() via build_plan_from_task()."""
 
     def test_system_task_gets_inspect_strategy(self):
         plan = build_plan_from_task(
-            "test", "review the architecture of the infrastructure",
+            "test",
+            "review the architecture of the infrastructure",
             routing={"stage": "D"},
         )
         # system class should get stageD_system_inspect strategy
@@ -456,7 +437,8 @@ class TestStageDPlanBuilding:
 
     def test_inspect_steps_have_no_blocked_skills(self):
         plan = build_plan_from_task(
-            "test", "review the architecture of the service",
+            "test",
+            "review the architecture of the service",
             routing={"stage": "D"},
         )
         if plan.strategy == "stageD_system_inspect":
@@ -465,14 +447,16 @@ class TestStageDPlanBuilding:
 
     def test_coding_gets_stageD_coding_strategy(self):
         plan = build_plan_from_task(
-            "test", "implement a helper function for parsing",
+            "test",
+            "implement a helper function for parsing",
             routing={"stage": "D"},
         )
         assert plan.strategy == "stageD_coding"
 
     def test_research_gets_stageD_research_strategy(self):
         plan = build_plan_from_task(
-            "test", "research the latest trends in monitoring",
+            "test",
+            "research the latest trends in monitoring",
             routing={"stage": "D"},
         )
         assert plan.strategy == "stageD_research"
@@ -481,6 +465,7 @@ class TestStageDPlanBuilding:
 # ===========================================================================
 # Test Artifact Generation
 # ===========================================================================
+
 
 class TestArtifactGeneration:
     """Tests for activation result rendering and writing."""
@@ -529,14 +514,13 @@ class TestArtifactGeneration:
 # Test Scope Boundaries
 # ===========================================================================
 
+
 class TestScopeBoundaries:
     """Verify that activation only enables system_inspect, not broader system."""
 
     def test_only_inspect_ops_in_config(self, act_root):
         activate_stage4(act_root)
-        ff = json.loads(
-            (act_root / "STATE" / "config" / "feature_flags.json").read_text()
-        )
+        ff = json.loads((act_root / "STATE" / "config" / "feature_flags.json").read_text())
         orch = ff["phase7_orchestrator"]
         assert orch["system_scope"] == "inspect_only"
         allowed = set(orch["system_allowed_operations"])
