@@ -83,13 +83,16 @@ def mock_query_results(query_entry: dict[str, Any]) -> list[str]:
     Returns expected_ids + some noise to simulate realistic retrieval.
     This is only for testing the eval harness itself.
     """
-    # Return expected IDs in order, plus some irrelevant noise
     expected = list(query_entry["expected_ids"])
     noise = [f"noise-{i}" for i in range(5)]
-    # Simulate imperfect retrieval: shuffle some noise in
-    if len(expected) >= 2:
+    if len(expected) >= 3:
+        # Simulate imperfect retrieval with varied ranking
+        return [noise[0], expected[0], noise[1], expected[1], noise[2]] + expected[2:]
+    elif len(expected) >= 2:
         return [expected[0], noise[0], expected[1]] + noise[1:3] + expected[2:]
-    return expected + noise
+    elif len(expected) == 1:
+        return [noise[0], expected[0]] + noise[1:]
+    return noise
 
 
 async def run_evaluation(

@@ -23,6 +23,8 @@ def dcg_at_k(relevance_scores: list[float], k: int = 10) -> float:
     Returns:
         DCG value (non-negative float).
     """
+    if k <= 0:
+        return 0.0
     dcg = 0.0
     for i, rel in enumerate(relevance_scores[:k]):
         dcg += (2**rel - 1) / math.log2(i + 2)  # i+2 because log2(1)=0
@@ -48,6 +50,8 @@ def ndcg_at_k(
     Returns:
         NDCG@k in [0, 1]. Returns 0.0 if no relevant docs exist.
     """
+    if k <= 0:
+        return 0.0
     # Build actual relevance vector from retrieved IDs
     actual_rels = [float(relevance_grades.get(doc_id, 0)) for doc_id in retrieved_ids[:k]]
 
@@ -79,6 +83,8 @@ def recall_at_k(
     Returns:
         Recall@k in [0, 1]. Returns 0.0 if expected_ids is empty.
     """
+    if k <= 0:
+        return 0.0
     if not expected_ids:
         return 0.0
     retrieved_set = set(retrieved_ids[:k])
@@ -103,7 +109,9 @@ def precision_at_k(
     Returns:
         Precision@k in [0, 1]. Returns 0.0 if k is 0.
     """
-    top_k = retrieved_ids[:k]
+    if k <= 0:
+        return 0.0
+    top_k = list(dict.fromkeys(retrieved_ids[:k]))  # preserves order, removes dupes
     if not top_k:
         return 0.0
     expected_set = set(expected_ids)
