@@ -304,8 +304,9 @@ def _shutdown(signum, _frame):
     _wake_event.set()  # unblock any wait immediately
 
 
-signal.signal(signal.SIGINT, _shutdown)
-signal.signal(signal.SIGTERM, _shutdown)
+# NOTE: Sync signal handlers removed — the async run() function registers
+# its own handlers via loop.add_signal_handler() which are async-safe.
+# The _shutdown() function is retained for use by add_signal_handler().
 
 # --- Duplicate-prevention state ---
 _dispatched: set[str] = set()
@@ -593,6 +594,16 @@ def _quick_contract_check(stem: str) -> tuple[bool, list[str]]:
     return False, result.get("errors", [])
 
 
+async def _watchdog_keepalive(interval: int = 300):
+    """Send sd_notify watchdog pings during long-running tasks."""
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            notify_watchdog()
+    except asyncio.CancelledError:
+        pass
+
+
 async def _execute_worker(
     stem: str,
     cmd: list[str],
@@ -651,6 +662,9 @@ async def _execute_worker(
         pid_file.write_text(str(proc.pid), encoding="utf-8")
         logger.info("Worker PID %d written to %s", proc.pid, pid_file)
 
+        # Start watchdog keepalive pings during long-running subprocess
+        keepalive_task = asyncio.create_task(_watchdog_keepalive())
+
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(),
@@ -684,6 +698,8 @@ async def _execute_worker(
                 wf.write("\n=== CANCELLED ===\n")
                 wf.write(f"=== END: {end_utc} ===\n")
             raise
+        finally:
+            keepalive_task.cancel()
 
         exit_code = proc.returncode if proc.returncode is not None else 0
         end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -753,6 +769,25 @@ async def _dispatch_inner(task_path: Path):
         _dispatched.discard(task_name)  # Allow retry on next poll cycle
         return
 
+    # --- Equity drawdown kill switch — blocks only NovaTrade tasks ---
+    try:
+        from nova_kill_switch import check_equity_kill_switch, is_novatrade_task
+
+        _task_content = ""
+        try:
+            _task_content = task_path.read_text(encoding="utf-8")[: 50 * 1024]
+        except Exception:
+            pass
+        if check_equity_kill_switch() and is_novatrade_task(stem, _task_content):
+            logger.warning("EQUITY_KILL_SWITCH: blocking NovaTrade task %s", stem)
+            # Move back from .inprogress to .md so it can be retried later
+            if inprogress_path.exists():
+                inprogress_path.rename(inprogress_path.with_suffix("").with_suffix(".md"))
+            _dispatched.discard(task_name)
+            return
+    except ImportError:
+        pass  # kill switch module not available
+
     # --- Phase 2.2: Budget check before spawning worker ---
     try:
         from agents.budget_enforcer import budget
@@ -813,6 +848,7 @@ async def _dispatch_inner(task_path: Path):
         report_path.write_text(report, encoding="utf-8")
         logger.info("Cancel report written: %s", report_path.name)
         cancel_marker.unlink(missing_ok=True)
+        clear_checkpoint(stem)
         return
 
     # --- Read task text for skill selection (cap 50 KB) ---
@@ -834,6 +870,7 @@ async def _dispatch_inner(task_path: Path):
         audit_task_execution(stem, task_text, validation, execution_mode="blocked")
         failed_path = inprogress_path.with_name(f"{stem}.md.failed")
         inprogress_path.rename(failed_path)
+        clear_checkpoint(stem)
         return
     audit_task_execution(stem, task_text, validation, classification="pre_validation", execution_mode="worker")
 
@@ -848,6 +885,7 @@ async def _dispatch_inner(task_path: Path):
         )
         failed_path = inprogress_path.with_name(f"{stem}.md.failed")
         inprogress_path.rename(failed_path)
+        clear_checkpoint(stem)
         return
     if dlp_result.action == "redact":
         logger.info("DLP_REDACT: %s — redacted %d finding(s)", stem, len(dlp_result.findings))
@@ -940,10 +978,12 @@ async def _dispatch_inner(task_path: Path):
                     done_path = inprogress_path.with_name(f"{stem}.md.done")
                     inprogress_path.rename(done_path)
                     logger.info("TASK SUCCEEDED (orchestrator): %s → %s", stem, done_path.name)
+                    clear_checkpoint(stem)
                 else:
                     failed_path = inprogress_path.with_name(f"{stem}.md.failed")
                     inprogress_path.rename(failed_path)
                     logger.warning("TASK FAILED (orchestrator): %s → %s", stem, failed_path.name)
+                    increment_retry(stem)
             except FileNotFoundError:
                 logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
             _session_mgr.record_task_completion(stem, success=passed)
@@ -956,6 +996,7 @@ async def _dispatch_inner(task_path: Path):
                 failed_path = inprogress_path.with_name(f"{stem}.md.failed")
                 inprogress_path.rename(failed_path)
                 logger.error("TASK FAILED (no fallback): %s", stem)
+                increment_retry(stem)
                 _session_mgr.record_task_completion(stem, success=False)
                 return
         finally:

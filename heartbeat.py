@@ -66,11 +66,15 @@ try:
     from utils.self_healing import (
         record_memory_snapshot as _sh_record_mem,
     )
+    from utils.self_healing import (
+        set_degradation_tier as _sh_set_tier,
+    )
 except ImportError:
     _DegradationTier = None  # type: ignore[assignment,misc]
     _sh_get_tier = None  # type: ignore[assignment]
     _sh_record_error = None  # type: ignore[assignment]
     _sh_record_mem = None  # type: ignore[assignment]
+    _sh_set_tier = None  # type: ignore[assignment]
 
 try:
     from agents.budget_enforcer import budget as _budget_enforcer
@@ -1515,6 +1519,9 @@ def main() -> int:
                 # Escalate to at least REDUCED if not already worse
                 if _degradation_tier < 1:
                     _degradation_tier = 1  # REDUCED
+                    # Persist so cycle runners calling get_degradation_tier() see the same value
+                    if _sh_set_tier is not None and _DegradationTier is not None:
+                        _sh_set_tier(_DegradationTier.REDUCED, reason=f"budget exceeded: {_budget_msg}")
         except Exception as e:
             print(f"[heartbeat] Budget check failed (non-fatal): {e}")
 
