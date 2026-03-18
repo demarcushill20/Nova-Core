@@ -26,12 +26,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from agents.validation import atomic_write, validate_id
+
 logger = logging.getLogger(__name__)
 
 BASE = Path("/home/nova/nova-core")
 STATE = BASE / "STATE"
 REGISTRY_FILE = STATE / "agents" / "registry.json"
-RUNTIME_DIR = STATE / "agents" / "runtime"
+# Use distinct path from Blackboard's STATE/agents/runtime/ to avoid schema conflicts
+RUNTIME_DIR = STATE / "agents" / "spawner_runtime"
 SPAWNER_STATE_FILE = STATE / "agents" / "spawner_state.json"
 
 
@@ -159,7 +162,8 @@ class AgentProcess:
 
     @classmethod
     def from_dict(cls, d: dict) -> AgentProcess:
-        budget_data = d.pop("budget", {})
+        d = dict(d)  # shallow copy — don't mutate caller's dict
+        budget_data = dict(d.pop("budget", {}))
         budget_data.pop("runtime_elapsed", None)
         budget_data.pop("runtime_exceeded", None)
         budget_data.pop("actions_exceeded", None)
@@ -335,6 +339,11 @@ class AgentSpawner:
             AgentAlreadyActive: this agent_id is already executing.
         """
         async with self._lock:
+            # Validate ID safety (prevents path traversal in persistence)
+            validate_id(agent_id, "agent_id")
+            if workflow_id is not None:
+                validate_id(workflow_id, "workflow_id")
+
             # Validate agent exists in registry
             config = self._registry.get(agent_id)
             if config is None:
@@ -365,9 +374,10 @@ class AgentSpawner:
                 max_actions=config.get("max_actions", 20),
                 max_retries=config.get("max_retries", 1),
             )
+            _BUDGET_OVERRIDABLE = {"max_runtime_seconds", "max_actions", "max_retries"}
             if budget_overrides:
                 for k, v in budget_overrides.items():
-                    if hasattr(budget, k):
+                    if k in _BUDGET_OVERRIDABLE:
                         setattr(budget, k, v)
 
             # Create agent process
@@ -471,9 +481,10 @@ class AgentSpawner:
 
         if proc._task is not None and not proc._task.done():
             proc._task.cancel()
-            # Wait briefly for cancellation to propagate
+            # Wait briefly for cancellation to propagate (asyncio.wait does
+            # not cancel the task on timeout, unlike wait_for).
             try:
-                await asyncio.wait_for(asyncio.shield(proc._task), timeout=2.0)
+                await asyncio.wait({proc._task}, timeout=2.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
 
@@ -600,11 +611,10 @@ class AgentSpawner:
     # -------------------------------------------------------------------
 
     def _persist_runtime_state(self, proc: AgentProcess) -> None:
-        """Write agent runtime state to disk."""
+        """Write agent runtime state to disk (atomic)."""
         try:
-            RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
             path = RUNTIME_DIR / f"{proc.agent_id}.json"
-            path.write_text(json.dumps(proc.to_dict(), indent=2, default=str))
+            atomic_write(path, json.dumps(proc.to_dict(), indent=2, default=str))
         except OSError as e:
             logger.error("Failed to persist agent state for %s: %s", proc.agent_id, e)
 
@@ -615,8 +625,7 @@ class AgentSpawner:
                 "timestamp": time.time(),
                 "agents": {sid: proc.to_dict() for sid, proc in self._pool.items()},
             }
-            SPAWNER_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            SPAWNER_STATE_FILE.write_text(json.dumps(snapshot, indent=2, default=str))
+            atomic_write(SPAWNER_STATE_FILE, json.dumps(snapshot, indent=2, default=str))
         except OSError as e:
             logger.error("Failed to save pool snapshot: %s", e)
 

@@ -20,6 +20,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agents.validation import validate_id
+
 logger = logging.getLogger(__name__)
 
 BASE = Path("/home/nova/nova-core")
@@ -212,6 +214,7 @@ class CompensationLog:
 
     def _persist(self, entry: CompensationEntry) -> None:
         try:
+            validate_id(entry.workflow_id, "workflow_id")
             path = self._dir / f"{entry.workflow_id}.jsonl"
             with open(path, "a") as f:
                 f.write(json.dumps(entry.to_dict(), default=str) + "\n")
@@ -231,6 +234,8 @@ class CompensationLog:
                     entries.append(CompensationEntry(**{k: v for k, v in d.items() if k in known}))
                 except (json.JSONDecodeError, TypeError):
                     continue
+        # Populate in-memory entries to stay in sync with disk
+        self._entries.extend(entries)
         return entries
 
 

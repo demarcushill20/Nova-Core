@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agents.validation import validate_id
+
 logger = logging.getLogger(__name__)
 
 BASE = Path("/home/nova/nova-core")
@@ -156,12 +158,13 @@ class RuntimePolicyEnforcer:
       4. Budget reporting
     """
 
-    def __init__(self, persist_dir: Path | None = None):
+    def __init__(self, persist_dir: Path | None = None, bridge: Any | None = None):
         self._workflow_budgets: dict[str, WorkflowBudgetState] = {}
         self._persist_dir = persist_dir or VIOLATIONS_DIR
         self._persist_dir.mkdir(parents=True, exist_ok=True)
         self._total_checks = 0
         self._total_violations = 0
+        self._bridge = bridge  # Optional RuntimeBridge for PolicyEngine delegation
 
     def register_agent(
         self,
@@ -208,6 +211,17 @@ class RuntimePolicyEnforcer:
             BudgetExhausted: If the agent or workflow exceeds budget.
         """
         self._total_checks += 1
+
+        # Delegate to 5-layer PolicyEngine if bridge is present
+        if self._bridge is not None and not self._bridge.check_tool_access(agent_id, tool_name):
+            result = PolicyCheckResult(
+                allowed=False,
+                agent_id=agent_id,
+                tool_name=tool_name,
+                reason=f"Denied by PolicyEngine for agent '{agent_id}'",
+            )
+            self._record_violation(result, workflow_id)
+            raise PolicyViolation(result)
 
         # Denied tools check
         if denied_tools and tool_name in denied_tools:
@@ -286,6 +300,7 @@ class RuntimePolicyEnforcer:
                 )
         # Persist
         try:
+            validate_id(workflow_id, "workflow_id")
             path = self._persist_dir / f"{workflow_id}.jsonl"
             entry = {
                 "agent_id": result.agent_id,

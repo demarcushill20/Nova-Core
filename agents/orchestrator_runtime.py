@@ -45,12 +45,14 @@ from agents.spawner import (
     ConcurrencyLimitReached,
     SpawnError,
 )
+from agents.validation import atomic_write, validate_id
 
 logger = logging.getLogger(__name__)
 
 BASE = Path("/home/nova/nova-core")
 STATE = BASE / "STATE"
-WORKFLOWS_DIR = STATE / "workflows"
+# Use distinct path from Blackboard's STATE/workflows/ to avoid schema conflicts
+WORKFLOWS_DIR = STATE / "orchestrator_workflows"
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +114,8 @@ class DAGNode:
             "max_retries": self.max_retries,
             "retries": self.retries,
         }
+        if self.result is not None:
+            d["result"] = self.result
         if self.error:
             d["error"] = self.error
         if self.started_at:
@@ -131,6 +135,7 @@ class DAGNode:
             goal=d["goal"],
             depends_on=d.get("depends_on", []),
             status=NodeStatus(d.get("status", "pending")),
+            result=d.get("result"),
             error=d.get("error"),
             started_at=d.get("started_at"),
             completed_at=d.get("completed_at"),
@@ -261,12 +266,14 @@ class OrchestratorRuntime:
         work_fn_factory: Callable[[DAGNode, WorkflowDAG], AgentWorkFn] | None = None,
         persist_dir: Path | None = None,
         max_workflow_runtime_s: float = 1800.0,
+        bridge: Any | None = None,
     ):
         self._spawner = spawner
         self._bus = bus
         self._work_fn_factory = work_fn_factory or self._default_work_fn_factory
         self._persist_dir = persist_dir or WORKFLOWS_DIR
         self._max_runtime_s = max_workflow_runtime_s
+        self._bridge = bridge  # Optional RuntimeBridge for integration
         self._persist_dir.mkdir(parents=True, exist_ok=True)
 
     def _default_work_fn_factory(self, node: DAGNode, dag: WorkflowDAG) -> AgentWorkFn:
@@ -297,6 +304,13 @@ class OrchestratorRuntime:
         """Find and spawn agents for all ready DAG nodes."""
         for node in dag.get_ready_nodes():
             try:
+                # Claim via CoordinationLayer if bridge is present
+                if self._bridge is not None and not self._bridge.claim_node(
+                    dag.workflow_id, node.node_id, node.agent_id
+                ):
+                    logger.debug("Could not claim node %s, skipping", node.node_id)
+                    continue
+
                 work_fn = self._work_fn_factory(node, dag)
                 proc = await self._spawner.spawn(
                     node.agent_id,
@@ -308,11 +322,21 @@ class OrchestratorRuntime:
                 node.started_at = time.time()
                 node.spawn_id = proc.spawn_id
                 active_spawns[proc.spawn_id] = node.node_id
+
+                # Sync agent state to blackboard
+                if self._bridge is not None:
+                    self._bridge.sync_agent_state(
+                        node.agent_id,
+                        dag.workflow_id,
+                        "executing",
+                    )
             except ConcurrencyLimitReached:
                 logger.debug("Concurrency limit, deferring node %s", node.node_id)
             except SpawnError as e:
                 node.status = NodeStatus.FAILED
                 node.error = str(e)
+                if self._bridge is not None:
+                    self._bridge.fail_node(dag.workflow_id, node.node_id, node.agent_id, str(e))
 
     def _process_completed_agents(
         self,
@@ -321,7 +345,7 @@ class OrchestratorRuntime:
     ) -> bool:
         """Process agents that have reached a terminal state. Returns True if any were processed."""
         done = [
-            (sid, nid, self._spawner.get(sid))
+            (sid, nid, p)
             for sid, nid in list(active_spawns.items())
             if (p := self._spawner.get(sid)) is not None and p.is_terminal
         ]
@@ -332,6 +356,17 @@ class OrchestratorRuntime:
                 node.status = NodeStatus.COMPLETED
                 node.result = proc.result
                 node.completed_at = time.time()
+                if self._bridge is not None:
+                    self._bridge.complete_node(
+                        dag.workflow_id,
+                        node_id,
+                        node.agent_id,
+                    )
+                    self._bridge.sync_agent_state(
+                        node.agent_id,
+                        dag.workflow_id,
+                        "completed",
+                    )
             elif node.retries < node.max_retries:
                 node.retries += 1
                 node.status = NodeStatus.PENDING
@@ -340,6 +375,19 @@ class OrchestratorRuntime:
                 node.status = NodeStatus.FAILED
                 node.error = proc.error or "Unknown failure"
                 node.completed_at = time.time()
+                if self._bridge is not None:
+                    self._bridge.fail_node(
+                        dag.workflow_id,
+                        node_id,
+                        node.agent_id,
+                        node.error,
+                    )
+                    self._bridge.sync_agent_state(
+                        node.agent_id,
+                        dag.workflow_id,
+                        "failed",
+                        error=node.error,
+                    )
         return len(done) > 0
 
     async def execute(self, dag: WorkflowDAG) -> WorkflowDAG:
@@ -416,8 +464,9 @@ class OrchestratorRuntime:
     def _persist_workflow(self, dag: WorkflowDAG) -> None:
         """Save workflow state to disk."""
         try:
+            validate_id(dag.workflow_id, "workflow_id")
             path = self._persist_dir / f"{dag.workflow_id}.json"
-            path.write_text(json.dumps(dag.to_dict(), indent=2, default=str))
+            atomic_write(path, json.dumps(dag.to_dict(), indent=2, default=str))
         except OSError as e:
             logger.error("Failed to persist workflow %s: %s", dag.workflow_id, e)
 

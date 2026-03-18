@@ -23,6 +23,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agents.validation import atomic_write, validate_id
+
 logger = logging.getLogger(__name__)
 
 BASE = Path("/home/nova/nova-core")
@@ -143,9 +145,13 @@ class ContextAssembler:
         Raises:
             ContextBudgetExceeded: If mandatory context exceeds the hard limit.
         """
-        allowed_keys = set(_ROLE_SCOPE.get(role, []))
+        # Use list (not set) to preserve deterministic iteration order.
+        # Role-scope keys come first in their defined priority order,
+        # then any extra_keys appended.
+        allowed_keys = list(_ROLE_SCOPE.get(role, []))
         if extra_keys:
-            allowed_keys.update(extra_keys)
+            seen = set(allowed_keys)
+            allowed_keys.extend(k for k in extra_keys if k not in seen)
 
         # Filter to allowed keys
         scoped: dict[str, Any] = {}
@@ -208,8 +214,10 @@ class ContextAssembler:
 
     def save_handoff(self, handoff: HandoffArtifact) -> Path:
         """Persist a handoff artifact to disk."""
+        validate_id(handoff.workflow_id, "workflow_id")
+        validate_id(handoff.subtask_id, "subtask_id")
         path = self._persist_dir / f"{handoff.workflow_id}_{handoff.subtask_id}.json"
-        path.write_text(json.dumps(handoff.to_dict(), indent=2, default=str))
+        atomic_write(path, json.dumps(handoff.to_dict(), indent=2, default=str))
         return path
 
     def load_handoff(self, workflow_id: str, subtask_id: str) -> HandoffArtifact | None:

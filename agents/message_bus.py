@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from agents.messages import AgentMessage
+from agents.validation import validate_id
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +67,19 @@ class MessageBus:
         # Subscribers: role → list of async callbacks
         self._subscribers: dict[str, list] = {}
 
-    def _get_queue(self, role: str) -> asyncio.PriorityQueue:
-        """Get or create a priority queue for a role."""
-        if role not in self._queues:
-            self._queues[role] = asyncio.PriorityQueue(maxsize=self._max_queue_size)
-        return self._queues[role]
+    async def _get_queue(self, role: str) -> asyncio.PriorityQueue:
+        """Get or create a priority queue for a role.
+
+        Uses _lock to prevent two concurrent coroutines from creating
+        duplicate queues for the same role.
+        """
+        if role in self._queues:
+            return self._queues[role]
+        async with self._lock:
+            # Double-check after acquiring lock
+            if role not in self._queues:
+                self._queues[role] = asyncio.PriorityQueue(maxsize=self._max_queue_size)
+            return self._queues[role]
 
     # -------------------------------------------------------------------
     # Send
@@ -82,7 +91,7 @@ class MessageBus:
         Raises:
             QueueFull: If the target queue is at capacity.
         """
-        queue = self._get_queue(message.to_role)
+        queue = await self._get_queue(message.to_role)
 
         if queue.full():
             raise QueueFull(f"Queue for role '{message.to_role}' is full ({queue.qsize()}/{self._max_queue_size})")
@@ -140,7 +149,7 @@ class MessageBus:
         Returns:
             The next message, or None if no message available within timeout.
         """
-        queue = self._get_queue(role)
+        queue = await self._get_queue(role)
 
         try:
             if timeout is None:
@@ -245,6 +254,7 @@ class MessageBus:
         """Append message to a per-workflow JSONL file."""
         try:
             wf_id = message.workflow_id or "unscoped"
+            validate_id(wf_id, "workflow_id")
             wf_dir = self._persist_dir / wf_id
             wf_dir.mkdir(parents=True, exist_ok=True)
             log_file = wf_dir / "messages.jsonl"
