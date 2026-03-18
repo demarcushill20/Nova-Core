@@ -1,0 +1,23 @@
+{
+  "run_id": "run_20260317_182533_465556",
+  "mode": "dry-run",
+  "total_skills": 1,
+  "processed": 1,
+  "accepted": 0,
+  "rejected": 1,
+  "skipped": 0,
+  "errors": 0,
+  "halted": false,
+  "halt_reason": "",
+  "completed": "2026-03-17T19:24:06Z",
+  "skills": [
+    {
+      "skill": "http-fetch",
+      "decision": "REJECT_SMOKE",
+      "reason": "Global smoke regressions: 1 (tolerance: 0)",
+      "baseline_score": 0.9477,
+      "candidate_score": 1.0,
+      "delta": 0.05230000000000001
+    }
+  ]
+}

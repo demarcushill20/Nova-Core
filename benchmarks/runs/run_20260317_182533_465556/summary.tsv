@@ -1,0 +1,2 @@
+skill	decision	reason	baseline_score	candidate_score	delta
+http-fetch	REJECT_SMOKE	Global smoke regressions: 1 (tolerance: 0)	0.9477	1.0	0.05230000000000001

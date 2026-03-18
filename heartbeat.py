@@ -11,8 +11,10 @@ Stdlib only — no pip installs required.
 import json
 import os
 import subprocess
+import time
 import urllib.parse
 import urllib.request
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +31,28 @@ try:
 except ImportError:
     _mpg_record = None  # type: ignore[assignment]
     _mpg_allow = None  # type: ignore[assignment]
+
+from prompts.heartbeat_prompts import (  # noqa: F401
+    _build_planning_prompt,
+    _build_research_prompt,
+    _gather_extended_state,
+)
+
+
+@dataclass
+class HeartbeatSnapshot:
+    """Type-safe container for a single heartbeat metrics sample."""
+
+    ts: str  # ISO 8601 UTC timestamp
+    epoch: int  # Unix epoch seconds
+    status: str  # "healthy" | "unhealthy"
+    total_checks: int
+    passed: int
+    failed: int
+    failed_names: list[str] = field(default_factory=list)
+    duration_ms: float = 0.0
+    checks: dict = field(default_factory=dict)  # check_name -> {ok, detail}
+
 
 # --- Configuration -----------------------------------------------------------
 
@@ -490,6 +514,85 @@ def write_heartbeat(checks: list) -> None:
     HEARTBEAT_FILE.write_text("\n".join(lines) + "\n")
 
 
+# --- Metrics persistence -----------------------------------------------------
+
+METRICS_JSONL = STATE_DIR / "heartbeat_metrics.jsonl"
+METRICS_MAX_ENTRIES = 2000
+
+
+def _append_metrics(snapshot: HeartbeatSnapshot) -> None:
+    """Append a HeartbeatSnapshot to heartbeat_metrics.jsonl with 2000-entry rotation."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(asdict(snapshot)) + "\n"
+
+    with open(METRICS_JSONL, "a") as f:
+        f.write(line)
+
+    # Rotate: if file exceeds max entries, keep the newest METRICS_MAX_ENTRIES
+    try:
+        lines = METRICS_JSONL.read_text().splitlines()
+        if len(lines) > METRICS_MAX_ENTRIES:
+            keep = lines[-METRICS_MAX_ENTRIES:]
+            METRICS_JSONL.write_text("\n".join(keep) + "\n")
+    except OSError:
+        pass
+
+
+def get_trend_summary(window: int = 100) -> dict:
+    """Analyze the last ``window`` heartbeat snapshots for trends.
+
+    Returns dict with:
+      - availability_pct: % of snapshots that were healthy
+      - total_snapshots: how many snapshots analyzed
+      - failure_hotspots: list of (check_name, fail_count) sorted desc, top 5
+      - recent_regressions: checks that failed in last 3 but passed in prior 10
+    """
+    if not METRICS_JSONL.exists():
+        return {"availability_pct": 100.0, "total_snapshots": 0, "failure_hotspots": [], "recent_regressions": []}
+
+    try:
+        raw_lines = METRICS_JSONL.read_text().splitlines()
+        entries = []
+        for ln in raw_lines[-window:]:
+            if ln.strip():
+                entries.append(json.loads(ln))
+    except (json.JSONDecodeError, OSError):
+        return {"availability_pct": 100.0, "total_snapshots": 0, "failure_hotspots": [], "recent_regressions": []}
+
+    if not entries:
+        return {"availability_pct": 100.0, "total_snapshots": 0, "failure_hotspots": [], "recent_regressions": []}
+
+    healthy_count = sum(1 for e in entries if e.get("status") == "healthy")
+    availability = round(healthy_count / len(entries) * 100, 1)
+
+    # Count failures per check name
+    fail_counts: dict[str, int] = {}
+    for e in entries:
+        for name in e.get("failed_names", []):
+            fail_counts[name] = fail_counts.get(name, 0) + 1
+    hotspots = sorted(fail_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    # Regression detection: failed in last 3, passed in prior 10
+    regressions: list[str] = []
+    if len(entries) >= 4:
+        recent = entries[-3:]
+        prior = entries[-13:-3] if len(entries) >= 13 else entries[:-3]
+        recent_fails: set[str] = set()
+        for e in recent:
+            recent_fails.update(e.get("failed_names", []))
+        prior_fails: set[str] = set()
+        for e in prior:
+            prior_fails.update(e.get("failed_names", []))
+        regressions = sorted(recent_fails - prior_fails)
+
+    return {
+        "availability_pct": availability,
+        "total_snapshots": len(entries),
+        "failure_hotspots": hotspots,
+        "recent_regressions": regressions,
+    }
+
+
 # --- Alerting ----------------------------------------------------------------
 
 
@@ -688,91 +791,6 @@ PLANNING_LOG = LOGS_DIR / "planning_cycle.log"
 # Memory maintenance configuration — runs periodically
 MEMORY_MAINTENANCE_COOLDOWN_MINUTES = 360  # every 6 hours
 MEMORY_MAINTENANCE_COOLDOWN_FILE = STATE_DIR / "last_memory_maintenance.json"
-
-
-def _gather_extended_state(checks: list) -> str:
-    """Collect system state summary for the LLM heartbeat agent."""
-    parts = []
-
-    # Deterministic check results
-    parts.append("## Deterministic Health Checks")
-    for c in checks:
-        mark = "PASS" if c["ok"] else "FAIL"
-        parts.append(f"  [{mark}] {c['name']}: {c['detail']}")
-
-    # Pending tasks (with age)
-    pending = [
-        p
-        for p in TASKS_DIR.glob("*.md")
-        if not any(p.name.endswith(s) for s in (".inprogress", ".done", ".failed", ".cancelled"))
-    ]
-    if pending:
-        parts.append(f"\n## Pending Tasks ({len(pending)})")
-        now = datetime.now(timezone.utc)
-        for p in sorted(pending, key=lambda x: x.stat().st_mtime):
-            age_min = (now - datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)).total_seconds() / 60
-            parts.append(f"  - {p.stem} ({round(age_min)}min old)")
-
-    # Recent failed tasks (last 2 hours)
-    failed = list(TASKS_DIR.glob("*.failed"))
-    now = datetime.now(timezone.utc)
-    recent_failed = []
-    for f in failed:
-        age_hr = (now - datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
-        if age_hr < 2:
-            recent_failed.append(f)
-    if recent_failed:
-        parts.append(f"\n## Recently Failed Tasks ({len(recent_failed)})")
-        for f in recent_failed:
-            parts.append(f"  - {f.stem}")
-
-    # Recent outputs (last 4 hours)
-    outputs = sorted(
-        OUTPUT_DIR.glob("*.md"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    recent_outputs = []
-    for o in outputs[:10]:
-        age_hr = (now - datetime.fromtimestamp(o.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
-        if age_hr < 4:
-            recent_outputs.append((o, age_hr))
-    if recent_outputs:
-        parts.append(f"\n## Recent Outputs ({len(recent_outputs)} in last 4h)")
-        for o, age in recent_outputs:
-            parts.append(f"  - {o.stem} ({round(age, 1)}h ago)")
-
-    # Goals
-    goals_file = STATE_DIR / "goals.json"
-    if goals_file.exists():
-        try:
-            data = json.loads(goals_file.read_text())
-            # Handle both dict-wrapped and bare-array formats
-            if isinstance(data, dict):
-                goals_list = data.get("goals", [])
-            elif isinstance(data, list):
-                goals_list = data
-            else:
-                goals_list = []
-            active = [g for g in goals_list if g.get("status") != "done"]
-            if active:
-                parts.append(f"\n## Active Goals ({len(active)})")
-                for g in active:
-                    parts.append(f"  - [{g.get('id', '?')}] {g.get('text', '?')}")
-        except Exception:
-            pass
-
-    # Last heartbeat agent action (to avoid repeating)
-    if HEARTBEAT_AGENT_LOG.exists():
-        try:
-            lines = HEARTBEAT_AGENT_LOG.read_text().strip().splitlines()
-            if lines:
-                parts.append("\n## Last Agent Action")
-                parts.append(f"  {lines[-1][:200]}")
-        except Exception:
-            pass
-
-    return "\n".join(parts)
 
 
 def _run_heartbeat_agent(checks: list) -> None:
@@ -1099,306 +1117,60 @@ def _log_research(message: str) -> None:
         f.write(f"[{ts}] {message}\n")
 
 
-def _scan_codebase() -> str:
-    """Scan the nova-core codebase and return a structured snapshot."""
-    parts = []
-
-    # Recent git log (last 15 commits)
-    try:
-        result = subprocess.run(
-            ["git", "log", "--oneline", "-15", "--no-decorate"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            cwd=str(BASE),
-        )
-        if result.stdout.strip():
-            parts.append("### Recent Commits (last 15)")
-            parts.append(result.stdout.strip())
-    except Exception:
-        pass
-
-    # File tree — top-level + key directories
-    try:
-        result = subprocess.run(
-            ["git", "ls-files"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            cwd=str(BASE),
-        )
-        if result.stdout.strip():
-            files = result.stdout.strip().splitlines()
-            # Group by top-level directory
-            dirs: dict[str, list[str]] = {}
-            for f in files:
-                top = f.split("/")[0] if "/" in f else "(root)"
-                dirs.setdefault(top, []).append(f)
-            parts.append(f"\n### File Tree ({len(files)} tracked files)")
-            for d in sorted(dirs):
-                parts.append(f"  {d}/ — {len(dirs[d])} files")
-            # List Python files explicitly (these are the codebase)
-            py_files = [f for f in files if f.endswith(".py")]
-            parts.append(f"\n### Python Modules ({len(py_files)})")
-            for f in py_files:
-                parts.append(f"  {f}")
-    except Exception:
-        pass
-
-    # Code stats — lines of Python
-    try:
-        total_lines = 0
-        for py in BASE.rglob("*.py"):
-            if ".venv" in str(py) or "__pycache__" in str(py):
-                continue
-            try:
-                total_lines += len(py.read_text().splitlines())
-            except Exception:
-                pass
-        parts.append("\n### Code Stats")
-        parts.append(f"  Total Python lines: {total_lines:,}")
-    except Exception:
-        pass
-
-    # Recent file changes (modified in last 24h)
-    try:
-        now = datetime.now(timezone.utc)
-        recently_modified = []
-        for py in BASE.rglob("*.py"):
-            if ".venv" in str(py) or "__pycache__" in str(py):
-                continue
-            age_hr = (now - datetime.fromtimestamp(py.stat().st_mtime, tz=timezone.utc)).total_seconds() / 3600
-            if age_hr < 24:
-                recently_modified.append((py.relative_to(BASE), round(age_hr, 1)))
-        if recently_modified:
-            parts.append("\n### Recently Modified (last 24h)")
-            for f, age in sorted(recently_modified, key=lambda x: x[1]):  # type: ignore[assignment]
-                parts.append(f"  {f} ({age}h ago)")
-    except Exception:
-        pass
-
-    # Uncommitted changes
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            cwd=str(BASE),
-        )
-        if result.stdout.strip():
-            lines = result.stdout.strip().splitlines()
-            parts.append(f"\n### Uncommitted Changes ({len(lines)})")
-            for line in lines[:20]:
-                parts.append(f"  {line}")
-    except Exception:
-        pass
-
-    return "\n".join(parts) if parts else "(codebase scan failed)"
+# --- Unified LLM Cycle Runner ------------------------------------------------
 
 
-def _build_research_prompt() -> str:
-    """Build the comprehensive research cycle prompt."""
-    now = datetime.now(timezone.utc)
-    ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    date_str = now.strftime("%Y-%m-%d")
-    stamp = now.strftime("%Y%m%d-%H%M%S")
+def _run_claude_cycle(
+    *,
+    cycle_name: str,
+    prompt_builder,
+    timeout: int,
+    cooldown_check,
+    cooldown_update,
+    log_fn,
+    emoji: str,
+    label: str,
+    mpg_caller: str,
+    paused: bool = False,
+) -> None:
+    """Unified LLM cycle runner for research and planning.
 
-    # Gather recent OUTPUT file names for topic deduplication
-    recent_topics = []
-    if OUTPUT_DIR.exists():
-        for f in sorted(OUTPUT_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
-            recent_topics.append(f.stem)
-    recent_str = "\n".join(f"  - {t}" for t in recent_topics) or "  (none)"
-
-    # Gather active goals
-    goals_str = "(no active goals)"
-    goals_file = STATE_DIR / "goals.json"
-    if goals_file.exists():
-        try:
-            data = json.loads(goals_file.read_text())
-            goals_list = data.get("goals", []) if isinstance(data, dict) else data
-            active = [g for g in goals_list if g.get("status") != "done"]
-            if active:
-                goals_str = "\n".join(f"  - [{g.get('id', '?')}] {g.get('text', '?')}" for g in active)
-        except Exception:
-            pass
-
-    # Scan the codebase
-    codebase_snapshot = _scan_codebase()
-
-    return f"""\
-You are Nova, an autonomous AI agent. This is your RESEARCH CYCLE.
-Current time: {ts}
-
-YOUR MISSION: Scan your codebase AND both memory systems for context, then
-conduct deep research on a topic of your choice, create a research report,
-and save it to BOTH of your memory systems. You have 10 minutes.
-
-═══════════════════════════════════════════════════════════════
-STEP 1: CONTEXT GATHERING — scan codebase + both memory systems
-═══════════════════════════════════════════════════════════════
-
-1a. Query Fusion Memory for prior research:
-    - Call `get_last_checkpoint` to see session state
-    - Call `query_memory` with query="research topics completed nova-core"
-    - Call `query_memory` with query="knowledge gaps improvement areas"
-
-1b. Scan Obsidian Vault for existing research:
-    - Call `vault_list` on path "40-research" to see what exists
-    - Call `vault_search` with query="research" to find research notes
-
-1c. Codebase snapshot (your own code — look for gaps, patterns, opportunities):
-{codebase_snapshot}
-
-1d. Review recent outputs (DO NOT repeat these topics):
-{recent_str}
-
-1e. Active goals to align research with:
-{goals_str}
-
-═══════════════════════════════════════════════════════════════
-STEP 2: CHOOSE A RESEARCH TOPIC
-═══════════════════════════════════════════════════════════════
-
-Pick ONE topic that:
-- Has NOT been researched before (check memory + recent outputs above)
-- Aligns with an active goal when possible
-- Is informed by the codebase scan — what does nova-core need right now?
-- Is actionable — results should improve nova-core
-- Has enough depth for a substantive report
-
-Topic categories (pick one, go deep):
-- New MCP servers or tools for agent capabilities
-- Autonomous agent architecture patterns (self-healing, reflection, planning)
-- Production hardening for AI agent runtimes
-- Memory/RAG innovations and knowledge graph techniques
-- Code quality and testing automation for AI-generated code
-- Security practices for autonomous AI systems
-- Monitoring and observability for agent runtimes
-- Task scheduling and workflow orchestration
-- Self-improvement and meta-learning in AI agents
-- Cost optimization for LLM-powered systems
-
-═══════════════════════════════════════════════════════════════
-STEP 3: DEEP WEB RESEARCH (use multiple tools)
-═══════════════════════════════════════════════════════════════
-
-- Run 3-5 search queries using `brave_web_search` and/or `tavily_search`
-- Use `tavily_research` for at least one deep synthesis query
-- Fetch 2-3 authoritative full pages using `fetch`
-- Cross-reference findings across multiple sources
-- Prefer sources from 2025-2026
-
-═══════════════════════════════════════════════════════════════
-STEP 4: WRITE OUTPUT REPORT
-═══════════════════════════════════════════════════════════════
-
-Create file: /home/nova/nova-core/OUTPUT/hb_research_{stamp}.md
-
-Include:
-- # Title with topic and date
-- ## Executive Summary (2-3 paragraphs)
-- ## Key Findings (numbered, detailed)
-- ## Recommendations for Nova-Core (specific, actionable)
-- ## Sources (URLs with brief descriptions)
-- ## CONTRACT block (required — see below)
-
-═══════════════════════════════════════════════════════════════
-STEP 5: SAVE TO FUSION MEMORY (MANDATORY — do not skip)
-═══════════════════════════════════════════════════════════════
-
-Call `upsert_memory` with these exact parameters:
-- content: Dense summary of findings (500-1000 chars)
-- id: "research_{date_str}_<topic_slug>"
-- metadata: {{
-    "category": "research",
-    "project": "nova-core",
-    "topic": "<the research topic>",
-    "date": "{date_str}",
-    "confidence": "high",
-    "source": "heartbeat"
-  }}
-
-═══════════════════════════════════════════════════════════════
-STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY — do not skip)
-═══════════════════════════════════════════════════════════════
-
-Call `vault_write` with these exact parameters:
-- path: "40-research/<topic-slug>-{date_str}.md"
-- frontmatter (MUST match this schema exactly):
-    type: "research-summary"
-    research_id: "rs-<topic-slug>-{date_str}"
-    title: "<Research Title>"
-    topic: "<topic category>"
-    date_researched: "{date_str}"
-    sources_count: <integer — number of sources>
-    confidence: "high"
-    source: "nova-core-memory"
-    tags:
-      - "#type/research"
-      - "<topic-tag>"
-      - "heartbeat-research"
-- body: Full research content (findings + recommendations + sources)
-
-IMPORTANT: The frontmatter must include `source: "nova-core-memory"` and
-tags must include "#type/research". Without these, vault_write will reject.
-
-═══════════════════════════════════════════════════════════════
-STEP 7: SELF-CHECK
-═══════════════════════════════════════════════════════════════
-
-Before exiting, verify:
-1. OUTPUT file exists at /home/nova/nova-core/OUTPUT/hb_research_{stamp}.md
-2. upsert_memory returned success
-3. vault_write returned success
-If any failed, retry ONCE.
-
-## CONTRACT (at end of OUTPUT report)
-summary: <one-line description>
-files_changed: OUTPUT/hb_research_{stamp}.md
-verification: OUTPUT exists, upsert_memory success, vault_write success
-confidence: high
-
-BEGIN NOW. Start with Step 1 — query your memory systems."""
-
-
-def _run_research_cycle() -> None:
-    """Autonomous research cycle: query memories, pick topic, research, save.
-
-    Runs a full Claude session with 600s timeout. Only during active hours.
-    Respects cooldown to avoid running back-to-back.
+    Parameterises the common pattern: active-hours gate -> cooldown check ->
+    MPG gate -> subprocess.run(claude) -> response parsing -> Telegram notify.
     """
-    # Paused 2026-03-14: in active build mode, research cycles are not needed.
-    # Planning cycle remains active. Flip this to False to re-enable.
-    RESEARCH_CYCLE_PAUSED = True
-    if RESEARCH_CYCLE_PAUSED:
-        print("[research-cycle] Paused (RESEARCH_CYCLE_PAUSED=True), skipping")
+    tag = f"[{cycle_name}-cycle]"
+
+    if paused:
+        print(f"{tag} Paused, skipping")
         return
 
     current_hour = datetime.now(timezone.utc).hour
     if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
-        print(f"[research-cycle] Outside active hours ({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
+        print(f"{tag} Outside active hours ({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
         return
 
-    if not _research_cooldown_ok():
-        print("[research-cycle] Cooldown active — skipping (ran recently)")
+    if not cooldown_check():
+        print(f"{tag} Cooldown active — skipping (ran recently)")
         return
 
-    # Max-plan guard: check if research should run
+    # Max-plan guard: check if cycle should run
     if _mpg_allow is not None:
-        allowed, reason = _mpg_allow("research_cycle")
+        allowed, reason = _mpg_allow(mpg_caller)
         if not allowed:
-            print(f"[research-cycle] Blocked by max-plan guard: {reason}")
+            print(f"{tag} Blocked by max-plan guard: {reason}")
             return
 
-    print("[research-cycle] Starting autonomous research cycle...")
-    prompt = _build_research_prompt()
+    print(f"{tag} Starting autonomous {cycle_name} cycle...")
+    prompt = prompt_builder()
 
     claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
-    _rc_t0 = datetime.now(timezone.utc)
+    _cycle_t0 = datetime.now(timezone.utc)
     if _mpg_record is not None:
-        _mpg_record(caller="research_cycle", component="heartbeat._run_research_cycle", model=HEARTBEAT_MODEL)
+        _mpg_record(
+            caller=mpg_caller,
+            component=f"heartbeat._run_{cycle_name}_cycle",
+            model=HEARTBEAT_MODEL,
+        )
 
     try:
         child_env = os.environ.copy()
@@ -1409,7 +1181,7 @@ def _run_research_cycle() -> None:
             [claude_bin, "-p", "--model", HEARTBEAT_MODEL, "--dangerously-skip-permissions", prompt],
             capture_output=True,
             text=True,
-            timeout=RESEARCH_TIMEOUT,
+            timeout=timeout,
             cwd=str(BASE),
             env=child_env,
         )
@@ -1417,18 +1189,16 @@ def _run_research_cycle() -> None:
 
         if not response:
             stderr_hint = result.stderr.strip()[:200] if result.stderr else ""
-            _log_research(
-                f"EMPTY_RESPONSE (exit={result.returncode}{f', stderr={stderr_hint}' if stderr_hint else ''})"
-            )
-            _update_research_cooldown("unknown", success=False)
-            print(f"[research-cycle] Empty response from Claude (exit={result.returncode})")
+            log_fn(f"EMPTY_RESPONSE (exit={result.returncode}{f', stderr={stderr_hint}' if stderr_hint else ''})")
+            cooldown_update("unknown", success=False)
+            print(f"{tag} Empty response from Claude (exit={result.returncode})")
             return
 
-        # Extract topic from response for logging
-        topic = "unknown"
+        # Extract title from response for logging
+        title = "unknown"
         for line in response.splitlines()[:30]:
             if line.startswith("#") and len(line) > 3:
-                topic = line.lstrip("# ").strip()[:100]
+                title = line.lstrip("# ").strip()[:100]
                 break
 
         # Check vault write outcome from subprocess output
@@ -1446,43 +1216,59 @@ def _run_research_cycle() -> None:
 
         # Log persistence outcomes independently
         if vault_ok:
-            _log_research("VAULT_WRITE: success")
+            log_fn("VAULT_WRITE: success")
         elif vault_failed:
-            _log_research("VAULT_WRITE: FAILED — check vault audit log")
+            log_fn("VAULT_WRITE: FAILED — check vault audit log")
         else:
-            _log_research("VAULT_WRITE: unknown (not detected in output)")
+            log_fn("VAULT_WRITE: unknown (not detected in output)")
 
         if memory_ok:
-            _log_research("FUSION_MEMORY: success")
+            log_fn("FUSION_MEMORY: success")
         else:
-            _log_research("FUSION_MEMORY: unknown (not detected in output)")
+            log_fn("FUSION_MEMORY: unknown (not detected in output)")
 
-        _log_research(f"COMPLETED: {topic}")
-        _update_research_cooldown(topic, success=True)
-        print(f"[research-cycle] Completed: {topic}")
+        log_fn(f"COMPLETED: {title}")
+        cooldown_update(title, success=True)
+        print(f"{tag} Completed: {title}")
 
         # Build status summary for notification
         sinks = []
         if vault_ok:
-            sinks.append("vault ✓")
+            sinks.append("vault \u2713")
         elif vault_failed:
-            sinks.append("vault ✗")
+            sinks.append("vault \u2717")
         if memory_ok:
-            sinks.append("memory ✓")
+            sinks.append("memory \u2713")
         sink_str = f" [{', '.join(sinks)}]" if sinks else ""
-        _send_telegram(f"🔬 Research Cycle Complete:\n{topic}{sink_str}")
+        _send_telegram(f"{emoji} {label} Complete:\n{title}{sink_str}")
 
     except subprocess.TimeoutExpired:
-        _log_research(f"TIMEOUT after {RESEARCH_TIMEOUT}s")
-        _update_research_cooldown("timeout", success=False)
-        print(f"[research-cycle] Timed out after {RESEARCH_TIMEOUT}s")
+        log_fn(f"TIMEOUT after {timeout}s")
+        cooldown_update("timeout", success=False)
+        print(f"{tag} Timed out after {timeout}s")
     except FileNotFoundError:
-        _log_research(f"CLAUDE_NOT_FOUND: {claude_bin}")
-        print(f"[research-cycle] Claude binary not found: {claude_bin}")
+        log_fn(f"CLAUDE_NOT_FOUND: {claude_bin}")
+        print(f"{tag} Claude binary not found: {claude_bin}")
     except Exception as e:
-        _log_research(f"ERROR: {e}")
-        _update_research_cooldown("error", success=False)
-        print(f"[research-cycle] Error: {e}")
+        log_fn(f"ERROR: {e}")
+        cooldown_update("error", success=False)
+        print(f"{tag} Error: {e}")
+
+
+def _run_research_cycle() -> None:
+    """Autonomous research cycle (delegates to unified runner)."""
+    _run_claude_cycle(
+        cycle_name="research",
+        prompt_builder=_build_research_prompt,
+        timeout=RESEARCH_TIMEOUT,
+        cooldown_check=_research_cooldown_ok,
+        cooldown_update=_update_research_cooldown,
+        log_fn=_log_research,
+        emoji="\U0001f52c",
+        label="Research Cycle",
+        mpg_caller="research_cycle",
+        paused=True,
+    )
 
 
 # --- Autonomous Planning Cycle -----------------------------------------------
@@ -1523,301 +1309,19 @@ def _log_planning(message: str) -> None:
         f.write(f"[{ts}] {message}\n")
 
 
-def _build_planning_prompt() -> str:
-    """Build the planning cycle prompt — create or revise implementation plans."""
-    now = datetime.now(timezone.utc)
-    ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    date_str = now.strftime("%Y-%m-%d")
-    stamp = now.strftime("%Y%m%d-%H%M%S")
-
-    # Reuse the codebase scan
-    codebase_snapshot = _scan_codebase()
-
-    # Gather recent OUTPUT file names
-    recent_outputs = []
-    if OUTPUT_DIR.exists():
-        for f in sorted(OUTPUT_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
-            recent_outputs.append(f.stem)
-    recent_str = "\n".join(f"  - {t}" for t in recent_outputs) or "  (none)"
-
-    # Gather active goals
-    goals_str = "(no active goals)"
-    goals_file = STATE_DIR / "goals.json"
-    if goals_file.exists():
-        try:
-            data = json.loads(goals_file.read_text())
-            goals_list = data.get("goals", []) if isinstance(data, dict) else data
-            active = [g for g in goals_list if g.get("status") != "done"]
-            if active:
-                goals_str = "\n".join(f"  - [{g.get('id', '?')}] {g.get('text', '?')}" for g in active)
-        except Exception:
-            pass
-
-    return f"""\
-You are Nova, an autonomous AI agent. This is your PLANNING CYCLE.
-Current time: {ts}
-
-YOUR MISSION: Scan your codebase AND both memory systems for full context,
-then either CREATE a new phased implementation plan or REVISE an existing
-plan based on new research findings. Save the plan to BOTH memory systems.
-You have 10 minutes.
-
-═══════════════════════════════════════════════════════════════
-STEP 1: DEEP CONTEXT GATHERING
-═══════════════════════════════════════════════════════════════
-
-1a. Query Fusion Memory for existing plans and recent research:
-    - Call `get_last_checkpoint` to see session state
-    - Call `query_memory` with query="implementation plan nova-core phases"
-    - Call `query_memory` with query="recent research findings discoveries"
-    - Call `query_memory` with query="enhancement plan revision"
-
-1b. Scan Obsidian Vault for existing plans and patterns:
-    - Call `vault_search` with query="implementation plan"
-    - Call `vault_search` with query="enhancement"
-    - Call `vault_list` on path "40-research" to see recent research
-
-1c. Codebase snapshot (your own code — understand what exists):
-{codebase_snapshot}
-
-1d. Recent outputs (research reports to build plans from):
-{recent_str}
-
-1e. Active goals:
-{goals_str}
-
-═══════════════════════════════════════════════════════════════
-STEP 2: DECIDE — CREATE NEW or REVISE EXISTING
-═══════════════════════════════════════════════════════════════
-
-Based on your context scan, decide:
-
-A) CREATE a new plan if:
-   - No current plan exists, OR
-   - The existing plan is fully completed, OR
-   - New research has revealed a completely new direction
-
-B) REVISE an existing plan if:
-   - A current plan exists but new research has been done since last revision
-   - Some phases are complete and need updating
-   - Priorities have shifted based on new findings
-
-When revising: read the existing plan fully, note what's done, what's
-changed, and what new research suggests. Don't start from scratch.
-
-═══════════════════════════════════════════════════════════════
-STEP 3: BUILD THE PLAN
-═══════════════════════════════════════════════════════════════
-
-Your plan MUST follow this structure:
-
-# Nova-Core Enhancement Plan v<N> — {date_str}
-
-## Vision
-One paragraph describing the overall direction.
-
-## Current State
-What's built, what's working, what's missing. Reference the codebase scan.
-
-## Phase-by-Phase Implementation
-
-### Phase <N>: <Name> (priority: high/medium/low)
-**Goal:** What this phase achieves
-**Prerequisites:** What must be done first
-**Steps:**
-1. Step with specific file paths and code changes
-2. Step with specific commands or configurations
-3. Step with verification criteria
-**Estimated complexity:** small/medium/large
-**Success criteria:** How to know it's done
-
-(Repeat for each phase — aim for 3-7 phases)
-
-## Research Gaps
-Topics that need research before certain phases can start.
-
-## Quick Wins
-Small improvements (< 30 min each) that can be done immediately.
-
-═══════════════════════════════════════════════════════════════
-STEP 4: WRITE OUTPUT REPORT
-═══════════════════════════════════════════════════════════════
-
-Create file: /home/nova/nova-core/OUTPUT/hb_plan_{stamp}.md
-
-Include the full plan plus a ## CONTRACT block at the end.
-
-═══════════════════════════════════════════════════════════════
-STEP 5: SAVE TO FUSION MEMORY (MANDATORY)
-═══════════════════════════════════════════════════════════════
-
-Call `upsert_memory` with:
-- content: Plan summary with phase names and priorities (500-1000 chars)
-- id: "plan_{date_str}_<plan_slug>"
-- metadata: {{
-    "category": "decision",
-    "project": "nova-core",
-    "topic": "enhancement_plan",
-    "date": "{date_str}",
-    "confidence": "high",
-    "source": "heartbeat",
-    "plan_version": "<version number>"
-  }}
-
-═══════════════════════════════════════════════════════════════
-STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY)
-═══════════════════════════════════════════════════════════════
-
-Call `vault_write` with EXACTLY this frontmatter (do NOT change the type or source):
-- path: "00-inbox/plan-nova-core-{stamp}.md"
-- frontmatter:
-    type: "implementation-plan"
-    plan_id: "plan-nova-core-{stamp}"
-    title: "Nova-Core Enhancement Plan"
-    date_created: "{date_str}"
-    confidence: "high"
-    source: "nova-core-memory"
-    tags:
-      - "#type/plan"
-      - "planning"
-      - "heartbeat-planning"
-- body: Full plan content
-
-CRITICAL: You MUST use type: "implementation-plan" and source: "nova-core-memory".
-Any other values will be rejected by schema validation.
-
-═══════════════════════════════════════════════════════════════
-STEP 7: SELF-CHECK
-═══════════════════════════════════════════════════════════════
-
-Verify:
-1. OUTPUT file exists at /home/nova/nova-core/OUTPUT/hb_plan_{stamp}.md
-2. upsert_memory returned success
-3. vault_write returned success
-If any failed, retry ONCE.
-
-## CONTRACT (at end of OUTPUT report)
-summary: <one-line: created or revised plan>
-files_changed: OUTPUT/hb_plan_{stamp}.md
-verification: OUTPUT exists, upsert_memory success, vault_write success
-confidence: high
-
-BEGIN NOW. Start with Step 1 — gather context from memory and codebase."""
-
-
 def _run_planning_cycle() -> None:
-    """Autonomous planning cycle: scan context, create or revise plans.
-
-    Runs every 3rd active cycle (~90 min). Same self-awareness layers as
-    research, but output is an implementation plan instead of a report.
-    """
-    current_hour = datetime.now(timezone.utc).hour
-    if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
-        print(f"[planning-cycle] Outside active hours ({ACTIVE_HOURS_START}-{ACTIVE_HOURS_END} UTC), skipping")
-        return
-
-    if not _planning_cooldown_ok():
-        print("[planning-cycle] Cooldown active — skipping (ran recently)")
-        return
-
-    # Max-plan guard: check if planning should run
-    if _mpg_allow is not None:
-        allowed, reason = _mpg_allow("planning_cycle")
-        if not allowed:
-            print(f"[planning-cycle] Blocked by max-plan guard: {reason}")
-            return
-
-    print("[planning-cycle] Starting autonomous planning cycle...")
-    prompt = _build_planning_prompt()
-
-    claude_bin = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
-    _pc_t0 = datetime.now(timezone.utc)
-    if _mpg_record is not None:
-        _mpg_record(caller="planning_cycle", component="heartbeat._run_planning_cycle", model=HEARTBEAT_MODEL)
-
-    try:
-        child_env = os.environ.copy()
-        child_env.pop("CLAUDECODE", None)
-        child_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
-
-        result = subprocess.run(
-            [claude_bin, "-p", "--model", HEARTBEAT_MODEL, "--dangerously-skip-permissions", prompt],
-            capture_output=True,
-            text=True,
-            timeout=PLANNING_TIMEOUT,
-            cwd=str(BASE),
-            env=child_env,
-        )
-        response = result.stdout.strip()
-
-        if not response:
-            stderr_hint = result.stderr.strip()[:200] if result.stderr else ""
-            _log_planning(
-                f"EMPTY_RESPONSE (exit={result.returncode}{f', stderr={stderr_hint}' if stderr_hint else ''})"
-            )
-            _update_planning_cooldown("unknown", success=False)
-            print("[planning-cycle] Empty response from Claude")
-            return
-
-        # Extract plan title from response
-        plan_title = "unknown"
-        for line in response.splitlines()[:30]:
-            if line.startswith("#") and len(line) > 3:
-                plan_title = line.lstrip("# ").strip()[:100]
-                break
-
-        # Check vault write outcome from subprocess output
-        response_lower = response.lower()
-        vault_ok = "vault_write" in response_lower and (
-            "success" in response_lower or "accepted" in response_lower or "written" in response_lower
-        )
-        vault_failed = "vault_write" in response_lower and (
-            "error" in response_lower
-            or "rejected" in response_lower
-            or "failed" in response_lower
-            or "invalid" in response_lower
-        )
-        memory_ok = "upsert_memory" in response_lower and ("success" in response_lower or "stored" in response_lower)
-
-        # Log persistence outcomes independently
-        if vault_ok:
-            _log_planning("VAULT_WRITE: success")
-        elif vault_failed:
-            _log_planning("VAULT_WRITE: FAILED — check vault audit log")
-        else:
-            _log_planning("VAULT_WRITE: unknown (not detected in output)")
-
-        if memory_ok:
-            _log_planning("FUSION_MEMORY: success")
-        else:
-            _log_planning("FUSION_MEMORY: unknown (not detected in output)")
-
-        _log_planning(f"COMPLETED: {plan_title}")
-        _update_planning_cooldown(plan_title, success=True)
-        print(f"[planning-cycle] Completed: {plan_title}")
-
-        # Build status summary for notification
-        sinks = []
-        if vault_ok:
-            sinks.append("vault ✓")
-        elif vault_failed:
-            sinks.append("vault ✗")
-        if memory_ok:
-            sinks.append("memory ✓")
-        sink_str = f" [{', '.join(sinks)}]" if sinks else ""
-        _send_telegram(f"📋 Planning Cycle Complete:\n{plan_title}{sink_str}")
-
-    except subprocess.TimeoutExpired:
-        _log_planning(f"TIMEOUT after {PLANNING_TIMEOUT}s")
-        _update_planning_cooldown("timeout", success=False)
-        print(f"[planning-cycle] Timed out after {PLANNING_TIMEOUT}s")
-    except FileNotFoundError:
-        _log_planning(f"CLAUDE_NOT_FOUND: {claude_bin}")
-        print(f"[planning-cycle] Claude binary not found: {claude_bin}")
-    except Exception as e:
-        _log_planning(f"ERROR: {e}")
-        _update_planning_cooldown("error", success=False)
-        print(f"[planning-cycle] Error: {e}")
+    """Autonomous planning cycle (delegates to unified runner)."""
+    _run_claude_cycle(
+        cycle_name="planning",
+        prompt_builder=_build_planning_prompt,
+        timeout=PLANNING_TIMEOUT,
+        cooldown_check=_planning_cooldown_ok,
+        cooldown_update=_update_planning_cooldown,
+        log_fn=_log_planning,
+        emoji="\U0001f4cb",
+        label="Planning Cycle",
+        mpg_caller="planning_cycle",
+    )
 
 
 # --- Main --------------------------------------------------------------------
@@ -1825,6 +1329,7 @@ def _run_planning_cycle() -> None:
 
 def main() -> int:
     """Run all health checks, write HEARTBEAT.md, alert if unhealthy."""
+    _t0 = time.monotonic()
     print(f"[heartbeat] Starting health check at {datetime.now(timezone.utc).isoformat()}")
 
     # Structured tracing for this heartbeat cycle
@@ -1928,7 +1433,21 @@ def main() -> int:
 
     write_heartbeat(checks)
 
+    # Record metrics snapshot
     all_ok = all(c["ok"] for c in checks)
+    fail_names = [c["name"] for c in checks if not c["ok"]]
+    snapshot = HeartbeatSnapshot(
+        ts=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        epoch=int(datetime.now(timezone.utc).timestamp()),
+        status="healthy" if all_ok else "unhealthy",
+        total_checks=len(checks),
+        passed=len(checks) - len(fail_names),
+        failed=len(fail_names),
+        failed_names=fail_names,
+        duration_ms=round((time.monotonic() - _t0) * 1000, 1),
+        checks={c["name"]: {"ok": c["ok"], "detail": c["detail"]} for c in checks},
+    )
+    _append_metrics(snapshot)
 
     # --- Phase 7.6: multi-agent heartbeat ---
     try:

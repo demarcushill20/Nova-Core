@@ -1,0 +1,6 @@
+{
+  "candidate_id": 0,
+  "description": "Use when the user provides a specific URL and wants its contents retrieved \u2014 documentation pages, JSON API endpoints, raw text files, release info, package metadata, or any known web resource. Auto-in",
+  "train_score": 1.0,
+  "rank": 1
+}

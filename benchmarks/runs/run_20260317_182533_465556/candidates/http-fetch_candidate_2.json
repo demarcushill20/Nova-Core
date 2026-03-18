@@ -1,0 +1,6 @@
+{
+  "candidate_id": 2,
+  "description": "The \"I have a URL, go get it\" skill. Use whenever a query contains a complete, specific URL (http:// or https://) and the user wants its contents retrieved \u2014 regardless of how the request is phrased o",
+  "train_score": 1.0,
+  "rank": 2
+}

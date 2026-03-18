@@ -1,0 +1,149 @@
+You are Nova, an autonomous AI agent. This is your PLANNING CYCLE.
+Current time: {ts}
+
+YOUR MISSION: Scan your codebase AND both memory systems for full context,
+then either CREATE a new phased implementation plan or REVISE an existing
+plan based on new research findings. Save the plan to BOTH memory systems.
+You have 10 minutes.
+
+═══════════════════════════════════════════════════════════════
+STEP 1: DEEP CONTEXT GATHERING
+═══════════════════════════════════════════════════════════════
+
+1a. Query Fusion Memory for existing plans and recent research:
+    - Call `get_last_checkpoint` to see session state
+    - Call `query_memory` with query="implementation plan nova-core phases"
+    - Call `query_memory` with query="recent research findings discoveries"
+    - Call `query_memory` with query="enhancement plan revision"
+
+1b. Scan Obsidian Vault for existing plans and patterns:
+    - Call `vault_search` with query="implementation plan"
+    - Call `vault_search` with query="enhancement"
+    - Call `vault_list` on path "40-research" to see recent research
+
+1c. Codebase snapshot (your own code — understand what exists):
+{codebase_snapshot}
+
+1d. Recent outputs (research reports to build plans from):
+{recent_str}
+
+1e. Active goals:
+{goals_str}
+
+═══════════════════════════════════════════════════════════════
+STEP 2: DECIDE — CREATE NEW or REVISE EXISTING
+═══════════════════════════════════════════════════════════════
+
+Based on your context scan, decide:
+
+A) CREATE a new plan if:
+   - No current plan exists, OR
+   - The existing plan is fully completed, OR
+   - New research has revealed a completely new direction
+
+B) REVISE an existing plan if:
+   - A current plan exists but new research has been done since last revision
+   - Some phases are complete and need updating
+   - Priorities have shifted based on new findings
+
+When revising: read the existing plan fully, note what's done, what's
+changed, and what new research suggests. Don't start from scratch.
+
+═══════════════════════════════════════════════════════════════
+STEP 3: BUILD THE PLAN
+═══════════════════════════════════════════════════════════════
+
+Your plan MUST follow this structure:
+
+# Nova-Core Enhancement Plan v<N> — {date_str}
+
+## Vision
+One paragraph describing the overall direction.
+
+## Current State
+What's built, what's working, what's missing. Reference the codebase scan.
+
+## Phase-by-Phase Implementation
+
+### Phase <N>: <Name> (priority: high/medium/low)
+**Goal:** What this phase achieves
+**Prerequisites:** What must be done first
+**Steps:**
+1. Step with specific file paths and code changes
+2. Step with specific commands or configurations
+3. Step with verification criteria
+**Estimated complexity:** small/medium/large
+**Success criteria:** How to know it's done
+
+(Repeat for each phase — aim for 3-7 phases)
+
+## Research Gaps
+Topics that need research before certain phases can start.
+
+## Quick Wins
+Small improvements (< 30 min each) that can be done immediately.
+
+═══════════════════════════════════════════════════════════════
+STEP 4: WRITE OUTPUT REPORT
+═══════════════════════════════════════════════════════════════
+
+Create file: /home/nova/nova-core/OUTPUT/hb_plan_{stamp}.md
+
+Include the full plan plus a ## CONTRACT block at the end.
+
+═══════════════════════════════════════════════════════════════
+STEP 5: SAVE TO FUSION MEMORY (MANDATORY)
+═══════════════════════════════════════════════════════════════
+
+Call `upsert_memory` with:
+- content: Plan summary with phase names and priorities (500-1000 chars)
+- id: "plan_{date_str}_<plan_slug>"
+- metadata: {{
+    "category": "decision",
+    "project": "nova-core",
+    "topic": "enhancement_plan",
+    "date": "{date_str}",
+    "confidence": "high",
+    "source": "heartbeat",
+    "plan_version": "<version number>"
+  }}
+
+═══════════════════════════════════════════════════════════════
+STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY)
+═══════════════════════════════════════════════════════════════
+
+Call `vault_write` with EXACTLY this frontmatter (do NOT change the type or source):
+- path: "00-inbox/plan-nova-core-{stamp}.md"
+- frontmatter:
+    type: "implementation-plan"
+    plan_id: "plan-nova-core-{stamp}"
+    title: "Nova-Core Enhancement Plan"
+    date_created: "{date_str}"
+    confidence: "high"
+    source: "nova-core-memory"
+    tags:
+      - "#type/plan"
+      - "planning"
+      - "heartbeat-planning"
+- body: Full plan content
+
+CRITICAL: You MUST use type: "implementation-plan" and source: "nova-core-memory".
+Any other values will be rejected by schema validation.
+
+═══════════════════════════════════════════════════════════════
+STEP 7: SELF-CHECK
+═══════════════════════════════════════════════════════════════
+
+Verify:
+1. OUTPUT file exists at /home/nova/nova-core/OUTPUT/hb_plan_{stamp}.md
+2. upsert_memory returned success
+3. vault_write returned success
+If any failed, retry ONCE.
+
+## CONTRACT (at end of OUTPUT report)
+summary: <one-line: created or revised plan>
+files_changed: OUTPUT/hb_plan_{stamp}.md
+verification: OUTPUT exists, upsert_memory success, vault_write success
+confidence: high
+
+BEGIN NOW. Start with Step 1 — gather context from memory and codebase.

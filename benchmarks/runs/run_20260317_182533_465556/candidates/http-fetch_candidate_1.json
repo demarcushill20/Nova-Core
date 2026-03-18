@@ -1,0 +1,6 @@
+{
+  "candidate_id": 1,
+  "description": "Use whenever the query contains a specific URL (http:// or https://) and the user wants to retrieve its contents. Covers all retrieval verbs \u2014 fetch, get, pull, download, read, check \u2014 regardless of w",
+  "train_score": 0.9477,
+  "rank": 3
+}
