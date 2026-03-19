@@ -1,0 +1,1 @@
+"""NovaTrade indicator modules."""

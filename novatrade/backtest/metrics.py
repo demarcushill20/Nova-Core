@@ -1,5 +1,9 @@
 """Backtest evaluation metrics for the IRB strategy.
 
+THIS MODULE IS SACRED. The AutoResearch agent must NOT modify the metric
+definitions or computation logic. Any changes invalidate all prior backtest
+results and require full re-evaluation. Version hash tracks identity.
+
 Computes all metrics required by the task specification:
 - trade counts, win/loss rates, profit factor, expectancy
 - drawdown, consecutive wins/losses, trade frequency
@@ -12,9 +16,23 @@ by the backtesting engine.
 
 from __future__ import annotations
 
+import hashlib
 import statistics
 from dataclasses import dataclass, field
 from enum import Enum
+
+VERSION: str = "1.0.0"
+
+
+def metrics_version_hash() -> str:
+    """SHA-256 hash of the metrics module version for identity tracking.
+
+    Bump VERSION whenever computation logic changes (new fields, formula
+    corrections, rounding changes). This hash participates in the
+    reproducibility manifest so any metric drift is detectable.
+    """
+    return hashlib.sha256(f"metrics:{VERSION}".encode()).hexdigest()[:16]
+
 
 # ---------------------------------------------------------------------------
 # Trade record

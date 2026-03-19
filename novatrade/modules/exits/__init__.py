@@ -1,0 +1,1 @@
+"""NovaTrade exit modules."""
