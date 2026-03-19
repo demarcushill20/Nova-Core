@@ -14,6 +14,7 @@ from pathlib import Path
 _VALID_STATUSES = frozenset(
     {
         "valid",
+        "crashed",
         "gated_a",
         "gated_b",
         "gated_c",
@@ -118,6 +119,7 @@ class ExperimentDB:
         self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute("PRAGMA busy_timeout=5000;")
         self._conn.execute(_CREATE_TABLE)
         for idx_sql in _CREATE_INDEXES:
             self._conn.execute(idx_sql)
@@ -255,6 +257,12 @@ class ExperimentDB:
     def close(self) -> None:
         """Close the database connection."""
         self._conn.close()
+
+    def __enter__(self) -> ExperimentDB:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
 
 def _bool_to_int(val: bool | None) -> int | None:

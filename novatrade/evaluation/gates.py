@@ -31,7 +31,7 @@ class GateResults:
     @property
     def passed(self) -> bool:
         """True if all gate checks passed."""
-        return all(r.passed for r in self.results)
+        return bool(self.results) and all(r.passed for r in self.results)
 
     @property
     def failed_at(self) -> str | None:
@@ -146,7 +146,7 @@ def evaluate_stage_b(environment: Any, config: GateConfig | None = None) -> list
     slippage = _extract_env_field(environment, "slippage_pips", 0.0)
     commission = _extract_env_field(environment, "commission_per_lot_usd", 0.0)
     stop_first = (
-        environment.get("stop_first_on_ambiguity", False)
+        environment.get("stop_first_on_ambiguity", True)
         if isinstance(environment, dict)
         else getattr(environment, "stop_first_on_ambiguity", True)
     )
@@ -154,7 +154,7 @@ def evaluate_stage_b(environment: Any, config: GateConfig | None = None) -> list
     results.append(
         GateResult(
             gate="B.spread_applied",
-            passed=avg_spread > config.min_avg_spread_pips,
+            passed=avg_spread >= config.min_avg_spread_pips,
             reason=f"Spread {avg_spread} pips (> {config.min_avg_spread_pips})",
             details={"min_required": config.min_avg_spread_pips, "actual": avg_spread},
         )

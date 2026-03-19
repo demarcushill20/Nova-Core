@@ -7,6 +7,8 @@ Terminates on budget, stagnation, crashes, wall clock, or manual stop.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 import time
 import uuid
@@ -55,6 +57,10 @@ class CampaignConfig:
     def __post_init__(self) -> None:
         if not self.campaign_id:
             self.campaign_id = f"campaign-{uuid.uuid4().hex[:8]}"
+        if self.max_experiments > 10_000:
+            self.max_experiments = 10_000
+        if self.max_wall_clock_seconds > 86_400:
+            self.max_wall_clock_seconds = 86_400
 
 
 @dataclass
@@ -110,7 +116,16 @@ def save_checkpoint(checkpoint: CampaignCheckpoint, campaign_dir: Path) -> Path:
         "elapsed_seconds": checkpoint.elapsed_seconds,
         "created_at": checkpoint.created_at,
     }
-    out_path.write_text(json.dumps(data, indent=2))
+    encoded = json.dumps(data, indent=2)
+    fd, tmp_path = tempfile.mkstemp(dir=str(cp_dir), suffix=".tmp")
+    try:
+        os.write(fd, encoded.encode())
+        os.close(fd)
+        os.replace(tmp_path, str(out_path))
+    except BaseException:
+        os.close(fd)
+        os.unlink(tmp_path)
+        raise
     return out_path
 
 
@@ -336,7 +351,7 @@ def _log_progress(
 ) -> None:
     """Print concise progress line every 10 experiments."""
     if idx % 10 == 0:
-        score_str = f"{result.scout_score:.4f}" if result.scout_score else "N/A"
+        score_str = f"{result.scout_score:.4f}" if result.scout_score is not None else "N/A"
         best_str = f"{best_score:.4f}" if best_score > float("-inf") else "N/A"
         print(
             f"[campaign] #{idx} {strategy.value:>11s} "

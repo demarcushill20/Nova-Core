@@ -6,8 +6,15 @@ Each function returns a plain string. No business logic here.
 from __future__ import annotations
 
 import hashlib
-import traceback
+import logging
+import threading
 from pathlib import Path
+
+log = logging.getLogger("novatrade.mcp.tools")
+
+# Active campaigns: campaign_id -> threading.Event (set to signal stop)
+_active_campaigns: dict[str, threading.Event] = {}
+_campaigns_lock = threading.Lock()
 
 BASE_DIR = Path("/home/nova/nova-core")
 DATA_DIR = BASE_DIR / "data"
@@ -81,7 +88,8 @@ def bt_run(config_yaml: str, snapshot_id: str = "", symbol: str = "EURUSD") -> s
             db.close()
         return format_run_report(result)
     except Exception as exc:
-        return f"bt_run error: {exc}\n{traceback.format_exc()}"
+        log.exception("bt_run failed")
+        return f"bt_run error: {type(exc).__name__}: {exc}"
 
 
 def bt_compare(experiment_id_a: str, experiment_id_b: str, db_path: str = "") -> str:
@@ -110,7 +118,8 @@ def bt_compare(experiment_id_a: str, experiment_id_b: str, db_path: str = "") ->
         ]
         return "\n".join(lines)
     except Exception as exc:
-        return f"bt_compare error: {exc}\n{traceback.format_exc()}"
+        log.exception("bt_compare failed")
+        return f"bt_compare error: {type(exc).__name__}: {exc}"
 
 
 def bt_leaderboard(campaign_id: str = "", limit: int = 20, db_path: str = "") -> str:
@@ -133,7 +142,8 @@ def bt_leaderboard(campaign_id: str = "", limit: int = 20, db_path: str = "") ->
             )
         return "\n".join(lines)
     except Exception as exc:
-        return f"bt_leaderboard error: {exc}\n{traceback.format_exc()}"
+        log.exception("bt_leaderboard failed")
+        return f"bt_leaderboard error: {type(exc).__name__}: {exc}"
 
 
 def bt_fetch_data(symbol: str = "EURUSD", days: int = 730) -> str:
@@ -159,7 +169,8 @@ def bt_fetch_data(symbol: str = "EURUSD", days: int = 730) -> str:
             f"  H4 bars: {h4_count:,} -> {h4_path}"
         )
     except Exception as exc:
-        return f"bt_fetch_data error: {exc}\n{traceback.format_exc()}"
+        log.exception("bt_fetch_data failed")
+        return f"bt_fetch_data error: {type(exc).__name__}: {exc}"
 
 
 # -- Campaign & validation tools (thin wrappers — no storage mutation) --
@@ -168,6 +179,12 @@ def bt_fetch_data(symbol: str = "EURUSD", days: int = 730) -> str:
 def bt_campaign_start(config_yaml: str, max_experiments: int = 200) -> str:
     """Start a bounded campaign. Thin wrapper — delegates to campaign_engine."""
     try:
+        # H9: guard against concurrent campaigns
+        with _campaigns_lock:
+            if _active_campaigns:
+                running = ", ".join(_active_campaigns)
+                return f"Error: campaign already running ({running}). Stop it first."
+
         from novatrade.cli.commands.data import load_candles_csv
         from novatrade.cli.config_schema import StrategyConfig
         from novatrade.optimization.campaign_engine import CampaignConfig, run_campaign
@@ -187,8 +204,6 @@ def bt_campaign_start(config_yaml: str, max_experiments: int = 200) -> str:
         h1 = load_candles_csv(h1_path, symbol="EURUSD", timeframe="H1")
         h4 = load_candles_csv(h4_path, symbol="EURUSD", timeframe="H4")
 
-        import hashlib
-
         combined = hashlib.sha256()
         combined.update(fingerprint_candles(h1).encode())
         combined.update(fingerprint_candles(h4).encode())
@@ -199,15 +214,29 @@ def bt_campaign_start(config_yaml: str, max_experiments: int = 200) -> str:
         campaign_dir.mkdir(parents=True, exist_ok=True)
 
         cfg = CampaignConfig(max_experiments=max_experiments)
-        result = run_campaign(
-            base_config=strategy_config,
-            h1_candles=h1,
-            h4_candles=h4,
-            campaign_config=cfg,
-            dataset_hash=dataset_hash,
-            campaign_dir=campaign_dir,
-            db=db,
-        )
+
+        # H4: create stop_event and register in _active_campaigns
+        stop_event = threading.Event()
+        campaign_id = cfg.campaign_id
+        with _campaigns_lock:
+            _active_campaigns[campaign_id] = stop_event
+
+        try:
+            result = run_campaign(
+                base_config=strategy_config,
+                h1_candles=h1,
+                h4_candles=h4,
+                campaign_config=cfg,
+                dataset_hash=dataset_hash,
+                campaign_dir=campaign_dir,
+                db=db,
+                stop_event=stop_event,
+            )
+        finally:
+            # Clean up after campaign finishes (success or failure)
+            with _campaigns_lock:
+                _active_campaigns.pop(campaign_id, None)
+
         db.close()
 
         return (
@@ -218,7 +247,8 @@ def bt_campaign_start(config_yaml: str, max_experiments: int = 200) -> str:
             f"  Elapsed: {result.elapsed_seconds:.1f}s"
         )
     except Exception as exc:
-        return f"bt_campaign_start error: {exc}\n{traceback.format_exc()}"
+        log.exception("bt_campaign_start failed")
+        return f"bt_campaign_start error: {type(exc).__name__}: {exc}"
 
 
 def bt_campaign_status() -> str:
@@ -242,7 +272,14 @@ def bt_campaign_status() -> str:
 
 def bt_campaign_stop() -> str:
     """Signal campaign to stop. Campaigns check stop_event periodically."""
-    return "Campaign stop signalled. Active campaigns will terminate at next checkpoint."
+    with _campaigns_lock:
+        if not _active_campaigns:
+            return "No active campaign to stop."
+        stopped = []
+        for campaign_id, event in _active_campaigns.items():
+            event.set()
+            stopped.append(campaign_id)
+    return f"Stop signalled for: {', '.join(stopped)}. Will terminate at next iteration."
 
 
 def bt_walkforward(config_yaml: str, snapshot_id: str = "") -> str:
@@ -283,7 +320,8 @@ def bt_walkforward(config_yaml: str, snapshot_id: str = "") -> str:
             lines.append(f"  Holdout passed: {result.holdout_passed}")
         return "\n".join(lines)
     except Exception as exc:
-        return f"bt_walkforward error: {exc}\n{traceback.format_exc()}"
+        log.exception("bt_walkforward failed")
+        return f"bt_walkforward error: {type(exc).__name__}: {exc}"
 
 
 def bt_promote(experiment_id: str, db_path: str = "") -> str:

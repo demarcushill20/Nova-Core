@@ -182,15 +182,15 @@ def compute_dashboard_metrics(
     row.sortino_ratio = row.sharpe_ratio * 1.2 if row.sharpe_ratio > 0 else 0.0
 
     # Recovery factor: net_pips / max_dd_pips (proxy)
-    max_dd_pips = _safe_float(metrics, "max_drawdown_pips", 0.0)
+    max_dd_pips = _safe_float(metrics, "max_drawdown_usd", 0.0)
     if max_dd_pips > 0:
         row.recovery_factor = net_pips / max_dd_pips
     else:
         row.recovery_factor = 5.0 if net_pips > 0 else 0.0
 
     # Avg win/loss ratio
-    avg_win = _safe_float(metrics, "avg_win_pips", 0.0)
-    avg_loss = abs(_safe_float(metrics, "avg_loss_pips", 0.0))
+    avg_win = _safe_float(metrics, "average_winner_pips", 0.0)
+    avg_loss = abs(_safe_float(metrics, "average_loser_pips", 0.0))
     if avg_loss > 0:
         row.avg_win_loss_ratio = avg_win / avg_loss
     else:
@@ -340,7 +340,7 @@ class EvaluationDashboard:
         lines = ["\t".join(headers)]
 
         for row in self.ranked:
-            promo = f"{row.promotion_score:.4f}" if row.promotion_score else "—"
+            promo = f"{row.promotion_score:.4f}" if row.promotion_score is not None else "—"
             lines.append(
                 "\t".join(
                     [

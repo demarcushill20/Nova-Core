@@ -93,6 +93,9 @@ def _run_single_backtest(
     h4_slice: list[Candle],
 ) -> float:
     """Run a backtest on a candle slice and return the scout score."""
+    if not h1_slice or not h4_slice:
+        return 0.0
+
     env_kwargs = config.to_environment_kwargs()
     try:
         environment = replace(DEFAULT_ENVIRONMENT, **env_kwargs)

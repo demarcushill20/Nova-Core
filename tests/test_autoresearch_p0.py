@@ -380,9 +380,20 @@ class TestGateStageB:
         results = evaluate_stage_b(env)
         assert all(r.passed for r in results)
 
-    def test_fails_if_spread_is_zero(self):
+    def test_passes_if_spread_equals_min_threshold(self):
+        """Spread gate uses >= (consistent with slippage/commission gates)."""
         env = _make_environment(avg_spread_pips=0.0)
         results = evaluate_stage_b(env)
+        spread_gate = [r for r in results if r.gate == "B.spread_applied"][0]
+        assert spread_gate.passed is True
+
+    def test_fails_if_spread_below_custom_threshold(self):
+        """Spread gate fails when below a non-zero custom threshold."""
+        from novatrade.evaluation.gates import GateConfig
+
+        env = _make_environment(avg_spread_pips=0.5)
+        custom_config = GateConfig(min_avg_spread_pips=1.0)
+        results = evaluate_stage_b(env, config=custom_config)
         spread_gate = [r for r in results if r.gate == "B.spread_applied"][0]
         assert spread_gate.passed is False
 
@@ -451,9 +462,10 @@ class TestGateResults:
         assert gr.passed is False
         assert gr.failed_at == "B"
 
-    def test_empty_results_passes(self):
+    def test_empty_results_does_not_pass(self):
+        """Empty GateResults should not count as passed (no gates were evaluated)."""
         gr = GateResults()
-        assert gr.passed is True
+        assert gr.passed is False
         assert gr.failed_at is None
 
 
@@ -559,7 +571,7 @@ class TestFitnessResult:
         fr = FitnessResult()
         assert fr.scout_score == 0.0
         assert fr.promotion_score is None
-        assert fr.gate_results.passed is True
+        assert fr.gate_results.passed is False  # empty results = not evaluated = not passed
         assert fr.details == {}
 
 

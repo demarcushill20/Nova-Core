@@ -6,6 +6,7 @@ Generates synthetic candle data, saves/loads CSV, and freezes snapshots.
 from __future__ import annotations
 
 import csv
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -238,19 +239,20 @@ def load_candles_csv(csv_path: Path, symbol: str = "", timeframe: str = "") -> l
     candles: list[Candle] = []
     with csv_path.open("r") as f:
         reader = csv.DictReader(f)
-        for row in reader:
-            candles.append(
-                Candle(
-                    timestamp=float(row["timestamp"]),
-                    open=float(row["open"]),
-                    high=float(row["high"]),
-                    low=float(row["low"]),
-                    close=float(row["close"]),
-                    volume=float(row["volume"]),
-                    symbol=symbol,
-                    timeframe=timeframe,
-                )
+        for i, row in enumerate(reader):
+            c = Candle(
+                timestamp=float(row["timestamp"]),
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row["volume"]),
+                symbol=symbol,
+                timeframe=timeframe,
             )
+            if any(math.isnan(v) for v in (c.open, c.high, c.low, c.close)):
+                raise ValueError(f"NaN detected in candle at row {i}")
+            candles.append(c)
 
     return sorted(candles, key=lambda c: c.timestamp)
 

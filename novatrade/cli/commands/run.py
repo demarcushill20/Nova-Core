@@ -30,17 +30,17 @@ from novatrade.backtest.metrics import (
     compute_metrics,
 )
 from novatrade.cli.config_schema import StrategyConfig
-from novatrade.evaluation.fill_model import DEFAULT_FILL_MODEL
 from novatrade.evaluation.fitness import compute_scout_score
 from novatrade.evaluation.gates import (
     GateResults,
     evaluate_stage_a,
     evaluate_stage_b,
 )
+from novatrade.evaluation.sacred_registry import collect_sacred_hashes
 from novatrade.models import Candle
 from novatrade.storage.artifacts import save_config_snapshot, save_trade_log
 from novatrade.storage.experiment_db import ExperimentDB, ExperimentRecord
-from novatrade.storage.experiment_identity import compute_experiment_id, get_engine_sha
+from novatrade.storage.experiment_identity import compute_experiment_id_v2, get_engine_sha
 
 log = logging.getLogger("novatrade.cli.commands.run")
 
@@ -169,14 +169,14 @@ def execute_backtest(
         initial_equity=environment.initial_equity,
     )
 
-    # --- Step 5: Compute experiment ID ---
+    # --- Step 5: Compute experiment ID (v2 — uses full sacred bundle hash) ---
     engine_sha = get_engine_sha()
-    fill_model_hash = DEFAULT_FILL_MODEL.version_hash()
+    sacred_bundle = collect_sacred_hashes()
 
-    experiment_id = compute_experiment_id(
+    experiment_id = compute_experiment_id_v2(
         config_hash=config.content_hash(),
         dataset_hash=dataset_hash,
-        fill_model_hash=fill_model_hash,
+        sacred_combined_hash=sacred_bundle.combined_hash,
         engine_sha=engine_sha,
         doctrine_hash=doctrine_hash,
     )
@@ -282,10 +282,11 @@ def _compute_id(
     doctrine_hash: str,
 ) -> str:
     """Compute experiment ID without running the backtest (for error paths)."""
-    return compute_experiment_id(
+    sacred_bundle = collect_sacred_hashes()
+    return compute_experiment_id_v2(
         config_hash=config.content_hash(),
         dataset_hash=dataset_hash,
-        fill_model_hash=DEFAULT_FILL_MODEL.version_hash(),
+        sacred_combined_hash=sacred_bundle.combined_hash,
         engine_sha=get_engine_sha(),
         doctrine_hash=doctrine_hash,
     )

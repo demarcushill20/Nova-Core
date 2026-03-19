@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 import struct
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -20,6 +22,11 @@ from novatrade.models import Candle
 # ---------------------------------------------------------------------------
 # DataSnapshot (frozen metadata)
 # ---------------------------------------------------------------------------
+
+
+def _validate_snapshot_id(value: str) -> None:
+    if not re.fullmatch(r"[0-9a-z_-]{1,64}", value):
+        raise ValueError(f"Invalid snapshot_id: must be 1-64 alphanumeric/underscore/dash chars, got {value!r}")
 
 
 @dataclass(frozen=True)
@@ -81,19 +88,20 @@ def _candles_to_df(candles: list[Candle]) -> pd.DataFrame:
 
 def _df_to_candles(df: pd.DataFrame) -> list[Candle]:
     candles: list[Candle] = []
-    for _, row in df.iterrows():
-        candles.append(
-            Candle(
-                timestamp=float(row["timestamp"]),
-                open=float(row["open"]),
-                high=float(row["high"]),
-                low=float(row["low"]),
-                close=float(row["close"]),
-                volume=float(row["volume"]),
-                symbol=str(row["symbol"]),
-                timeframe=str(row["timeframe"]),
-            )
+    for i, row in df.iterrows():
+        c = Candle(
+            timestamp=float(row["timestamp"]),
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=float(row["volume"]),
+            symbol=str(row["symbol"]),
+            timeframe=str(row["timeframe"]),
         )
+        if any(math.isnan(v) for v in (c.open, c.high, c.low, c.close)):
+            raise ValueError(f"NaN detected in candle at row {i}")
+        candles.append(c)
     return candles
 
 
@@ -176,6 +184,7 @@ def load_snapshot(
     Raises FileNotFoundError if files are missing, ValueError if fingerprint
     does not match (data corruption).
     """
+    _validate_snapshot_id(snapshot_id)
     snapshot_dir = Path(snapshot_dir)
 
     meta_path = snapshot_dir / f"{snapshot_id}_meta.json"

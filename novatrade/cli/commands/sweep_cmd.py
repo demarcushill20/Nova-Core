@@ -109,7 +109,7 @@ def _print_table(result: SweepResult, top_n: int) -> None:
         typer.echo(
             f"\n  Best score: {result.best.scout_score:.4f}  "
             f"(#{result.best.index}, {result.best.trade_count} trades, "
-            f"PF={result.best.profit_factor or 'N/A'})"
+            f"PF={result.best.profit_factor if result.best.profit_factor is not None else 'N/A'})"
         )
 
     # Top-N table

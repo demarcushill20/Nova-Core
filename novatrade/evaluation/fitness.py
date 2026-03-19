@@ -146,6 +146,16 @@ def compute_promotion_score(
     if holdout_score >= median_oos * 0.8:
         holdout_bonus = 0.05
 
+    # IS/OOS degradation penalty: penalize when OOS is much worse than IS
+    # This is the core overfit detection — large IS/OOS gap = overfitting
+    is_oos_penalty = 0.0
+    if is_median > 0:
+        oos_is_ratio = median_oos / is_median
+        if oos_is_ratio < 0.5:
+            is_oos_penalty = 0.15  # severe degradation
+        elif oos_is_ratio < 0.7:
+            is_oos_penalty = 0.08  # moderate degradation
+
     # Complexity penalty: -0.02 per parameter above 5
     complexity_penalty = max(0.0, (complexity - 5) * 0.02)
 
@@ -158,5 +168,5 @@ def compute_promotion_score(
         elif oos_std > 0.10:
             instability_penalty = 0.05
 
-    score = median_oos + holdout_bonus - complexity_penalty - instability_penalty
+    score = median_oos + holdout_bonus - complexity_penalty - instability_penalty - is_oos_penalty
     return max(min(score, 1.0), 0.0)
