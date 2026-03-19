@@ -552,17 +552,16 @@ class TestBudgetEnforcer:
     """Token and cost budget enforcement."""
 
     @pytest.fixture(autouse=True)
-    def _load(self):
+    def _load(self, tmp_path, monkeypatch):
+        import agents.budget_enforcer as _mod
+
+        # Redirect budget state to temp dir so tests never touch production files
+        monkeypatch.setattr(_mod, "BUDGETS_DIR", tmp_path / "budgets")
+        monkeypatch.setattr(_mod, "LIMITS_FILE", tmp_path / "budgets" / "limits.json")
+
         from agents.budget_enforcer import BudgetEnforcer
 
         self.enforcer = BudgetEnforcer()
-        # Reset state for each test using actual internal attributes
-        self.enforcer._session = self.enforcer._session.__class__()
-        self.enforcer._tasks = {}
-        self.enforcer._session_cost_usd = 0.0
-        self.enforcer._daily = self.enforcer._daily.__class__()
-        self.enforcer._daily_cost_usd = 0.0
-        self.enforcer._monthly_cost_usd = 0.0
 
     def test_fresh_budget_allows(self):
         ok, msg = self.enforcer.can_proceed()
