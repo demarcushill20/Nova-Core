@@ -308,17 +308,19 @@ class TestBurnRate:
 # ---------------------------------------------------------------------------
 class TestCompletedOnly:
     def test_filters_null_duration(self):
-        """Entries with duration_secs=None are excluded."""
+        """Entries with duration_secs=None or sub-second are excluded."""
         entries = [
             {"caller": "a", "duration_secs": None},
             {"caller": "b", "duration_secs": 1.5},
             {"caller": "c"},  # missing key
-            {"caller": "d", "duration_secs": 0.0},
+            {"caller": "d", "duration_secs": 0.0},  # sub-second → excluded
+            {"caller": "e", "duration_secs": 0.001},  # sub-second → excluded
+            {"caller": "f", "duration_secs": 5.0},
         ]
         result = _completed_only(entries)
         assert len(result) == 2
         assert result[0]["caller"] == "b"
-        assert result[1]["caller"] == "d"
+        assert result[1]["caller"] == "f"
 
 
 # ---------------------------------------------------------------------------

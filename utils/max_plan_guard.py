@@ -308,14 +308,18 @@ class BurnRateMetrics:
 
 
 def _completed_only(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Filter ledger entries to only completed invocations.
+    """Filter ledger entries to only meaningful completed invocations.
 
-    Start/in-flight entries have ``duration_secs: null`` and ``success: null``.
-    Counting them would inflate call counts (each invocation produces a start
-    entry *and* a completion entry).  Only completion entries carry meaningful
-    metrics so we use those for burn-rate and runaway analysis.
+    Excludes:
+    - Start/in-flight entries (``duration_secs: null``, ``success: null``).
+    - Sub-second entries (< 1.0s) — these are housekeeping no-ops like the
+      orchestrator classifier returning instantly when no tasks exist, or
+      heartbeat bookkeeping.  Real Claude calls take several seconds minimum.
+
+    Only entries representing actual work are counted for burn-rate and
+    runaway analysis.
     """
-    return [e for e in entries if e.get("duration_secs") is not None]
+    return [e for e in entries if (e.get("duration_secs") or 0) >= 1.0]
 
 
 def compute_burn_rate() -> BurnRateMetrics:
