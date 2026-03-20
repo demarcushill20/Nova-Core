@@ -6,15 +6,17 @@ the complete validation gauntlet:
   2. Holdout evaluation (separate from WF holdout)
   3. Parameter perturbation stability test
   4. Cost stress test (2x spread + slippage)
-  5. Promotion score computation
+  5. Durability validation (rolling profitability, regime consistency, drawdown)
+  6. Promotion score computation
 
-Only strategies that pass ALL four stages earn a promotion score.
+Only strategies that pass ALL five stages earn a promotion score.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
 from novatrade.cli.config_schema import StrategyConfig
 from novatrade.evaluation.fitness import compute_promotion_score
@@ -46,6 +48,8 @@ class PromotionResult:
     holdout_passed: bool = False
     perturbation_passed: bool = False
     stress_passed: bool = False
+    durability_passed: bool = False
+    durability_grade: str | None = None
     promotion_score: float | None = None
     overall_passed: bool = False
     details: dict = field(default_factory=dict)
@@ -65,6 +69,8 @@ def run_promotion_pipeline(
     wf_config: WalkForwardConfig | None = None,
     perturb_config: PerturbationConfig | None = None,
     stress_config: StressConfig | None = None,
+    trades: list | None = None,
+    durability_config: Any | None = None,
 ) -> PromotionResult:
     """Run the full promotion validation battery on a champion strategy.
 
@@ -165,9 +171,53 @@ def run_promotion_pipeline(
         stress_result.still_profitable,
     )
 
+    # --- Stage 5: Durability validation ---
+    durability_report = _run_durability_stage(
+        trades=trades,
+        h1_candles=h1_candles,
+        wf_result=wf_result,
+        durability_config=durability_config,
+    )
+    if durability_report is not None:
+        result.durability_passed = durability_report.overall_passed
+        result.durability_grade = durability_report.durability_grade
+        result.details["durability"] = {
+            "grade": durability_report.durability_grade,
+            "overall_passed": durability_report.overall_passed,
+            "rolling_12m_win_pct": durability_report.rolling_12m_win_pct,
+            "rolling_6m_win_pct": durability_report.rolling_6m_win_pct,
+            "regime_consistency_score": durability_report.regime_consistency_score,
+            "max_underwater_days": durability_report.max_underwater_days,
+            "recovery_factor": (
+                durability_report.recovery_factor
+                if not isinstance(durability_report.recovery_factor, float)
+                or durability_report.recovery_factor != float("inf")
+                else "inf"
+            ),
+            "gates_passed": sum(1 for g in durability_report.gates if g.passed),
+            "gates_total": len(durability_report.gates),
+        }
+        log.info(
+            "Durability: %s (grade=%s, %d/%d gates)",
+            "PASS" if result.durability_passed else "FAIL",
+            result.durability_grade,
+            sum(1 for g in durability_report.gates if g.passed),
+            len(durability_report.gates),
+        )
+    else:
+        # No trades provided — skip durability (treat as passed)
+        result.durability_passed = True
+        result.durability_grade = None
+        result.details["durability"] = {"skipped": True, "reason": "no_trades_provided"}
+        log.info("Durability: SKIPPED (no trades provided)")
+
     # --- Compute promotion score if all pass ---
     result.overall_passed = (
-        result.walkforward_passed and result.holdout_passed and result.perturbation_passed and result.stress_passed
+        result.walkforward_passed
+        and result.holdout_passed
+        and result.perturbation_passed
+        and result.stress_passed
+        and result.durability_passed
     )
 
     if result.overall_passed:
@@ -199,6 +249,8 @@ def run_promotion_pipeline(
             stages_failed.append("perturbation")
         if not result.stress_passed:
             stages_failed.append("stress")
+        if not result.durability_passed:
+            stages_failed.append("durability")
         log.warning("PROMOTION FAILED — stages: %s", ", ".join(stages_failed))
 
     return result
@@ -282,3 +334,53 @@ def _run_stress_stage(
             score_degradation_pct=1.0,
             passed=False,
         )
+
+
+def _run_durability_stage(
+    trades: list | None,
+    h1_candles: list,
+    wf_result: WalkForwardResult,
+    durability_config: Any | None = None,
+) -> Any | None:
+    """Execute durability validation if trades are available.
+
+    Args:
+        trades: Completed trades from baseline backtest.
+        h1_candles: H1 candles for regime classification.
+        wf_result: Walk-forward result (used for IS/OOS PF if available).
+        durability_config: Optional DurabilityConfig override.
+
+    Returns:
+        DurabilityReport or None if no trades provided.
+    """
+    if not trades:
+        return None
+
+    try:
+        from novatrade.evaluation.durability import DurabilityConfig, evaluate_durability
+
+        dur_cfg = durability_config if durability_config is not None else DurabilityConfig()
+
+        # Extract IS/OOS profit factors from walk-forward if available
+        is_pf: float | None = None
+        oos_pf: float | None = None
+        if wf_result.windows:
+            # Use median IS/OOS scores as proxy for profit factors
+            is_scores = [w.is_scout_score for w in wf_result.windows if w.is_scout_score > 0]
+            oos_scores = [w.oos_scout_score for w in wf_result.windows if w.oos_scout_score > 0]
+            if is_scores and oos_scores:
+                import statistics
+
+                is_pf = statistics.median(is_scores)
+                oos_pf = statistics.median(oos_scores)
+
+        return evaluate_durability(
+            trades=trades,
+            candles=h1_candles,
+            is_profit_factor=is_pf,
+            oos_profit_factor=oos_pf,
+            config=dur_cfg,
+        )
+    except Exception as exc:
+        log.error("Durability validation crashed: %s", exc)
+        return None

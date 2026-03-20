@@ -3,7 +3,7 @@
 Strategies must pass gates sequentially:
   Stage A (Validity): Enough data, no crash, no lookahead, diversified P&L
   Stage B (Realism): Costs applied, conservative fill model, no impossible fills
-  Stage C (Robustness): Monte Carlo, walk-forward, cost stress (stubs for now)
+  Stage C (Robustness): Monte Carlo, walk-forward, cost stress, parameter stability
 """
 
 from __future__ import annotations
@@ -196,7 +196,11 @@ def evaluate_stage_b(environment: Any, config: GateConfig | None = None) -> list
 
 
 def evaluate_stage_c_stub() -> list[GateResult]:
-    """Stage C robustness stubs — returns NOT_EVALUATED placeholders."""
+    """Stage C robustness stubs — returns NOT_EVALUATED placeholders.
+
+    Kept for backward compatibility. Prefer :func:`evaluate_stage_c_gates` for
+    real validation.
+    """
     stubs = [
         ("C.monte_carlo", "Monte Carlo permutation test"),
         ("C.walk_forward", "Walk-forward OOS consistency"),
@@ -212,3 +216,37 @@ def evaluate_stage_c_stub() -> list[GateResult]:
         )
         for gid, desc in stubs
     ]
+
+
+def evaluate_stage_c_gates(
+    trades: list,
+    config: Any,
+    h1_candles: list,
+    h4_candles: list,
+    stage_c_config: Any | None = None,
+) -> list[GateResult]:
+    """Stage C robustness gates — delegates to the real Stage C evaluator.
+
+    Replaces :func:`evaluate_stage_c_stub` with actual Monte Carlo,
+    walk-forward, cost stress, and parameter stability gates.
+
+    Args:
+        trades: Completed trades from a baseline backtest (CompletedTrade list).
+        config: StrategyConfig (or dict/object coercible to one).
+        h1_candles: Full H1 candle series.
+        h4_candles: Full H4 candle series.
+        stage_c_config: Optional StageCConfig for threshold overrides.
+
+    Returns:
+        List of GateResult, one per enabled gate.
+    """
+    from novatrade.evaluation.stage_c import StageCConfig, evaluate_stage_c
+
+    sc_cfg = stage_c_config if stage_c_config is not None else StageCConfig()
+    return evaluate_stage_c(
+        trades=trades,
+        config=config,
+        h1_candles=h1_candles,
+        h4_candles=h4_candles,
+        stage_c_config=sc_cfg,
+    )
