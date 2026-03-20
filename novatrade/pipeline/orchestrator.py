@@ -675,7 +675,10 @@ def _stage_robustness_validation(
 # ---------------------------------------------------------------------------
 
 
-def run_pipeline(config: PipelineConfig) -> PipelineResult:
+def run_pipeline(
+    config: PipelineConfig,
+    callbacks: list[Any] | None = None,
+) -> PipelineResult:
     """Execute the full NovaTrade evaluation pipeline.
 
     Chains: load data -> validate -> derive timeframes -> parse doctrine ->
@@ -683,10 +686,16 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
 
     Args:
         config: Pipeline configuration specifying data, mode, and parameters.
+        callbacks: Optional list of ProgressCallback instances for observability.
+            If None or empty, the pipeline works exactly as before.
 
     Returns:
         PipelineResult with stage timings, gate pass rates, and top survivors.
     """
+    from novatrade.pipeline.progress import notify_stage_complete, notify_stage_start
+
+    cbs = callbacks or []
+
     log.info(
         "Starting pipeline: mode=%s pair=%s tf=%s experiments=%d",
         config.mode.value,
@@ -699,8 +708,10 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     errors: list[str] = []
 
     # --- Stage 1: Load data ------------------------------------------------
+    notify_stage_start(cbs, "load_data")
     stage_load, h1_candles, h4_candles = _stage_load_data(config)
     stages.append(stage_load)
+    notify_stage_complete(cbs, "load_data", {"status": stage_load.status, "duration_ms": stage_load.duration_ms})
 
     if stage_load.status == "error":
         errors.append(stage_load.details.get("error", "Data load failed"))
@@ -711,15 +722,19 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         )
 
     # --- Stage 2: Validate data --------------------------------------------
+    notify_stage_start(cbs, "validate_data")
     stage_val, h1_candles, h4_candles, quality_issues = _stage_validate_data(config, h1_candles, h4_candles)
     stages.append(stage_val)
+    notify_stage_complete(cbs, "validate_data", {"status": stage_val.status, "duration_ms": stage_val.duration_ms})
 
     if stage_val.status == "error":
         errors.append(stage_val.details.get("error", "Validation failed"))
 
     # --- Stage 3: Parse doctrine -------------------------------------------
+    notify_stage_start(cbs, "parse_doctrine")
     stage_doc, doctrine = _stage_parse_doctrine(config)
     stages.append(stage_doc)
+    notify_stage_complete(cbs, "parse_doctrine", {"status": stage_doc.status, "duration_ms": stage_doc.duration_ms})
 
     if stage_doc.status == "error" or doctrine is None:
         errors.append(stage_doc.details.get("error", "Doctrine parsing failed"))
@@ -734,8 +749,10 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     doctrine_hash = doctrine.content_hash() if hasattr(doctrine, "content_hash") else ""
 
     # --- Stage 4: Generate config ------------------------------------------
+    notify_stage_start(cbs, "generate_config")
     stage_cfg, strategy_config = _stage_generate_config(doctrine)
     stages.append(stage_cfg)
+    notify_stage_complete(cbs, "generate_config", {"status": stage_cfg.status, "duration_ms": stage_cfg.duration_ms})
 
     if stage_cfg.status == "error" or strategy_config is None:
         errors.append(stage_cfg.details.get("error", "Config generation failed"))
@@ -751,6 +768,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     dataset_hash = _candle_hash(h1_candles) if h1_candles else ""
 
     # --- Stage 5: Execute --------------------------------------------------
+    notify_stage_start(cbs, "execute")
     if config.mode == PipelineMode.SINGLE:
         stage_exec, result = _stage_execute_single(
             strategy_config,
@@ -783,6 +801,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         errors.append(f"Unknown pipeline mode: {config.mode}")
 
     stages.append(stage_exec)
+    notify_stage_complete(cbs, "execute", {"status": stage_exec.status, "duration_ms": stage_exec.duration_ms})
 
     # --- Stage 6: Robustness validation (Stage C gates) --------------------
     if result.top_survivors and config.mode in (PipelineMode.SWEEP, PipelineMode.CAMPAIGN):
