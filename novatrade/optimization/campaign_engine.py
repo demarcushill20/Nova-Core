@@ -2,6 +2,11 @@
 
 Bounded, auditable experiment loop with keep/discard ratchet.
 Terminates on budget, stagnation, crashes, wall clock, or manual stop.
+
+Supports three mutation levels (P4 wiring):
+  Level 1 — parameter perturbation (default, always available)
+  Level 2 — filter / rule toggle mutations (doctrine-constrained)
+  Level 3 — structural template swaps (registered compositions)
 """
 
 from __future__ import annotations
@@ -19,6 +24,15 @@ from pathlib import Path
 
 from novatrade.cli.commands.run import BacktestRunResult, execute_backtest
 from novatrade.cli.config_schema import StrategyConfig
+from novatrade.doctrine.schema import StrategyDoctrine
+from novatrade.optimization.mutations import (
+    AncestryTracker,
+    MutationBudget,
+    MutationRecord,
+    generate_mutated_candidate,
+    select_mutation_level,
+)
+from novatrade.optimization.search_levels import SearchLevelConfig
 from novatrade.optimization.strategies import (
     ExperimentStrategy,
     StrategyBudget,
@@ -56,6 +70,11 @@ class CampaignConfig:
     strategy_budget: StrategyBudget | None = None
     walkforward_on_new_best: bool = True
     wf_config: WalkForwardConfig | None = None
+    # P4: Mutation wiring
+    search_level_config: SearchLevelConfig | None = None
+    mutation_budget: MutationBudget | None = None
+    doctrine: StrategyDoctrine | None = None
+    enable_mutations: bool = False  # opt-in: set True to use L2/L3 mutations
 
     def __post_init__(self) -> None:
         if not self.campaign_id:
@@ -158,17 +177,31 @@ def run_campaign(
     db: ExperimentDB | None = None,
     stop_event: threading.Event | None = None,
 ) -> CampaignResult:
-    """Run a bounded AutoResearch campaign loop."""
+    """Run a bounded AutoResearch campaign loop.
+
+    When ``campaign_config.enable_mutations`` is True, the engine uses
+    Level 2/3 mutations (filter toggles, structural templates) alongside
+    the standard Level 1 parameter perturbation.  Mutation level selection
+    is controlled by ``search_level_config`` and ``mutation_budget``.
+
+    Ancestry tracking records every mutation for lineage audit.  The
+    ancestry JSON is saved alongside campaign results when ``campaign_dir``
+    is provided.
+    """
     cfg = campaign_config or CampaignConfig()
     stop = stop_event or threading.Event()
     if campaign_dir is not None:
         Path(campaign_dir).mkdir(parents=True, exist_ok=True)
+
+    # P4: Ancestry tracker for mutation lineage
+    ancestry = AncestryTracker()
 
     best_score: float = float("-inf")
     best_config_dict: dict = base_config.to_environment_kwargs()
     best_experiment_id: str = ""
     stagnation = crashes = experiment_index = 0
     status_counts: dict[str, int] = {}
+    mutation_type_counts: dict[str, int] = {}
     checkpoints: list[CampaignCheckpoint] = []
     improvements: list[dict] = []
     recent_good: list[dict] = []
@@ -183,11 +216,12 @@ def run_campaign(
     )
 
     log.info(
-        "Starting %s: max=%d, stagnation=%d, wall=%.0fs",
+        "Starting %s: max=%d, stagnation=%d, wall=%.0fs, mutations=%s",
         cfg.campaign_id,
         cfg.max_experiments,
         cfg.stagnation_limit,
         cfg.max_wall_clock_seconds,
+        "enabled" if cfg.enable_mutations else "disabled",
     )
 
     if not h1_candles or not h4_candles:
@@ -218,12 +252,32 @@ def run_campaign(
             end_reason = "manual_stop"
             break
 
-        strategy = select_strategy(
-            experiment_index,
-            budget=cfg.strategy_budget,
-            total_experiments=cfg.max_experiments,
-        )
-        candidate_dict = _generate_candidate(strategy, best_config_dict, recent_good)
+        # P4: Generate candidate via mutation system or legacy strategy
+        mutation_type = "level1_perturbation"
+        mutation_details: dict = {}
+
+        if cfg.enable_mutations:
+            search_level = select_mutation_level(
+                experiment_index,
+                cfg.max_experiments,
+                budget=cfg.mutation_budget,
+                search_level_config=cfg.search_level_config,
+            )
+            candidate_dict, mutation_type, mutation_details = generate_mutated_candidate(
+                best_config=best_config_dict,
+                search_level=search_level,
+                doctrine=cfg.doctrine,
+                search_level_config=cfg.search_level_config,
+            )
+        else:
+            strategy = select_strategy(
+                experiment_index,
+                budget=cfg.strategy_budget,
+                total_experiments=cfg.max_experiments,
+            )
+            candidate_dict = _generate_candidate(strategy, best_config_dict, recent_good)
+
+        mutation_type_counts[mutation_type] = mutation_type_counts.get(mutation_type, 0) + 1
 
         try:
             candidate_config = base_config.model_copy(update=candidate_dict)
@@ -245,10 +299,22 @@ def run_campaign(
         )
         status_counts[result.status] = status_counts.get(result.status, 0) + 1
 
+        # P4: Record ancestry
+        ancestry.record(
+            MutationRecord(
+                experiment_id=result.experiment_id,
+                parent_id=best_experiment_id or None,
+                mutation_type=mutation_type,
+                mutation_details=mutation_details,
+                scout_score=result.scout_score,
+            )
+        )
+
         if result.status == "crashed":
             crashes += 1
             stagnation += 1
-            _log_progress(experiment_index, strategy, result, best_score, stagnation)
+            if not cfg.enable_mutations:
+                _log_progress(experiment_index, strategy, result, best_score, stagnation)
             experiment_index += 1
             continue
 
@@ -277,17 +343,36 @@ def run_campaign(
                         "experiment_id": result.experiment_id,
                         "scout_score": score,
                         "experiment_index": experiment_index,
+                        "mutation_type": mutation_type,
                     }
                 )
                 recent_good.append(candidate_dict)
                 if len(recent_good) > 10:
                     recent_good.pop(0)
-                log.info("#%d NEW BEST: score=%.4f id=%s", experiment_index, score, result.experiment_id)
+                log.info(
+                    "#%d NEW BEST: score=%.4f id=%s mutation=%s",
+                    experiment_index,
+                    score,
+                    result.experiment_id,
+                    mutation_type,
+                )
             else:
                 stagnation += 1
         else:
             stagnation += 1
-            _log_progress(experiment_index, strategy, result, best_score, stagnation)
+            if not cfg.enable_mutations:
+                _log_progress(experiment_index, strategy, result, best_score, stagnation)
+            elif experiment_index % 10 == 0:
+                score_str = f"{score:.4f}" if result.scout_score is not None else "N/A"
+                best_str = f"{best_score:.4f}" if best_score > float("-inf") else "N/A"
+                log.info(
+                    "#%d %s score=%s best=%s stagnation=%d",
+                    experiment_index,
+                    mutation_type,
+                    score_str,
+                    best_str,
+                    stagnation,
+                )
 
         if (
             campaign_dir is not None
@@ -309,14 +394,19 @@ def run_campaign(
 
         experiment_index += 1
 
+    # P4: Save ancestry JSON alongside campaign results
+    if campaign_dir is not None and len(ancestry) > 0:
+        ancestry.save(Path(campaign_dir) / "ancestry.json")
+
     total_elapsed = round(time.monotonic() - t0, 2)
     final_best = best_score if best_score > float("-inf") else 0.0
     log.info(
-        "Finished: %d experiments, best=%.4f, reason=%s, elapsed=%.1fs",
+        "Finished: %d experiments, best=%.4f, reason=%s, elapsed=%.1fs, mutations=%s",
         experiment_index,
         final_best,
         end_reason,
         total_elapsed,
+        json.dumps(mutation_type_counts),
     )
 
     return CampaignResult(
