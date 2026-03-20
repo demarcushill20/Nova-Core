@@ -38,6 +38,7 @@ from novatrade.evaluation.gates import (
     GateResults,
     evaluate_stage_a,
     evaluate_stage_b,
+    evaluate_stage_c_gates,
     evaluate_stage_c_stub,
 )
 from novatrade.evaluation.intrabar_policy import (
@@ -109,6 +110,7 @@ __all__ = [
     "create_manifest",
     "evaluate_stage_a",
     "evaluate_stage_b",
+    "evaluate_stage_c_gates",
     "evaluate_stage_c_stub",
     "load_manifest",
     "save_manifest",

@@ -93,6 +93,7 @@ class PipelineResult:
     data_quality_issues: int = 0
     stages: list[PipelineStage] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    robustness_results: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +570,106 @@ def _stage_execute_campaign(
     return stage, result
 
 
+def _stage_robustness_validation(
+    top_survivors: list[dict[str, Any]],
+    h1_candles: list,
+    h4_candles: list,
+    max_survivors: int = 3,
+) -> tuple[PipelineStage, dict[str, Any]]:
+    """Run Stage C robustness gates on the top survivors from a campaign.
+
+    Applies Monte Carlo, walk-forward, cost stress, and parameter stability
+    gates to the best N survivors.  Only runs the Monte-Carlo gate (which
+    needs only trade data) when config is not available.
+
+    Args:
+        top_survivors: List of survivor dicts from campaign execution.
+        h1_candles: H1 candle series.
+        h4_candles: H4 candle series.
+        max_survivors: Maximum number of survivors to validate.
+
+    Returns:
+        (PipelineStage, results_dict) where results_dict maps experiment_id
+        to per-gate outcomes.
+    """
+    t0 = time.monotonic()
+    stage = PipelineStage(name="robustness_validation")
+    results: dict[str, Any] = {}
+
+    if not top_survivors:
+        stage.status = "skipped"
+        stage.details["reason"] = "no_survivors_to_validate"
+        stage.duration_ms = int((time.monotonic() - t0) * 1000)
+        return stage, results
+
+    try:
+        from novatrade.evaluation.stage_c import StageCConfig, monte_carlo_gate
+    except ImportError as exc:
+        stage.status = "error"
+        stage.details["error"] = f"Stage C module not available: {exc}"
+        stage.duration_ms = int((time.monotonic() - t0) * 1000)
+        return stage, results
+
+    validated = 0
+    candidates = top_survivors[:max_survivors]
+
+    for survivor in candidates:
+        exp_id = survivor.get("experiment_id", "unknown")
+        exp_results: dict[str, Any] = {"experiment_id": exp_id, "gates": []}
+
+        # Monte Carlo gate uses trade data — we need to reconstruct trades
+        # from the experiment.  For now, we can only run MC if trades are
+        # embedded in the survivor dict (future: load from ExperimentDB).
+        trades = survivor.get("trades", [])
+        if trades:
+            mc_result = monte_carlo_gate(trades, n_simulations=200)
+            exp_results["gates"].append(
+                {
+                    "gate": mc_result.gate,
+                    "passed": mc_result.passed,
+                    "reason": mc_result.reason,
+                }
+            )
+
+        # Full Stage C requires a StrategyConfig — check if available
+        config_obj = survivor.get("config")
+        if config_obj is not None and h1_candles and h4_candles:
+            from novatrade.evaluation.stage_c import evaluate_stage_c
+
+            sc_cfg = StageCConfig(
+                mc_simulations=200,  # lighter for pipeline
+                run_monte_carlo=not bool(trades),  # skip if already ran above
+            )
+            gate_results = evaluate_stage_c(
+                trades=trades,
+                config=config_obj,
+                h1_candles=h1_candles,
+                h4_candles=h4_candles,
+                stage_c_config=sc_cfg,
+            )
+            for gr in gate_results:
+                exp_results["gates"].append(
+                    {
+                        "gate": gr.gate,
+                        "passed": gr.passed,
+                        "reason": gr.reason,
+                    }
+                )
+
+        all_passed = all(g["passed"] for g in exp_results["gates"]) if exp_results["gates"] else False
+        exp_results["overall_passed"] = all_passed
+        results[exp_id] = exp_results
+
+        if all_passed:
+            validated += 1
+
+    stage.details["candidates_tested"] = len(candidates)
+    stage.details["candidates_passed"] = validated
+    stage.status = "ok"
+    stage.duration_ms = int((time.monotonic() - t0) * 1000)
+    return stage, results
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -682,6 +783,16 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         errors.append(f"Unknown pipeline mode: {config.mode}")
 
     stages.append(stage_exec)
+
+    # --- Stage 6: Robustness validation (Stage C gates) --------------------
+    if result.top_survivors and config.mode in (PipelineMode.SWEEP, PipelineMode.CAMPAIGN):
+        stage_robust, robustness_results = _stage_robustness_validation(
+            result.top_survivors,
+            h1_candles,
+            h4_candles,
+        )
+        stages.append(stage_robust)
+        result.robustness_results = robustness_results
 
     # --- Assemble final result ---------------------------------------------
     result.doctrine_name = doctrine_name

@@ -87,7 +87,13 @@ class DashboardRow:
 
     # Stage C outcome (populated after promotion pipeline)
     stage_c_passed: bool | None = None
+    stage_c_gates: list[Any] = field(default_factory=list)  # list[GateResult]
     promotion_score: float | None = None
+
+    # Durability outcome (populated after durability validation)
+    durability_grade: str | None = None  # A/B/C/D/F
+    durability_passed: bool | None = None
+
     ladder_stage: LadderStage = LadderStage.REJECTED
 
     def to_dict(self) -> dict[str, Any]:
@@ -111,7 +117,14 @@ class DashboardRow:
             "ranking_score": round(self.ranking_score, 4),
             "regime_labels": self.regime_labels,
             "stage_c_passed": self.stage_c_passed,
+            "stage_c_gates": [
+                {"gate": g.gate, "passed": g.passed, "reason": g.reason}
+                for g in self.stage_c_gates
+                if hasattr(g, "gate")
+            ],
             "promotion_score": (round(self.promotion_score, 4) if self.promotion_score is not None else None),
+            "durability_grade": self.durability_grade,
+            "durability_passed": self.durability_passed,
         }
 
 
@@ -309,6 +322,33 @@ class EvaluationDashboard:
             r for r in self.rows if r.ladder_stage in (LadderStage.REJECTED, LadderStage.GATED_A, LadderStage.GATED_B)
         ]
 
+    def validate_stage_c(
+        self,
+        experiment_id: str,
+        gate_results: list,
+    ) -> bool:
+        """Apply Stage C gate results to a strategy on the dashboard.
+
+        If all gates pass, the strategy moves to VALIDATED stage.  Gate
+        results are stored for diagnostic review regardless of outcome.
+
+        Args:
+            experiment_id: Experiment to update.
+            gate_results: List of GateResult objects from Stage C evaluation.
+
+        Returns:
+            True if the experiment was found and updated, False otherwise.
+        """
+        for row in self.rows:
+            if row.experiment_id == experiment_id:
+                row.stage_c_gates = gate_results
+                all_passed = bool(gate_results) and all(getattr(g, "passed", False) for g in gate_results)
+                row.stage_c_passed = all_passed
+                if all_passed and row.ladder_stage == LadderStage.RANKED:
+                    row.ladder_stage = LadderStage.VALIDATED
+                return True
+        return False
+
     def promote(self, experiment_id: str, promotion_score: float) -> bool:
         """Mark a strategy as promoted (passed Stage C).
 
@@ -319,6 +359,29 @@ class EvaluationDashboard:
                 row.stage_c_passed = True
                 row.promotion_score = promotion_score
                 row.ladder_stage = LadderStage.PROMOTED
+                return True
+        return False
+
+    def set_durability(
+        self,
+        experiment_id: str,
+        durability_grade: str,
+        durability_passed: bool,
+    ) -> bool:
+        """Record durability validation results for a strategy.
+
+        Args:
+            experiment_id: Experiment to update.
+            durability_grade: Composite grade (A/B/C/D/F).
+            durability_passed: Whether all durability gates passed.
+
+        Returns:
+            True if the experiment was found and updated, False otherwise.
+        """
+        for row in self.rows:
+            if row.experiment_id == experiment_id:
+                row.durability_grade = durability_grade
+                row.durability_passed = durability_passed
                 return True
         return False
 
