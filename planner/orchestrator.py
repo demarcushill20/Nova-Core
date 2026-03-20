@@ -396,6 +396,7 @@ class Orchestrator:
         validation = contracts_validate(output_text)
         contract_valid = validation.get("valid", False)
         validation_errors = validation.get("errors", [])
+        contract_fields = validation.get("fields", {})
 
         if error:
             validation_errors.append(error)
@@ -408,6 +409,7 @@ class Orchestrator:
             status=status,
             contract_valid=contract_valid,
             validation_errors=validation_errors,
+            contract_fields=contract_fields,
         )
 
 
@@ -457,4 +459,5 @@ def _result_to_dict(r: StepResult) -> dict:
         "contract_valid": r.contract_valid,
         "validation_errors": r.validation_errors,
         "retry_count": r.retry_count,
+        "contract_fields": r.contract_fields,
     }

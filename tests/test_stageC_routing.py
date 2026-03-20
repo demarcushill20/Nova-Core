@@ -426,7 +426,9 @@ class TestStageCPlanValidation:
         assert valid is False
         assert "blocked_skill:shell-ops" in reason
 
-    def test_plan_with_git_ops_rejected(self):
+    def test_plan_with_git_ops_allowed_but_needs_verifier(self):
+        """git-ops is allowed in Stage C for post-implementation commits,
+        but a plan with only git-ops and no verifier is still rejected."""
         from planner.schemas import ExecutionPlan, PlanStep
 
         plan = ExecutionPlan(
@@ -445,7 +447,40 @@ class TestStageCPlanValidation:
         )
         valid, reason = validate_stageC_plan(plan)
         assert valid is False
-        assert "blocked_skill:git-ops" in reason
+        assert "missing_mandatory_verifier_step" in reason
+
+    def test_plan_with_git_ops_and_verifier_valid(self):
+        """git-ops + verifier is valid in Stage C."""
+        from planner.schemas import ExecutionPlan, PlanStep
+
+        plan = ExecutionPlan(
+            plan_id="test_plan",
+            task_id="test",
+            strategy="stageC_coding",
+            steps=[
+                PlanStep(
+                    step_id="test_implement",
+                    skill_name="file-ops",
+                    goal="Implement changes",
+                    inputs={},
+                ),
+                PlanStep(
+                    step_id="test_verify",
+                    skill_name="self-verification",
+                    goal="Verify correctness",
+                    inputs={},
+                ),
+                PlanStep(
+                    step_id="test_commit",
+                    skill_name="git-ops",
+                    goal="Commit changes",
+                    inputs={},
+                ),
+            ],
+            success_criteria=["done"],
+        )
+        valid, reason = validate_stageC_plan(plan)
+        assert valid is True
 
     def test_plan_with_task_execution_rejected(self):
         from planner.schemas import ExecutionPlan, PlanStep
@@ -507,10 +542,12 @@ class TestVerifierEnforcement:
         skill_names = [s.skill_name for s in plan.steps]
         assert "self-verification" in skill_names
 
-    def test_coding_steps_have_three_steps(self):
+    def test_coding_steps_have_four_steps_with_commit(self):
         steps = _build_stageC_coding_steps("test", "code_impl", "Refactor module")
-        assert len(steps) == 3
-        assert steps[-1].skill_name == "self-verification"
+        assert len(steps) == 4
+        assert steps[-2].skill_name == "self-verification"
+        assert steps[-1].skill_name == "git-ops"
+        assert "commit" in steps[-1].goal.lower()
 
     def test_code_review_steps_have_three_steps(self):
         steps = _build_stageC_coding_steps("test", "code_review", "Review code")
@@ -621,8 +658,10 @@ class TestStageCConstants:
     def test_blocked_skills_include_shell(self):
         assert "shell-ops" in _STAGE_C_BLOCKED_SKILLS
 
-    def test_blocked_skills_include_git(self):
-        assert "git-ops" in _STAGE_C_BLOCKED_SKILLS
+    def test_git_ops_allowed_in_stage_c(self):
+        """git-ops is allowed in Stage C for post-implementation commits."""
+        assert "git-ops" in _STAGE_C_ALLOWED_SKILLS
+        assert "git-ops" not in _STAGE_C_BLOCKED_SKILLS
 
     def test_blocked_skills_include_task_execution(self):
         assert "task-execution" in _STAGE_C_BLOCKED_SKILLS

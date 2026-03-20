@@ -33,6 +33,7 @@ def contracts_validate(output: str) -> dict:
             "fields": {},
             "missing_fields": list(REQUIRED_FIELDS),
             "errors": ["output must be a string"],
+            "warnings": [],
         }
 
     # 1. Find the FIRST ## CONTRACT header
@@ -45,6 +46,7 @@ def contracts_validate(output: str) -> dict:
             "fields": {},
             "missing_fields": list(REQUIRED_FIELDS),
             "errors": ["no ## CONTRACT section found"],
+            "warnings": [],
         }
 
     # 2. Parse key: value pairs from the contract block
@@ -63,7 +65,45 @@ def contracts_validate(output: str) -> dict:
         "fields": fields,
         "missing_fields": missing,
         "errors": errors,
+        "warnings": [],
     }
+
+
+# Task classes where files_changed should not be empty/none
+_CODE_TASK_CLASSES = frozenset({"code_impl", "code_review"})
+
+
+def evaluate_contract_quality(
+    validation: dict,
+    task_class: str = "",
+) -> dict:
+    """Evaluate contract quality with task-class-aware checks.
+
+    Takes a validation result from contracts_validate() and returns it
+    augmented with warnings and an adjusted confidence assessment.
+
+    Args:
+        validation: result dict from contracts_validate()
+        task_class: task classification (e.g. 'code_impl', 'code_review')
+
+    Returns:
+        The same validation dict with added 'warnings' and
+        'confidence_penalty' keys.
+    """
+    warnings = list(validation.get("warnings", []))
+    confidence_penalty = 0.0
+
+    fields = validation.get("fields", {})
+    fc = fields.get("files_changed", "").strip().lower()
+
+    # Flag code tasks that report no files changed
+    if task_class in _CODE_TASK_CLASSES and (not fc or fc == "none"):
+        warnings.append(f"files_changed is '{fc or 'empty'}' on a {task_class} task — expected file modifications")
+        confidence_penalty += 0.2
+
+    validation["warnings"] = warnings
+    validation["confidence_penalty"] = confidence_penalty
+    return validation
 
 
 # --- Internal helpers --------------------------------------------------------

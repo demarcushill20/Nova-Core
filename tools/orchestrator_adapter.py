@@ -80,6 +80,7 @@ _STAGE_B_BLOCKED_SKILLS = frozenset(
 
 # Stage C: skills allowed for low-risk coding path
 # Same as Stage B plus file-ops is used for bounded code edits
+# git-ops allowed for post-implementation commits
 _STAGE_C_ALLOWED_SKILLS = frozenset(
     {
         "web-research",
@@ -87,6 +88,7 @@ _STAGE_C_ALLOWED_SKILLS = frozenset(
         "self-verification",
         "research-to-action",
         "http-fetch",
+        "git-ops",
     }
 )
 
@@ -94,7 +96,6 @@ _STAGE_C_ALLOWED_SKILLS = frozenset(
 _STAGE_C_BLOCKED_SKILLS = frozenset(
     {
         "shell-ops",
-        "git-ops",
         "task-execution",
     }
 )
@@ -319,6 +320,12 @@ def _build_stageC_coding_steps(stem: str, task_class: str, task_text: str) -> li
             skill_name="self-verification",
             goal="Verify implementation correctness (MANDATORY — verifier approval required)",
             inputs={},
+        ),
+        PlanStep(
+            step_id=f"{stem}_commit",
+            skill_name="git-ops",
+            goal="Stage and commit all changed files from this implementation",
+            inputs={"task_text": task_text[:500]},
         ),
     ]
 
@@ -1043,8 +1050,16 @@ def _build_orchestrator_report(
         report += f"- **Score:** {evaluation.get('aggregate_score', 'N/A')}\n"
         report += f"- **Summary:** {evaluation.get('summary', 'N/A')}\n"
 
-    # Files changed: collect from step outputs
-    files_changed = "none"
+    # Files changed: aggregate from step contract outputs
+    all_files = []
+    for step_result in steps:
+        fc = step_result.get("contract_fields", {}).get("files_changed", "")
+        if fc and fc.strip().lower() != "none":
+            for f in fc.split(","):
+                f = f.strip()
+                if f and f not in all_files:
+                    all_files.append(f)
+    files_changed = ", ".join(all_files) if all_files else "none"
 
     report += "\n## CONTRACT\n"
     report += f"summary: Orchestrated execution of {stem} via Phase 7 pipeline ({plan.strategy})\n"

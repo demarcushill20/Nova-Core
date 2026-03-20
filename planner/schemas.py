@@ -68,6 +68,7 @@ class StepResult:
     contract_valid: bool | None = None
     validation_errors: list[str] = field(default_factory=list)
     retry_count: int = 0
+    contract_fields: dict = field(default_factory=dict)
 
 
 @dataclass

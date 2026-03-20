@@ -278,7 +278,7 @@ def test_runner_dispatch_missing_contract():
 
 def test_json_output_shape_valid():
     result = contracts_validate(VALID_CONTRACT)
-    required_keys = {"ok", "valid", "found_contract", "fields", "missing_fields", "errors"}
+    required_keys = {"ok", "valid", "found_contract", "fields", "missing_fields", "errors", "warnings"}
     assert required_keys == set(result.keys()), f"Unexpected keys: {set(result.keys()) - required_keys}"
     assert isinstance(result["ok"], bool)
     assert isinstance(result["valid"], bool)
@@ -286,11 +286,12 @@ def test_json_output_shape_valid():
     assert isinstance(result["fields"], dict)
     assert isinstance(result["missing_fields"], list)
     assert isinstance(result["errors"], list)
+    assert isinstance(result["warnings"], list)
 
 
 def test_json_output_shape_invalid():
     result = contracts_validate(MISSING_CONTRACT)
-    required_keys = {"ok", "valid", "found_contract", "fields", "missing_fields", "errors"}
+    required_keys = {"ok", "valid", "found_contract", "fields", "missing_fields", "errors", "warnings"}
     assert required_keys == set(result.keys())
     assert isinstance(result["ok"], bool)
     assert isinstance(result["valid"], bool)
