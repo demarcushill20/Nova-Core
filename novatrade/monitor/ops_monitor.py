@@ -31,6 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from novatrade.adapter.base import MT5Adapter
 from novatrade.config import NovaTradeCfg
@@ -269,8 +270,12 @@ class OpsMonitor:
         self._recorder = recorder
         self._clock = clock or _default_utc_now
 
+        # FTMO daily reset uses Prague timezone (CET/CEST), not UTC.
+        # This prevents drawdown miscalculation at DST transitions.
+        self._reset_tz = ZoneInfo(cfg.risk.daily_reset_tz)
+
         # Daily tracking
-        self._last_reset_date: str = ""  # ISO date of last daily reset
+        self._last_reset_date: str = ""  # ISO date of last daily reset (in reset_tz)
         self._cycle_count: int = 0
         self._daily_summary = DailySummary(date=self._today_iso())
         self._alerts: list[OpsAlert] = []
@@ -723,7 +728,9 @@ class OpsMonitor:
     async def _check_daily_reset(self, result: CycleResult) -> None:
         """Check if daily drawdown reset is due and execute if so.
 
-        Reset happens once per calendar day at midnight UTC.
+        Reset happens once per calendar day at midnight in the configured
+        FTMO timezone (Europe/Prague by default).  This correctly handles
+        CET↔CEST DST transitions.
         Does NOT clear halt state (per kill_switch_policy.md §7).
         """
         today = self._today_iso()
@@ -766,7 +773,12 @@ class OpsMonitor:
             detail={"date": today, "equity": equity},
         )
 
-        log.info("Daily reset executed: date=%s equity=%.2f", today, equity)
+        log.info(
+            "Daily reset executed: date=%s tz=%s equity=%.2f",
+            today,
+            self._reset_tz.key,
+            equity,
+        )
 
     # ------------------------------------------------------------------
     # Risk alerts
@@ -905,8 +917,15 @@ class OpsMonitor:
     # ------------------------------------------------------------------
 
     def _today_iso(self) -> str:
-        """Return today's date as ISO string (UTC)."""
-        return self._clock().strftime("%Y-%m-%d")
+        """Return today's date as ISO string in the FTMO reset timezone.
+
+        FTMO measures daily drawdown from midnight Prague time (CET/CEST).
+        Using UTC would cause the reset to fire at the wrong hour, and
+        the CET→CEST DST transition (last Sunday of March at 02:00)
+        would shift the boundary by one hour if we hardcoded UTC+1.
+        """
+        utc_now = self._clock()
+        return utc_now.astimezone(self._reset_tz).strftime("%Y-%m-%d")
 
 
 # ---------------------------------------------------------------------------

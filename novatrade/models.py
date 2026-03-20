@@ -88,6 +88,7 @@ class OrderRequest:
     idempotency_key: str = ""  # duplicate-prevention token
     strategy_id: str = ""
     strategy_version: str = ""
+    max_slippage_pips: float | None = None  # per-order slippage override (None = use config default)
 
     def __post_init__(self) -> None:
         if self.volume <= 0:

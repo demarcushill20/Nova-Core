@@ -21,7 +21,7 @@ import statistics
 from dataclasses import dataclass, field
 from enum import Enum
 
-VERSION: str = "1.0.0"
+VERSION: str = "1.2.0"
 
 
 def metrics_version_hash() -> str:
@@ -217,6 +217,10 @@ class BacktestMetrics:
     # --- Concentration ---
     top_3_trades_pct_of_profit: float = 0.0
 
+    # --- Risk-adjusted ratios (per-trade-return based) ---
+    sharpe_ratio: float = 0.0
+    sortino_ratio: float = 0.0
+
     # --- Exit breakdown ---
     stop_loss_exits: int = 0
     trailing_stop_exits: int = 0
@@ -271,6 +275,8 @@ class BacktestMetrics:
             "avg_hold_bars": round(self.avg_hold_bars, 2),
             "exposure_pct": round(self.exposure_pct, 4),
             "top_3_trades_pct_of_profit": round(self.top_3_trades_pct_of_profit, 4),
+            "sharpe_ratio": round(self.sharpe_ratio, 4),
+            "sortino_ratio": round(self.sortino_ratio, 4),
             "stop_loss_exits": self.stop_loss_exits,
             "trailing_stop_exits": self.trailing_stop_exits,
             "time_stop_exits": self.time_stop_exits,
@@ -378,6 +384,16 @@ def compute_metrics(
     m.max_drawdown_usd = dd_usd
     m.max_drawdown_duration_bars = dd_bars
 
+    # --- Frequency / exposure ---
+    trading_days = max(total_bars / 24, 1)
+
+    # --- Risk-adjusted ratios (per-trade-return based, annualized) ---
+    m.sharpe_ratio, m.sortino_ratio = _compute_sharpe_sortino(
+        all_pnl_usd,
+        initial_equity,
+        trading_days,
+    )
+
     # --- Extremes ---
     m.largest_win_pips = max((t.pnl_pips for t in winners), default=0.0)
     m.largest_win_usd = max((t.pnl_usd for t in winners), default=0.0)
@@ -387,9 +403,6 @@ def compute_metrics(
     # --- Streaks ---
     m.max_consecutive_wins = _max_streak(trades, winning=True)
     m.max_consecutive_losses = _max_streak(trades, winning=False)
-
-    # --- Frequency / exposure ---
-    trading_days = max(total_bars / 24, 1)
     m.trade_frequency_per_day = m.total_completed_trades / trading_days
     m.avg_hold_bars = statistics.mean([t.hold_bars for t in trades])
 
@@ -460,6 +473,68 @@ def _max_streak(trades: list[CompletedTrade], winning: bool) -> int:
         else:
             current = 0
     return max_streak
+
+
+def _compute_sharpe_sortino(
+    trade_pnl_usd: list[float],
+    initial_equity: float,
+    trading_days: float,
+    risk_free_annual: float = 0.0,
+) -> tuple[float, float]:
+    """Compute annualized Sharpe and Sortino ratios from per-trade returns.
+
+    Per-trade returns are computed as pnl_usd / initial_equity.  Annualization
+    uses ``sqrt(trades_per_year)`` scaling where trades_per_year is estimated
+    from trade count and trading days.
+
+    These are per-trade-return-based approximations.  True daily-return-based
+    ratios require a daily equity series which is not available at this level.
+
+    Args:
+        trade_pnl_usd: List of per-trade P&L in USD.
+        initial_equity: Starting account equity (for return computation).
+        trading_days: Number of trading days in the backtest window.
+        risk_free_annual: Annual risk-free rate (default 0.0).
+
+    Returns:
+        (sharpe_ratio, sortino_ratio) tuple, both annualized.
+    """
+    if len(trade_pnl_usd) < 2 or initial_equity <= 0:
+        return 0.0, 0.0
+
+    # Per-trade fractional returns
+    returns = [pnl / initial_equity for pnl in trade_pnl_usd]
+
+    mean_return = statistics.mean(returns)
+    std_return = statistics.stdev(returns)
+
+    # Annualization factor: sqrt(trades per year)
+    # trades_per_year = (n_trades / trading_days) * 252
+    n_trades = len(returns)
+    trades_per_year = (n_trades / max(trading_days, 1.0)) * 252.0
+    annualization = trades_per_year**0.5
+
+    # Per-trade risk-free rate
+    rf_per_trade = risk_free_annual / max(trades_per_year, 1.0)
+
+    # Sharpe ratio: (mean_return - rf) / std * sqrt(trades_per_year)
+    if std_return > 0:
+        sharpe = ((mean_return - rf_per_trade) / std_return) * annualization
+    else:
+        sharpe = 0.0
+
+    # Sortino ratio: (mean_return - rf) / downside_deviation * sqrt(trades_per_year)
+    # Downside deviation uses ALL returns: sqrt(1/N * sum(min(r - target, 0)^2))
+    # Target is the per-trade risk-free rate.
+    downside_squares = [min(r - rf_per_trade, 0.0) ** 2 for r in returns]
+    downside_dev = (sum(downside_squares) / len(returns)) ** 0.5
+
+    if downside_dev > 0:
+        sortino = ((mean_return - rf_per_trade) / downside_dev) * annualization
+    else:
+        sortino = 0.0
+
+    return sharpe, sortino
 
 
 def _top_n_concentration(trades: list[CompletedTrade], n: int = 3) -> float:

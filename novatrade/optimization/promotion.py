@@ -13,6 +13,7 @@ Only strategies that pass ALL four stages earn a promotion score.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from novatrade.cli.config_schema import StrategyConfig
@@ -28,6 +29,8 @@ from novatrade.optimization.walkforward import (
     WalkForwardResult,
     run_walk_forward,
 )
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Result dataclass
@@ -87,11 +90,11 @@ def run_promotion_pipeline(
     pt_cfg = perturb_config or PerturbationConfig()
     st_cfg = stress_config or StressConfig()
 
-    print(f"[promote] Starting promotion pipeline for {experiment_id}")
-    print(f"[promote] Baseline scout score: {baseline_score:.4f}")
+    log.info("Starting promotion pipeline for %s", experiment_id)
+    log.info("Baseline scout score: %.4f", baseline_score)
 
     # --- Stage 1: Walk-forward validation ---
-    print("[promote] Stage 1/4: Walk-forward validation...")
+    log.info("Stage 1/4: Walk-forward validation...")
     wf_result = _run_walkforward_stage(config, h1_candles, h4_candles, wf_cfg)
     result.walkforward_passed = wf_result.overall_passed
     result.details["walkforward"] = {
@@ -101,21 +104,22 @@ def run_promotion_pipeline(
         "all_windows_passed": wf_result.all_windows_passed,
         "overall_passed": wf_result.overall_passed,
     }
-    print(
-        f"[promote]   Walk-forward: {'PASS' if result.walkforward_passed else 'FAIL'} "
-        f"(median OOS={wf_result.median_oos_score:.4f}, "
-        f"ratio={wf_result.median_oos_is_ratio:.4f})"
+    log.info(
+        "Walk-forward: %s (median OOS=%.4f, ratio=%.4f)",
+        "PASS" if result.walkforward_passed else "FAIL",
+        wf_result.median_oos_score,
+        wf_result.median_oos_is_ratio,
     )
 
     # --- Stage 2: Holdout evaluation ---
-    print("[promote] Stage 2/4: Holdout evaluation...")
+    log.info("Stage 2/4: Holdout evaluation...")
     holdout_passed, holdout_details = _evaluate_holdout(wf_result)
     result.holdout_passed = holdout_passed
     result.details["holdout"] = holdout_details
-    print(f"[promote]   Holdout: {'PASS' if holdout_passed else 'FAIL'}")
+    log.info("Holdout: %s", "PASS" if holdout_passed else "FAIL")
 
     # --- Stage 3: Perturbation stability ---
-    print("[promote] Stage 3/4: Perturbation stability test...")
+    log.info("Stage 3/4: Perturbation stability test...")
     perturb_result = _run_perturbation_stage(
         config,
         h1_candles,
@@ -130,14 +134,15 @@ def run_promotion_pipeline(
         "cliff_detected": perturb_result.cliff_detected,
         "tests_run": len(perturb_result.results),
     }
-    print(
-        f"[promote]   Perturbation: {'PASS' if result.perturbation_passed else 'FAIL'} "
-        f"(worst drop={perturb_result.worst_drop:.1%}, "
-        f"cliff={'YES' if perturb_result.cliff_detected else 'no'})"
+    log.info(
+        "Perturbation: %s (worst drop=%.1f%%, cliff=%s)",
+        "PASS" if result.perturbation_passed else "FAIL",
+        perturb_result.worst_drop * 100,
+        "YES" if perturb_result.cliff_detected else "no",
     )
 
     # --- Stage 4: Cost stress test ---
-    print("[promote] Stage 4/4: Cost stress test...")
+    log.info("Stage 4/4: Cost stress test...")
     stress_result = _run_stress_stage(
         config,
         h1_candles,
@@ -153,10 +158,11 @@ def run_promotion_pipeline(
         "still_profitable": stress_result.still_profitable,
         "degradation_pct": stress_result.score_degradation_pct,
     }
-    print(
-        f"[promote]   Stress: {'PASS' if result.stress_passed else 'FAIL'} "
-        f"(degradation={stress_result.score_degradation_pct:.1%}, "
-        f"profitable={stress_result.still_profitable})"
+    log.info(
+        "Stress: %s (degradation=%.1f%%, profitable=%s)",
+        "PASS" if result.stress_passed else "FAIL",
+        stress_result.score_degradation_pct * 100,
+        stress_result.still_profitable,
     )
 
     # --- Compute promotion score if all pass ---
@@ -167,7 +173,7 @@ def run_promotion_pipeline(
     if result.overall_passed:
         oos_scores = [w.oos_scout_score for w in wf_result.windows]
         holdout_score = wf_result.holdout_score or 0.0
-        is_median = wf_result.median_oos_score  # proxy: use OOS median as IS median
+        is_median = wf_result.median_is_score  # true IS median from walk-forward windows
         complexity = len(StrategyConfig.OPTIMIZABLE_PARAMS)
 
         result.promotion_score = compute_promotion_score(
@@ -182,7 +188,7 @@ def run_promotion_pipeline(
             "is_median": is_median,
             "complexity": complexity,
         }
-        print(f"[promote] ALL STAGES PASSED — promotion score: {result.promotion_score:.4f}")
+        log.info("ALL STAGES PASSED — promotion score: %.4f", result.promotion_score)
     else:
         stages_failed = []
         if not result.walkforward_passed:
@@ -193,7 +199,7 @@ def run_promotion_pipeline(
             stages_failed.append("perturbation")
         if not result.stress_passed:
             stages_failed.append("stress")
-        print(f"[promote] PROMOTION FAILED — stages: {', '.join(stages_failed)}")
+        log.warning("PROMOTION FAILED — stages: %s", ", ".join(stages_failed))
 
     return result
 
@@ -213,7 +219,7 @@ def _run_walkforward_stage(
     try:
         return run_walk_forward(config, h1_candles, h4_candles, wf_config)
     except Exception as exc:
-        print(f"[promote] Walk-forward crashed: {exc}")
+        log.error("Walk-forward crashed: %s", exc)
         return WalkForwardResult()
 
 
@@ -247,7 +253,7 @@ def _run_perturbation_stage(
             perturb_config,
         )
     except Exception as exc:
-        print(f"[promote] Perturbation test crashed: {exc}")
+        log.error("Perturbation test crashed: %s", exc)
         return PerturbationResult(all_passed=False)
 
 
@@ -268,7 +274,7 @@ def _run_stress_stage(
             stress_config,
         )
     except Exception as exc:
-        print(f"[promote] Stress test crashed: {exc}")
+        log.error("Stress test crashed: %s", exc)
         return StressResult(
             normal_score=baseline_score,
             stress_score=0.0,

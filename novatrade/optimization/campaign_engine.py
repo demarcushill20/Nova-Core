@@ -7,6 +7,7 @@ Terminates on budget, stagnation, crashes, wall clock, or manual stop.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -29,6 +30,8 @@ from novatrade.optimization.strategies import (
 from novatrade.optimization.walkforward import WalkForwardConfig, run_walk_forward
 from novatrade.storage.experiment_db import ExperimentDB
 
+log = logging.getLogger("novatrade.optimization.campaign_engine")
+
 _END_REASONS = frozenset(
     {
         "budget_exhausted",
@@ -47,7 +50,7 @@ class CampaignConfig:
     campaign_id: str = ""
     max_experiments: int = 200
     max_wall_clock_seconds: float = 21600.0
-    stagnation_limit: int = 20
+    stagnation_limit: int = 10  # Aligned with CampaignBudget.max_stagnant_experiments
     max_crashes: int = 5
     checkpoint_interval: int = 25
     strategy_budget: StrategyBudget | None = None
@@ -118,13 +121,17 @@ def save_checkpoint(checkpoint: CampaignCheckpoint, campaign_dir: Path) -> Path:
     }
     encoded = json.dumps(data, indent=2)
     fd, tmp_path = tempfile.mkstemp(dir=str(cp_dir), suffix=".tmp")
+    closed = False
     try:
         os.write(fd, encoded.encode())
         os.close(fd)
+        closed = True
         os.replace(tmp_path, str(out_path))
     except BaseException:
-        os.close(fd)
-        os.unlink(tmp_path)
+        if not closed:
+            os.close(fd)
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
         raise
     return out_path
 
@@ -175,13 +182,16 @@ def run_campaign(
         holdout_bars=1095,
     )
 
-    print(
-        f"[campaign] Starting {cfg.campaign_id}: max={cfg.max_experiments}, "
-        f"stagnation={cfg.stagnation_limit}, wall={cfg.max_wall_clock_seconds:.0f}s"
+    log.info(
+        "Starting %s: max=%d, stagnation=%d, wall=%.0fs",
+        cfg.campaign_id,
+        cfg.max_experiments,
+        cfg.stagnation_limit,
+        cfg.max_wall_clock_seconds,
     )
 
     if not h1_candles or not h4_candles:
-        print("[campaign] Empty candle data — aborting")
+        log.warning("Empty candle data — aborting")
         return CampaignResult(
             campaign_id=cfg.campaign_id,
             total_experiments=0,
@@ -218,7 +228,7 @@ def run_campaign(
         try:
             candidate_config = base_config.model_copy(update=candidate_dict)
         except Exception as exc:
-            print(f"[campaign] #{experiment_index} config build failed: {exc}")
+            log.warning("#%d config build failed: %s", experiment_index, exc)
             crashes += 1
             experiment_index += 1
             continue
@@ -255,7 +265,7 @@ def run_campaign(
                 )
                 wf_passed = wf_result.overall_passed
                 if not wf_passed:
-                    print(f"[campaign] #{experiment_index} WF failed — score {score:.4f} rejected")
+                    log.info("#%d WF failed — score %.4f rejected", experiment_index, score)
 
             if wf_passed:
                 best_score = score
@@ -272,7 +282,7 @@ def run_campaign(
                 recent_good.append(candidate_dict)
                 if len(recent_good) > 10:
                     recent_good.pop(0)
-                print(f"[campaign] #{experiment_index} NEW BEST: score={score:.4f} id={result.experiment_id}")
+                log.info("#%d NEW BEST: score=%.4f id=%s", experiment_index, score, result.experiment_id)
             else:
                 stagnation += 1
         else:
@@ -301,9 +311,12 @@ def run_campaign(
 
     total_elapsed = round(time.monotonic() - t0, 2)
     final_best = best_score if best_score > float("-inf") else 0.0
-    print(
-        f"[campaign] Finished: {experiment_index} experiments, "
-        f"best={final_best:.4f}, reason={end_reason}, elapsed={total_elapsed:.1f}s"
+    log.info(
+        "Finished: %d experiments, best=%.4f, reason=%s, elapsed=%.1fs",
+        experiment_index,
+        final_best,
+        end_reason,
+        total_elapsed,
     )
 
     return CampaignResult(
@@ -349,12 +362,16 @@ def _log_progress(
     best_score: float,
     stagnation: int,
 ) -> None:
-    """Print concise progress line every 10 experiments."""
+    """Log concise progress line every 10 experiments."""
     if idx % 10 == 0:
         score_str = f"{result.scout_score:.4f}" if result.scout_score is not None else "N/A"
         best_str = f"{best_score:.4f}" if best_score > float("-inf") else "N/A"
-        print(
-            f"[campaign] #{idx} {strategy.value:>11s} "
-            f"status={result.status:<8s} score={score_str} "
-            f"best={best_str} stagnation={stagnation}"
+        log.info(
+            "#%d %11s status=%-8s score=%s best=%s stagnation=%d",
+            idx,
+            strategy.value,
+            result.status,
+            score_str,
+            best_str,
+            stagnation,
         )

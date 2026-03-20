@@ -171,22 +171,30 @@ def compute_dashboard_metrics(
     else:
         row.calmar_ratio = 5.0 if annual_return > 0 else 0.0
 
-    # Sharpe ratio (simplified — daily returns not available, use proxy)
-    # Proxy: annual_return / max_dd * sqrt-scaling factor
-    if row.max_drawdown_pct > 0 and annual_return > 0:
-        row.sharpe_ratio = annual_return / (row.max_drawdown_pct * 10.0)
-    else:
-        row.sharpe_ratio = 0.0
+    # Sharpe and Sortino ratios — prefer per-trade-return-based values from
+    # BacktestMetrics (computed in metrics.py).  Fall back to a simple proxy
+    # when the metrics object does not provide them (e.g. mock objects in tests).
+    metrics_sharpe = _safe_float(metrics, "sharpe_ratio", 0.0)
+    metrics_sortino = _safe_float(metrics, "sortino_ratio", 0.0)
 
-    # Sortino ratio (proxy — uses drawdown as downside deviation)
-    row.sortino_ratio = row.sharpe_ratio * 1.2 if row.sharpe_ratio > 0 else 0.0
-
-    # Recovery factor: net_pips / max_dd_pips (proxy)
-    max_dd_pips = _safe_float(metrics, "max_drawdown_usd", 0.0)
-    if max_dd_pips > 0:
-        row.recovery_factor = net_pips / max_dd_pips
+    if metrics_sharpe != 0.0 or metrics_sortino != 0.0:
+        row.sharpe_ratio = metrics_sharpe
+        row.sortino_ratio = metrics_sortino
     else:
-        row.recovery_factor = 5.0 if net_pips > 0 else 0.0
+        # Fallback proxy when per-trade data is unavailable
+        if row.max_drawdown_pct > 0 and annual_return > 0:
+            row.sharpe_ratio = annual_return / (row.max_drawdown_pct * 10.0)
+        else:
+            row.sharpe_ratio = 0.0
+        row.sortino_ratio = row.sharpe_ratio * 1.2 if row.sharpe_ratio > 0 else 0.0
+
+    # Recovery factor: net_result_usd / max_drawdown_usd (consistent USD units)
+    net_usd = _safe_float(metrics, "net_result_usd", 0.0)
+    max_dd_usd = _safe_float(metrics, "max_drawdown_usd", 0.0)
+    if max_dd_usd > 0:
+        row.recovery_factor = net_usd / max_dd_usd
+    else:
+        row.recovery_factor = 5.0 if net_usd > 0 else 0.0
 
     # Avg win/loss ratio
     avg_win = _safe_float(metrics, "average_winner_pips", 0.0)

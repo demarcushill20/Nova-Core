@@ -50,9 +50,9 @@ class GateConfig:
     min_active_months: int = 6
     max_month_pnl_concentration: float = 0.4
     max_session_pnl_concentration: float = 0.5
-    min_avg_spread_pips: float = 0.0
-    min_slippage_pips: float = 0.0
-    min_commission_per_lot: float = 0.0
+    min_avg_spread_pips: float = 1.0  # typical major pair spread floor
+    min_slippage_pips: float = 0.1
+    min_commission_per_lot: float = 3.0  # typical ECN commission per lot
 
 
 def evaluate_stage_a(metrics: Any, config: GateConfig | None = None) -> list[GateResult]:

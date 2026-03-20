@@ -108,9 +108,9 @@ def _make_metrics(**overrides) -> SimpleNamespace:
 def _make_environment(**overrides) -> dict:
     """Create a mock BacktestEnvironment-like dict with realistic defaults."""
     defaults = dict(
-        avg_spread_pips=1.0,
+        avg_spread_pips=1.5,
         slippage_pips=0.5,
-        commission_per_lot_usd=0.0,
+        commission_per_lot_usd=5.0,
         stop_first_on_ambiguity=True,
     )
     defaults.update(overrides)
@@ -382,8 +382,11 @@ class TestGateStageB:
 
     def test_passes_if_spread_equals_min_threshold(self):
         """Spread gate uses >= (consistent with slippage/commission gates)."""
-        env = _make_environment(avg_spread_pips=0.0)
-        results = evaluate_stage_b(env)
+        from novatrade.evaluation.gates import GateConfig
+
+        env = _make_environment(avg_spread_pips=1.0)
+        config = GateConfig()  # min_avg_spread_pips=1.0
+        results = evaluate_stage_b(env, config=config)
         spread_gate = [r for r in results if r.gate == "B.spread_applied"][0]
         assert spread_gate.passed is True
 
@@ -411,9 +414,9 @@ class TestGateStageB:
 
     def test_accepts_object_environment(self):
         env = SimpleNamespace(
-            avg_spread_pips=1.0,
+            avg_spread_pips=1.5,
             slippage_pips=0.5,
-            commission_per_lot_usd=0.0,
+            commission_per_lot_usd=5.0,
             stop_first_on_ambiguity=True,
         )
         results = evaluate_stage_b(env)

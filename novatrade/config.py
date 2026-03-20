@@ -39,6 +39,14 @@ class MetaApiConfig:
     domain: str = "agiliumtrade.agiliumtrade.ai"
     region: str = "new-york"
     application: str = "NovaTrade"
+    # Execution resilience (Phase: Execution Gaps)
+    retry_max_attempts: int = 3  # max retries for broker operations
+    circuit_breaker_threshold: int = 5  # failures before circuit opens
+    circuit_breaker_reset_seconds: float = 60.0  # seconds before half-open
+    reconnect_max_attempts: int = 3  # auto-reconnect attempts on disconnect
+    reconnect_backoff_base: float = 2.0  # exponential backoff base (seconds)
+    order_verify_timeout: float = 5.0  # seconds to poll for order verification
+    order_verify_interval: float = 0.5  # poll interval for verification
 
     @classmethod
     def from_env(cls) -> MetaApiConfig:
@@ -77,6 +85,10 @@ class RiskConfig:
     # Phase 6: IRB-specific risk hardening
     check_forex_session: bool = False  # enforce 24/5 forex market hours
     irb_max_open_positions: int = 0  # IRB exposure limit (0 = disabled)
+    # FTMO daily reset timezone (IANA name). FTMO resets at midnight Prague time.
+    daily_reset_tz: str = "Europe/Prague"
+    # Slippage control (Phase: Execution Gaps)
+    max_slippage_pips: float = 3.0  # max acceptable slippage in pips (0 = disabled)
 
     def validate(self) -> list[str]:
         errors: list[str] = []

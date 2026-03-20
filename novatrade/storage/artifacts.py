@@ -25,13 +25,17 @@ def _atomic_write(out_path: Path, data: str) -> None:
     """Write *data* to *out_path* atomically via tmp-file + rename."""
     parent = str(out_path.parent)
     fd, tmp_path = tempfile.mkstemp(dir=parent, suffix=".tmp")
+    closed = False
     try:
         os.write(fd, data.encode())
         os.close(fd)
+        closed = True
         os.replace(tmp_path, str(out_path))
     except BaseException:
-        os.close(fd)
-        os.unlink(tmp_path)
+        if not closed:
+            os.close(fd)
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
         raise
 
 

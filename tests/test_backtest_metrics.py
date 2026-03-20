@@ -1,5 +1,8 @@
 """Tests for novatrade.backtest.metrics."""
 
+import math
+import statistics
+
 import pytest
 
 from novatrade.backtest.metrics import (
@@ -12,6 +15,7 @@ from novatrade.backtest.metrics import (
     OrderCancelReason,
     PendingOrderRecord,
     TradeSide,
+    _compute_sharpe_sortino,
     compute_metrics,
     format_metrics_report,
 )
@@ -296,3 +300,230 @@ class TestMetricsToDict:
         assert "win_rate" in d
         assert "profit_factor" in d
         assert "filter_rejections" in d
+        assert "sharpe_ratio" in d
+        assert "sortino_ratio" in d
+
+
+# ---------------------------------------------------------------------------
+# H3: Recovery factor uses consistent units (USD/USD)
+# ---------------------------------------------------------------------------
+
+
+class TestRecoveryFactorUnits:
+    """Bug H3: Recovery factor must use net_result_usd / max_drawdown_usd,
+    NOT net_result_pips / max_drawdown_usd (unit mismatch)."""
+
+    def test_recovery_factor_consistent_usd_units(self):
+        """Verify evaluation_ladder computes recovery_factor as net_usd / max_dd_usd."""
+        from novatrade.evaluation.evaluation_ladder import compute_dashboard_metrics
+
+        class MockMetrics:
+            total_completed_trades = 100
+            profit_factor = 1.8
+            max_drawdown_pct = 5.0
+            max_drawdown_usd = 2000.0
+            net_result_pips = 500.0  # pips -- should NOT be used
+            net_result_usd = 4000.0  # USD -- should be used
+            total_bars = 24 * 22 * 6
+            expectancy_r = 0.5
+            win_rate = 0.55
+            max_consecutive_losses = 4
+            top_3_trades_pct_of_profit = 25.0
+            average_winner_pips = 30.0
+            average_loser_pips = -15.0
+            sharpe_ratio = 0.0
+            sortino_ratio = 0.0
+
+        row = compute_dashboard_metrics(MockMetrics(), experiment_id="rf-test")
+        # recovery_factor = net_usd / max_dd_usd = 4000 / 2000 = 2.0
+        assert row.recovery_factor == pytest.approx(2.0, rel=0.01)
+
+    def test_recovery_factor_not_pips_over_usd(self):
+        """Ensure net_pips is NOT divided by max_dd_usd (the original bug)."""
+        from novatrade.evaluation.evaluation_ladder import compute_dashboard_metrics
+
+        class MockMetrics:
+            total_completed_trades = 100
+            profit_factor = 1.8
+            max_drawdown_pct = 5.0
+            max_drawdown_usd = 500.0
+            net_result_pips = 200.0  # would give 0.4 if divided by max_dd_usd
+            net_result_usd = 2000.0  # gives 4.0 (correct)
+            total_bars = 24 * 22 * 6
+            expectancy_r = 0.5
+            win_rate = 0.55
+            max_consecutive_losses = 4
+            top_3_trades_pct_of_profit = 25.0
+            average_winner_pips = 30.0
+            average_loser_pips = -15.0
+            sharpe_ratio = 0.0
+            sortino_ratio = 0.0
+
+        row = compute_dashboard_metrics(MockMetrics(), experiment_id="rf-test2")
+        # Should be 4.0 (USD/USD), NOT 0.4 (pips/USD)
+        assert row.recovery_factor == pytest.approx(4.0, rel=0.01)
+        assert row.recovery_factor != pytest.approx(0.4, abs=0.1)
+
+    def test_recovery_factor_zero_drawdown(self):
+        """When drawdown is zero, recovery_factor should be 5.0 cap (positive net) or 0.0."""
+        from novatrade.evaluation.evaluation_ladder import compute_dashboard_metrics
+
+        class MockMetrics:
+            total_completed_trades = 100
+            profit_factor = 2.0
+            max_drawdown_pct = 0.0
+            max_drawdown_usd = 0.0
+            net_result_pips = 300.0
+            net_result_usd = 3000.0
+            total_bars = 24 * 22 * 6
+            expectancy_r = 0.5
+            win_rate = 0.55
+            max_consecutive_losses = 3
+            top_3_trades_pct_of_profit = 25.0
+            average_winner_pips = 30.0
+            average_loser_pips = -15.0
+            sharpe_ratio = 0.0
+            sortino_ratio = 0.0
+
+        row = compute_dashboard_metrics(MockMetrics(), experiment_id="rf-zero")
+        assert row.recovery_factor == 5.0
+
+
+# ---------------------------------------------------------------------------
+# H4: Sharpe and Sortino — proper annualized formulas
+# ---------------------------------------------------------------------------
+
+
+class TestSharpeSortinoFormulas:
+    """Bug H4: Sharpe and Sortino must use proper formulas with annualization,
+    not rough proxies based on drawdown."""
+
+    def test_sharpe_known_values(self):
+        """Verify Sharpe ratio against hand-computed known values.
+
+        Setup: 10 trades over 20 trading days, equity=100000
+          P&L: [100, -50, 80, -30, 120, -40, 90, -20, 110, -60]
+          Returns: [0.001, -0.0005, 0.0008, -0.0003, 0.0012, -0.0004, 0.0009, -0.0002, 0.0011, -0.0006]
+          Mean return: 0.0004 (hand-verified)
+          Std return: stdev([...])
+          trades_per_year = (10 / 20) * 252 = 126
+          annualization = sqrt(126)
+          Sharpe = (mean / std) * sqrt(126)
+        """
+        pnl = [100.0, -50.0, 80.0, -30.0, 120.0, -40.0, 90.0, -20.0, 110.0, -60.0]
+        equity = 100_000.0
+        trading_days = 20.0
+
+        sharpe, sortino = _compute_sharpe_sortino(pnl, equity, trading_days)
+
+        # Hand-compute expected
+        returns = [p / equity for p in pnl]
+        mean_r = statistics.mean(returns)
+        std_r = statistics.stdev(returns)
+        tpy = (len(returns) / trading_days) * 252.0
+        ann = math.sqrt(tpy)
+        expected_sharpe = (mean_r / std_r) * ann
+
+        assert sharpe == pytest.approx(expected_sharpe, rel=1e-6)
+        assert sharpe > 0  # net positive returns
+
+    def test_sortino_known_values(self):
+        """Verify Sortino uses proper downside deviation formula.
+
+        Downside deviation = sqrt(1/N * sum(min(r, 0)^2 for ALL r))
+        """
+        pnl = [100.0, -50.0, 80.0, -30.0, 120.0, -40.0, 90.0, -20.0, 110.0, -60.0]
+        equity = 100_000.0
+        trading_days = 20.0
+
+        sharpe, sortino = _compute_sharpe_sortino(pnl, equity, trading_days)
+
+        # Hand-compute expected Sortino
+        returns = [p / equity for p in pnl]
+        mean_r = statistics.mean(returns)
+        tpy = (len(returns) / trading_days) * 252.0
+        ann = math.sqrt(tpy)
+
+        # Downside deviation: sqrt(1/N * sum(min(r, 0)^2))
+        dd_squares = [min(r, 0.0) ** 2 for r in returns]
+        dd = (sum(dd_squares) / len(returns)) ** 0.5
+
+        expected_sortino = (mean_r / dd) * ann
+
+        assert sortino == pytest.approx(expected_sortino, rel=1e-6)
+        assert sortino > 0
+
+    def test_sortino_greater_than_sharpe_mixed_returns(self):
+        """With mixed returns, Sortino should generally be >= Sharpe
+        because downside deviation <= total std deviation."""
+        pnl = [100.0, -50.0, 80.0, -30.0, 120.0, -40.0, 90.0, -20.0, 110.0, -60.0]
+        equity = 100_000.0
+        trading_days = 20.0
+
+        sharpe, sortino = _compute_sharpe_sortino(pnl, equity, trading_days)
+        assert sortino >= sharpe
+
+    def test_sharpe_all_positive_returns(self):
+        """All positive returns: Sortino should be 0 (no downside)."""
+        pnl = [100.0, 200.0, 150.0, 80.0, 120.0]
+        equity = 100_000.0
+        trading_days = 10.0
+
+        sharpe, sortino = _compute_sharpe_sortino(pnl, equity, trading_days)
+        assert sharpe > 0
+        # No negative returns => downside_dev = 0 => sortino = 0
+        assert sortino == 0.0
+
+    def test_sharpe_all_negative_returns(self):
+        """All negative returns: both should be negative (or zero)."""
+        pnl = [-100.0, -200.0, -150.0, -80.0, -120.0]
+        equity = 100_000.0
+        trading_days = 10.0
+
+        sharpe, sortino = _compute_sharpe_sortino(pnl, equity, trading_days)
+        assert sharpe < 0
+        assert sortino < 0
+
+    def test_sharpe_too_few_trades(self):
+        """Less than 2 trades should return (0, 0)."""
+        sharpe, sortino = _compute_sharpe_sortino([100.0], 100_000.0, 10.0)
+        assert sharpe == 0.0
+        assert sortino == 0.0
+
+    def test_sharpe_zero_equity(self):
+        """Zero initial equity should return (0, 0)."""
+        sharpe, sortino = _compute_sharpe_sortino([100.0, 200.0], 0.0, 10.0)
+        assert sharpe == 0.0
+        assert sortino == 0.0
+
+    def test_sharpe_with_risk_free_rate(self):
+        """Risk-free rate should reduce Sharpe/Sortino ratios."""
+        pnl = [100.0, -50.0, 80.0, -30.0, 120.0, -40.0, 90.0, -20.0, 110.0, -60.0]
+        equity = 100_000.0
+        trading_days = 20.0
+
+        sharpe_0, _ = _compute_sharpe_sortino(pnl, equity, trading_days, risk_free_annual=0.0)
+        sharpe_rf, _ = _compute_sharpe_sortino(pnl, equity, trading_days, risk_free_annual=0.05)
+        # With positive risk-free rate, Sharpe should be lower
+        assert sharpe_rf < sharpe_0
+
+    def test_compute_metrics_populates_sharpe_sortino(self):
+        """compute_metrics should populate sharpe_ratio and sortino_ratio fields."""
+        trades = [
+            _make_trade(i, pnl_pips=float(pnl), pnl_usd=float(pnl * 10), exit_bar=i * 10 + 10)
+            for i, pnl in enumerate([50, -30, 40, -20, 60, -25, 35, -15, 55, -35], start=1)
+        ]
+        m = compute_metrics(trades, [], [], FilterRejection(), WINDOW_30D, 480)
+        # With mixed trades, both ratios should be non-zero
+        assert m.sharpe_ratio != 0.0
+        assert m.sortino_ratio != 0.0
+
+    def test_annualization_scales_correctly(self):
+        """Same returns but different trading_days should produce different Sharpe."""
+        pnl = [100.0, -50.0, 80.0, -30.0, 120.0]
+        equity = 100_000.0
+
+        sharpe_20, _ = _compute_sharpe_sortino(pnl, equity, 20.0)
+        sharpe_100, _ = _compute_sharpe_sortino(pnl, equity, 100.0)
+        # More trades per day (20 days) = higher annualization = higher Sharpe
+        assert abs(sharpe_20) > abs(sharpe_100)

@@ -609,7 +609,13 @@ class IRBBacktester:
         else:
             pnl_pips = (pos.entry_price - exit_price) / pip
 
+        # Deduct transaction costs: spread + slippage (round-trip)
+        pnl_pips -= self.env.spread.total_cost_pips
+
         pnl_usd = pnl_pips * pos.volume * lot_val
+
+        # Deduct commission (round-trip: entry + exit)
+        pnl_usd -= self.env.spread.commission_per_lot_usd * pos.volume * 2
 
         # Risk R-multiple
         stop_distance_pips = abs(pos.entry_price - pos.stop_loss) / pip

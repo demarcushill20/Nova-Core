@@ -8,11 +8,13 @@ from novatrade.backtest.engine import (
     BacktestResult,
     IRBBacktester,
     StrategyState,
+    _OpenPosition,
     compute_adx,
     compute_atr,
     compute_ema,
 )
-from novatrade.backtest.environment import BacktestEnvironment
+from novatrade.backtest.environment import BacktestEnvironment, SpreadAssumptions
+from novatrade.backtest.metrics import ExitReason, TradeSide
 from novatrade.models import Candle
 
 # ---------------------------------------------------------------------------
@@ -338,3 +340,407 @@ class TestStrategyState:
         assert StrategyState.PENDING_SHORT in states
         assert StrategyState.LONG in states
         assert StrategyState.SHORT in states
+
+
+# ---------------------------------------------------------------------------
+# Transaction cost deduction tests
+# ---------------------------------------------------------------------------
+
+
+class TestTransactionCostDeduction:
+    """Verify that spread, slippage, and commission are properly deducted
+    from PnL in _close_position().
+
+    Tests exercise the fix for the CRITICAL bug where transaction costs
+    existed in the environment config but were never subtracted from PnL.
+    """
+
+    @staticmethod
+    def _make_env(**overrides) -> BacktestEnvironment:
+        defaults = dict(
+            warmup_bars=2,
+            initial_equity=100_000.0,
+        )
+        defaults.update(overrides)
+        return BacktestEnvironment(**defaults)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _setup_backtester_with_position(
+        env: BacktestEnvironment,
+        side: TradeSide,
+        entry_price: float,
+        stop_loss: float,
+        volume: float = 0.10,
+    ) -> IRBBacktester:
+        """Create an IRBBacktester with an open position injected directly.
+
+        This bypasses signal generation to isolate _close_position() logic.
+        """
+        bt = IRBBacktester(env=env)
+        bt._state = StrategyState.LONG if side == TradeSide.LONG else StrategyState.SHORT
+        bt._position = _OpenPosition(
+            side=side,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            volume=volume,
+            entry_bar=0,
+            current_stop=stop_loss,
+            best_close=entry_price,
+        )
+        return bt
+
+    # --- Zero-cost baseline: matches old (pre-fix) behavior ---
+
+    def test_zero_costs_long_pnl_matches_raw_calculation(self):
+        """With all costs at zero, PnL should equal raw price difference."""
+        env = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=0.0,
+                slippage_pips=0.0,
+                commission_per_lot_usd=0.0,
+            ),
+        )
+        bt = self._setup_backtester_with_position(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            stop_loss=1.09500,
+            volume=0.10,
+        )
+        bt._close_position(5, 1.10500, ExitReason.TIME_STOP)
+
+        assert len(bt._trades) == 1
+        trade = bt._trades[0]
+        # Raw: (1.10500 - 1.10000) / 0.0001 = 50.0 pips
+        assert trade.pnl_pips == pytest.approx(50.0, abs=0.01)
+        # USD: 50 pips * 0.10 lots * $10/pip/lot = $50.00
+        assert trade.pnl_usd == pytest.approx(50.0, abs=0.01)
+
+    def test_zero_costs_short_pnl_matches_raw_calculation(self):
+        """With all costs at zero, SHORT PnL should equal raw price difference."""
+        env = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=0.0,
+                slippage_pips=0.0,
+                commission_per_lot_usd=0.0,
+            ),
+        )
+        bt = self._setup_backtester_with_position(
+            env,
+            TradeSide.SHORT,
+            entry_price=1.10000,
+            stop_loss=1.10500,
+            volume=0.10,
+        )
+        bt._close_position(5, 1.09500, ExitReason.TIME_STOP)
+
+        trade = bt._trades[0]
+        # Raw: (1.10000 - 1.09500) / 0.0001 = 50.0 pips
+        assert trade.pnl_pips == pytest.approx(50.0, abs=0.01)
+        assert trade.pnl_usd == pytest.approx(50.0, abs=0.01)
+
+    # --- Costs reduce PnL vs zero-cost baseline ---
+
+    def test_realistic_costs_lower_than_zero_cost_long(self):
+        """PnL with realistic costs should be strictly lower than zero-cost PnL."""
+        entry = 1.10000
+        exit_p = 1.10500
+        stop = 1.09500
+        vol = 0.10
+
+        # Zero costs
+        env0 = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=0.0,
+                slippage_pips=0.0,
+                commission_per_lot_usd=0.0,
+            ),
+        )
+        bt0 = self._setup_backtester_with_position(env0, TradeSide.LONG, entry, stop, vol)
+        bt0._close_position(5, exit_p, ExitReason.TIME_STOP)
+        pnl_zero = bt0._trades[0].pnl_usd
+
+        # Realistic costs (1.2 pip spread, 0.5 pip slippage, $3.50/lot commission)
+        env1 = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=1.2,
+                slippage_pips=0.5,
+                commission_per_lot_usd=3.50,
+            ),
+        )
+        bt1 = self._setup_backtester_with_position(env1, TradeSide.LONG, entry, stop, vol)
+        bt1._close_position(5, exit_p, ExitReason.TIME_STOP)
+        pnl_costs = bt1._trades[0].pnl_usd
+
+        assert pnl_costs < pnl_zero
+
+    def test_realistic_costs_lower_than_zero_cost_short(self):
+        """PnL with realistic costs should be strictly lower than zero-cost PnL (SHORT)."""
+        entry = 1.10000
+        exit_p = 1.09500
+        stop = 1.10500
+        vol = 0.10
+
+        env0 = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=0.0,
+                slippage_pips=0.0,
+                commission_per_lot_usd=0.0,
+            ),
+        )
+        bt0 = self._setup_backtester_with_position(env0, TradeSide.SHORT, entry, stop, vol)
+        bt0._close_position(5, exit_p, ExitReason.TIME_STOP)
+        pnl_zero = bt0._trades[0].pnl_usd
+
+        env1 = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=1.2,
+                slippage_pips=0.5,
+                commission_per_lot_usd=3.50,
+            ),
+        )
+        bt1 = self._setup_backtester_with_position(env1, TradeSide.SHORT, entry, stop, vol)
+        bt1._close_position(5, exit_p, ExitReason.TIME_STOP)
+        pnl_costs = bt1._trades[0].pnl_usd
+
+        assert pnl_costs < pnl_zero
+
+    # --- Each cost component contributes independently ---
+
+    def test_spread_only_deduction(self):
+        """Spread alone should reduce PnL by spread * volume * pip_value_per_lot."""
+        spread_pips = 1.5
+        env = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=spread_pips,
+                slippage_pips=0.0,
+                commission_per_lot_usd=0.0,
+            ),
+        )
+        vol = 0.10
+        bt = self._setup_backtester_with_position(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            stop_loss=1.09500,
+            volume=vol,
+        )
+        bt._close_position(5, 1.10500, ExitReason.TIME_STOP)
+
+        trade = bt._trades[0]
+        raw_pips = 50.0
+        expected_pips = raw_pips - spread_pips  # 50 - 1.5 = 48.5
+        expected_usd = expected_pips * vol * 10.0  # 48.5 * 0.1 * 10 = $48.50
+        assert trade.pnl_pips == pytest.approx(expected_pips, abs=0.01)
+        assert trade.pnl_usd == pytest.approx(expected_usd, abs=0.01)
+
+    def test_slippage_only_deduction(self):
+        """Slippage alone should reduce PnL by 2*slippage * volume * pip_value_per_lot.
+
+        Slippage is doubled because it applies on both entry and exit (round-trip).
+        """
+        slippage_pips = 0.5
+        env = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=0.0,
+                slippage_pips=slippage_pips,
+                commission_per_lot_usd=0.0,
+            ),
+        )
+        vol = 0.10
+        bt = self._setup_backtester_with_position(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            stop_loss=1.09500,
+            volume=vol,
+        )
+        bt._close_position(5, 1.10500, ExitReason.TIME_STOP)
+
+        trade = bt._trades[0]
+        raw_pips = 50.0
+        # total_cost_pips = 0 (spread) + 2 * 0.5 (slippage) = 1.0
+        expected_pips = raw_pips - 2 * slippage_pips  # 50 - 1.0 = 49.0
+        expected_usd = expected_pips * vol * 10.0
+        assert trade.pnl_pips == pytest.approx(expected_pips, abs=0.01)
+        assert trade.pnl_usd == pytest.approx(expected_usd, abs=0.01)
+
+    def test_commission_only_deduction(self):
+        """Commission alone should reduce PnL in USD but not in pips.
+
+        Commission is per-lot, round-trip (entry + exit = 2x).
+        """
+        commission = 3.50  # USD per lot per side
+        env = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=0.0,
+                slippage_pips=0.0,
+                commission_per_lot_usd=commission,
+            ),
+        )
+        vol = 0.10
+        bt = self._setup_backtester_with_position(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            stop_loss=1.09500,
+            volume=vol,
+        )
+        bt._close_position(5, 1.10500, ExitReason.TIME_STOP)
+
+        trade = bt._trades[0]
+        # Pips should be unaffected by commission
+        assert trade.pnl_pips == pytest.approx(50.0, abs=0.01)
+        # USD: raw = 50 * 0.1 * 10 = $50. Commission = 3.50 * 0.10 * 2 = $0.70
+        expected_usd = 50.0 * vol * 10.0 - commission * vol * 2
+        assert trade.pnl_usd == pytest.approx(expected_usd, abs=0.01)
+
+    def test_all_costs_combined(self):
+        """All three cost components applied together."""
+        spread_pips = 1.2
+        slippage_pips = 0.5
+        commission = 3.50
+        env = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=spread_pips,
+                slippage_pips=slippage_pips,
+                commission_per_lot_usd=commission,
+            ),
+        )
+        vol = 0.10
+        bt = self._setup_backtester_with_position(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            stop_loss=1.09500,
+            volume=vol,
+        )
+        bt._close_position(5, 1.10500, ExitReason.TIME_STOP)
+
+        trade = bt._trades[0]
+        # total_cost_pips = 1.2 + 2*0.5 = 2.2
+        expected_pips = 50.0 - (spread_pips + 2 * slippage_pips)  # 50 - 2.2 = 47.8
+        expected_usd = expected_pips * vol * 10.0 - commission * vol * 2
+        # 47.8 * 0.1 * 10 = $47.80 - $0.70 = $47.10
+        assert trade.pnl_pips == pytest.approx(expected_pips, abs=0.01)
+        assert trade.pnl_usd == pytest.approx(expected_usd, abs=0.01)
+
+    # --- Both directions ---
+
+    def test_costs_applied_symmetrically_long_and_short(self):
+        """Same magnitude trade in opposite directions should have equal cost deduction."""
+        spread_pips = 1.0
+        slippage_pips = 0.3
+        commission = 5.0
+        vol = 0.20
+
+        env = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=spread_pips,
+                slippage_pips=slippage_pips,
+                commission_per_lot_usd=commission,
+            ),
+        )
+
+        # LONG: buy 1.10000, sell 1.10500 => +50 raw pips
+        bt_long = self._setup_backtester_with_position(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            stop_loss=1.09500,
+            volume=vol,
+        )
+        bt_long._close_position(5, 1.10500, ExitReason.TIME_STOP)
+
+        # SHORT: sell 1.10500, buy 1.10000 => +50 raw pips
+        bt_short = self._setup_backtester_with_position(
+            env,
+            TradeSide.SHORT,
+            entry_price=1.10500,
+            stop_loss=1.11000,
+            volume=vol,
+        )
+        bt_short._close_position(5, 1.10000, ExitReason.TIME_STOP)
+
+        long_trade = bt_long._trades[0]
+        short_trade = bt_short._trades[0]
+
+        # Both should have the same PnL in pips (same magnitude, same costs)
+        assert long_trade.pnl_pips == pytest.approx(short_trade.pnl_pips, abs=0.01)
+        # Both should have the same PnL in USD
+        assert long_trade.pnl_usd == pytest.approx(short_trade.pnl_usd, abs=0.01)
+
+    def test_costs_can_turn_profit_into_loss(self):
+        """A small winning trade can become a net loss after costs."""
+        # Only 2 pips gross profit, but 2.5 pips total cost => net loss
+        env = self._make_env(
+            spread=SpreadAssumptions(
+                avg_spread_pips=2.0,
+                slippage_pips=0.25,
+                commission_per_lot_usd=0.0,
+            ),
+        )
+        bt = self._setup_backtester_with_position(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            stop_loss=1.09500,
+            volume=0.10,
+        )
+        # Exit 2 pips above entry
+        bt._close_position(5, 1.10020, ExitReason.TIME_STOP)
+
+        trade = bt._trades[0]
+        # Raw = 2.0 pips. Cost = 2.0 + 2*0.25 = 2.5 pips. Net = -0.5 pips.
+        assert trade.pnl_pips < 0
+        assert trade.pnl_usd < 0
+
+    def test_equity_updated_with_costs(self):
+        """Final equity should reflect transaction cost deductions."""
+        initial = 100_000.0
+        env = self._make_env(
+            initial_equity=initial,
+            spread=SpreadAssumptions(
+                avg_spread_pips=1.0,
+                slippage_pips=0.0,
+                commission_per_lot_usd=0.0,
+            ),
+        )
+        bt = self._setup_backtester_with_position(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            stop_loss=1.09500,
+            volume=1.0,
+        )
+        bt._close_position(5, 1.10500, ExitReason.TIME_STOP)
+
+        trade = bt._trades[0]
+        assert bt._equity == pytest.approx(initial + trade.pnl_usd, abs=0.01)
+        # Verify the cost actually reduced equity vs raw
+        raw_usd = 50.0 * 1.0 * 10.0  # 50 pips * 1 lot * $10
+        assert bt._equity < initial + raw_usd
+
+    def test_fixed_spread_used_when_set(self):
+        """When fixed_spread_pips is set, it overrides avg_spread_pips."""
+        env = self._make_env(
+            spread=SpreadAssumptions(
+                fixed_spread_pips=2.0,
+                avg_spread_pips=1.0,  # should be ignored
+                slippage_pips=0.0,
+                commission_per_lot_usd=0.0,
+            ),
+        )
+        bt = self._setup_backtester_with_position(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            stop_loss=1.09500,
+            volume=0.10,
+        )
+        bt._close_position(5, 1.10500, ExitReason.TIME_STOP)
+
+        trade = bt._trades[0]
+        # total_cost_pips should use fixed (2.0), not avg (1.0)
+        expected_pips = 50.0 - 2.0  # = 48.0
+        assert trade.pnl_pips == pytest.approx(expected_pips, abs=0.01)

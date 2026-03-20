@@ -139,6 +139,7 @@ def _make_profitable_metrics(**overrides):
         profit_factor=1.8,
         max_drawdown_pct=5.0,
         net_result_pips=350.0,
+        net_result_usd=3500.0,
         total_bars=22 * 24 * 6,  # ~6 months
         expectancy_r=0.35,
         win_rate=0.55,
@@ -254,7 +255,7 @@ class TestComputeDashboardMetrics:
         assert row.avg_win_loss_ratio == pytest.approx(3.0)
 
     def test_recovery_factor_computed(self):
-        m = _make_profitable_metrics(net_result_pips=200.0, max_drawdown_usd=100.0)
+        m = _make_profitable_metrics(net_result_usd=200.0, max_drawdown_usd=100.0)
         row = compute_dashboard_metrics(m)
         assert row.recovery_factor == pytest.approx(2.0)
 

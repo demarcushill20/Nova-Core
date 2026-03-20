@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import struct
 from dataclasses import asdict, dataclass
@@ -87,22 +86,36 @@ def _candles_to_df(candles: list[Candle]) -> pd.DataFrame:
 
 
 def _df_to_candles(df: pd.DataFrame) -> list[Candle]:
-    candles: list[Candle] = []
-    for i, row in df.iterrows():
-        c = Candle(
-            timestamp=float(row["timestamp"]),
-            open=float(row["open"]),
-            high=float(row["high"]),
-            low=float(row["low"]),
-            close=float(row["close"]),
-            volume=float(row["volume"]),
-            symbol=str(row["symbol"]),
-            timeframe=str(row["timeframe"]),
+    # Vectorized NaN check — much faster than per-row iteration
+    price_cols = ["open", "high", "low", "close"]
+    nan_mask = df[price_cols].isna().any(axis=1)
+    if nan_mask.any():
+        first_bad = nan_mask.idxmax()
+        raise ValueError(f"NaN detected in candle at row {first_bad}")
+
+    # Vectorized extraction — avoids iterrows() overhead on large datasets
+    timestamps = df["timestamp"].to_numpy(dtype=float)
+    opens = df["open"].to_numpy(dtype=float)
+    highs = df["high"].to_numpy(dtype=float)
+    lows = df["low"].to_numpy(dtype=float)
+    closes = df["close"].to_numpy(dtype=float)
+    volumes = df["volume"].to_numpy(dtype=float)
+    symbols = df["symbol"].astype(str).to_numpy()
+    timeframes = df["timeframe"].astype(str).to_numpy()
+
+    return [
+        Candle(
+            timestamp=timestamps[i],
+            open=opens[i],
+            high=highs[i],
+            low=lows[i],
+            close=closes[i],
+            volume=volumes[i],
+            symbol=symbols[i],
+            timeframe=timeframes[i],
         )
-        if any(math.isnan(v) for v in (c.open, c.high, c.low, c.close)):
-            raise ValueError(f"NaN detected in candle at row {i}")
-        candles.append(c)
-    return candles
+        for i in range(len(df))
+    ]
 
 
 # ---------------------------------------------------------------------------

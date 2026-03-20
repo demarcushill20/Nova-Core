@@ -69,6 +69,7 @@ class WalkForwardResult:
     holdout_score: float | None = None
     holdout_is_ratio: float | None = None
     median_oos_score: float = 0.0
+    median_is_score: float = 0.0
     median_oos_is_ratio: float = 0.0
     all_windows_passed: bool = False
     holdout_passed: bool | None = None
@@ -225,6 +226,7 @@ def run_walk_forward(
     ratios = [w.oos_is_ratio for w in windows]
 
     result.median_oos_score = statistics.median(oos_scores)
+    result.median_is_score = statistics.median(is_scores)
     result.median_oos_is_ratio = statistics.median(ratios)
     result.all_windows_passed = all(w.passed for w in windows)
 

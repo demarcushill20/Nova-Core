@@ -90,7 +90,7 @@ class TestCampaignConfig:
         cfg = CampaignConfig()
         assert cfg.max_experiments == 200
         assert cfg.max_wall_clock_seconds == 21600.0
-        assert cfg.stagnation_limit == 20
+        assert cfg.stagnation_limit == 10  # Aligned with CampaignBudget.max_stagnant_experiments
         assert cfg.max_crashes == 5
         assert cfg.checkpoint_interval == 25
         assert cfg.walkforward_on_new_best is True

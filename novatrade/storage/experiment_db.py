@@ -6,7 +6,9 @@ metrics, and campaign lineage.  Uses stdlib sqlite3 with no ORM.
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -233,7 +235,20 @@ class ExperimentDB:
             vals = [str(v) if v is not None else "" for v in row]
             lines.append("\t".join(vals))
 
-        output_path.write_text("\n".join(lines) + "\n")
+        # Atomic write: tempfile + os.replace to prevent corrupt TSV on crash
+        fd, tmp_path = tempfile.mkstemp(dir=str(output_path.parent), suffix=".tmp", prefix=output_path.stem)
+        closed = False
+        try:
+            os.write(fd, ("\n".join(lines) + "\n").encode())
+            os.close(fd)
+            closed = True
+            os.replace(tmp_path, str(output_path))
+        except BaseException:
+            if not closed:
+                os.close(fd)
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
         return len(rows)
 
     # -- helpers --
