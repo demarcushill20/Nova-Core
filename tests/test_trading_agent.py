@@ -285,7 +285,7 @@ class TestValidateAlert:
 class TestIdempotencyKey:
     def test_signal_key_format(self):
         key = make_idempotency_key(_signal_payload())
-        assert key == "irb_PLACE_STOP_ORDER_1710000000000_BUY"
+        assert key == "irb_PS_1710000000000_B"
 
     def test_trail_key_uses_bar_close_time(self):
         p = _trail_payload()
@@ -744,7 +744,7 @@ class TestOrderIntent:
     def test_to_dict_modify(self):
         intent = OrderIntent(
             intent_type=IntentType.MODIFY_SL,
-            idempotency_key="irb_MODIFY_SL_1710003600000_BUY",
+            idempotency_key="irb_MS_1710003600000_B",
             broker_symbol="EURUSD.sim",
             side=OrderSide.BUY,
             new_stop_loss=1.08500,
@@ -757,7 +757,7 @@ class TestOrderIntent:
     def test_to_dict_cancel(self):
         intent = OrderIntent(
             intent_type=IntentType.CANCEL_ORDER,
-            idempotency_key="irb_CANCEL_ORDER_20_BUY",
+            idempotency_key="irb_CX_20_B",
             broker_symbol="EURUSD.sim",
             side=OrderSide.BUY,
             cancel_reason="TRIGGER_WINDOW_EXPIRED",
@@ -768,7 +768,7 @@ class TestOrderIntent:
     def test_to_dict_close(self):
         intent = OrderIntent(
             intent_type=IntentType.CLOSE_POSITION,
-            idempotency_key="irb_CLOSE_POSITION_40_BUY",
+            idempotency_key="irb_CP_40_B",
             broker_symbol="EURUSD.sim",
             side=OrderSide.BUY,
             close_reason="TIME_STOP",

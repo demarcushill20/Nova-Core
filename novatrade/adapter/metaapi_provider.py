@@ -238,7 +238,7 @@ class MetaApiAdapter(MT5Adapter):
     async def _auto_reconnect(self) -> bool:
         """Attempt to re-establish the broker connection.
 
-        Uses exponential backoff with configurable max attempts.
+        Tears down stale state before reconnecting with exponential backoff.
         Returns True if reconnection succeeded.
         """
         if self._reconnecting:
@@ -255,14 +255,21 @@ class MetaApiAdapter(MT5Adapter):
                     attempt + 1,
                     max_attempts,
                 )
+                # Tear down stale SDK state before fresh connect
+                try:
+                    await self.disconnect()
+                except Exception as exc:
+                    log.debug("metaapi auto-reconnect: disconnect cleanup: %s", _safe_error(exc))
+
                 status = await self.connect()
                 if status.connected:
                     log.info("metaapi auto-reconnect: succeeded on attempt %d", attempt + 1)
                     return True
 
+                log.warning("metaapi auto-reconnect: attempt %d failed: %s", attempt + 1, status.message)
                 if attempt < max_attempts - 1:
-                    delay = backoff_base**attempt
-                    log.warning("metaapi auto-reconnect: failed, retrying in %.1fs", delay)
+                    delay = backoff_base ** (attempt + 1)
+                    log.warning("metaapi auto-reconnect: retrying in %.1fs", delay)
                     await asyncio.sleep(delay)
 
             log.error("metaapi auto-reconnect: exhausted %d attempts", max_attempts)
@@ -381,10 +388,23 @@ class MetaApiAdapter(MT5Adapter):
         Includes: retry, circuit breaker, auto-reconnect, slippage control,
         and post-order verification for MARKET orders.
         """
-        comment = request.comment or ""
+        # MetaApi limit: comment + clientId combined must be <= 26 chars.
+        # Use clientId for idempotency key (truncated), comment for label.
+        _MAX_COMMENT_CLIENT_LEN = 26
+        client_id = ""
         if request.idempotency_key:
-            comment = f"{comment} {request.idempotency_key}".strip()
-        options: dict[str, Any] = {"comment": comment} if comment else {}
+            client_id = request.idempotency_key[:_MAX_COMMENT_CLIENT_LEN]
+        comment = request.comment or ""
+        # Enforce combined length limit
+        total = len(comment) + len(client_id)
+        if total > _MAX_COMMENT_CLIENT_LEN:
+            avail = _MAX_COMMENT_CLIENT_LEN - len(client_id)
+            comment = comment[: max(avail, 0)]
+        options: dict[str, Any] = {}
+        if client_id:
+            options["clientId"] = client_id
+        if comment:
+            options["comment"] = comment
 
         # Slippage control: per-order override > config default > disabled
         slippage_pips = request.max_slippage_pips

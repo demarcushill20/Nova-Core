@@ -207,7 +207,7 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
             risk_engine_halted=ws.risk_engine.halted if ws.risk_engine else False,
             agent_initialized=ws.agent is not None,
             monitor_initialized=ws.monitor is not None,
-            adapter_connected=True,
+            adapter_connected=getattr(ws.agent._adapter if ws.agent else None, "_connected", ws.dry_run),
             adapter_type=ws.adapter_type,
         )
         return r.to_dict()

@@ -291,8 +291,15 @@ async def run_server(
         if hasattr(adapter, "connect") and not getattr(adapter, "_connected", True):
             log.info("connecting MetaApiAdapter to broker...")
             try:
-                await adapter.connect()
-                log.info("MetaApiAdapter connected successfully")
+                status = await adapter.connect()
+                if status.connected:
+                    log.info("MetaApiAdapter connected successfully")
+                else:
+                    log.error(
+                        "MetaApiAdapter connection failed: %s — rolling back to dry-run",
+                        status.message,
+                    )
+                    rollback_to_dry_run(ws, ws.recorder)
             except Exception:
                 log.exception("MetaApiAdapter connection failed — rolling back to dry-run")
                 rollback_to_dry_run(ws, ws.recorder)

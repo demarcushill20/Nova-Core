@@ -1,4 +1,16 @@
-"""Tests for novatrade.adapter.metaapi_provider — mocked MetaApi SDK wiring."""
+"""Tests for novatrade.adapter.metaapi_provider — mocked MetaApi SDK wiring.
+
+Covers:
+- Translation functions (account, position, candle, symbol price, trade response)
+- Adapter lifecycle (connect, disconnect, health check)
+- All order types (market, limit, stop, stop-limit)
+- Execution gap fixes:
+  - Retry with exponential backoff on ALL operations (place, modify, close, cancel)
+  - Circuit breaker integration
+  - Auto-reconnect on connection failure
+  - Slippage parameter support
+  - Post-order verification polling
+"""
 
 from __future__ import annotations
 
@@ -40,6 +52,13 @@ def config():
         domain="test.example.com",
         region="london",
         application="NovaTrade-Test",
+        retry_max_attempts=3,
+        circuit_breaker_threshold=5,
+        circuit_breaker_reset_seconds=60.0,
+        reconnect_max_attempts=2,
+        reconnect_backoff_base=0.01,  # fast for tests
+        order_verify_timeout=0.3,  # fast for tests
+        order_verify_interval=0.05,
     )
 
 
@@ -160,6 +179,15 @@ def _make_mock_connection():
             "positionId": "12345",
         }
     )
+    conn.cancel_order = AsyncMock(
+        return_value={
+            "numericCode": 10009,
+            "stringCode": "TRADE_RETCODE_DONE",
+            "message": "Order cancelled",
+            "orderId": "55001",
+        }
+    )
+    conn.get_orders = AsyncMock(return_value=[])
     conn.connect = AsyncMock()
     conn.wait_synchronized = AsyncMock()
     conn.close = AsyncMock()
@@ -330,10 +358,14 @@ class TestTranslateTradeResponse:
 
 class TestAdapterNotConnected:
     def test_operations_fail_before_connect(self, adapter):
+        # Auto-reconnect will try and fail (no real SDK), eventually raise
         with pytest.raises(ConnectionError, match="not connected"):
             asyncio.new_event_loop().run_until_complete(adapter.get_account())
 
     def test_health_check_when_disconnected(self, adapter):
+        # No token/account_id set means no reconnect attempt
+        adapter._config.token = ""
+        adapter._config.account_id = ""
         h = asyncio.new_event_loop().run_until_complete(adapter.health_check())
         assert h.state == HealthState.DOWN
         assert not h.connected
@@ -404,6 +436,12 @@ class TestAdapterPlaceOrder:
             order_type=OrderType.MARKET,
             volume=0.1,
         )
+        # Mock positions to contain the order for verification
+        adapter._connection.get_positions = AsyncMock(
+            return_value=[
+                {"id": "99001", "type": "POSITION_TYPE_BUY", "symbol": "EURUSD", "volume": 0.1, "openPrice": 1.1002}
+            ]
+        )
         result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         assert result.ok
         assert result.order_id == "99001"
@@ -416,6 +454,11 @@ class TestAdapterPlaceOrder:
             side=OrderSide.SELL,
             order_type=OrderType.MARKET,
             volume=0.05,
+        )
+        adapter._connection.get_positions = AsyncMock(
+            return_value=[
+                {"id": "99002", "type": "POSITION_TYPE_SELL", "symbol": "EURUSD", "volume": 0.05, "openPrice": 1.1000}
+            ]
         )
         result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         assert result.ok
@@ -467,13 +510,18 @@ class TestAdapterPlaceOrder:
             volume=0.1,
             idempotency_key="abc-123",
         )
+        adapter._connection.get_positions = AsyncMock(
+            return_value=[
+                {"id": "99001", "type": "POSITION_TYPE_BUY", "symbol": "EURUSD", "volume": 0.1, "openPrice": 1.1002}
+            ]
+        )
         asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
         call_args = adapter._connection.create_market_buy_order.call_args
         # Options dict is the last positional arg passed to the SDK method
         all_args = call_args[0]
         options = next((a for a in all_args if isinstance(a, dict)), None)
         assert options is not None, f"no dict arg found in call_args: {all_args}"
-        assert "abc-123" in options["comment"]
+        assert options.get("clientId") == "abc-123"
 
     def test_order_failure_returns_error(self, adapter):
         _wire_adapter(adapter)
@@ -490,6 +538,60 @@ class TestAdapterPlaceOrder:
         assert not result.ok
         assert "insufficient margin" in result.error
 
+    def test_order_retry_on_transient_failure(self, adapter):
+        _wire_adapter(adapter)
+        # Simulate transient failure on first 2 attempts, success on 3rd
+        call_count = 0
+
+        async def failing_order_call(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                raise Exception("connection timeout")  # noqa: TRY002
+            return {"orderId": "retry-123", "description": "TRADE_RETCODE_DONE", "numericCode": 10009}
+
+        adapter._connection.create_market_buy_order = AsyncMock(side_effect=failing_order_call)
+        # For verification: order won't be found in positions (LIMIT-like result)
+        adapter._connection.get_positions = AsyncMock(
+            return_value=[
+                {"id": "retry-123", "type": "POSITION_TYPE_BUY", "symbol": "EURUSD", "volume": 0.1, "openPrice": 1.1000}
+            ]
+        )
+
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+        )
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
+
+        # Should succeed on 3rd attempt
+        assert result.ok
+        assert result.order_id == "retry-123"
+        assert call_count == 3  # Verify it retried twice before succeeding
+
+    def test_order_retry_exhausted_returns_error(self, adapter):
+        _wire_adapter(adapter)
+        # Simulate persistent failure on all attempts
+        adapter._connection.create_market_buy_order = AsyncMock(
+            side_effect=Exception("persistent network error"),
+        )
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+        )
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
+
+        # Should fail after all retries exhausted
+        assert not result.ok
+        assert "Failed after 4 attempts" in result.error
+        assert "persistent network error" in result.error
+        # Verify it tried 4 times (1 initial + 3 retries)
+        assert adapter._connection.create_market_buy_order.call_count == 4
+
 
 class TestAdapterModifyOrder:
     def test_modify_sl_tp(self, adapter):
@@ -503,6 +605,42 @@ class TestAdapterModifyOrder:
             stop_loss=1.0900,
             take_profit=1.1200,
         )
+
+    def test_modify_retry_on_failure(self, adapter):
+        """Gap 1 fix: modify_order now has retry logic."""
+        _wire_adapter(adapter)
+        call_count = 0
+
+        async def failing_modify(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                raise Exception("temporary error")  # noqa: TRY002
+            return {
+                "numericCode": 10009,
+                "stringCode": "TRADE_RETCODE_DONE",
+                "positionId": "12345",
+            }
+
+        adapter._connection.modify_position = AsyncMock(side_effect=failing_modify)
+        result = asyncio.new_event_loop().run_until_complete(
+            adapter.modify_order("12345", stop_loss=1.0900),
+        )
+        assert result.ok
+        assert call_count == 3
+
+    def test_modify_retry_exhausted(self, adapter):
+        """Gap 1 fix: modify_order returns error after exhausting retries."""
+        _wire_adapter(adapter)
+        adapter._connection.modify_position = AsyncMock(
+            side_effect=Exception("persistent error"),
+        )
+        result = asyncio.new_event_loop().run_until_complete(
+            adapter.modify_order("12345", stop_loss=1.0900),
+        )
+        assert not result.ok
+        assert "Failed after 4 attempts" in result.error
+        assert adapter._connection.modify_position.call_count == 4
 
 
 class TestAdapterClosePosition:
@@ -521,6 +659,61 @@ class TestAdapterClosePosition:
         )
         assert result.ok
         adapter._connection.close_position_partially.assert_called_once_with("12345", 0.05)
+
+    def test_close_retry_on_failure(self, adapter):
+        """Gap 1 fix: close_position now has retry logic."""
+        _wire_adapter(adapter)
+        call_count = 0
+
+        async def failing_close(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                raise Exception("connection timeout")  # noqa: TRY002
+            return {
+                "numericCode": 10009,
+                "stringCode": "TRADE_RETCODE_DONE",
+                "positionId": "12345",
+            }
+
+        adapter._connection.close_position = AsyncMock(side_effect=failing_close)
+        result = asyncio.new_event_loop().run_until_complete(
+            adapter.close_position("12345"),
+        )
+        assert result.ok
+        assert call_count == 2
+
+
+class TestAdapterCancelOrder:
+    def test_cancel_order(self, adapter):
+        _wire_adapter(adapter)
+        result = asyncio.new_event_loop().run_until_complete(
+            adapter.cancel_order("55001"),
+        )
+        assert result.ok
+
+    def test_cancel_retry_on_failure(self, adapter):
+        """Gap 1 fix: cancel_order now has retry logic."""
+        _wire_adapter(adapter)
+        call_count = 0
+
+        async def failing_cancel(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                raise Exception("network error")  # noqa: TRY002
+            return {
+                "numericCode": 10009,
+                "stringCode": "TRADE_RETCODE_DONE",
+                "orderId": "55001",
+            }
+
+        adapter._connection.cancel_order = AsyncMock(side_effect=failing_cancel)
+        result = asyncio.new_event_loop().run_until_complete(
+            adapter.cancel_order("55001"),
+        )
+        assert result.ok
+        assert call_count == 2
 
 
 class TestAdapterHealthCheck:
@@ -548,6 +741,342 @@ class TestAdapterDisconnect:
         assert not adapter._connected
         assert adapter._connection is None
         assert adapter._account is None
+
+
+# ---------------------------------------------------------------------------
+# Execution Gap Fix Tests
+# ---------------------------------------------------------------------------
+
+
+class TestCircuitBreaker:
+    """Gap 3 fix: Circuit breaker integration tests."""
+
+    def test_circuit_breaker_exists(self, adapter):
+        """Adapter has a circuit breaker instance."""
+        assert adapter.breaker is not None
+        assert adapter.breaker.name == "metaapi_broker"
+
+    def test_circuit_breaker_config(self, adapter):
+        """Breaker uses config values."""
+        assert adapter.breaker.failure_threshold == 5
+        assert adapter.breaker.reset_timeout_seconds == 60.0
+
+    def test_circuit_breaker_trips_after_failures(self, adapter):
+        """Breaker opens after enough failures, blocking subsequent calls."""
+        _wire_adapter(adapter)
+        adapter._connection.modify_position = AsyncMock(
+            side_effect=Exception("error"),
+        )
+        adapter._config.retry_max_attempts = 0  # no retries for this test
+        adapter._config.circuit_breaker_threshold = 3
+
+        # Reset breaker with lower threshold
+        from agents.circuit_breakers import SimpleCircuitBreaker
+
+        adapter._breaker = SimpleCircuitBreaker(
+            name="metaapi_broker",
+            failure_threshold=3,
+            reset_timeout_seconds=60.0,
+            redis_client=None,
+        )
+
+        # Exhaust the circuit breaker
+        for i in range(4):
+            asyncio.new_event_loop().run_until_complete(
+                adapter.modify_order(f"order-{i}", stop_loss=1.0),
+            )
+
+        # Next call should be rejected by circuit breaker
+        result = asyncio.new_event_loop().run_until_complete(
+            adapter.modify_order("order-blocked", stop_loss=1.0),
+        )
+        assert not result.ok
+        assert "Circuit breaker" in result.error
+
+    def test_circuit_breaker_records_success(self, adapter):
+        """Successful operations reset the circuit breaker."""
+        _wire_adapter(adapter)
+        result = asyncio.new_event_loop().run_until_complete(
+            adapter.modify_order("12345", stop_loss=1.0900),
+        )
+        assert result.ok
+        # Breaker should still be closed
+        assert adapter.breaker.state == "CLOSED"
+
+
+class TestAutoReconnect:
+    """Gap 4 fix: Auto-reconnect tests."""
+
+    def test_reconnect_on_disconnected_health_check(self, adapter):
+        """Health check triggers auto-reconnect when disconnected."""
+        adapter._connected = False
+        adapter._connection = None
+
+        # Mock connect to succeed
+        async def mock_connect():
+            adapter._connected = True
+            adapter._connection = _make_mock_connection()
+            return MagicMock(connected=True, state=HealthState.OK)
+
+        adapter.connect = AsyncMock(side_effect=mock_connect)
+
+        h = asyncio.new_event_loop().run_until_complete(adapter.health_check())
+        assert h.connected
+        assert "reconnected" in h.message
+
+    def test_reconnect_exhausted(self, adapter):
+        """Auto-reconnect gives up after max attempts."""
+        adapter._connected = False
+        adapter._connection = None
+
+        # Mock connect to always fail
+        adapter.connect = AsyncMock(return_value=MagicMock(connected=False))
+
+        h = asyncio.new_event_loop().run_until_complete(adapter.health_check())
+        assert not h.connected
+        assert adapter.connect.call_count == adapter._config.reconnect_max_attempts
+
+    def test_reconnect_on_connection_error_during_operation(self, adapter):
+        """Operations trigger reconnect on ConnectionError."""
+        _wire_adapter(adapter)
+        call_count = 0
+
+        async def connection_then_success(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionError("lost connection")
+            return {
+                "numericCode": 10009,
+                "stringCode": "TRADE_RETCODE_DONE",
+                "positionId": "12345",
+            }
+
+        adapter._connection.modify_position = AsyncMock(side_effect=connection_then_success)
+
+        # Mock reconnect to succeed and restore connection
+        original_conn = adapter._connection
+
+        async def mock_reconnect():
+            adapter._connected = True
+            adapter._connection = original_conn
+            return True
+
+        adapter._auto_reconnect = AsyncMock(side_effect=mock_reconnect)
+
+        asyncio.new_event_loop().run_until_complete(
+            adapter.modify_order("12345", stop_loss=1.0900),
+        )
+        # Should have attempted reconnect
+        adapter._auto_reconnect.assert_called()
+
+    def test_no_concurrent_reconnect(self, adapter):
+        """Prevents concurrent reconnect attempts."""
+        adapter._reconnecting = True
+        result = asyncio.new_event_loop().run_until_complete(adapter._auto_reconnect())
+        assert result is False
+
+
+class TestSlippageControl:
+    """Gap 5 fix: Slippage parameter tests."""
+
+    def test_slippage_from_order_request(self, adapter):
+        """Per-order slippage is passed to MetaApi options."""
+        _wire_adapter(adapter)
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+            max_slippage_pips=2.5,
+        )
+        adapter._connection.get_positions = AsyncMock(
+            return_value=[
+                {"id": "99001", "type": "POSITION_TYPE_BUY", "symbol": "EURUSD", "volume": 0.1, "openPrice": 1.1000}
+            ]
+        )
+        asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
+
+        call_args = adapter._connection.create_market_buy_order.call_args[0]
+        options = next((a for a in call_args if isinstance(a, dict)), None)
+        assert options is not None
+        assert options["slippage"] == 25  # 2.5 pips * 10 = 25 points
+
+    def test_no_slippage_when_none(self, adapter):
+        """No slippage key in options when not set."""
+        _wire_adapter(adapter)
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+        )
+        adapter._connection.get_positions = AsyncMock(
+            return_value=[
+                {"id": "99001", "type": "POSITION_TYPE_BUY", "symbol": "EURUSD", "volume": 0.1, "openPrice": 1.1000}
+            ]
+        )
+        asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
+
+        call_args = adapter._connection.create_market_buy_order.call_args[0]
+        options = next((a for a in call_args if isinstance(a, dict)), None)
+        # Options should either be None or not contain slippage
+        if options is not None:
+            assert "slippage" not in options
+
+    def test_zero_slippage_not_sent(self, adapter):
+        """Zero slippage means disabled, not sent to broker."""
+        _wire_adapter(adapter)
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+            max_slippage_pips=0.0,
+        )
+        adapter._connection.get_positions = AsyncMock(
+            return_value=[
+                {"id": "99001", "type": "POSITION_TYPE_BUY", "symbol": "EURUSD", "volume": 0.1, "openPrice": 1.1000}
+            ]
+        )
+        asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
+
+        call_args = adapter._connection.create_market_buy_order.call_args[0]
+        options = next((a for a in call_args if isinstance(a, dict)), None)
+        if options is not None:
+            assert "slippage" not in options
+
+    def test_slippage_in_order_request_model(self):
+        """OrderRequest accepts max_slippage_pips field."""
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+            max_slippage_pips=3.0,
+        )
+        assert req.max_slippage_pips == 3.0
+
+    def test_slippage_default_none(self):
+        """OrderRequest defaults max_slippage_pips to None."""
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+        )
+        assert req.max_slippage_pips is None
+
+
+class TestOrderVerification:
+    """Gap 2 fix: Post-order verification polling tests."""
+
+    def test_verification_finds_position(self, adapter):
+        """Successful verification populates fill_price and filled_volume."""
+        _wire_adapter(adapter)
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+        )
+        # Mock position matching order_id
+        adapter._connection.get_positions = AsyncMock(
+            return_value=[
+                {
+                    "id": "99001",
+                    "type": "POSITION_TYPE_BUY",
+                    "symbol": "EURUSD",
+                    "volume": 0.1,
+                    "openPrice": 1.10025,
+                }
+            ]
+        )
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
+        assert result.ok
+        assert result.fill_price == 1.10025
+        assert result.filled_volume == 0.1
+
+    def test_verification_timeout(self, adapter):
+        """Verification timeout adds warning but doesn't fail the order."""
+        _wire_adapter(adapter)
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+        )
+        # Mock no matching position found
+        adapter._connection.get_positions = AsyncMock(return_value=[])
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
+        assert result.ok  # Still OK — order was placed
+        assert "verification timed out" in result.error
+
+    def test_no_verification_for_limit_orders(self, adapter):
+        """Limit orders skip post-order verification."""
+        _wire_adapter(adapter)
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            volume=0.1,
+            price=1.0900,
+        )
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
+        assert result.ok
+        # get_positions should not have been called for verification
+        # (only the default mock from _wire_adapter, not extra verification calls)
+        assert result.fill_price is None
+
+    def test_verification_handles_poll_error(self, adapter):
+        """Verification gracefully handles poll errors."""
+        _wire_adapter(adapter)
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=0.1,
+        )
+        # Mock position poll raises errors
+        adapter._connection.get_positions = AsyncMock(side_effect=Exception("poll error"))
+        result = asyncio.new_event_loop().run_until_complete(adapter.place_order(req))
+        assert result.ok  # Order placement succeeded
+        assert "verification timed out" in result.error
+
+
+class TestConfigExecutionGaps:
+    """Config parameter tests for execution gap fields."""
+
+    def test_metaapi_config_defaults(self):
+        """MetaApiConfig has sensible defaults for execution gap fields."""
+        cfg = MetaApiConfig()
+        assert cfg.retry_max_attempts == 3
+        assert cfg.circuit_breaker_threshold == 5
+        assert cfg.circuit_breaker_reset_seconds == 60.0
+        assert cfg.reconnect_max_attempts == 3
+        assert cfg.reconnect_backoff_base == 2.0
+        assert cfg.order_verify_timeout == 5.0
+        assert cfg.order_verify_interval == 0.5
+
+    def test_risk_config_slippage(self):
+        from novatrade.config import RiskConfig
+
+        cfg = RiskConfig()
+        assert cfg.max_slippage_pips == 3.0
+
+    def test_metaapi_config_from_env(self):
+        """from_env still works with new fields defaulting."""
+        import os
+
+        os.environ["METAAPI_TOKEN"] = "test-tok"
+        os.environ["METAAPI_ACCOUNT_ID"] = "test-acct"
+        try:
+            cfg = MetaApiConfig.from_env()
+            assert cfg.token == "test-tok"
+            assert cfg.retry_max_attempts == 3  # default preserved
+        finally:
+            os.environ.pop("METAAPI_TOKEN", None)
+            os.environ.pop("METAAPI_ACCOUNT_ID", None)
 
 
 # ---------------------------------------------------------------------------
