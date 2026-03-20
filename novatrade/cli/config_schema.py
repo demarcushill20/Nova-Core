@@ -50,6 +50,12 @@ class StrategyConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    # --- Strategy type selector -------------------------------------------
+    strategy_type: str = Field(
+        default="irb",
+        description="Strategy type identifier. Must match a registered strategy name.",
+    )
+
     # --- Signal parameters (Level 1) ------------------------------------
     irb_threshold: float = Field(default=0.45, ge=0.30, le=0.60)
     ema_period: int = Field(default=20, ge=10, le=50)

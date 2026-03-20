@@ -18,6 +18,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from novatrade.backtest.environment import DEFAULT_ENVIRONMENT, BacktestEnvironment
 from novatrade.backtest.metrics import (
@@ -682,3 +683,204 @@ class IRBBacktester:
         else:
             # Simple ratio mapping: every 4 H1 bars = 1 H4 bar
             return [min(i // 4, len(h4_candles) - 1) for i in range(n)]
+
+
+# ---------------------------------------------------------------------------
+# Strategy-agnostic backtester adapter
+# ---------------------------------------------------------------------------
+
+
+class StrategyBacktesterAdapter:
+    """Generic backtester that delegates signal logic to a BaseStrategy.
+
+    This adapter wraps any ``BaseStrategy`` implementation into a backtester
+    with the same ``run(h1_candles, h4_candles) -> BacktestResult`` interface
+    as ``IRBBacktester``.  It uses the strategy's ``check_entry`` and
+    ``check_exit`` methods for bar-by-bar simulation.
+    """
+
+    def __init__(self, strategy: object, env: BacktestEnvironment | None = None) -> None:
+        from novatrade.strategies.base import BaseStrategy as _BS
+
+        if not isinstance(strategy, _BS):
+            raise TypeError(f"Expected BaseStrategy, got {type(strategy).__name__}")
+        self.strategy = strategy
+        self.env = env or DEFAULT_ENVIRONMENT
+        self._equity = self.env.initial_equity
+        self._trade_counter = 0
+
+    def run(
+        self,
+        h1_candles: list[Candle],
+        h4_candles: list[Candle] | None = None,
+    ) -> BacktestResult:
+        """Run bar-by-bar simulation using the pluggable strategy.
+
+        Args:
+            h1_candles: Primary timeframe candles.
+            h4_candles: Higher timeframe candles (optional, passed to strategy).
+
+        Returns:
+            BacktestResult with completed trades.
+        """
+        n = len(h1_candles)
+        if n == 0:
+            return BacktestResult(total_bars=0, final_equity=self._equity, environment=self.env)
+
+        indicators = self.strategy.compute_indicators(h1_candles)
+
+        trades: list[CompletedTrade] = []
+        signals: list[SignalRecord] = []
+        position: dict | None = None
+        pending_entry: dict | None = None  # simple 1-bar delay model
+
+        for i in range(n):
+            # Check exit for open position
+            if position is not None:
+                exit_sig = self.strategy.check_exit(i, h1_candles, indicators, position)
+                if exit_sig is not None:
+                    trade = self._close_trade(position, exit_sig, h1_candles[i])
+                    trades.append(trade)
+                    position = None
+
+            # Fill pending entry on this bar (1-bar delay)
+            if pending_entry is not None and position is None:
+                position = {
+                    "side": pending_entry["side"],
+                    "entry_price": pending_entry["entry_price"],
+                    "stop_loss": pending_entry["stop_loss"],
+                    "entry_bar": i,
+                    "current_stop": pending_entry["stop_loss"],
+                    "best_close": h1_candles[i].close,
+                }
+                pending_entry = None
+
+            # Check for new entry signal (only if flat)
+            if position is None and pending_entry is None:
+                entry_sig = self.strategy.check_entry(i, h1_candles, indicators, h4_candles)
+                if entry_sig is not None:
+                    signals.append(
+                        SignalRecord(
+                            bar_index=entry_sig.bar_index,
+                            side=TradeSide.LONG if entry_sig.side == "LONG" else TradeSide.SHORT,
+                        )
+                    )
+                    pending_entry = {
+                        "side": entry_sig.side,
+                        "entry_price": entry_sig.entry_price,
+                        "stop_loss": entry_sig.stop_loss,
+                    }
+
+            # Update position tracking
+            if position is not None:
+                bar = h1_candles[i]
+                if position["side"] == "LONG":
+                    position["best_close"] = max(position["best_close"], bar.close)
+                else:
+                    position["best_close"] = min(position["best_close"], bar.close)
+
+        # Close any remaining position at last bar
+        if position is not None:
+            from novatrade.strategies.base import ExitSignal
+
+            exit_sig_final = ExitSignal(bar_index=n - 1, exit_price=h1_candles[-1].close, reason="time_stop")
+            trade = self._close_trade(position, exit_sig_final, h1_candles[-1])
+            trades.append(trade)
+
+        return BacktestResult(
+            trades=trades,
+            signals=signals,
+            total_bars=n,
+            final_equity=self._equity,
+            environment=self.env,
+        )
+
+    def _close_trade(self, position: dict, exit_sig: Any, bar: Candle) -> CompletedTrade:
+        pip = self.env.pip_value
+        lot_val = self.env.pip_value_per_standard_lot
+
+        side = TradeSide.LONG if position["side"] == "LONG" else TradeSide.SHORT
+        entry_price = position["entry_price"]
+        exit_price = exit_sig.exit_price
+
+        if side == TradeSide.LONG:
+            pnl_pips = (exit_price - entry_price) / pip
+        else:
+            pnl_pips = (entry_price - exit_price) / pip
+
+        pnl_pips -= self.env.spread.total_cost_pips
+
+        risk_dollars = self._equity * self.env.risk_fraction
+        stop_distance_pips = abs(entry_price - position["stop_loss"]) / pip
+        if stop_distance_pips > 0:
+            volume = risk_dollars / (stop_distance_pips * lot_val)
+            volume = max(self.env.min_volume, min(self.env.max_volume, round(volume, 2)))
+        else:
+            volume = self.env.min_volume
+
+        pnl_usd = pnl_pips * volume * lot_val
+        pnl_usd -= self.env.spread.commission_per_lot_usd * volume * 2
+
+        risk_r = pnl_pips / stop_distance_pips if stop_distance_pips > 0 else 0.0
+
+        # Map exit reason
+        reason_map = {
+            "stop_loss": ExitReason.STOP_LOSS,
+            "trailing_stop": ExitReason.TRAILING_STOP,
+            "time_stop": ExitReason.TIME_STOP,
+            "signal_exit": ExitReason.TIME_STOP,  # closest enum match
+        }
+        exit_reason = reason_map.get(exit_sig.reason, ExitReason.TIME_STOP)
+
+        self._trade_counter += 1
+        trade = CompletedTrade(
+            trade_id=self._trade_counter,
+            side=side,
+            entry_bar=position["entry_bar"],
+            exit_bar=exit_sig.bar_index,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            stop_loss=position["stop_loss"],
+            volume=volume,
+            exit_reason=exit_reason,
+            pnl_pips=pnl_pips,
+            pnl_usd=pnl_usd,
+            risk_r=risk_r,
+        )
+        self._equity += pnl_usd
+        return trade
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+
+def create_backtester(
+    strategy_type: str,
+    env: BacktestEnvironment | None = None,
+) -> IRBBacktester | StrategyBacktesterAdapter:
+    """Create a backtester for the given strategy type.
+
+    For "irb", returns the battle-tested IRBBacktester (zero regression risk).
+    For other registered strategies, returns a StrategyBacktesterAdapter that
+    delegates to the corresponding BaseStrategy implementation.
+
+    Args:
+        strategy_type: Registered strategy name (e.g. "irb", "mean_reversion").
+        env: Optional BacktestEnvironment override.
+
+    Returns:
+        A backtester with a ``run(h1_candles, h4_candles)`` method.
+
+    Raises:
+        KeyError: If strategy_type is not registered.
+    """
+    if strategy_type == "irb":
+        return IRBBacktester(env=env)
+
+    from novatrade.strategies.registry import get_strategy
+
+    strategy_cls = get_strategy(strategy_type)
+    strategy = strategy_cls()
+    return StrategyBacktesterAdapter(strategy=strategy, env=env)
