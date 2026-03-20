@@ -51,6 +51,7 @@ class ExperimentRecord:
     status: str = "valid"
     created_at: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
     notes: str = ""
+    mutation_type: str = ""  # P4: "level1_perturbation", "level2_filter", "level3_structural"
 
     def __post_init__(self) -> None:
         if self.status not in _VALID_STATUSES:
@@ -78,6 +79,7 @@ _COLUMNS = [
     "status",
     "created_at",
     "notes",
+    "mutation_type",
 ]
 
 _CREATE_TABLE = """
@@ -101,7 +103,8 @@ CREATE TABLE IF NOT EXISTS experiments (
     max_drawdown_pct     REAL,
     status               TEXT NOT NULL DEFAULT 'valid',
     created_at           TEXT NOT NULL,
-    notes                TEXT NOT NULL DEFAULT ''
+    notes                TEXT NOT NULL DEFAULT '',
+    mutation_type        TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -109,6 +112,8 @@ _CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_campaign ON experiments(campaign_id);",
     "CREATE INDEX IF NOT EXISTS idx_status ON experiments(status);",
     "CREATE INDEX IF NOT EXISTS idx_scout ON experiments(scout_score);",
+    "CREATE INDEX IF NOT EXISTS idx_mutation_type ON experiments(mutation_type);",
+    "CREATE INDEX IF NOT EXISTS idx_parent ON experiments(parent_experiment_id);",
 ]
 
 
@@ -123,6 +128,8 @@ class ExperimentDB:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA busy_timeout=5000;")
         self._conn.execute(_CREATE_TABLE)
+        # Run migrations before creating indexes (indexes may reference new columns)
+        self._migrate_add_mutation_type()
         for idx_sql in _CREATE_INDEXES:
             self._conn.execute(idx_sql)
         self._conn.commit()
@@ -217,6 +224,59 @@ class ExperimentDB:
             ).fetchall()
         return [self._row_to_record(r) for r in rows]
 
+    # -- ancestry queries --
+
+    def get_children(self, parent_experiment_id: str) -> list[ExperimentRecord]:
+        """Get all direct children of a parent experiment."""
+        rows = self._conn.execute(
+            "SELECT * FROM experiments WHERE parent_experiment_id = ? ORDER BY created_at",
+            (parent_experiment_id,),
+        ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    def get_lineage(self, experiment_id: str) -> list[ExperimentRecord]:
+        """Trace the full ancestry chain from experiment_id back to root.
+
+        Returns list ordered root-first.
+        """
+        chain: list[ExperimentRecord] = []
+        current = experiment_id
+        seen: set[str] = set()
+
+        while current and current not in seen:
+            seen.add(current)
+            record = self.get(current)
+            if record is None:
+                break
+            chain.append(record)
+            current = record.parent_experiment_id  # type: ignore[assignment]
+
+        chain.reverse()
+        return chain
+
+    def count_by_mutation_type(self, campaign_id: str) -> dict[str, int]:
+        """Count experiments per mutation_type within a campaign."""
+        rows = self._conn.execute(
+            "SELECT mutation_type, COUNT(*) FROM experiments WHERE campaign_id = ? GROUP BY mutation_type",
+            (campaign_id,),
+        ).fetchall()
+        return {row[0]: int(row[1]) for row in rows}
+
+    def list_by_mutation_type(
+        self,
+        campaign_id: str,
+        mutation_type: str,
+        limit: int = 100,
+    ) -> list[ExperimentRecord]:
+        """List experiments of a specific mutation type in a campaign."""
+        rows = self._conn.execute(
+            "SELECT * FROM experiments WHERE campaign_id = ? AND mutation_type = ? ORDER BY scout_score DESC LIMIT ?",
+            (campaign_id, mutation_type, limit),
+        ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    # -- export --
+
     def export_tsv(self, campaign_id: str, output_path: Path) -> int:
         """Export campaign experiments as Karpathy-compatible TSV. Returns row count."""
         output_path = Path(output_path)
@@ -250,6 +310,15 @@ class ExperimentDB:
                 os.unlink(tmp_path)
             raise
         return len(rows)
+
+    # -- migrations --
+
+    def _migrate_add_mutation_type(self) -> None:
+        """Add mutation_type column to existing databases that lack it."""
+        cursor = self._conn.execute("PRAGMA table_info(experiments)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "mutation_type" not in columns:
+            self._conn.execute("ALTER TABLE experiments ADD COLUMN mutation_type TEXT NOT NULL DEFAULT ''")
 
     # -- helpers --
 
