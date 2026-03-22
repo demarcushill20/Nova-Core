@@ -624,7 +624,7 @@ class RiskEngine:
         stop_loss: float,
     ) -> None:
         """Record a trade fill and start position risk tracking."""
-        self._gate.record_trade(symbol, side.value)
+        self._gate.record_trade(symbol, side.value, volume)
 
         self._position_risks[position_id] = PositionRiskState(
             position_id=position_id,
@@ -694,6 +694,14 @@ class RiskEngine:
             exit_reason,
             self._current_equity,
         )
+
+    def record_server_request(self, operation: str) -> None:
+        """Record a non-trade server request for FTMO daily counter."""
+        self._gate.record_server_request(operation)
+
+    def save_ftmo_state(self) -> None:
+        """Persist FTMO compliance state for crash recovery."""
+        self._gate.save_ftmo_state()
 
     # ------------------------------------------------------------------
     # Position-level risk monitoring

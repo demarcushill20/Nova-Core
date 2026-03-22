@@ -349,6 +349,12 @@ class OpsMonitor:
         # 5. Risk state alert check
         self._check_risk_alerts(result)
 
+        # 6. Persist FTMO compliance state (crash recovery)
+        try:
+            self._risk.save_ftmo_state()
+        except Exception as exc:
+            log.debug("FTMO state save failed: %s", exc)
+
         result.elapsed_ms = (time.monotonic() - t0) * 1000
         self._record_cycle(result)
         return result

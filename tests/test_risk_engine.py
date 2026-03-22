@@ -361,3 +361,66 @@ class TestMFEMAETracking:
 
         prs = engine.update_position_risk("pos1", 1.0970, 0.002, 5)
         assert prs.max_adverse_excursion == pytest.approx(30.0, abs=1.0)
+
+
+# ---------------------------------------------------------------------------
+# FTMO compliance wiring
+# ---------------------------------------------------------------------------
+
+
+class TestRiskEngineFtmoWiring:
+    """Verify FTMO compliance features are properly wired through RiskEngine."""
+
+    def test_on_trade_fill_passes_volume_to_lot_checker(self):
+        """on_trade_fill must pass volume to PreTradeGate.record_trade."""
+        engine = RiskEngine(_cfg())
+        engine.initialize(_account())
+        initial_count = len(engine._gate._lot_checker._history)
+        engine.on_trade_fill("pos1", "EURUSD", OrderSide.BUY, 0.15, 1.1000, 1.0950)
+
+        # The lot checker should have one new entry with the correct volume
+        checker = engine._gate._lot_checker
+        assert len(checker._history) == initial_count + 1
+        assert checker._history[-1].volume == 0.15
+
+    def test_record_server_request_increments_counter(self):
+        """record_server_request should increment the FTMO request counter."""
+        engine = RiskEngine(_cfg())
+        engine.initialize(_account())
+        initial_count = engine._gate._request_counter._count
+
+        engine.record_server_request("modify_sl")
+        engine.record_server_request("cancel_order")
+
+        assert engine._gate._request_counter._count == initial_count + 2
+
+    def test_save_ftmo_state_delegates_to_gate(self):
+        """save_ftmo_state should persist all three FTMO compliance states."""
+        from unittest.mock import patch
+
+        from novatrade.risk.ftmo_compliance import (
+            LotSizeConsistencyChecker,
+            ServerRequestCounter,
+            TradingDaysTracker,
+        )
+
+        engine = RiskEngine(_cfg())
+        engine.initialize(_account())
+
+        with (
+            patch.object(LotSizeConsistencyChecker, "save_state") as lot_save,
+            patch.object(ServerRequestCounter, "save_state") as req_save,
+            patch.object(TradingDaysTracker, "save_state") as days_save,
+        ):
+            engine.save_ftmo_state()
+            lot_save.assert_called_once()
+            req_save.assert_called_once()
+            days_save.assert_called_once()
+
+    def test_on_trade_fill_records_trading_day(self):
+        """on_trade_fill should record the trading day for min-days tracker."""
+        engine = RiskEngine(_cfg())
+        engine.initialize(_account())
+        engine.on_trade_fill("pos1", "EURUSD", OrderSide.BUY, 0.10, 1.1000, 1.0950)
+
+        assert engine._gate._days_tracker.days_traded == 1

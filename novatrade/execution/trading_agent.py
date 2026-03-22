@@ -544,6 +544,7 @@ class TradingAgent:
         if action == AlertAction.REPLACE_STOP_ORDER and self._pending_order_id:
             try:
                 await self._adapter.cancel_order(self._pending_order_id)
+                self._risk.record_server_request("cancel_for_replace")
                 log.info(
                     "cancelled pending order %s for replacement",
                     self._pending_order_id,
@@ -720,6 +721,9 @@ class TradingAgent:
                 elapsed_ms=elapsed,
             )
 
+        # Track FTMO server request
+        self._risk.record_server_request("modify_sl")
+
         log.info(
             "SL modified: position=%s old=%.5f new=%.5f",
             self._position_id,
@@ -796,6 +800,9 @@ class TradingAgent:
             )
             # Transition to FLAT regardless — the pending order may have
             # already expired or filled on the broker side.
+
+        # Track FTMO server request
+        self._risk.record_server_request("cancel_order")
 
         # State transition: PENDING_X -> FLAT
         self._state = AgentState.FLAT
@@ -884,7 +891,8 @@ class TradingAgent:
                 elapsed_ms=elapsed,
             )
 
-        # Notify risk engine
+        # Track FTMO server request + notify risk engine
+        self._risk.record_server_request("close_position")
         self._risk.on_trade_close(
             position_id=old_position,
             symbol=broker_symbol,
