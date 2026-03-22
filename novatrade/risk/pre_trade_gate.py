@@ -34,6 +34,7 @@ from novatrade.risk.ftmo_compliance import (
     ServerRequestCounter,
     TradingDaysTracker,
 )
+from novatrade.risk.position_sizer import PositionSizer
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
@@ -67,6 +68,11 @@ class PreTradeGate:
         self._request_counter = ServerRequestCounter()
         # FTMO compliance: minimum trading days tracker
         self._days_tracker = TradingDaysTracker()
+        # FTMO compliance: position sizer for volume cross-check
+        self._sizer = PositionSizer(
+            min_lot=self._risk.min_volume_per_trade,
+            max_lot=self._risk.max_volume_per_trade,
+        )
         # Attempt to restore persisted state from prior session
         self._lot_checker.load_state()
         self._request_counter.load_state()
@@ -102,6 +108,7 @@ class PreTradeGate:
         checks.append(self._lot_checker.check(request.volume))
         checks.append(self._request_counter.check())
         checks.append(self._check_stop_loss(request))
+        checks.append(self._check_volume_sizing(request, account))
         checks.append(self._check_max_positions(positions))
         checks.append(self._check_daily_trade_count(now))
         checks.append(self._check_cooldown(request, now))
@@ -282,6 +289,52 @@ class PreTradeGate:
             name="volume_bounds",
             passed=True,
             detail=f"volume={request.volume} within [{min_vol}, {max_vol}]",
+        )
+
+    def _check_volume_sizing(self, request: OrderRequest, account: AccountState) -> RiskCheckResult:
+        """Cross-check requested volume against the 1% equity risk model.
+
+        Requires both entry price and stop-loss to be set.  If either is
+        missing, the check passes (informational only) because not all
+        order flows provide both values at gate time.
+        """
+        if request.price is None or request.stop_loss is None:
+            return RiskCheckResult(
+                name="volume_sizing",
+                passed=True,
+                detail="price or stop_loss not set — sizing cross-check skipped",
+            )
+
+        if account.equity <= 0:
+            return RiskCheckResult(
+                name="volume_sizing",
+                passed=True,
+                detail="equity <= 0 — sizing cross-check skipped",
+            )
+
+        try:
+            calculated = self._sizer.calculate(
+                equity=account.equity,
+                entry=request.price,
+                stop=request.stop_loss,
+            )
+        except ValueError as exc:
+            return RiskCheckResult(
+                name="volume_sizing",
+                passed=True,
+                detail=f"sizing calculation failed: {exc} — skipped",
+            )
+
+        ok, reason = self._sizer.validate(
+            requested=request.volume,
+            calculated=calculated,
+            tolerance=0.25,
+        )
+
+        return RiskCheckResult(
+            name="volume_sizing",
+            passed=ok,
+            detail=reason,
         )
 
     def _check_stop_loss(self, request: OrderRequest) -> RiskCheckResult:
