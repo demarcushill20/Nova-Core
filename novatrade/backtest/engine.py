@@ -174,6 +174,27 @@ def compute_adx(candles: list[Candle], period: int) -> list[float]:
     return adx
 
 
+def compute_bbw(closes: list[float], period: int = 20) -> list[float]:
+    """Compute Bollinger Band Width (BBW) as (upper - lower) / middle.
+
+    Low BBW indicates a ranging/compressed market (squeeze).
+    Returns same-length list, NaN-padded for warmup.
+    """
+    n = len(closes)
+    bbw = [float("nan")] * n
+    if n < period:
+        return bbw
+    for i in range(period - 1, n):
+        window = closes[i - period + 1 : i + 1]
+        sma = sum(window) / period
+        if sma <= 0:
+            continue
+        variance = sum((x - sma) ** 2 for x in window) / period
+        std = variance**0.5
+        bbw[i] = (2 * std) / sma  # (upper - lower) / middle = 4*std/sma simplified
+    return bbw
+
+
 # ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
@@ -258,6 +279,11 @@ class IRBBacktester:
                 vals = [atr_h1[k] for k in range(j - ma_period + 1, j + 1) if not math.isnan(atr_h1[k])]
                 if len(vals) == ma_period:
                     atr_sma[j] = sum(vals) / ma_period
+
+        # Bollinger Band Width for Tier 1 regime gate
+        self._bbw: list[float] = []
+        if self.env.use_regime_gate:
+            self._bbw = compute_bbw(h1_closes, self.env.regime_bbw_period)
 
         # Pre-compute H4 EMA
         h4_closes = [c.close for c in h4_candles]
@@ -502,6 +528,13 @@ class IRBBacktester:
         if overext_ratio > e.overextension_threshold:
             self._rejections.overextension_filter += 1
             return
+
+        # --- Tier 1 regime gate: skip when BBW indicates ranging/squeeze ---
+        if e.use_regime_gate and self._bbw and i < len(self._bbw):
+            bbw_val = self._bbw[i]
+            if not math.isnan(bbw_val) and bbw_val < e.regime_bbw_threshold:
+                self._rejections.regime_gate += 1
+                return
 
         # --- All filters passed: record signal ---
         self._signals.append(

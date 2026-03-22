@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from novatrade.backtest.engine import compute_adx, compute_atr, compute_ema
+from novatrade.backtest.engine import compute_adx, compute_atr, compute_bbw, compute_ema
 from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
 from novatrade.strategies.base import BaseStrategy, EntrySignal, ExitSignal
@@ -39,11 +39,14 @@ class IRBStrategy(BaseStrategy):
             return {"ema": [], "atr": [], "adx": []}
 
         closes = [c.close for c in candles]
-        return {
+        indicators = {
             "ema": compute_ema(closes, self.env.ema_period),
             "atr": compute_atr(candles, self.env.atr_period),
             "adx": compute_adx(candles, self.env.adx_period),
         }
+        if self.env.use_regime_gate:
+            indicators["bbw"] = compute_bbw(closes, self.env.regime_bbw_period)
+        return indicators
 
     def generate_signals(self, candles: list[Candle], indicators: dict[str, list[float]]) -> list[EntrySignal]:
         """Scan all bars for IRB entry signals."""
@@ -122,6 +125,12 @@ class IRBStrategy(BaseStrategy):
         # --- Overextension filter ---
         if rng / atr[i] > e.overextension_threshold:
             return None
+
+        # --- Tier 1 regime gate: skip when BBW indicates ranging/squeeze ---
+        if e.use_regime_gate:
+            bbw = indicators.get("bbw", [])
+            if i < len(bbw) and not math.isnan(bbw[i]) and bbw[i] < e.regime_bbw_threshold:
+                return None
 
         # --- Compute entry/stop levels ---
         if side == "LONG":

@@ -123,6 +123,7 @@ class FilterRejection:
     session_filter: int = 0  # v4: rejected by session hours
     volatility_filter: int = 0  # v4: rejected by low-volatility regime
     circuit_breaker: int = 0  # v4: rejected by consecutive-loss breaker
+    regime_gate: int = 0  # Tier 1: rejected by BBW ranging regime gate
 
 
 # ---------------------------------------------------------------------------
@@ -527,9 +528,9 @@ def _compute_sharpe_sortino(
         sharpe = 0.0
 
     # Sortino ratio: (mean_return - rf) / downside_deviation * sqrt(trades_per_year)
-    # Downside deviation uses ALL returns: sqrt(1/N * sum(min(r - target, 0)^2))
-    # Target is the per-trade risk-free rate.
-    downside_squares = [min(r - rf_per_trade, 0.0) ** 2 for r in returns]
+    # Downside deviation uses ALL returns: sqrt(1/N * sum(min(r, 0)^2))
+    # Target = 0 (industry standard MAR for trade-return Sortino).
+    downside_squares = [min(r, 0.0) ** 2 for r in returns]
     downside_dev = (sum(downside_squares) / len(returns)) ** 0.5
 
     if downside_dev > 0:
