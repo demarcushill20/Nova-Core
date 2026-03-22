@@ -15,6 +15,7 @@ import pytest
 from novatrade.risk.ftmo_compliance import (
     LotSizeConsistencyChecker,
     ServerRequestCounter,
+    TradingDaysTracker,
 )
 
 # =========================================================================
@@ -282,6 +283,142 @@ class TestServerRequestCounter:
 
 
 # =========================================================================
+# Trading Days Tracker
+# =========================================================================
+
+
+class TestTradingDaysTracker:
+    """Tests for the FTMO minimum trading days tracker."""
+
+    def test_starts_empty(self):
+        """Tracker starts with zero trading days."""
+        tracker = TradingDaysTracker()
+        assert tracker.days_traded == 0
+        assert tracker.days_remaining == 4
+        assert not tracker.requirement_met
+
+    def test_record_trade_day_default_today(self):
+        """Recording without explicit date uses today UTC."""
+        tracker = TradingDaysTracker()
+        tracker.record_trade_day()
+        assert tracker.days_traded == 1
+
+    def test_record_trade_day_explicit(self):
+        """Recording with explicit date string."""
+        tracker = TradingDaysTracker()
+        tracker.record_trade_day("2026-03-01")
+        tracker.record_trade_day("2026-03-02")
+        assert tracker.days_traded == 2
+
+    def test_duplicate_dates_not_counted(self):
+        """Same date recorded twice counts as one day."""
+        tracker = TradingDaysTracker()
+        tracker.record_trade_day("2026-03-01")
+        tracker.record_trade_day("2026-03-01")
+        tracker.record_trade_day("2026-03-01")
+        assert tracker.days_traded == 1
+
+    def test_requirement_met_at_threshold(self):
+        """Requirement is met when days_traded >= min_days_required."""
+        tracker = TradingDaysTracker(min_days_required=3)
+        tracker.record_trade_day("2026-03-01")
+        tracker.record_trade_day("2026-03-02")
+        assert not tracker.requirement_met
+        tracker.record_trade_day("2026-03-03")
+        assert tracker.requirement_met
+        assert tracker.days_remaining == 0
+
+    def test_requirement_exceeded(self):
+        """Trading more than required still reports met."""
+        tracker = TradingDaysTracker(min_days_required=2)
+        for day in range(1, 6):
+            tracker.record_trade_day(f"2026-03-{day:02d}")
+        assert tracker.requirement_met
+        assert tracker.days_remaining == 0
+        assert tracker.days_traded == 5
+
+    def test_days_remaining_decreases(self):
+        """days_remaining decreases as trading days are added."""
+        tracker = TradingDaysTracker(min_days_required=4)
+        assert tracker.days_remaining == 4
+        tracker.record_trade_day("2026-03-01")
+        assert tracker.days_remaining == 3
+        tracker.record_trade_day("2026-03-02")
+        assert tracker.days_remaining == 2
+
+    def test_trading_dates_sorted(self):
+        """trading_dates returns dates in sorted order."""
+        tracker = TradingDaysTracker()
+        tracker.record_trade_day("2026-03-15")
+        tracker.record_trade_day("2026-03-01")
+        tracker.record_trade_day("2026-03-10")
+        assert tracker.trading_dates == ["2026-03-01", "2026-03-10", "2026-03-15"]
+
+    def test_check_returns_progress(self):
+        """check() returns informational result showing progress."""
+        tracker = TradingDaysTracker(min_days_required=4)
+        tracker.record_trade_day("2026-03-01")
+        tracker.record_trade_day("2026-03-02")
+        result = tracker.check()
+        assert result.passed  # informational — never blocks
+        assert "2/4" in result.detail
+        assert "need 2 more" in result.detail
+
+    def test_check_returns_met(self):
+        """check() shows requirement met when threshold reached."""
+        tracker = TradingDaysTracker(min_days_required=2)
+        tracker.record_trade_day("2026-03-01")
+        tracker.record_trade_day("2026-03-02")
+        result = tracker.check()
+        assert result.passed
+        assert "requirement met" in result.detail
+
+    def test_save_and_load_state(self, tmp_path: Path):
+        """State persistence round-trips correctly."""
+        state_file = tmp_path / "trading_days.json"
+
+        t1 = TradingDaysTracker(
+            min_days_required=4,
+            challenge_start="2026-03-01",
+            challenge_end="2026-03-31",
+        )
+        t1.record_trade_day("2026-03-05")
+        t1.record_trade_day("2026-03-08")
+        t1.record_trade_day("2026-03-12")
+        t1.save_state(state_file)
+
+        t2 = TradingDaysTracker()
+        loaded = t2.load_state(state_file)
+        assert loaded is True
+        assert t2.days_traded == 3
+        assert t2.trading_dates == ["2026-03-05", "2026-03-08", "2026-03-12"]
+        assert t2.challenge_start == "2026-03-01"
+        assert t2.challenge_end == "2026-03-31"
+
+    def test_load_missing_file(self, tmp_path: Path):
+        """Loading from missing file returns False."""
+        tracker = TradingDaysTracker()
+        loaded = tracker.load_state(tmp_path / "nonexistent.json")
+        assert loaded is False
+
+    def test_load_corrupt_file(self, tmp_path: Path):
+        """Loading from corrupt file returns False."""
+        state_file = tmp_path / "trading_days.json"
+        state_file.write_text("{bad json!", encoding="utf-8")
+        tracker = TradingDaysTracker()
+        loaded = tracker.load_state(state_file)
+        assert loaded is False
+
+    def test_custom_min_days(self):
+        """Custom min_days_required works."""
+        tracker = TradingDaysTracker(min_days_required=10)
+        for day in range(1, 11):
+            tracker.record_trade_day(f"2026-03-{day:02d}")
+        assert tracker.requirement_met
+        assert tracker.days_remaining == 0
+
+
+# =========================================================================
 # Integration with PreTradeGate
 # =========================================================================
 
@@ -295,6 +432,7 @@ class TestPreTradeGateIntegration:
         with (
             patch.object(LotSizeConsistencyChecker, "load_state", return_value=0),
             patch.object(ServerRequestCounter, "load_state", return_value=False),
+            patch.object(TradingDaysTracker, "load_state", return_value=False),
         ):
             yield
 
@@ -378,17 +516,36 @@ class TestPreTradeGateIntegration:
         gate.record_server_request("close_position")
         assert gate._request_counter.count == 2
 
+    def test_min_trading_days_check_present(self, gate, order, account):
+        """Evaluate includes the min_trading_days check."""
+        decision = gate.evaluate(order, account, [])
+        check_names = [c.name for c in decision.checks]
+        assert "min_trading_days" in check_names
+
+    def test_min_trading_days_never_blocks(self, gate, order, account):
+        """min_trading_days check is informational — never causes DENY."""
+        decision = gate.evaluate(order, account, [])
+        days_check = next(c for c in decision.checks if c.name == "min_trading_days")
+        assert days_check.passed
+
+    def test_record_trade_updates_days_tracker(self, gate):
+        """record_trade should also record the trading day."""
+        gate.record_trade("EURUSD", "buy", volume=0.15)
+        assert gate._days_tracker.days_traded == 1
+
     def test_save_ftmo_state(self, gate, tmp_path: Path):
-        """save_ftmo_state persists both checkers."""
-        # Override state paths for testing
+        """save_ftmo_state persists all three FTMO checkers."""
         gate._lot_checker._history.append(
             __import__("novatrade.risk.ftmo_compliance", fromlist=["LotRecord"]).LotRecord(time.time(), 0.10, "EURUSD")
         )
         gate._request_counter.record("test_op")
+        gate._days_tracker.record_trade_day("2026-03-22")
         with (
             patch.object(LotSizeConsistencyChecker, "save_state") as lot_save,
             patch.object(ServerRequestCounter, "save_state") as req_save,
+            patch.object(TradingDaysTracker, "save_state") as days_save,
         ):
             gate.save_ftmo_state()
             lot_save.assert_called_once()
             req_save.assert_called_once()
+            days_save.assert_called_once()

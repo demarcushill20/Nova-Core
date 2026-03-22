@@ -32,6 +32,7 @@ from novatrade.models import (
 from novatrade.risk.ftmo_compliance import (
     LotSizeConsistencyChecker,
     ServerRequestCounter,
+    TradingDaysTracker,
 )
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
@@ -64,9 +65,12 @@ class PreTradeGate:
         self._lot_checker = LotSizeConsistencyChecker()
         # FTMO compliance: daily server request counter (hard ceiling 1,500)
         self._request_counter = ServerRequestCounter()
+        # FTMO compliance: minimum trading days tracker
+        self._days_tracker = TradingDaysTracker()
         # Attempt to restore persisted state from prior session
         self._lot_checker.load_state()
         self._request_counter.load_state()
+        self._days_tracker.load_state()
 
     # ------------------------------------------------------------------
     # Public API
@@ -104,6 +108,7 @@ class PreTradeGate:
         checks.append(self._check_duplicate_position(request, positions))
         checks.append(self._check_drawdown(account))
         checks.append(self._check_spread(price))
+        checks.append(self._days_tracker.check())
 
         failed = [c for c in checks if not c.passed]
 
@@ -152,6 +157,7 @@ class PreTradeGate:
         if volume > 0:
             self._lot_checker.record(volume, symbol)
         self._request_counter.record("order_open")
+        self._days_tracker.record_trade_day()
 
     def record_server_request(self, operation: str) -> None:
         """Record a non-trade server request (modify SL/TP, close, etc.)."""
@@ -161,6 +167,7 @@ class PreTradeGate:
         """Persist FTMO compliance state for crash recovery."""
         self._lot_checker.save_state()
         self._request_counter.save_state()
+        self._days_tracker.save_state()
 
     # ------------------------------------------------------------------
     # Individual checks

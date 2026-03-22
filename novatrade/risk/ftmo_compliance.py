@@ -11,7 +11,12 @@ pre-trade gate:
    on trade/pending-order operations.  We enforce a hard ceiling at 1,500
    (75% of limit) with an alert threshold at 1,000.
 
-Both components are stateful (in-memory with optional JSON persistence)
+3. **Minimum Trading Days Tracker** — FTMO requires trading on at least N
+   unique calendar days during the challenge period (typically 4 days for
+   FTMO Challenge/Verification).  We track unique trading dates and expose
+   progress via an informational check.
+
+All components are stateful (in-memory with optional JSON persistence)
 and designed to integrate into the existing PreTradeGate pipeline.
 """
 
@@ -176,8 +181,8 @@ class ServerRequestCounter:
     50% (1,000).
 
     "Server requests" = order open, modify (SL/TP), close, pending order
-    operations.  Position reads do NOT count (they go through MetaApi
-    infrastructure, not directly to FTMO MT5 as order messages).
+    operations.  Position reads do NOT count (they go through the
+    adapter infrastructure, not directly to FTMO MT5 as order messages).
     """
 
     hard_ceiling: int = _DEFAULT_HARD_CEILING
@@ -289,4 +294,118 @@ class ServerRequestCounter:
             return False
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             log.warning("Failed to load request counter from %s: %s", path, exc)
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Minimum Trading Days Tracker
+# ---------------------------------------------------------------------------
+
+_DEFAULT_MIN_TRADING_DAYS = 4  # FTMO Challenge / Verification requirement
+
+
+@dataclass
+class TradingDaysTracker:
+    """Tracks unique calendar days on which trades were executed.
+
+    FTMO rule: traders must trade on at least N distinct calendar days
+    during the challenge / verification period.  Typically 4 days for
+    FTMO Challenge and Verification phases.
+
+    This is primarily **informational** — it does not block trades but
+    provides a check method that signals whether the minimum has been met
+    and how many more days are needed.
+    """
+
+    min_days_required: int = _DEFAULT_MIN_TRADING_DAYS
+    challenge_start: str = ""  # ISO date, e.g. "2026-03-01"
+    challenge_end: str = ""  # ISO date, e.g. "2026-03-31"
+    _trading_dates: set[str] = field(default_factory=set)
+
+    def record_trade_day(self, date_str: str | None = None) -> None:
+        """Record that a trade was placed on a given date.
+
+        Args:
+            date_str: ISO date string (YYYY-MM-DD).  Defaults to today UTC.
+        """
+        if date_str is None:
+            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        self._trading_dates.add(date_str)
+
+    @property
+    def days_traded(self) -> int:
+        """Number of unique calendar days traded."""
+        return len(self._trading_dates)
+
+    @property
+    def days_remaining(self) -> int:
+        """How many more unique trading days are needed (0 if met)."""
+        return max(0, self.min_days_required - self.days_traded)
+
+    @property
+    def requirement_met(self) -> bool:
+        """Whether the minimum trading days requirement has been met."""
+        return self.days_traded >= self.min_days_required
+
+    @property
+    def trading_dates(self) -> list[str]:
+        """Sorted list of unique trading dates."""
+        return sorted(self._trading_dates)
+
+    def check(self) -> RiskCheckResult:
+        """Informational check on minimum trading days progress.
+
+        Always passes (informational only) — the detail string shows
+        progress toward the minimum.
+        """
+        met = self.days_traded >= self.min_days_required
+
+        if met:
+            return RiskCheckResult(
+                name="min_trading_days",
+                passed=True,
+                detail=f"requirement met: {self.days_traded}/{self.min_days_required} unique days traded",
+            )
+
+        return RiskCheckResult(
+            name="min_trading_days",
+            passed=True,  # informational — never blocks
+            detail=f"progress: {self.days_traded}/{self.min_days_required} "
+            f"unique days traded — need {self.days_remaining} more day(s)",
+        )
+
+    def save_state(self, path: Path | None = None) -> None:
+        """Persist trading days to JSON for crash recovery."""
+        path = path or (_STATE_DIR / "trading_days.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "min_days_required": self.min_days_required,
+            "challenge_start": self.challenge_start,
+            "challenge_end": self.challenge_end,
+            "trading_dates": sorted(self._trading_dates),
+        }
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def load_state(self, path: Path | None = None) -> bool:
+        """Load trading days from JSON.  Returns True if loaded."""
+        path = path or (_STATE_DIR / "trading_days.json")
+        if not path.exists():
+            return False
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            dates = data.get("trading_dates", [])
+            self._trading_dates = set(dates)
+            # Optionally restore challenge bounds
+            if data.get("challenge_start"):
+                self.challenge_start = data["challenge_start"]
+            if data.get("challenge_end"):
+                self.challenge_end = data["challenge_end"]
+            log.info(
+                "Loaded trading days tracker: %d days traded (%d required)",
+                self.days_traded,
+                self.min_days_required,
+            )
+            return True
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            log.warning("Failed to load trading days from %s: %s", path, exc)
             return False
