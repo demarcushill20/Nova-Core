@@ -1,0 +1,35 @@
+# IRB v2.0.0 Optimized — LHS-1000 sweep rank #2
+# Scout: 0.4995, PF: 1.17, 71 trades (passes min_trades gate)
+# Data: 5,195 real EURUSD H1 bars (May 2025 – Mar 2026)
+
+name: irb_v2_optimized
+version: 2.1.0
+description: Optimized from LHS-1000 sweep — PF 1.17, 71 trades, passes Stage A min_trades
+parent_config: irb_v2_pine
+
+# --- Signal parameters ---
+irb_threshold: 0.425
+ema_period: 36
+ema_fast_period: 6
+ema_slow_period: 59
+atr_period: 7
+adx_period: 17
+trend_slope_threshold: 0.892
+adx_threshold: 16.8
+overextension_threshold: 2.35
+
+# --- v2.0.0 features ---
+use_ema_stack_filter: true
+ema_confirm_bars: 3
+trail_ema_period: 55
+trail_atr_multiplier: 1.71
+
+# --- Entry / exit ---
+trigger_window_bars: 35
+time_stop_bars: 77
+mtf_lookback: 8
+warmup_bars: 59
+
+# --- Filter toggles ---
+filters_enabled: []
+session_filter: null

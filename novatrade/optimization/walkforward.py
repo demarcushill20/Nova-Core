@@ -92,6 +92,8 @@ def _run_single_backtest(
     config: StrategyConfig,
     h1_slice: list[Candle],
     h4_slice: list[Candle],
+    *,
+    min_trades: int = 30,
 ) -> float:
     """Run a backtest on a candle slice and return the scout score."""
     if not h1_slice or not h4_slice:
@@ -116,7 +118,7 @@ def _run_single_backtest(
         total_bars=result.total_bars,
         initial_equity=environment.initial_equity,
     )
-    return compute_scout_score(metrics)
+    return compute_scout_score(metrics, min_trades=min_trades)
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +186,9 @@ def run_walk_forward(
         h4_test = h4_candles[h4_ts2:h4_te2]
 
         # Run IS and OOS backtests
-        is_score = _run_single_backtest(config, h1_train, h4_train)
-        oos_score = _run_single_backtest(config, h1_test, h4_test)
+        # Use min_trades=10 for both — WF windows are smaller than full dataset
+        is_score = _run_single_backtest(config, h1_train, h4_train, min_trades=10)
+        oos_score = _run_single_backtest(config, h1_test, h4_test, min_trades=10)
 
         ratio = oos_score / is_score if is_score > 0 else (1.0 if oos_score > 0 else 0.0)
         passed = ratio >= wf.min_oos_is_ratio
@@ -236,10 +239,10 @@ def run_walk_forward(
         h4_hs, h4_he = _slice_h4(n_h1 - wf.holdout_bars, n_h1, n_h4)
         holdout_h4 = h4_candles[h4_hs:h4_he]
 
-        holdout_score = _run_single_backtest(config, holdout_h1, holdout_h4)
+        holdout_score = _run_single_backtest(config, holdout_h1, holdout_h4, min_trades=10)
         result.holdout_score = holdout_score
 
-        median_is = statistics.median(is_scores) if is_scores else 0.0
+        median_is = result.median_is_score if result.median_is_score else 0.0
         holdout_ratio = holdout_score / median_is if median_is > 0 else (1.0 if holdout_score > 0 else 0.0)
         result.holdout_is_ratio = round(holdout_ratio, 4)
         result.holdout_passed = holdout_ratio >= wf.min_holdout_ratio

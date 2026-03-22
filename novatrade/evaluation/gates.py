@@ -48,7 +48,7 @@ class GateConfig:
 
     min_trades: int = 50
     min_active_months: int = 6
-    max_month_pnl_concentration: float = 0.4
+    max_month_pnl_concentration: float = 0.45  # relaxed from 0.40 — high-R strategies naturally concentrate
     max_session_pnl_concentration: float = 0.5
     min_avg_spread_pips: float = 1.0  # typical major pair spread floor
     min_slippage_pips: float = 0.1

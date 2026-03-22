@@ -1,0 +1,35 @@
+# IRB v2.0.0 — Best from 500-experiment Latin Hypercube Sweep
+# Scout score: 0.4851, PF: 1.15, 48 trades
+# Data: 5,195 real EURUSD H1 bars (May 2025 – Mar 2026)
+
+name: irb_v2_sweep_best
+version: 2.1.0
+description: Best configuration from LHS-500 sweep on real data — PF 1.15
+parent_config: irb_v2_pine
+
+# --- Signal parameters ---
+irb_threshold: 0.497
+ema_period: 30
+ema_fast_period: 7
+ema_slow_period: 46
+atr_period: 18
+adx_period: 12
+trend_slope_threshold: 0.486
+adx_threshold: 23.5
+overextension_threshold: 2.39
+
+# --- v2.0.0 features ---
+use_ema_stack_filter: true
+ema_confirm_bars: 4
+trail_ema_period: 55
+trail_atr_multiplier: 2.87
+
+# --- Entry / exit ---
+trigger_window_bars: 31
+time_stop_bars: 46
+mtf_lookback: 28
+warmup_bars: 72
+
+# --- Filter toggles ---
+filters_enabled: []
+session_filter: null

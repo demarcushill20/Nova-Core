@@ -34,7 +34,7 @@ class FitnessResult:
     """Breakdown of score components, penalties, and intermediates."""
 
 
-def compute_scout_score(metrics: Any) -> float:
+def compute_scout_score(metrics: Any, *, min_trades: int = 30) -> float:
     """Compute scout score from backtest metrics.
 
     Weighted combination of capped performance ratios:
@@ -52,12 +52,15 @@ def compute_scout_score(metrics: Any) -> float:
         metrics: BacktestMetrics instance (typed as Any to avoid circular imports).
             Expected fields: total_completed_trades, profit_factor, expectancy_r,
             max_drawdown_pct, net_result_pips, total_bars, max_consecutive_losses.
+        min_trades: Minimum trade count to produce a non-zero score.
+            Default 30 for full-dataset evaluation. Use lower (e.g. 10)
+            for walk-forward OOS windows that cover smaller data slices.
 
     Returns:
-        Scout score in range [0.0, 1.0]. Returns 0.0 if fewer than 30 trades.
+        Scout score in range [0.0, 1.0]. Returns 0.0 if fewer than min_trades.
     """
     total_trades = getattr(metrics, "total_completed_trades", 0)
-    if total_trades < 30:
+    if total_trades < min_trades:
         return 0.0
 
     # --- Component 1: Profit Factor (40%) ---
