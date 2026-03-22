@@ -155,26 +155,27 @@ if strategy.position_size != 0 and breakeven_r > 0 and not breakeven_hit and not
 bars_in_trade = not na(entry_bar_var) ? bar_index - entry_bar_var : 0
 trail_active  = trail_delay == 0 or bars_in_trade >= trail_delay
 
-if strategy.position_size > 0 and trail_active
-    if trail_mode == "atr"
-        // ATR-based trailing: best_close - multiplier * ATR
-        new_trail = close - trail_atr_mult * nz(atr_val)
-        if not na(atr_val) and new_trail > nz(trail_stop, 0)
-            trail_stop := new_trail
-    else
-        // EMA-based trailing
-        if not na(trail_ema_val) and trail_ema_val > nz(trail_stop, 0)
-            trail_stop := trail_ema_val
+// Trail only updates after delay; stop loss is ALWAYS active (using init_sl until trail kicks in)
+if strategy.position_size > 0
+    if trail_active
+        if trail_mode == "atr"
+            new_trail = close - trail_atr_mult * nz(atr_val)
+            if not na(atr_val) and new_trail > nz(trail_stop, 0)
+                trail_stop := new_trail
+        else
+            if not na(trail_ema_val) and trail_ema_val > nz(trail_stop, 0)
+                trail_stop := trail_ema_val
     strategy.exit("Long Exit", "Long", stop=trail_stop)
 
-if strategy.position_size < 0 and trail_active
-    if trail_mode == "atr"
-        new_trail = close + trail_atr_mult * nz(atr_val)
-        if not na(atr_val) and new_trail < nz(trail_stop, 99999)
-            trail_stop := new_trail
-    else
-        if not na(trail_ema_val) and trail_ema_val < nz(trail_stop, 99999)
-            trail_stop := trail_ema_val
+if strategy.position_size < 0
+    if trail_active
+        if trail_mode == "atr"
+            new_trail = close + trail_atr_mult * nz(atr_val)
+            if not na(atr_val) and new_trail < nz(trail_stop, 99999)
+                trail_stop := new_trail
+        else
+            if not na(trail_ema_val) and trail_ema_val < nz(trail_stop, 99999)
+                trail_stop := trail_ema_val
     strategy.exit("Short Exit", "Short", stop=trail_stop)
 
 // === TIME STOP ===
