@@ -29,6 +29,10 @@ from novatrade.models import (
     RiskVerdict,
     SymbolPrice,
 )
+from novatrade.risk.ftmo_compliance import (
+    LotSizeConsistencyChecker,
+    ServerRequestCounter,
+)
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
@@ -56,6 +60,13 @@ class PreTradeGate:
         # cooldown and daily-count tracking.  Kept in-memory — resets on
         # process restart, which is acceptable for MVP.
         self._trade_log: list[tuple[float, str, str]] = []
+        # FTMO compliance: lot-size consistency (trailing 20 trades)
+        self._lot_checker = LotSizeConsistencyChecker()
+        # FTMO compliance: daily server request counter (hard ceiling 1,500)
+        self._request_counter = ServerRequestCounter()
+        # Attempt to restore persisted state from prior session
+        self._lot_checker.load_state()
+        self._request_counter.load_state()
 
     # ------------------------------------------------------------------
     # Public API
@@ -84,6 +95,8 @@ class PreTradeGate:
         checks.append(self._check_health(health))
         checks.append(self._check_symbol(request))
         checks.append(self._check_volume(request))
+        checks.append(self._lot_checker.check(request.volume))
+        checks.append(self._request_counter.check())
         checks.append(self._check_stop_loss(request))
         checks.append(self._check_max_positions(positions))
         checks.append(self._check_daily_trade_count(now))
@@ -129,13 +142,25 @@ class PreTradeGate:
 
         return decision
 
-    def record_trade(self, symbol: str, side_value: str) -> None:
-        """Record a trade for cooldown and daily-count tracking.
+    def record_trade(self, symbol: str, side_value: str, volume: float = 0.0) -> None:
+        """Record a trade for cooldown, daily-count, and FTMO tracking.
 
         Call this after a successful order placement so subsequent
         evaluate() calls see it.
         """
         self._trade_log.append((time.time(), symbol, side_value))
+        if volume > 0:
+            self._lot_checker.record(volume, symbol)
+        self._request_counter.record("order_open")
+
+    def record_server_request(self, operation: str) -> None:
+        """Record a non-trade server request (modify SL/TP, close, etc.)."""
+        self._request_counter.record(operation)
+
+    def save_ftmo_state(self) -> None:
+        """Persist FTMO compliance state for crash recovery."""
+        self._lot_checker.save_state()
+        self._request_counter.save_state()
 
     # ------------------------------------------------------------------
     # Individual checks
