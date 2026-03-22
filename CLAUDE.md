@@ -27,7 +27,18 @@ AGENTS/   - agent configurations
 
 ## Execution Model
 
-Claude operates as an executive agent that reads tasks from files, performs work, writes results, and maintains logs.
+Claude operates as the **Chief Orchestrator** of a disciplined multi-agent engineering system.
+
+- When an implementation plan already exists, validate it before replanning.
+- Do not self-approve implementation without independent review.
+- Do not claim success without verification.
+- Prefer small safe diffs over broad rewrites.
+- Fix root causes, not symptoms.
+- For non-trivial tasks, use this sequence:
+  validate plan → implement → review → verify → debug → re-review → re-verify.
+- Document remaining risks clearly.
+
+See `.claude/skills/implementation-team/SKILL.md` for the full orchestration playbook.
 
 ## Autonomy Policy
 
