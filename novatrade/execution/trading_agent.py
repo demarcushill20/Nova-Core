@@ -301,22 +301,29 @@ _SIDE_ABBREV = {"BUY": "B", "SELL": "S"}
 def make_idempotency_key(payload: dict) -> str:
     """Deterministic idempotency key from alert payload.
 
-    Format: ``irb_{abbrev}_{bar_close_time}_{side_abbrev}``
+    Broker clientId format: ``{strategyId}_{positionId}_{orderId}``
+    with underscore separators. Max 15 chars to stay within broker limits.
 
-    Compact format (max ~20 chars) fits within the broker's 26-char clientId limit.
+    Format: ``IRB_{abbrev}{time6}_{side}`` (max 14 chars).
+
     Ensures one intent per (action, bar, direction) combination.  For alerts
     that lack ``bar_close_time`` (cancel/close), ``bars_elapsed``/``bars_held``
     is used as the temporal discriminator.
     """
     action = payload.get("action", "UNKNOWN")
-    action_short = _ACTION_ABBREV.get(action, action[:4])
+    action_short = _ACTION_ABBREV.get(action, action[:2])
     bar_time = payload.get(
         "bar_close_time",
         payload.get("bars_elapsed", payload.get("bars_held", int(time.time()))),
     )
+    # Compact the temporal part: use last 6 digits for uniqueness
+    bar_str = str(bar_time)
+    digits = "".join(c for c in bar_str if c.isdigit())
+    time_compact = digits[-6:] if len(digits) >= 6 else digits.ljust(6, "0")
     side = payload.get("side", "UNKNOWN")
     side_short = _SIDE_ABBREV.get(side, side[:1])
-    return f"irb_{action_short}_{bar_time}_{side_short}"
+    # Broker pattern: {strategyId}_{positionId}_{orderId}
+    return f"IRB_{action_short}{time_compact}_{side_short}"
 
 
 # ---------------------------------------------------------------------------

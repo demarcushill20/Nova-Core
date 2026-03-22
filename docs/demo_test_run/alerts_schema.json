@@ -2,10 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "novatrade-irb-alert-v2.0.0",
   "title": "NovaTrade Rob Hoffman IRB — Alert Payload Contract",
-  "description": "JSON schema for alert payloads emitted by strategy.pine v2.0.0. Consumed by the NovaTrade Trading Agent. Replaces EMA Crossover alert schema v1.0.0.",
+  "description": "JSON schema for alert payloads emitted by strategy.pine v2.0.0 (3, 40). Consumed by the NovaTrade Trading Agent. Features EMA stack filter, EMA 10 close confirmation, and EMA-based trailing stop.",
   "phase": "2 (Pine Implementation)",
-  "date": "2026-03-17",
+  "date": "2026-03-22",
   "strategy_spec_version": "2.0.0",
+  "input_parameters": {
+    "EMA_CONFIRM_BARS": 3,
+    "TRAIL_EMA_PERIOD": 40
+  },
 
   "oneOf": [
     { "$ref": "#/$defs/signal_alert" },
@@ -17,60 +21,71 @@
   "$defs": {
     "signal_alert": {
       "type": "object",
-      "description": "Emitted when an IRB signal fires (PLACE_STOP_ORDER) or replaces a pending order (REPLACE_STOP_ORDER). Trading Agent should place or replace the pending stop order on MetaApi.",
+      "description": "Emitted when an IRB signal fires (PLACE_STOP_ORDER) or replaces a pending order (REPLACE_STOP_ORDER). Trading Agent should place or replace the pending stop order.",
       "required": [
         "strategy_name", "strategy_version", "action", "signal_type",
         "irb_type", "symbol", "broker_symbol", "timeframe", "side",
         "order_type", "entry_price", "stop_loss", "stop_distance_pips",
         "volume", "risk_dollars", "bar_close_time", "bar_ohlc_o",
         "bar_ohlc_h", "bar_ohlc_l", "bar_ohlc_c", "irb_range",
-        "ema_20_h1", "ema_slope", "ema_20_h4", "ema_20_h4_dir",
+        "ema_10_h1", "ema_20_h1", "ema_50_h1", "trail_ema",
+        "trail_ema_period", "ema_stack_h1", "ema_confirm_bars",
+        "ema10_confirm_long", "ema10_confirm_short",
+        "ema_slope", "ema_20_h4", "ema_20_h4_dir",
         "adx_14", "atr_14", "overextension_ratio", "trigger_window_bars",
         "strategy_state", "campaign"
       ],
       "properties": {
-        "strategy_name":      { "type": "string", "const": "Rob Hoffman IRB" },
-        "strategy_version":   { "type": "string", "const": "2.0.0" },
-        "action":             { "type": "string", "enum": ["PLACE_STOP_ORDER", "REPLACE_STOP_ORDER"] },
-        "signal_type":        { "type": "string", "enum": ["LONG_IRB", "SHORT_IRB"] },
-        "irb_type":           { "type": "string", "enum": ["UPTREND_IRB", "DOWNTREND_IRB"] },
-        "symbol":             { "type": "string", "const": "EURUSD" },
-        "broker_symbol":      { "type": "string", "const": "EURUSD.sim" },
-        "timeframe":          { "type": "string", "const": "H1" },
-        "side":               { "type": "string", "enum": ["BUY", "SELL"] },
-        "order_type":         { "type": "string", "enum": ["BUY_STOP", "SELL_STOP"] },
-        "entry_price":        { "type": "number", "description": "Stop order trigger price: IRB extreme ± 1 pip [A2]" },
-        "stop_loss":          { "type": "number", "description": "SL price: IRB opposite side ± 1 pip [A3]. Authoritative — use directly." },
-        "stop_distance_pips": { "type": "number", "description": "Distance from entry to SL in pips" },
-        "volume":             { "type": "number", "description": "Risk-based lot size, clamped [0.01, 1.00] [A5][U7]" },
-        "risk_dollars":       { "type": "number", "description": "Dollar risk = equity × 0.01" },
-        "bar_close_time":     { "type": "integer", "description": "Bar close time as Unix ms" },
-        "bar_ohlc_o":         { "type": "number" },
-        "bar_ohlc_h":         { "type": "number" },
-        "bar_ohlc_l":         { "type": "number" },
-        "bar_ohlc_c":         { "type": "number" },
-        "irb_range":          { "type": "number", "description": "IRB candle range (high - low)" },
-        "ema_20_h1":          { "type": "number" },
-        "ema_slope":          { "type": "number", "description": "ATR-normalized EMA slope [U1]" },
-        "ema_20_h4":          { "type": "number" },
-        "ema_20_h4_dir":      { "type": "string", "enum": ["RISING", "FALLING", "FLAT"] },
-        "adx_14":             { "type": "number" },
-        "atr_14":             { "type": "number" },
-        "overextension_ratio":{ "type": "number", "description": "bar_range / ATR(14) [U2]" },
-        "trigger_window_bars":{ "type": "integer", "const": 20 },
-        "strategy_state":     { "type": "string", "enum": ["PENDING_LONG", "PENDING_SHORT"] },
-        "campaign":           { "type": "string", "const": "ftmo-free-trial-march-2026" }
+        "strategy_name":        { "type": "string", "const": "Rob Hoffman IRB" },
+        "strategy_version":     { "type": "string", "const": "2.0.0" },
+        "action":               { "type": "string", "enum": ["PLACE_STOP_ORDER", "REPLACE_STOP_ORDER"] },
+        "signal_type":          { "type": "string", "enum": ["LONG_IRB", "SHORT_IRB"] },
+        "irb_type":             { "type": "string", "enum": ["UPTREND_IRB", "DOWNTREND_IRB"] },
+        "symbol":               { "type": "string", "const": "EURUSD" },
+        "broker_symbol":        { "type": "string", "const": "EURUSD.sim" },
+        "timeframe":            { "type": "string", "const": "H1" },
+        "side":                 { "type": "string", "enum": ["BUY", "SELL"] },
+        "order_type":           { "type": "string", "enum": ["BUY_STOP", "SELL_STOP"] },
+        "entry_price":          { "type": "number", "description": "Stop order trigger price: IRB extreme ± 1 pip" },
+        "stop_loss":            { "type": "number", "description": "SL price: IRB opposite side ± 1 pip. Authoritative." },
+        "stop_distance_pips":   { "type": "number", "description": "Distance from entry to SL in pips" },
+        "volume":               { "type": "number", "description": "Risk-based lot size, clamped [0.01, 1.00]" },
+        "risk_dollars":         { "type": "number", "description": "Dollar risk = equity * 0.01" },
+        "bar_close_time":       { "type": "integer", "description": "Bar close time as Unix ms" },
+        "bar_ohlc_o":           { "type": "number" },
+        "bar_ohlc_h":           { "type": "number" },
+        "bar_ohlc_l":           { "type": "number" },
+        "bar_ohlc_c":           { "type": "number" },
+        "irb_range":            { "type": "number", "description": "IRB candle range (high - low)" },
+        "ema_10_h1":            { "type": "number", "description": "EMA(10) on H1 close" },
+        "ema_20_h1":            { "type": "number", "description": "EMA(20) on H1 close" },
+        "ema_50_h1":            { "type": "number", "description": "EMA(50) on H1 close" },
+        "trail_ema":            { "type": "number", "description": "EMA used for trailing stop" },
+        "trail_ema_period":     { "type": "integer", "description": "Period of the trailing stop EMA (input parameter)" },
+        "ema_stack_h1":         { "type": "string", "enum": ["BULL", "BEAR", "MIXED"], "description": "EMA stack alignment: BULL = 10>20>50, BEAR = 10<20<50" },
+        "ema_confirm_bars":     { "type": "integer", "description": "Number of bars for EMA 10 close confirmation (input parameter)" },
+        "ema10_confirm_long":   { "type": ["boolean", "string"], "description": "Whether last N bars closed above EMA 10" },
+        "ema10_confirm_short":  { "type": ["boolean", "string"], "description": "Whether last N bars closed below EMA 10" },
+        "ema_slope":            { "type": "number", "description": "ATR-normalized EMA slope" },
+        "ema_20_h4":            { "type": "number" },
+        "ema_20_h4_dir":        { "type": "string", "enum": ["RISING", "FALLING", "FLAT"] },
+        "adx_14":               { "type": "number" },
+        "atr_14":               { "type": "number" },
+        "overextension_ratio":  { "type": "number", "description": "bar_range / ATR(14)" },
+        "trigger_window_bars":  { "type": "integer", "const": 20 },
+        "strategy_state":       { "type": "string", "enum": ["PENDING_LONG", "PENDING_SHORT"] },
+        "campaign":             { "type": "string", "const": "ftmo-free-trial-march-2026" }
       },
       "additionalProperties": false
     },
 
     "trail_alert": {
       "type": "object",
-      "description": "Emitted when the trailing stop tightens. Trading Agent should modify the SL on the open position via MetaApi.",
+      "description": "Emitted when the EMA-based trailing stop tightens. Trading Agent should modify the SL on the open position.",
       "required": [
         "strategy_name", "strategy_version", "action", "symbol", "side",
-        "old_stop", "new_stop", "best_close", "atr_14", "bars_since_entry",
-        "campaign"
+        "old_stop", "new_stop", "best_close", "trail_ema", "trail_ema_period",
+        "bars_since_entry", "campaign"
       ],
       "properties": {
         "strategy_name":    { "type": "string", "const": "Rob Hoffman IRB" },
@@ -79,9 +94,10 @@
         "symbol":           { "type": "string", "const": "EURUSD" },
         "side":             { "type": "string", "enum": ["BUY", "SELL"] },
         "old_stop":         { "type": "number" },
-        "new_stop":         { "type": "number", "description": "Authoritative new SL level" },
+        "new_stop":         { "type": "number", "description": "Authoritative new SL level (from EMA trail)" },
         "best_close":       { "type": "number", "description": "Highest (long) or lowest (short) close since entry" },
-        "atr_14":           { "type": "number" },
+        "trail_ema":        { "type": "number", "description": "Current trailing stop EMA value" },
+        "trail_ema_period": { "type": "integer", "description": "Period of the trailing stop EMA" },
         "bars_since_entry": { "type": "integer" },
         "campaign":         { "type": "string", "const": "ftmo-free-trial-march-2026" }
       },
@@ -90,7 +106,7 @@
 
     "cancel_alert": {
       "type": "object",
-      "description": "Emitted when a pending order is canceled due to trigger window expiry. Trading Agent should cancel the pending order on MetaApi.",
+      "description": "Emitted when a pending order is canceled due to trigger window expiry.",
       "required": [
         "strategy_name", "strategy_version", "action", "symbol", "side",
         "cancel_reason", "bars_elapsed", "campaign"
@@ -110,7 +126,7 @@
 
     "close_alert": {
       "type": "object",
-      "description": "Emitted when a time stop fires. Trading Agent should close the open position at market via MetaApi. Note: SL and trailing stop exits are handled by the broker (stop order on MetaApi); Pine does not emit alerts for those.",
+      "description": "Emitted when a time stop fires. Trading Agent should close the open position at market.",
       "required": [
         "strategy_name", "strategy_version", "action", "symbol", "side",
         "close_reason", "bars_held", "close_price", "campaign"
@@ -123,26 +139,10 @@
         "side":             { "type": "string", "enum": ["BUY", "SELL"] },
         "close_reason":     { "type": "string", "const": "TIME_STOP" },
         "bars_held":        { "type": "integer" },
-        "close_price":      { "type": "number", "description": "Bar close price at time stop (reference only; actual fill may differ)" },
+        "close_price":      { "type": "number" },
         "campaign":         { "type": "string", "const": "ftmo-free-trial-march-2026" }
       },
       "additionalProperties": false
     }
-  },
-
-  "_implementation_notes": {
-    "encoding": "JSON string via Pine string concatenation",
-    "precision": "5 decimal places for prices (#.#####)",
-    "alert_frequency": "alert.freq_once_per_bar_close per alert() call",
-    "multiple_alerts_per_bar": "Possible (e.g., CANCEL + SIGNAL on same bar). Each alert() call is independent.",
-    "sl_authoritative": "Unlike the EMA schema where sl_pips was canonical and ref_stop_loss was informational, the IRB schema provides stop_loss as an authoritative price level computed from the IRB candle. The Trading Agent should use this directly.",
-    "trail_updates": "MODIFY_SL alerts fire each bar the trailing stop tightens. The Trading Agent must call modifyPosition() on MetaApi with the new stop level.",
-    "sl_tp_handling": "SL is set by the Trading Agent as a stop-loss order on the broker. Pine's trailing stop updates are communicated via MODIFY_SL alerts. There is no fixed take-profit — exit is via trail or time stop only [A9].",
-    "not_in_scope": [
-      "risk_decision, risk_checks (populated by Trading Agent after risk gate)",
-      "fill_price, slippage_pips, position_id (populated by Trading Agent from broker)",
-      "pnl_pips, pnl_usd, hold_duration_seconds (computed by Trading Agent on close)",
-      "SL/trailing stop exit alerts (handled by broker stop order; no Pine alert needed)"
-    ]
   }
 }

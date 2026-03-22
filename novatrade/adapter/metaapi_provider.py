@@ -388,23 +388,18 @@ class MetaApiAdapter(MT5Adapter):
         Includes: retry, circuit breaker, auto-reconnect, slippage control,
         and post-order verification for MARKET orders.
         """
-        # MetaApi limit: comment + clientId combined must be <= 26 chars.
-        # Use clientId for idempotency key (truncated), comment for label.
-        _MAX_COMMENT_CLIENT_LEN = 26
+        # MetaApi limit: clientId + comment combined ≤ 30 (both) or ≤ 31 (one).
+        # FTMO MT5 servers enforce stricter limits — cap clientId at 15 chars
+        # and skip comment to stay safely within broker limits.
+        _MAX_CLIENT_ID_LEN = 15
         client_id = ""
         if request.idempotency_key:
-            client_id = request.idempotency_key[:_MAX_COMMENT_CLIENT_LEN]
-        comment = request.comment or ""
-        # Enforce combined length limit
-        total = len(comment) + len(client_id)
-        if total > _MAX_COMMENT_CLIENT_LEN:
-            avail = _MAX_COMMENT_CLIENT_LEN - len(client_id)
-            comment = comment[: max(avail, 0)]
+            client_id = request.idempotency_key[:_MAX_CLIENT_ID_LEN]
         options: dict[str, Any] = {}
         if client_id:
             options["clientId"] = client_id
-        if comment:
-            options["comment"] = comment
+        # Intentionally omit comment — FTMO reserves comment space for tracking.
+        log.debug("order options: clientId=%r (len=%d)", client_id, len(client_id))
 
         # Slippage control: per-order override > config default > disabled
         slippage_pips = request.max_slippage_pips

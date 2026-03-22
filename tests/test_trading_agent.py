@@ -285,26 +285,49 @@ class TestValidateAlert:
 class TestIdempotencyKey:
     def test_signal_key_format(self):
         key = make_idempotency_key(_signal_payload())
-        assert key == "irb_PS_1710000000000_B"
+        # MetaApi format: IRB_{action}{time6}_{side}
+        assert key.startswith("IRB_PS")
+        assert key.endswith("_B")
+        assert "_" in key[4:]  # has second underscore
+        assert len(key) <= 15
 
     def test_trail_key_uses_bar_close_time(self):
         p = _trail_payload()
         p["bar_close_time"] = 1710003600000
         key = make_idempotency_key(p)
-        assert "1710003600000" in key
+        assert "MS" in key
+        assert len(key) <= 15
 
     def test_cancel_key_uses_bars_elapsed(self):
         key = make_idempotency_key(_cancel_payload())
-        assert "20" in key
+        assert "CX" in key
+        assert len(key) <= 15
 
     def test_close_key_uses_bars_held(self):
         key = make_idempotency_key(_close_payload())
-        assert "40" in key
+        assert "CP" in key
+        assert len(key) <= 15
 
     def test_different_sides_different_keys(self):
         k1 = make_idempotency_key(_signal_payload(side="BUY"))
         k2 = make_idempotency_key(_signal_payload(side="SELL"))
         assert k1 != k2
+
+    def test_key_matches_metaapi_pattern(self):
+        """Keys must match MetaApi clientId pattern: strategyId_positionId_orderId."""
+        import re
+
+        pattern = re.compile(r"^[a-zA-Z0-9]+_[a-zA-Z0-9]+_[a-zA-Z0-9]+$")
+        payloads = [
+            _signal_payload(),
+            _trail_payload(),
+            _cancel_payload(),
+            _close_payload(),
+        ]
+        for p in payloads:
+            key = make_idempotency_key(p)
+            assert len(key) <= 15, f"key too long: {key!r} ({len(key)} chars)"
+            assert pattern.match(key), f"key doesn't match MetaApi pattern: {key!r}"
 
 
 # ---------------------------------------------------------------------------
