@@ -185,8 +185,16 @@ def compute_dashboard_metrics(
         row.calmar_ratio = 5.0 if annual_return > 0 else 0.0
 
     # Sharpe and Sortino ratios — prefer per-trade-return-based values from
-    # BacktestMetrics (computed in metrics.py).  Fall back to a simple proxy
-    # when the metrics object does not provide them (e.g. mock objects in tests).
+    # BacktestMetrics (computed in metrics.py using standard formulas):
+    #   Sharpe  = (mean_return - rf) / std_return * sqrt(annualization_factor)
+    #   Sortino = (mean_return - rf) / downside_std * sqrt(annualization_factor)
+    # Fall back to a crude RANKING PROXY when the metrics object does not
+    # provide them (e.g. mock objects in tests).
+    # NOTE: The fallback proxy is NOT a true Sharpe/Sortino ratio — it uses
+    # annual_return / (max_dd * 10) as a rough approximation for sorting only.
+    # It does not account for return volatility, risk-free rate, or proper
+    # annualization.  Production code paths always use the real values from
+    # metrics.py via _compute_sharpe_sortino().
     metrics_sharpe = _safe_float(metrics, "sharpe_ratio", 0.0)
     metrics_sortino = _safe_float(metrics, "sortino_ratio", 0.0)
 
@@ -194,7 +202,8 @@ def compute_dashboard_metrics(
         row.sharpe_ratio = metrics_sharpe
         row.sortino_ratio = metrics_sortino
     else:
-        # Fallback proxy when per-trade data is unavailable
+        # Fallback RANKING PROXY — not a true Sharpe/Sortino ratio.
+        # Used only when per-trade return data is unavailable.
         if row.max_drawdown_pct > 0 and annual_return > 0:
             row.sharpe_ratio = annual_return / (row.max_drawdown_pct * 10.0)
         else:

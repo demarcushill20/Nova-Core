@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0502_I_want_it_so_all_I_have_to_do_is_give_the_agent_clean_price_data__the_currency_p_1773993051",
+  "workflow_id": "0502_I_want_it_so_all_I_have_to_do_is_give_the_agent_clean_price_data__the_currency_p",
+  "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0502_I_want_it_so_all_I_have_to_do_is_give_the_agent_clean_price_data__the_c"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-03-20T07:50:51Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_hb_proactive_20260322_064953_investigate_drift_detection_failure_1774162745"
+}

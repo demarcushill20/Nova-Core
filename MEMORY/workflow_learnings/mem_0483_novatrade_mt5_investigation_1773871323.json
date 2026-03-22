@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0483_novatrade_mt5_investigation_1773871323",
+  "workflow_id": "0483_novatrade_mt5_investigation",
+  "task_summary": "Investigated NovaTrade MT5 trade failure - root cause is missing systemd service, server not running on port 8877",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Investigated NovaTrade MT5 trade failure - root cause is missing systemd service, server not running on port 8877"
+  ],
+  "successful_patterns": [
+    "task_completed: 0483_novatrade_mt5_investigation"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Investigated NovaTrade MT5 trade failure - root cause is missing systemd service, server not running on port 8877",
+  "created_at": "2026-03-18T22:02:03Z",
+  "confidence": "low"
+}

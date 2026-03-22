@@ -486,9 +486,9 @@ def supersede_artifact(
             rejection_reason="self_supersession",
         )
 
-    # Prevent circular supersession
+    # Prevent circular supersession — check both directions and transitive chains
     if surviving_meta.get("supersedes") == superseded_id:
-        # Already superseded
+        # A already supersedes B — no-op
         return CompactionResult(
             action="no_action",
             target_store=_infer_store(surviving_path),
@@ -497,6 +497,30 @@ def supersede_artifact(
             rule_name="supersede_artifact",
             dry_run=dry_run,
             detail="already_superseded",
+        )
+
+    if superseded_meta.get("supersedes") == surviving_id:
+        # B already supersedes A — reverse would create A↔B cycle
+        return CompactionResult(
+            action="rejected_unsafe",
+            target_store=_infer_store(surviving_path),
+            surviving_path=str(surviving_path),
+            affected_paths=[str(superseded_path)],
+            rule_name="supersede_artifact",
+            dry_run=dry_run,
+            rejection_reason="circular_supersession",
+        )
+
+    if superseded_meta.get("superseded_by") and superseded_meta.get("superseded_by") != surviving_id:
+        # B is already superseded by a third artifact — don't create conflicting chains
+        return CompactionResult(
+            action="rejected_unsafe",
+            target_store=_infer_store(surviving_path),
+            surviving_path=str(surviving_path),
+            affected_paths=[str(superseded_path)],
+            rule_name="supersede_artifact",
+            dry_run=dry_run,
+            rejection_reason="already_superseded_by_other",
         )
 
     if not dry_run:

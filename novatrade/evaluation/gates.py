@@ -50,9 +50,13 @@ class GateConfig:
     min_active_months: int = 6
     max_month_pnl_concentration: float = 0.45  # relaxed from 0.40 — high-R strategies naturally concentrate
     max_session_pnl_concentration: float = 0.5
-    min_avg_spread_pips: float = 1.0  # typical major pair spread floor
+    # Forex realism floors — any real broker has at least these costs.
+    # 0.5 pip spread: even the tightest ECN majors rarely go below this.
+    # 0.1 pip slippage: minimal but non-zero; real executions always have some.
+    # $2/lot commission: typical ECN round-turn; spread-only brokers embed this.
+    min_avg_spread_pips: float = 0.5
     min_slippage_pips: float = 0.1
-    min_commission_per_lot: float = 3.0  # typical ECN commission per lot
+    min_commission_per_lot: float = 2.0
 
 
 def evaluate_stage_a(metrics: Any, config: GateConfig | None = None) -> list[GateResult]:

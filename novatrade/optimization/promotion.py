@@ -237,6 +237,7 @@ def run_promotion_pipeline(
             "holdout_score": holdout_score,
             "is_median": is_median,
             "complexity": complexity,
+            "overfit_check": ("verified" if is_median > 0 else "insufficient_is_data"),
         }
         log.info("ALL STAGES PASSED — promotion score: %.4f", result.promotion_score)
     else:
@@ -270,8 +271,8 @@ def _run_walkforward_stage(
     """Execute walk-forward validation, returning the raw result."""
     try:
         return run_walk_forward(config, h1_candles, h4_candles, wf_config)
-    except Exception as exc:
-        log.error("Walk-forward crashed: %s", exc)
+    except Exception:
+        log.exception("Walk-forward crashed")
         return WalkForwardResult()
 
 
@@ -304,8 +305,8 @@ def _run_perturbation_stage(
             baseline_score,
             perturb_config,
         )
-    except Exception as exc:
-        log.error("Perturbation test crashed: %s", exc)
+    except Exception:
+        log.exception("Perturbation test crashed")
         return PerturbationResult(all_passed=False)
 
 
@@ -325,8 +326,8 @@ def _run_stress_stage(
             baseline_score,
             stress_config,
         )
-    except Exception as exc:
-        log.error("Stress test crashed: %s", exc)
+    except Exception:
+        log.exception("Stress test crashed")
         return StressResult(
             normal_score=baseline_score,
             stress_score=0.0,

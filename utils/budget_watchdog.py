@@ -101,7 +101,7 @@ class BudgetWatchdog:
             self.turns += 1
 
         # Progress-stall detection via MD5 hash
-        output_hash = hashlib.md5(step_output.encode("utf-8")).hexdigest()
+        output_hash = hashlib.md5(step_output.encode("utf-8"), usedforsecurity=False).hexdigest()
         if output_hash == self._last_hash:
             self._stall_count += 1
         else:

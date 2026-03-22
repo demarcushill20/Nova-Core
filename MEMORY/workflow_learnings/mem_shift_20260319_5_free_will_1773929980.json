@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260319_5_free_will_1773929980",
+  "workflow_id": "shift_20260319_5_free_will",
+  "task_summary": "Fixed Python namespace collision that blocked pytest test collection \u2014 skill-creator's scripts/ package was shadowing project-root scripts/",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed Python namespace collision that blocked pytest test collection \u2014 skill-creator's scripts/ package was shadowing project-root scripts/"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260319_5_free_will"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed Python namespace collision that blocked pytest test collection \u2014 skill-creator's scripts/ package was shadowing project-root scripts/",
+  "created_at": "2026-03-19T14:19:40Z",
+  "confidence": "low"
+}

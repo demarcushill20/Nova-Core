@@ -1,0 +1,39 @@
+[Unit]
+Description=NovaCore Morning Schedule Generator
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/nova/nova-core/scripts/daily_shift_generator.py --today --shift morning
+WorkingDirectory=/home/nova/nova-core
+User=nova
+EnvironmentFile=/etc/novacore/telegram.env
+
+# Allow up to 2 minutes for API calls
+TimeoutStartSec=120
+
+# --- Security hardening ---
+ProtectSystem=strict
+ProtectHome=no
+ReadWritePaths=/home/nova/nova-core
+ReadOnlyPaths=/etc/novacore
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=512M
+TasksMax=64
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

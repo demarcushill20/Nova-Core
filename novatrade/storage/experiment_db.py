@@ -297,18 +297,17 @@ class ExperimentDB:
 
         # Atomic write: tempfile + os.replace to prevent corrupt TSV on crash
         fd, tmp_path = tempfile.mkstemp(dir=str(output_path.parent), suffix=".tmp", prefix=output_path.stem)
-        closed = False
         try:
             os.write(fd, ("\n".join(lines) + "\n").encode())
+            os.fsync(fd)
             os.close(fd)
-            closed = True
+            fd = -1  # mark as closed
             os.replace(tmp_path, str(output_path))
-        except BaseException:
-            if not closed:
+        finally:
+            if fd >= 0:
                 os.close(fd)
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
-            raise
         return len(rows)
 
     # -- migrations --

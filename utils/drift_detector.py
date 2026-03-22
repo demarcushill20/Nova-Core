@@ -85,6 +85,20 @@ def _load_events(hours: float = 24.0) -> list[dict]:
     return events
 
 
+def _is_rate_limit_failure(event: dict) -> bool:
+    """Detect if a task failure was caused by API rate limits, not a code bug."""
+    d = event.get("data", {})
+    if not isinstance(d, dict):
+        return False
+    # Short-duration failures with exit_code=1 are rate-limit signatures.
+    # Real task failures take 300s+; rate-limit bounces return quickly but
+    # the watcher's 2-attempt retry can push total duration to ~120s.
+    # Threshold at 120s to cover retry overhead.
+    duration = d.get("duration_ms", 0)
+    exit_code = d.get("exit_code", 0)
+    return exit_code == 1 and duration < 120_000
+
+
 def _compute_metrics(events: list[dict]) -> dict:
     """Compute task-level metrics from structured events."""
     completed = [e for e in events if e.get("event") == "task.completed"]
@@ -93,8 +107,15 @@ def _compute_metrics(events: list[dict]) -> dict:
     reflexions = [e for e in events if e.get("event") == "task.reflexion_start"]
     all_events = len(events)
 
+    # Separate rate-limit failures from genuine failures
+    rate_limited = [e for e in failed if _is_rate_limit_failure(e)]
+    genuine_failed = [e for e in failed if not _is_rate_limit_failure(e)]
+
+    # Exclude rate-limited tasks from success rate calculation — they don't
+    # reflect code quality, only API quota exhaustion.
+    countable_tasks = len(completed) + len(genuine_failed)
     total_tasks = len(completed) + len(failed)
-    success_rate = len(completed) / total_tasks if total_tasks > 0 else 1.0
+    success_rate = len(completed) / countable_tasks if countable_tasks > 0 else 1.0
     error_rate = len(errors) / all_events if all_events > 0 else 0.0
 
     durations = []
@@ -109,6 +130,8 @@ def _compute_metrics(events: list[dict]) -> dict:
         "total_tasks": total_tasks,
         "completed": len(completed),
         "failed": len(failed),
+        "rate_limited": len(rate_limited),
+        "genuine_failed": len(genuine_failed),
         "success_rate": success_rate,
         "error_rate": error_rate,
         "avg_duration_ms": avg_duration,

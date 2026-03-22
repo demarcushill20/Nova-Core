@@ -295,8 +295,10 @@ class TestHandleAgentActions(unittest.TestCase):
 
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
+    @patch("heartbeat._telegram_cooldown_gate", return_value=True)
+    @patch("heartbeat._ground_service_alert", return_value=True)
     @patch("heartbeat._send_telegram")
-    def test_notify_action_sends_telegram(self, mock_tg):
+    def test_notify_action_sends_telegram(self, mock_tg, _mock_ground, _mock_cooldown):
         response = '[{"type": "notify", "message": "Disk getting full"}]'
         heartbeat._handle_agent_actions(response)
         mock_tg.assert_called_once()
@@ -308,8 +310,10 @@ class TestHandleAgentActions(unittest.TestCase):
         tasks = list(heartbeat.TASKS_DIR.glob("hb_proactive_*.md"))
         self.assertEqual(len(tasks), 1)
 
+    @patch("heartbeat._telegram_cooldown_gate", return_value=True)
+    @patch("heartbeat._ground_service_alert", return_value=True)
     @patch("heartbeat._send_telegram")
-    def test_plain_text_sends_as_notification(self, mock_tg):
+    def test_plain_text_sends_as_notification(self, mock_tg, _mock_ground, _mock_cooldown):
         heartbeat._handle_agent_actions("Something needs attention: disk is at 90%")
         mock_tg.assert_called_once()
         self.assertIn("disk is at 90%", mock_tg.call_args[0][0])

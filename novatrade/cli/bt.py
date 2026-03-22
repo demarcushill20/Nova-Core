@@ -44,8 +44,12 @@ app = typer.Typer(
 )
 data_app = typer.Typer(help="Historical data management", no_args_is_help=True)
 campaign_app = typer.Typer(help="AutoResearch campaign management", no_args_is_help=True)
+doctrine_app = typer.Typer(help="Strategy doctrine management", no_args_is_help=True)
+pipeline_app = typer.Typer(help="End-to-end strategy pipeline", no_args_is_help=True)
 app.add_typer(data_app, name="data")
 app.add_typer(campaign_app, name="campaign")
+app.add_typer(doctrine_app, name="doctrine")
+app.add_typer(pipeline_app, name="pipeline")
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +106,44 @@ def data_fetch(
     typer.echo(f"  Open:      {h1_candles[0].open:.5f}")
     typer.echo(f"  Close:     {h1_candles[-1].close:.5f}")
     typer.echo("Done.")
+
+
+@data_app.command("fetch-real")
+def data_fetch_real(
+    symbol: str = typer.Option("EURUSD", help="Instrument symbol"),
+    days: int = typer.Option(730, help="Number of days of history to fetch"),
+    no_snapshot: bool = typer.Option(False, help="Skip creating a frozen snapshot"),
+) -> None:
+    """Fetch real historical candle data from MetaApi (FTMO/broker).
+
+    Connects to MetaApi, paginates the historical candle API to fetch
+    H1 data for the specified date range, derives H4 by aggregation,
+    saves both as CSV, and optionally creates a reproducible Parquet snapshot.
+    """
+    import asyncio
+
+    from novatrade.data.historical_fetcher import fetch_and_save
+
+    typer.echo(f"Fetching {days} days of real {symbol} data via MetaApi...")
+
+    result = asyncio.run(
+        fetch_and_save(
+            symbol=symbol,
+            days=days,
+            snapshot=not no_snapshot,
+            verbose=True,
+        )
+    )
+
+    typer.echo(f"\n  Symbol:      {symbol}")
+    typer.echo(f"  Period:      {result['start_date'][:10]} to {result['end_date'][:10]}")
+    typer.echo(f"  H1 bars:     {result['h1_count']:,}")
+    typer.echo(f"  H4 bars:     {result['h4_count']:,}")
+    typer.echo(f"  H1 file:     {result['h1_path']}")
+    typer.echo(f"  H4 file:     {result['h4_path']}")
+    if "snapshot_id" in result:
+        typer.echo(f"  Snapshot ID: {result['snapshot_id']}")
+    typer.echo("Done — real data ready for backtesting.")
 
 
 @data_app.command("freeze")
@@ -659,6 +701,98 @@ def campaign_stop() -> None:
         "Use Ctrl+C to stop a running campaign. "
         "Async background campaigns will be added in a future phase."
     )
+
+
+# ---------------------------------------------------------------------------
+# doctrine subcommands
+# ---------------------------------------------------------------------------
+
+from novatrade.cli.commands.doctrine_cmd import doctrine_create, doctrine_show  # noqa: E402
+
+doctrine_app.command("create")(doctrine_create)
+doctrine_app.command("show")(doctrine_show)
+
+
+# ---------------------------------------------------------------------------
+# pipeline subcommands
+# ---------------------------------------------------------------------------
+
+
+@pipeline_app.command("run")
+def pipeline_run(
+    data: Path = typer.Option(..., "--data", "-d", help="Path to candle data file"),  # noqa: B008
+    pair: str = typer.Option("EURUSD", help="Currency pair"),
+    timeframe: str = typer.Option("H1", help="Primary timeframe"),
+    concept: str = typer.Option("", help="Strategy concept text (auto-generates doctrine)"),
+    doctrine: Path = typer.Option("", help="Pre-existing doctrine YAML path"),  # noqa: B008
+    mode: str = typer.Option("single", help="Pipeline mode: single, sweep, campaign"),
+    experiments: int = typer.Option(200, "-n", help="Number of experiments (sweep/campaign)"),
+    output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Run an end-to-end strategy pipeline (single backtest, sweep, or campaign)."""
+    from novatrade.pipeline.orchestrator import PipelineConfig, PipelineMode, run_pipeline
+    from novatrade.pipeline.reporter import format_pipeline_json, format_pipeline_report
+
+    # Map mode string to enum
+    try:
+        pipeline_mode = PipelineMode(mode)
+    except ValueError:
+        typer.echo(f"Error: invalid mode '{mode}'. Choose from: single, sweep, campaign", err=True)
+        raise typer.Exit(code=1) from None
+
+    # Build pipeline config
+    config = PipelineConfig(
+        data_path=Path(data),
+        pair=pair,
+        timeframe=timeframe,
+        concept=concept or "",
+        doctrine_path=Path(doctrine) if str(doctrine) else None,
+        mode=pipeline_mode,
+        experiments=experiments,
+    )
+
+    # Execute pipeline
+    result = run_pipeline(config)
+
+    # Output
+    if output_json:
+        typer.echo(format_pipeline_json(result))
+    else:
+        typer.echo(format_pipeline_report(result))
+
+    # Exit code 1 if errors
+    if result.errors:
+        raise typer.Exit(code=1)
+
+
+@pipeline_app.command("campaign")
+def pipeline_campaign(
+    data: Path = typer.Option(..., "--data", "-d", help="Path to candle data file"),  # noqa: B008
+    pair: str = typer.Option("EURUSD", help="Currency pair"),
+    timeframe: str = typer.Option("H1", help="Primary timeframe"),
+    concept: str = typer.Option("", help="Strategy concept text"),
+    doctrine: Path = typer.Option("", help="Doctrine YAML path"),  # noqa: B008
+    experiments: int = typer.Option(200, "-n", help="Number of experiments"),
+) -> None:
+    """Run an end-to-end campaign pipeline (convenience alias for 'pipeline run --mode campaign')."""
+    from novatrade.pipeline.orchestrator import PipelineConfig, PipelineMode, run_pipeline
+    from novatrade.pipeline.reporter import format_pipeline_report
+
+    config = PipelineConfig(
+        data_path=Path(data),
+        pair=pair,
+        timeframe=timeframe,
+        concept=concept or "",
+        doctrine_path=Path(doctrine) if str(doctrine) else None,
+        mode=PipelineMode.CAMPAIGN,
+        experiments=experiments,
+    )
+
+    result = run_pipeline(config)
+    typer.echo(format_pipeline_report(result))
+
+    if result.errors:
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------

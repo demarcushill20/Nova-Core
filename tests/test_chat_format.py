@@ -84,6 +84,116 @@ class TestClassifyIntent:
 
 
 # ---------------------------------------------------------------------------
+# Phase 10.1: Affirmative command classification (bug fix)
+# User-reported: "Yes kick off phase 4-7" → health status instead of task ack
+# ---------------------------------------------------------------------------
+
+
+class TestAffirmativeCommandClassification:
+    """Tests for affirmative-prefixed commands being correctly routed to task."""
+
+    # --- User's exact bug-report examples ---
+
+    def test_yes_handle_both_is_task(self):
+        assert classify_intent("Yes handle both then commit and push") == "task"
+
+    def test_yes_kick_off_phase_is_task(self):
+        assert classify_intent("Yes kick off phase 4-7") == "task"
+
+    # --- Bare confirmations ---
+
+    def test_do_it_is_task(self):
+        assert classify_intent("do it") == "task"
+
+    def test_go_ahead_is_task(self):
+        assert classify_intent("Go ahead") == "task"
+
+    def test_ship_it_is_task(self):
+        assert classify_intent("ship it") == "task"
+
+    def test_lgtm_is_task(self):
+        assert classify_intent("lgtm") == "task"
+
+    def test_lets_do_it_is_task(self):
+        assert classify_intent("let's do it") == "task"
+
+    def test_make_it_so_is_task(self):
+        assert classify_intent("make it so") == "task"
+
+    def test_yes_do_it_is_task(self):
+        assert classify_intent("yes, do it") == "task"
+
+    def test_yeah_go_ahead_is_task(self):
+        assert classify_intent("yeah go ahead") == "task"
+
+    def test_proceed_is_task(self):
+        assert classify_intent("proceed") == "task"
+
+    def test_yes_proceed_is_task(self):
+        assert classify_intent("yes proceed") == "task"
+
+    # --- Affirmative + action verb ---
+
+    def test_yes_deploy_changes_is_task(self):
+        assert classify_intent("Yes, deploy the changes") == "task"
+
+    def test_sure_start_phase_is_task(self):
+        assert classify_intent("Sure, start phase 3") == "task"
+
+    def test_yeah_build_api_is_task(self):
+        assert classify_intent("Yeah build the API") == "task"
+
+    def test_okay_create_database_is_task(self):
+        assert classify_intent("Okay, create the database") == "task"
+
+    def test_sounds_good_run_tests_is_task(self):
+        assert classify_intent("Sounds good, run the tests") == "task"
+
+    def test_perfect_merge_branch_is_task(self):
+        assert classify_intent("Perfect, merge the branch") == "task"
+
+    def test_great_push_changes_is_task(self):
+        assert classify_intent("Great, push the changes") == "task"
+
+    # --- Work-item references ---
+
+    def test_yes_phase_4_is_task(self):
+        assert classify_intent("Yes phase 4") == "task"
+
+    def test_ok_start_step_3_is_task(self):
+        assert classify_intent("Ok start step 3") == "task"
+
+    def test_sure_task_42_is_task(self):
+        assert classify_intent("Sure, task 42") == "task"
+
+    # --- Negative cases: should STILL be chat ---
+
+    def test_bare_yes_is_chat(self):
+        assert classify_intent("Yes") == "chat"
+
+    def test_bare_yeah_is_chat(self):
+        assert classify_intent("Yeah") == "chat"
+
+    def test_should_we_refactor_is_chat(self):
+        assert classify_intent("Should we refactor?") == "chat"
+
+    def test_what_do_you_think_is_chat(self):
+        assert classify_intent("What do you think about the deploy?") == "chat"
+
+    def test_tell_me_about_is_chat(self):
+        assert classify_intent("tell me about the deploy") == "chat"
+
+    def test_how_are_you_is_chat(self):
+        assert classify_intent("How are you doing?") == "chat"
+
+    def test_thanks_is_chat(self):
+        assert classify_intent("thanks") == "chat"
+
+    def test_save_to_memory_still_chat(self):
+        assert classify_intent("save this to memory") == "chat"
+
+
+# ---------------------------------------------------------------------------
 # strip_report_sections
 # ---------------------------------------------------------------------------
 

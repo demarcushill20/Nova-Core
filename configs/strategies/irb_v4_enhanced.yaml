@@ -1,0 +1,30 @@
+strategy_type: irb
+irb_threshold: 0.5306
+ema_period: 48
+ema_fast_period: 6
+ema_slow_period: 89
+atr_period: 9
+adx_period: 7
+trend_slope_threshold: 0.4104
+adx_threshold: 16.28
+overextension_threshold: 2.727
+trail_atr_multiplier: 2.0
+trail_ema_period: 0
+ema_confirm_bars: 2
+use_ema_stack_filter: true
+trigger_window_bars: 10
+time_stop_bars: 35
+mtf_lookback: 50
+warmup_bars: 86
+breakeven_r: 1.0
+trail_delay_bars: 5
+use_volatility_filter: false
+volatility_atr_ma_period: 50
+max_consecutive_losses: 10
+filters_enabled: []
+session_filter: null
+name: irb_v4_enhanced
+version: 4.2.0
+description: 'IRB v4.2: same entries as v3 (no EMA stack/vol filter), improved exits
+  (ATR trail, breakeven, trail delay, circuit breaker)'
+parent_config: irb_v2_seed9999

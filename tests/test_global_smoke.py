@@ -29,7 +29,7 @@ _MOCK_CFG = "tools.skill_optimizer.global_smoke.THRESHOLDS_PATH"
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def smoke_file(tmp_path: Path) -> Path:
     """Create a temporary smoke_test.jsonl with known queries."""
     p = tmp_path / "smoke_test.jsonl"
@@ -44,7 +44,7 @@ def smoke_file(tmp_path: Path) -> Path:
     return p
 
 
-@pytest.fixture()
+@pytest.fixture
 def thresholds_file(tmp_path: Path) -> Path:
     """Create a temporary thresholds.yaml."""
     p = tmp_path / "thresholds.yaml"

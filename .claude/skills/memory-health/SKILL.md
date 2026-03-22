@@ -143,41 +143,47 @@ are unaffected.
 
 ### Step 6 — Cross-System Consistency Checks
 
-Run these checks to detect drift between Fusion Memory and Obsidian.
-Each check is optional — skip if the relevant system is down.
+**Implementation Note**: As of Dual Memory Integration Phase 6 (2026-03-19),
+cross-system health checks are now implemented via `utils/dual_memory_health.py`.
+Use the `CrossSystemHealthChecker` class for systematic drift detection.
 
-**Check A — Checkpoint-to-Diary Sync**:
-Compare the latest Fusion Memory checkpoint with the latest diary entry.
-```
-1. get_last_checkpoint() -> extract session_id
-2. vault_search(session_id) in 00-inbox/ and 90-diary/
-3. If checkpoint exists but no diary entry -> "diary gap detected"
-```
+**Usage**:
+```python
+from utils.dual_memory_health import CrossSystemHealthChecker, format_health_report
 
-**Check B — Promoted Pattern Integrity**:
-Verify that items marked `promoted_to_vault=true` in Fusion Memory
-still have corresponding notes in Obsidian.
-```
-1. query_memory("promoted patterns", top_k_final=5)
-   Filter for metadata.promoted_to_vault=true
-2. For each: vault_search(vault_path from metadata)
-3. If vault note missing -> "orphaned promotion flag"
-```
+# Initialize checker (max 2 checks per run by default)
+checker = CrossSystemHealthChecker()
 
-**Check C — Stale Promotion Detection**:
-Check if Obsidian agent-patterns with `source: nova-core-memory` still
-have valid Fusion Memory source items.
-```
-1. vault_list("20-agent-patterns/")
-2. For notes with source=nova-core-memory, check frontmatter for
-   source memory IDs
-3. query_memory by those IDs
-4. If source item missing -> "orphaned vault note"
+# Create mock MCP clients (replace with actual tool calls)
+fusion_client = MockFusionClient()  # Wraps mcp__nova-memory__ tools
+vault_client = MockVaultClient()    # Wraps mcp__nova-vault__ tools
+
+# Run comprehensive check
+health_report = checker.run_cross_system_health_check(
+    fusion_client, vault_client,
+    checks_to_run=["diary_sync", "promotion_integrity"]  # or None for default
+)
+
+# Format for output
+formatted_report = format_health_report(health_report)
 ```
 
-**Bounds**: Run at most 2 of these 3 checks per invocation (choose the
-most relevant based on context). Max 4 additional tool calls for
-cross-system checks.
+**Available Checks**:
+- **diary_sync**: Checkpoint-to-Diary Sync — compare latest Fusion Memory checkpoint with Obsidian diary entries
+- **promotion_integrity**: Promoted Pattern Integrity — verify items marked `promoted_to_vault=true` exist in Obsidian
+- **stale_detection**: Stale Promotion Detection — check if Obsidian agent-patterns with `source: nova-core-memory` have valid source items
+
+**Check Results**:
+- `ok`: Check passed, no issues detected
+- `gap_detected`: Missing diary entry for checkpoint
+- `orphaned_flags`: Fusion Memory items marked as promoted but vault files missing
+- `orphaned_notes`: Obsidian notes reference missing Fusion Memory source items
+- `error`: Check failed due to connectivity or other issues
+- `not_checked`: Check was skipped (not in selected checks)
+
+**Bounds**: Run at most 2 checks per invocation by default. Each check is optimized
+to limit API calls (max 5 items per check type). Total cross-system tool calls
+should not exceed 8-10 per health check invocation.
 
 ### Step 7 — Verify Recovery
 

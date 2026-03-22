@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0469_M3__Golden_corpus_has_no__adversarial__cases_1773839527",
+  "workflow_id": "0469_M3__Golden_corpus_has_no__adversarial__cases",
+  "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0469_M3__Golden_corpus_has_no__adversarial__cases_1773839000 (done)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-03-18T13:12:07Z",
+  "confidence": "high"
+}

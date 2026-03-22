@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260322_10_implementation_pm_1774214011",
+  "workflow_id": "shift_20260322_10_implementation_pm",
+  "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_shift_20260322_10_implementation_pm_1774210537 (done)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
+  "created_at": "2026-03-22T21:13:31Z",
+  "confidence": "high"
+}

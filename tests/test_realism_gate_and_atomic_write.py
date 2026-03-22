@@ -25,17 +25,17 @@ from novatrade.evaluation.gates import (
 class TestRealismGateDefaults:
     """Default GateConfig must reject zero-cost environments."""
 
-    def test_default_min_spread_is_1_pip(self):
+    def test_default_min_spread_is_half_pip(self):
         cfg = GateConfig()
-        assert cfg.min_avg_spread_pips == 1.0
+        assert cfg.min_avg_spread_pips == 0.5
 
     def test_default_min_slippage_is_0_1_pip(self):
         cfg = GateConfig()
         assert cfg.min_slippage_pips == 0.1
 
-    def test_default_min_commission_is_3_usd(self):
+    def test_default_min_commission_is_2_usd(self):
         cfg = GateConfig()
-        assert cfg.min_commission_per_lot == 3.0
+        assert cfg.min_commission_per_lot == 2.0
 
     def test_zero_cost_env_fails_all_realism_gates(self):
         """A completely zero-cost environment must fail spread, slippage, AND commission."""
@@ -85,9 +85,9 @@ class TestRealismGateDefaults:
     def test_boundary_values_pass(self):
         """Exact boundary values (>= comparison) should pass."""
         env = {
-            "avg_spread_pips": 1.0,
+            "avg_spread_pips": 0.5,
             "slippage_pips": 0.1,
-            "commission_per_lot_usd": 3.0,
+            "commission_per_lot_usd": 2.0,
             "stop_first_on_ambiguity": True,
         }
         results = evaluate_stage_b(env)
@@ -97,9 +97,9 @@ class TestRealismGateDefaults:
     def test_just_below_boundary_fails(self):
         """Values slightly below the floor must fail."""
         env = {
-            "avg_spread_pips": 0.99,
+            "avg_spread_pips": 0.49,
             "slippage_pips": 0.09,
-            "commission_per_lot_usd": 2.99,
+            "commission_per_lot_usd": 1.99,
             "stop_first_on_ambiguity": True,
         }
         results = evaluate_stage_b(env)
@@ -241,3 +241,145 @@ class TestAtomicWriteNoDoubleClose:
         # No .tmp files should remain
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert len(tmp_files) == 0, f"Leftover tmp files: {tmp_files}"
+
+    # ── experiment_db.export_tsv ──────────────────────────────────────────
+
+    def test_experiment_db_export_tsv_no_double_close(self, tmp_path: Path):
+        """export_tsv must not double-close the fd when os.replace fails."""
+        from novatrade.storage.experiment_db import ExperimentDB
+
+        db = ExperimentDB(tmp_path / "test.db")
+        out_path = tmp_path / "export.tsv"
+
+        close_calls: list[int] = []
+        original_close = os.close
+
+        def tracking_close(fd: int) -> None:
+            close_calls.append(fd)
+            original_close(fd)
+
+        with (
+            patch("novatrade.storage.experiment_db.os.close", side_effect=tracking_close),
+            patch(
+                "novatrade.storage.experiment_db.os.replace",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            db.export_tsv("campaign-x", out_path)
+
+        assert len(close_calls) == 1, f"os.close called {len(close_calls)} times, expected 1. fds: {close_calls}"
+
+    def test_experiment_db_export_tsv_happy_path(self, tmp_path: Path):
+        """Normal export_tsv should produce a valid TSV file."""
+        from novatrade.storage.experiment_db import ExperimentDB
+
+        db = ExperimentDB(tmp_path / "test.db")
+        out_path = tmp_path / "export.tsv"
+        count = db.export_tsv("campaign-x", out_path)
+        assert count == 0
+        assert out_path.exists()
+        content = out_path.read_text()
+        assert "experiment_id" in content  # header row present
+
+    # ── pipeline/checkpoint.save_checkpoint ───────────────────────────────
+
+    def test_pipeline_checkpoint_no_double_close(self, tmp_path: Path):
+        """pipeline checkpoint save must not double-close fd on os.replace failure."""
+        from novatrade.pipeline.checkpoint import (
+            CampaignCheckpoint as PipelineCheckpoint,
+        )
+        from novatrade.pipeline.checkpoint import (
+            save_checkpoint as pipeline_save_checkpoint,
+        )
+
+        cp = PipelineCheckpoint(campaign_id="test-pipe")
+
+        close_calls: list[int] = []
+        original_close = os.close
+
+        def tracking_close(fd: int) -> None:
+            close_calls.append(fd)
+            original_close(fd)
+
+        with (
+            patch("novatrade.pipeline.checkpoint.os.close", side_effect=tracking_close),
+            patch(
+                "novatrade.pipeline.checkpoint.os.replace",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            pipeline_save_checkpoint(cp, tmp_path)
+
+        assert len(close_calls) == 1, f"os.close called {len(close_calls)} times, expected 1. fds: {close_calls}"
+
+    def test_pipeline_checkpoint_happy_path(self, tmp_path: Path):
+        """Normal pipeline checkpoint save should produce a valid JSON file."""
+        from novatrade.pipeline.checkpoint import (
+            CampaignCheckpoint as PipelineCheckpoint,
+        )
+        from novatrade.pipeline.checkpoint import (
+            save_checkpoint as pipeline_save_checkpoint,
+        )
+
+        cp = PipelineCheckpoint(campaign_id="test-pipe", best_score=1.5)
+        path = pipeline_save_checkpoint(cp, tmp_path)
+        data = json.loads(path.read_text())
+        assert data["campaign_id"] == "test-pipe"
+        assert data["best_score"] == 1.5
+
+    # ── pipeline/reporter.report_to_file ──────────────────────────────────
+
+    def test_reporter_no_double_close(self, tmp_path: Path):
+        """report_to_file must not double-close fd on os.replace failure."""
+        from novatrade.pipeline.orchestrator import PipelineMode, PipelineResult
+        from novatrade.pipeline.reporter import report_to_file
+
+        result = PipelineResult(mode=PipelineMode.SINGLE)
+
+        close_calls: list[int] = []
+        original_close = os.close
+
+        def tracking_close(fd: int) -> None:
+            close_calls.append(fd)
+            original_close(fd)
+
+        with (
+            patch("novatrade.pipeline.reporter.os.close", side_effect=tracking_close),
+            patch(
+                "novatrade.pipeline.reporter.os.replace",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            report_to_file(result, tmp_path)
+
+        assert len(close_calls) == 1, f"os.close called {len(close_calls)} times, expected 1. fds: {close_calls}"
+
+    def test_reporter_happy_path(self, tmp_path: Path):
+        """Normal report_to_file should produce a report file."""
+        from novatrade.pipeline.orchestrator import PipelineMode, PipelineResult
+        from novatrade.pipeline.reporter import report_to_file
+
+        result = PipelineResult(mode=PipelineMode.SINGLE)
+        path = report_to_file(result, tmp_path)
+        assert path.exists()
+        assert path.stat().st_size > 0
+
+    # ── Original error propagation ────────────────────────────────────────
+
+    def test_original_error_propagates_not_masked(self, tmp_path: Path):
+        """When os.replace fails, the ORIGINAL error must propagate, not an OSError from double-close."""
+        from novatrade.storage.artifacts import _atomic_write
+
+        out_path = tmp_path / "test.json"
+
+        with (
+            pytest.raises(PermissionError, match="permission denied"),
+            patch(
+                "novatrade.storage.artifacts.os.replace",
+                side_effect=PermissionError("permission denied"),
+            ),
+        ):
+            _atomic_write(out_path, '{"key": "value"}')

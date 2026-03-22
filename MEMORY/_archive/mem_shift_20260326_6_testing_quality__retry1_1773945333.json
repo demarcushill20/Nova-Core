@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260326_6_testing_quality__retry1_1773945333",
+  "workflow_id": "shift_20260326_6_testing_quality__retry1",
+  "task_summary": "Repaired contract validation for shift_20260326_6_testing_quality by fixing field name from files_modified to files_changed",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Repaired contract validation for shift_20260326_6_testing_quality by fixing field name from files_modified to files_changed"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260326_6_testing_quality__retry1"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Repaired contract validation for shift_20260326_6_testing_quality by fixing field name from files_modified to files_changed",
+  "created_at": "2026-03-19T18:35:33Z",
+  "confidence": "high"
+}

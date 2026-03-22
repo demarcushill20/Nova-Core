@@ -15,6 +15,7 @@ Covers:
 import json
 import time
 from pathlib import Path
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -43,9 +44,9 @@ from utils.trace_context import TraceContext
 # ---------------------------------------------------------------------------
 
 
-def _valid_cmo(**kw) -> CanonicalMemoryObject:
+def _valid_cmo(**kw: Any) -> CanonicalMemoryObject:
     """Build a minimal valid CanonicalMemoryObject."""
-    defaults = {
+    defaults: dict[str, Any] = {
         "memory_id": "cm-wat-1234567890",
         "timestamp": "2026-03-13T10:00:00Z",
         "source": "watcher",
@@ -1517,7 +1518,7 @@ class TestWritePathBypassGuard:
 
     # Known direct-write bypasses that are documented and exempt.
     # Each entry: (file_relative, function_or_pattern, reason)
-    KNOWN_BYPASSES = [
+    KNOWN_BYPASSES: ClassVar[list[tuple[str, str, str]]] = [
         # Blackboard is internal orchestration state, not knowledge memory
         ("agents/blackboard.py", "_write_json", "internal state, not knowledge"),
         # Session manager persists session state, not knowledge

@@ -659,118 +659,182 @@ class TestMutations:
 
         config = StrategyConfig()
         doctrine = concept_to_doctrine("IRB reversal", "EURUSD", "H1")
-        mutated = generate_filter_mutation(config, doctrine=doctrine, rng=random.Random(42))
+        mutated_params, _toggles = generate_filter_mutation(config.model_dump(), doctrine=doctrine, seed=42)
 
         # Mandatory filters must always be present
         for f in doctrine.filters_mandatory:
-            assert f in mutated.filters_enabled
+            assert f in mutated_params["filters_enabled"]
         # Forbidden filters must never be present
         for f in doctrine.filters_forbidden:
-            assert f not in mutated.filters_enabled
+            assert f not in mutated_params["filters_enabled"]
 
     def test_filter_mutation_without_doctrine(self):
         from novatrade.cli.config_schema import StrategyConfig
         from novatrade.optimization.mutations import generate_filter_mutation
 
         config = StrategyConfig()
-        mutated = generate_filter_mutation(config, rng=random.Random(123))
-        # Should still produce a valid StrategyConfig
-        assert isinstance(mutated, StrategyConfig)
+        mutated_params, _toggles = generate_filter_mutation(config.model_dump(), seed=123)
+        # Should still produce a valid dict with expected keys
+        assert isinstance(mutated_params, dict)
+        assert "filters_enabled" in mutated_params
 
     def test_structural_mutation_within_bounds(self):
         from novatrade.cli.config_schema import StrategyConfig
         from novatrade.optimization.mutations import generate_structural_mutation
 
         config = StrategyConfig()
-        mutated = generate_structural_mutation(config, rng=random.Random(42))
+        mutated_params, _template = generate_structural_mutation(config.model_dump(), seed=42)
 
         for param, bounds in StrategyConfig.PARAMETER_BOUNDS.items():
-            val = getattr(mutated, param)
-            assert bounds.min_val <= val <= bounds.max_val, (
-                f"{param}: {val} outside [{bounds.min_val}, {bounds.max_val}]"
-            )
+            if param in mutated_params:
+                val = mutated_params[param]
+                assert bounds.min_val <= val <= bounds.max_val, (
+                    f"{param}: {val} outside [{bounds.min_val}, {bounds.max_val}]"
+                )
 
     def test_structural_mutation_tags_lineage(self):
         from novatrade.cli.config_schema import StrategyConfig
         from novatrade.optimization.mutations import generate_structural_mutation
 
         config = StrategyConfig(name="base_config")
-        mutated = generate_structural_mutation(config, rng=random.Random(42))
-        assert "L3:" in mutated.description
-        assert "base_config" in mutated.description
+        mutated_params, template = generate_structural_mutation(config.model_dump(), seed=42)
+        # Template should have composition info
+        assert template.composition is not None
 
     def test_ancestry_tracking(self):
-        from novatrade.optimization.mutations import AncestryTracker
+        from novatrade.optimization.mutations import AncestryTracker, MutationRecord
 
         tracker = AncestryTracker()
-        tracker.record("parent1", "child1", "l1_param", {"irb_threshold": 0.45})
-        tracker.record("child1", "child2", "l2_filter", {"filters_enabled": ["trend"]})
+        tracker.record(
+            MutationRecord(
+                experiment_id="child1",
+                parent_id="parent1",
+                mutation_type="level1_perturbation",
+                mutation_details={"irb_threshold": 0.45},
+            )
+        )
+        tracker.record(
+            MutationRecord(
+                experiment_id="child2",
+                parent_id="child1",
+                mutation_type="level2_filter",
+                mutation_details={"filters_enabled": ["trend"]},
+            )
+        )
 
-        lineage = tracker.get_lineage("child2")
+        lineage = tracker.lineage("child2")
         assert len(lineage) == 2
-        assert lineage[0].child_id == "child2"
-        assert lineage[0].parent_id == "child1"
-        assert lineage[1].child_id == "child1"
-        assert lineage[1].parent_id == "parent1"
+        # Root-first order: child1 (root) → child2 (leaf)
+        assert lineage[0].experiment_id == "child1"
+        assert lineage[0].parent_id == "parent1"
+        assert lineage[1].experiment_id == "child2"
+        assert lineage[1].parent_id == "child1"
 
     def test_ancestry_get_children(self):
-        from novatrade.optimization.mutations import AncestryTracker
+        from novatrade.optimization.mutations import AncestryTracker, MutationRecord
 
         tracker = AncestryTracker()
-        tracker.record("parent", "child_a", "l1_param", {"x": 1})
-        tracker.record("parent", "child_b", "l2_filter", {"y": 2})
-        tracker.record("child_a", "grandchild", "l3_structural", {"z": 3})
+        tracker.record(
+            MutationRecord(
+                experiment_id="child_a",
+                parent_id="parent",
+                mutation_type="level1_perturbation",
+                mutation_details={"x": 1},
+            )
+        )
+        tracker.record(
+            MutationRecord(
+                experiment_id="child_b",
+                parent_id="parent",
+                mutation_type="level2_filter",
+                mutation_details={"y": 2},
+            )
+        )
+        tracker.record(
+            MutationRecord(
+                experiment_id="grandchild",
+                parent_id="child_a",
+                mutation_type="level3_structural",
+                mutation_details={"z": 3},
+            )
+        )
 
-        children = tracker.get_children("parent")
+        children = tracker.children("parent")
         assert len(children) == 2
-        child_ids = {c.child_id for c in children}
+        child_ids = {c.experiment_id for c in children}
         assert child_ids == {"child_a", "child_b"}
 
     def test_ancestry_json_roundtrip(self):
-        from novatrade.optimization.mutations import AncestryTracker
+        from novatrade.optimization.mutations import AncestryTracker, MutationRecord
 
         tracker = AncestryTracker()
-        tracker.record("p1", "c1", "l1_param", {"a": 1.0})
-        tracker.record("c1", "c2", "l2_filter", {"b": ["trend"]})
+        tracker.record(
+            MutationRecord(
+                experiment_id="c1",
+                parent_id="p1",
+                mutation_type="level1_perturbation",
+                mutation_details={"a": 1.0},
+            )
+        )
+        tracker.record(
+            MutationRecord(
+                experiment_id="c2",
+                parent_id="c1",
+                mutation_type="level2_filter",
+                mutation_details={"b": ["trend"]},
+            )
+        )
 
         json_str = tracker.to_json()
         restored = AncestryTracker.from_json(json_str)
         assert len(restored.records) == 2
-        lineage = restored.get_lineage("c2")
+        lineage = restored.lineage("c2")
         assert len(lineage) == 2
 
-    def test_mutated_candidate_budget(self):
+    def test_mutated_candidate_levels(self):
         from novatrade.cli.config_schema import StrategyConfig
         from novatrade.optimization.mutations import generate_mutated_candidate
+        from novatrade.optimization.search_levels import SearchLevel
 
-        config = StrategyConfig()
-        types = {"l1_param": 0, "l2_filter": 0, "l3_structural": 0}
-        rng = random.Random(42)
+        config = StrategyConfig().model_dump()
 
-        for _ in range(100):
-            _, mt = generate_mutated_candidate(
-                config,
-                {"l1": 0.60, "l2": 0.25, "l3": 0.15},
-                rng=rng,
-            )
-            types[mt] += 1
+        # Level 1 produces parameter perturbation
+        new_params, mt, details = generate_mutated_candidate(
+            config,
+            SearchLevel.LEVEL_1,
+            seed=42,
+        )
+        assert mt == "level1_perturbation"
+        assert isinstance(new_params, dict)
 
-        # L1 should be dominant (~60 out of 100)
-        assert types["l1_param"] > 30
-        # All types should appear at least once with 100 trials
-        assert types["l2_filter"] > 0
-        assert types["l3_structural"] > 0
+        # Level 2 produces filter toggles
+        new_params, mt, details = generate_mutated_candidate(
+            config,
+            SearchLevel.LEVEL_2,
+            seed=42,
+        )
+        assert mt == "level2_filter"
+        assert "toggles" in details
+
+        # Level 3 produces structural template
+        new_params, mt, details = generate_mutated_candidate(
+            config,
+            SearchLevel.LEVEL_3,
+            seed=42,
+        )
+        assert mt == "level3_structural"
+        assert "composition" in details
 
     def test_mutation_diff(self):
         from novatrade.cli.config_schema import StrategyConfig
         from novatrade.optimization.mutations import compute_mutation_diff
 
-        parent = StrategyConfig(irb_threshold=0.45, ema_period=20)
-        child = StrategyConfig(irb_threshold=0.50, ema_period=20)
+        parent = StrategyConfig(irb_threshold=0.45, ema_period=20).model_dump()
+        child = StrategyConfig(irb_threshold=0.50, ema_period=20).model_dump()
         diff = compute_mutation_diff(parent, child)
         assert "irb_threshold" in diff
-        assert diff["irb_threshold"]["old"] == pytest.approx(0.45)
-        assert diff["irb_threshold"]["new"] == pytest.approx(0.50)
+        assert diff["irb_threshold"]["before"] == pytest.approx(0.45)
+        assert diff["irb_threshold"]["after"] == pytest.approx(0.50)
         assert "ema_period" not in diff  # unchanged
 
 

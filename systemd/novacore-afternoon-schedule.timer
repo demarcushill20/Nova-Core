@@ -1,0 +1,10 @@
+[Unit]
+Description=NovaCore Afternoon Schedule Timer (2:30 PM Central)
+
+[Timer]
+OnCalendar=*-*-* 14:30:00 America/Chicago
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

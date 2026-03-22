@@ -16,8 +16,11 @@ import os
 import signal
 import sys
 import threading
-from datetime import datetime, timedelta, timezone
+import time
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+
+import yaml
 
 from agents.memory_engine import (
     format_retrieval_for_planner,  # legacy — retained for recall result formatting
@@ -57,6 +60,15 @@ from utils.task_checkpoint import (
 from utils.task_validator import audit_task_execution, validate_task_content
 from utils.trace_context import TraceContext
 
+# Quota-aware scheduling (optional — degrades gracefully if quota file absent)
+try:
+    from utils.quota_manager import check_emergency_brake as _quota_emergency_brake
+    from utils.quota_manager import filter_tasks_for_quota as _quota_filter
+
+    _HAS_QUOTA = True
+except ImportError:
+    _HAS_QUOTA = False
+
 # --- Audit logger for watcher lifecycle events ---
 _audit = get_audit_logger("watcher")
 
@@ -75,6 +87,8 @@ TASK_TIMEOUT = 14400  # max seconds per task execution (4 hours)
 ARTIFACT_WINDOW = 600  # seconds — OUTPUT file must be this recent
 MAX_SUPERVISOR_ATTEMPTS = 2  # total attempts per task (1 original + up to 1 retry)
 MAX_CONCURRENT_TASKS = int(os.environ.get("NOVA_MAX_CONCURRENT_TASKS", "2"))  # Phase 4.3
+STALE_TASK_AGE_HOURS = 12  # auto-mark pending .md tasks as .done after this many hours untouched
+STALE_REAP_INTERVAL = 3600  # seconds between staleness reaper runs (1 hour)
 
 METRICS_FILE = STATE_DIR / "metrics.json"
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
@@ -310,6 +324,10 @@ def _shutdown(signum, _frame):
 
 # --- Duplicate-prevention state ---
 _dispatched: set[str] = set()
+# Deferred tasks: task_name -> monotonic timestamp when deferred.
+# Tasks in this dict are skipped during scan until the cooldown expires.
+_deferred: dict[str, float] = {}
+_DEFER_COOLDOWN_S: float = 300.0  # 5 minutes before retrying a deferred task
 
 
 # --- Helpers ---
@@ -340,23 +358,137 @@ def _find_recent_output(task_stem: str) -> Path | None:
     return newest if mtime >= cutoff else None
 
 
+# --- Frontmatter helpers ---
+def parse_frontmatter(path: Path) -> dict:
+    """Parse YAML frontmatter from a task file.
+
+    Returns an empty dict if the file has no frontmatter or parsing fails.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}
+    try:
+        return yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError:
+        return {}
+
+
+def is_task_ready(path: Path) -> bool:
+    """Check if a task is ready for dispatch (not scheduled for the future).
+
+    Tasks with no ``scheduled_at`` frontmatter field are always ready.
+    Tasks whose ``scheduled_at`` datetime is in the past (or now) are ready.
+    Tasks scheduled for the future are skipped.
+    """
+    fm = parse_frontmatter(path)
+    return _check_scheduled(fm.get("scheduled_at"))
+
+
+def _check_scheduled(scheduled_at) -> bool:
+    """Return True if the task should run now, False if it should be deferred."""
+    if scheduled_at is None:
+        return True
+    # yaml.safe_load can produce datetime.date for bare dates (e.g. 2026-03-20)
+    if isinstance(scheduled_at, date) and not isinstance(scheduled_at, datetime):
+        scheduled_at = datetime(scheduled_at.year, scheduled_at.month, scheduled_at.day)
+    elif isinstance(scheduled_at, str):
+        try:
+            scheduled_at = datetime.fromisoformat(scheduled_at)
+        except (ValueError, TypeError):
+            return True  # Unparseable → ready immediately
+    elif isinstance(scheduled_at, datetime):
+        pass  # yaml.safe_load may parse datetime directly
+    else:
+        return True  # Unexpected type → ready immediately
+    now = datetime.now(tz=scheduled_at.tzinfo)
+    return now >= scheduled_at
+
+
 # --- Core logic ---
 def get_pending_tasks() -> list[Path]:
     """Return sorted list of pending .md task files.
 
     Ignores: .done, .failed, .inprogress, .cancelled
+    Defers: tasks with a future ``scheduled_at`` frontmatter field.
     """
     if not TASKS_DIR.exists():
         return []
-    return sorted(
-        p
-        for p in TASKS_DIR.iterdir()
-        if p.suffix == ".md"
-        and not p.name.endswith(".md.done")
-        and not p.name.endswith(".md.failed")
-        and not p.name.endswith(".md.inprogress")
-        and not p.name.endswith(".md.cancelled")
-    )
+    ready: list[Path] = []
+    for p in sorted(TASKS_DIR.iterdir()):
+        if p.suffix != ".md":
+            continue
+        fm = parse_frontmatter(p)
+        if not _check_scheduled(fm.get("scheduled_at")):
+            logger.debug(
+                "Task %s scheduled for %s, skipping (not yet ready)",
+                p.name,
+                fm.get("scheduled_at"),
+            )
+            continue
+        ready.append(p)
+    return ready
+
+
+# --- Staleness reaper ---
+_last_reap_time: float = 0.0
+
+
+def reap_stale_tasks(*, force: bool = False) -> list[str]:
+    """Auto-mark pending .md tasks as .done if untouched for STALE_TASK_AGE_HOURS.
+
+    Tasks handled via direct Telegram conversation never go through the watcher
+    pipeline, so they accumulate as stale .md files. This reaper cleans them up.
+
+    Runs at most once per STALE_REAP_INTERVAL seconds unless force=True.
+    Returns list of reaped task filenames.
+    """
+    global _last_reap_time
+    import time as _time
+
+    now = _time.time()
+    if not force and (now - _last_reap_time) < STALE_REAP_INTERVAL:
+        return []
+    _last_reap_time = now
+
+    if not TASKS_DIR.exists():
+        return []
+
+    reaped: list[str] = []
+    cutoff = now - (STALE_TASK_AGE_HOURS * 3600)
+
+    for p in sorted(TASKS_DIR.iterdir()):
+        if p.suffix != ".md":
+            continue
+        # Skip tasks currently being processed
+        if p.with_suffix(".md.inprogress").exists():
+            continue
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < cutoff:
+            done_path = p.with_suffix(".done")
+            try:
+                p.rename(done_path)
+                logger.info(
+                    "STALE REAPER: %s → %s (untouched %.1fh)",
+                    p.name,
+                    done_path.name,
+                    (now - mtime) / 3600,
+                )
+                reaped.append(p.name)
+            except OSError as exc:
+                logger.warning("STALE REAPER: failed to rename %s: %s", p.name, exc)
+
+    if reaped:
+        slog.event("task.stale_reaped", count=len(reaped), tasks=reaped)
+    return reaped
 
 
 def _is_retry_task(stem: str) -> bool:
@@ -604,6 +736,16 @@ async def _watchdog_keepalive(interval: int = 300):
         pass
 
 
+async def _async_write(path: Path, content: str, mode: str = "a") -> None:
+    """Write content to a file without blocking the event loop."""
+
+    def _do():
+        with open(path, mode, encoding="utf-8") as f:
+            f.write(content)
+
+    await asyncio.to_thread(_do)
+
+
 async def _execute_worker(
     stem: str,
     cmd: list[str],
@@ -625,17 +767,18 @@ async def _execute_worker(
     pid_file = RUNNING_DIR / f"{stem}.pid"
 
     log_mode = "w" if attempt == 1 else "a"
-    with open(worker_log, log_mode) as wf:
-        if attempt > 1:
-            wf.write(f"\n{'=' * 60}\n")
-            wf.write(f"=== SUPERVISOR RETRY: attempt {attempt}/{max_attempts} ===\n")
-            wf.write(f"{'=' * 60}\n")
-        wf.write(f"=== WORKER LOG: {stem} ===\n")
-        wf.write(f"=== START: {start_utc} ===\n")
-        wf.write(f"=== SKILLS: {', '.join(selected_names) or '(none)'} ===\n")
-        wf.write(
-            f"=== COMMAND: {CLAUDE_BIN} -p --verbose --dangerously-skip-permissions{skill_flag_note} <prompt> ===\n\n"
-        )
+    header_lines = []
+    if attempt > 1:
+        header_lines.append(f"\n{'=' * 60}\n")
+        header_lines.append(f"=== SUPERVISOR RETRY: attempt {attempt}/{max_attempts} ===\n")
+        header_lines.append(f"{'=' * 60}\n")
+    header_lines.append(f"=== WORKER LOG: {stem} ===\n")
+    header_lines.append(f"=== START: {start_utc} ===\n")
+    header_lines.append(f"=== SKILLS: {', '.join(selected_names) or '(none)'} ===\n")
+    header_lines.append(
+        f"=== COMMAND: {CLAUDE_BIN} -p --verbose --dangerously-skip-permissions{skill_flag_note} <prompt> ===\n\n"
+    )
+    await _async_write(worker_log, "".join(header_lines), mode=log_mode)
 
     if child_env is None:
         child_env = os.environ.copy()
@@ -659,7 +802,7 @@ async def _execute_worker(
             env=child_env,
         )
 
-        pid_file.write_text(str(proc.pid), encoding="utf-8")
+        await asyncio.to_thread(pid_file.write_text, str(proc.pid), "utf-8")
         logger.info("Worker PID %d written to %s", proc.pid, pid_file)
 
         # Start watchdog keepalive pings during long-running subprocess
@@ -678,10 +821,10 @@ async def _execute_worker(
             end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
             logger.error("EXECUTION TIMEOUT: %s (exceeded %ds)", stem, TASK_TIMEOUT)
             _sh_record_error("watcher._execute_worker", f"timeout after {TASK_TIMEOUT}s", task_id=stem)
-            with open(worker_log, "a") as wf:
-                wf.write(f"=== TIMEOUT after {TASK_TIMEOUT}s ===\n")
-                wf.write("\n=== EXIT CODE: -1 (timeout) ===\n")
-                wf.write(f"=== END: {end_utc} ===\n")
+            await _async_write(
+                worker_log,
+                f"=== TIMEOUT after {TASK_TIMEOUT}s ===\n\n=== EXIT CODE: -1 (timeout) ===\n=== END: {end_utc} ===\n",
+            )
             return -1
         except asyncio.CancelledError:
             # Graceful cancellation: terminate, wait, then kill if needed
@@ -694,25 +837,29 @@ async def _execute_worker(
                     proc.kill()
                     await proc.communicate()
             end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            with open(worker_log, "a") as wf:
-                wf.write("\n=== CANCELLED ===\n")
-                wf.write(f"=== END: {end_utc} ===\n")
+            await _async_write(
+                worker_log,
+                f"\n=== CANCELLED ===\n=== END: {end_utc} ===\n",
+            )
             raise
         finally:
             keepalive_task.cancel()
 
         exit_code = proc.returncode if proc.returncode is not None else 0
         end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        with open(worker_log, "a") as wf:
-            wf.write("=== STDOUT ===\n")
-            wf.write(stdout or "(empty)\n")
-            wf.write("\n=== STDERR ===\n")
-            wf.write(stderr or "(empty)\n")
-            wf.write(f"\n=== EXIT CODE: {exit_code} ===\n")
-            wf.write(f"=== END: {end_utc} ===\n")
+        await _async_write(
+            worker_log,
+            f"=== STDOUT ===\n"
+            f"{stdout or '(empty)'}\n"
+            f"\n=== STDERR ===\n"
+            f"{stderr or '(empty)'}\n"
+            f"\n=== EXIT CODE: {exit_code} ===\n"
+            f"=== END: {end_utc} ===\n",
+        )
 
         logger.info("Claude exited with code %d for %s", exit_code, stem)
-        logger.info("Worker log: %s (%d bytes)", worker_log, worker_log.stat().st_size)
+        log_size = await asyncio.to_thread(lambda: worker_log.stat().st_size)
+        logger.info("Worker log: %s (%d bytes)", worker_log, log_size)
 
     except asyncio.CancelledError:
         raise  # re-raise, already handled above
@@ -720,13 +867,13 @@ async def _execute_worker(
         end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         logger.exception("EXECUTION ERROR: %s", stem)
         _sh_record_error("watcher._execute_worker", exc, task_id=stem)
-        with open(worker_log, "a") as wf:
-            wf.write(f"\n=== EXCEPTION: {exc} ===\n")
-            wf.write("=== EXIT CODE: -1 (error) ===\n")
-            wf.write(f"=== END: {end_utc} ===\n")
+        await _async_write(
+            worker_log,
+            f"\n=== EXCEPTION: {exc} ===\n=== EXIT CODE: -1 (error) ===\n=== END: {end_utc} ===\n",
+        )
 
     finally:
-        pid_file.unlink(missing_ok=True)
+        await asyncio.to_thread(pid_file.unlink, True)
         logger.info("PID file removed: %s", pid_file)
         # Max-plan guard: record completion
         _mpg_dur = (datetime.now(timezone.utc) - _mpg_t0).total_seconds()
@@ -745,6 +892,7 @@ async def _execute_worker(
 async def dispatch(task_path: Path):
     """Dispatch a single task (async). Wraps _dispatch_inner with cancellation handling."""
     stem = _task_stem(task_path.name)
+    task_name = task_path.name
     inprogress_path = task_path.with_name(f"{stem}.md.inprogress")
     try:
         await _dispatch_inner(task_path)
@@ -754,6 +902,11 @@ async def dispatch(task_path: Path):
         slog.event("task.cancelled", stem=stem, reason="async_cancellation")
         _audit.log("task.cancelled", {"task_stem": stem, "reason": "async_cancellation"}, correlation_id=f"task_{stem}")
         raise
+    finally:
+        # Always remove from _dispatched so the task can be retried on the next
+        # poll cycle if it was renamed back to .md (e.g. after timeout or crash).
+        _dispatched.discard(task_name)
+        _deferred.pop(task_name, None)
 
 
 async def _dispatch_inner(task_path: Path):
@@ -765,8 +918,8 @@ async def _dispatch_inner(task_path: Path):
     # --- Phase 1.2: Kill switch check ---
     ks_mode = check_kill_switch()
     if ks_mode != MODE_RUN:
-        logger.info("KILL_SWITCH: mode=%s — skipping task %s", ks_mode, stem)
-        _dispatched.discard(task_name)  # Allow retry on next poll cycle
+        logger.info("KILL_SWITCH: mode=%s — deferring task %s for %ds", ks_mode, stem, int(_DEFER_COOLDOWN_S))
+        _deferred[task_name] = time.monotonic()
         return
 
     # --- Equity drawdown kill switch — blocks only NovaTrade tasks ---
@@ -775,15 +928,18 @@ async def _dispatch_inner(task_path: Path):
 
         _task_content = ""
         try:
-            _task_content = task_path.read_text(encoding="utf-8")[: 50 * 1024]
+            _task_content = (await asyncio.to_thread(task_path.read_text, "utf-8"))[: 50 * 1024]
         except Exception:
             pass
         if check_equity_kill_switch() and is_novatrade_task(stem, _task_content):
-            logger.warning("EQUITY_KILL_SWITCH: blocking NovaTrade task %s", stem)
+            logger.warning("EQUITY_KILL_SWITCH: deferring NovaTrade task %s for %ds", stem, int(_DEFER_COOLDOWN_S))
             # Move back from .inprogress to .md so it can be retried later
-            if inprogress_path.exists():
-                inprogress_path.rename(inprogress_path.with_suffix("").with_suffix(".md"))
-            _dispatched.discard(task_name)
+            if await asyncio.to_thread(inprogress_path.exists):
+                await asyncio.to_thread(
+                    inprogress_path.rename,
+                    inprogress_path.with_suffix("").with_suffix(".md"),
+                )
+            _deferred[task_name] = time.monotonic()
             return
     except ImportError:
         pass  # kill switch module not available
@@ -794,23 +950,34 @@ async def _dispatch_inner(task_path: Path):
 
         can_go, budget_msg = budget.can_proceed()
         if not can_go:
-            logger.warning("BUDGET_EXCEEDED: %s — deferring task %s", budget_msg, stem)
-            _dispatched.discard(task_name)  # Allow retry on next poll cycle
+            logger.warning("BUDGET_EXCEEDED: %s — deferring task %s for %ds", budget_msg, stem, int(_DEFER_COOLDOWN_S))
+            _deferred[task_name] = time.monotonic()
             return
     except ImportError:
         pass
 
-    # --- Guard: skip if already in-progress ---
-    # NOTE: _dispatched check removed — scan_and_enqueue() already adds to
-    # _dispatched before pool.submit(), so checking here would always skip.
+    # --- Guard: skip if already in-progress or completed ---
     # The .inprogress file check is the authoritative filesystem-level guard.
-    if inprogress_path.exists():
+    if await asyncio.to_thread(inprogress_path.exists):
         logger.info("Skipping %s — .inprogress file exists.", task_name)
+        return
+
+    # Guard: skip if already completed (.done exists) — prevents runaway loops
+    # where a generator recreates a .md file for a task that already finished.
+    done_path_check = task_path.with_name(f"{stem}.md.done")
+    if await asyncio.to_thread(done_path_check.exists):
+        logger.info("Skipping %s — .done file already exists (duplicate .md).", task_name)
+        # Remove the duplicate .md file to prevent future re-dispatch
+        try:
+            await asyncio.to_thread(task_path.unlink)
+            logger.info("Removed duplicate .md: %s", task_name)
+        except FileNotFoundError:
+            pass
         return
 
     # --- Claim: atomic rename to .inprogress ---
     _dispatched.add(task_name)
-    task_path.rename(inprogress_path)
+    await asyncio.to_thread(task_path.rename, inprogress_path)
     logger.info("TASK DETECTED: %s → renamed to %s", task_name, inprogress_path.name)
 
     # --- Phase 6B.14: Create checkpoint on dispatch ---
@@ -1534,11 +1701,36 @@ def _write_shutdown_state(pool_status: dict | None = None) -> None:
 async def scan_and_enqueue(pool: AsyncWorkerPool) -> None:
     """Scan for pending tasks and enqueue them into the async worker pool."""
     pending = get_pending_tasks()
-    new_tasks = [t for t in pending if t.name not in _dispatched]
+
+    # Expire stale deferrals (cooldown elapsed → eligible for retry)
+    now = time.monotonic()
+    expired = [k for k, t in _deferred.items() if now - t >= _DEFER_COOLDOWN_S]
+    for k in expired:
+        _deferred.pop(k, None)
+
+    new_tasks = [t for t in pending if t.name not in _dispatched and t.name not in _deferred]
 
     if not new_tasks:
         logger.info("Scan complete — no new tasks.")
         return
+
+    # Quota-aware filtering — defers non-critical tasks under pressure
+    if _HAS_QUOTA and _quota_emergency_brake():
+        logger.warning("Quota emergency brake active — skipping all task dispatch this cycle")
+        return
+
+    if _HAS_QUOTA:
+        accepted, quota_deferred = _quota_filter(new_tasks)
+        if quota_deferred:
+            logger.info(
+                "Quota filter deferred %d task(s): %s",
+                len(quota_deferred),
+                ", ".join(t.name for t in quota_deferred),
+            )
+        new_tasks = accepted
+        if not new_tasks:
+            logger.info("Scan complete — all tasks deferred by quota filter.")
+            return
 
     # Parse priorities and sort: highest priority first
     task_priorities: list[tuple[TaskPriority, Path]] = []
@@ -1646,6 +1838,9 @@ async def run() -> None:
         while _running:
             # Phase 6A: touch dead man's switch every scan cycle
             _sh_touch(component="watcher")
+
+            # Staleness reaper — auto-mark old pending tasks as .done
+            reap_stale_tasks()
 
             # Phase 6B: check degradation tier — skip dispatch in EMERGENCY
             _watcher_tier = _sh_get_tier().tier

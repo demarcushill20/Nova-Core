@@ -5,6 +5,8 @@ and correctly validates all canonical note types including Phase 0 additions
 (ADR type, implementation-plan optional fields).
 """
 
+from typing import ClassVar
+
 import pytest
 
 from schemas.vault_note_schema import (
@@ -131,7 +133,7 @@ def _fm_research(**kw):
 class TestAllCanonicalTypes:
     """Each canonical type must be accepted with valid frontmatter."""
 
-    BUILDERS = {
+    BUILDERS: ClassVar[dict] = {
         "agent-pattern": _fm_agent_pattern,
         "workflow-learning": _fm_learning,
         "research-summary": _fm_research,

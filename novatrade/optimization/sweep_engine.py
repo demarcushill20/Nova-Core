@@ -19,12 +19,16 @@ log = logging.getLogger("novatrade.optimization.sweep_engine")
 
 INT_PARAMS = {
     "ema_period",
+    "ema_fast_period",
+    "ema_slow_period",
     "atr_period",
     "adx_period",
     "trigger_window_bars",
     "time_stop_bars",
     "mtf_lookback",
     "warmup_bars",
+    "trail_ema_period",
+    "ema_confirm_bars",
 }
 
 

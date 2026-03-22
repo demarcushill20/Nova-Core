@@ -43,9 +43,11 @@ output_contract:
 1. **Discover** — scan `TASKS/*.md` for pending work.
 2. **Read** — parse the task file for instructions before doing anything else.
 3. **Claim** — atomically rename `TASKS/<name>.md` to `TASKS/<name>.inprogress`.
+   **IMPORTANT:** If dispatched by the watcher (prompt says "Do NOT rename the task file"), SKIP this step — the watcher already claimed the task.
 4. **Execute** — perform the work, delegating to other skills as needed (`file-ops`, `shell-ops`, `git-ops`, `self-verification`).
 5. **Write output** — write results to `OUTPUT/<name>_<YYYYMMDD_HHMMSS>.md` before marking done.
 6. **Complete** — rename `TASKS/<name>.inprogress` to `TASKS/<name>.done`.
+   **IMPORTANT:** If dispatched by the watcher (prompt says "Do NOT rename the task file"), SKIP this step — the watcher handles lifecycle transitions.
 7. **Log** — write summary to `LOGS/task_<name>.log`.
 
 For lifecycle details, crash recovery, and naming conventions, see `reference.md`.

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0513_Please_fix_this_yourself__The_fix_is_straightforward__the__dispatched_set_needs__1774201496",
+  "workflow_id": "0513_Please_fix_this_yourself__The_fix_is_straightforward__the__dispatched_set_needs_",
+  "task_summary": "Fixed _dispatched set to discard task names on all worker exit paths (timeout, crash, cancellation, completion)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed _dispatched set to discard task names on all worker exit paths (timeout, crash, cancellation, completion)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0513_Please_fix_this_yourself__The_fix_is_straightforward__the__dispatched_set_needs"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed _dispatched set to discard task names on all worker exit paths (timeout, crash, cancellation, completion)",
+  "created_at": "2026-03-22T17:44:56Z",
+  "confidence": "high"
+}

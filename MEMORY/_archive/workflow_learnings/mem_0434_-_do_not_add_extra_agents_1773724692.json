@@ -1,0 +1,23 @@
+{
+  "artifact_id": "mem_0434_-_do_not_add_extra_agents_1773724692",
+  "workflow_id": "0434_-_do_not_add_extra_agents",
+  "task_summary": "Verified EMA\u2192IRB strategy change-control completion \u2014 all governance, source, and restart requirements satisfied",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Verified EMA\u2192IRB strategy change-control completion \u2014 all governance, source, and restart requirements satisfied"
+  ],
+  "successful_patterns": [
+    "task_completed: 0434_-_do_not_add_extra_agents"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Verified EMA\u2192IRB strategy change-control completion \u2014 all governance, source, and restart requirements satisfied",
+  "created_at": "2026-03-17T05:18:12Z",
+  "confidence": "high",
+  "supersedes": "mem_0434_-_do_not_add_extra_agents_1773706452",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0434_-_do_not_add_extra_agents_1773706452"
+}

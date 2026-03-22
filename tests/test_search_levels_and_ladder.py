@@ -845,11 +845,11 @@ class TestOverfitDetection:
         is_median = 0.80  # ratio = 0.30/0.80 = 0.375 < 0.5
         complexity = 5
 
-        # Without penalty (is_median = 0, bypasses check)
-        score_no_check = compute_promotion_score(
+        # With healthy IS data (ratio >= 0.7, no overfit penalty)
+        score_healthy = compute_promotion_score(
             oos_scores=oos_scores,
             holdout_score=holdout_score,
-            is_median=0.0,
+            is_median=0.30,  # ratio = 0.30/0.30 = 1.0 (healthy)
             complexity=complexity,
         )
 
@@ -860,8 +860,8 @@ class TestOverfitDetection:
             complexity=complexity,
         )
 
-        # Penalty should be 0.15
-        assert score_no_check - score_with_penalty == pytest.approx(0.15, abs=0.01)
+        # Penalty should be 0.15 vs the healthy case (no penalty)
+        assert score_healthy - score_with_penalty == pytest.approx(0.15, abs=0.01)
 
     def test_overfit_moderate_penalty_threshold(self):
         """oos_is_ratio between 0.5 and 0.7 should apply 0.08 penalty."""
@@ -872,10 +872,11 @@ class TestOverfitDetection:
         is_median = 0.80  # ratio = 0.50/0.80 = 0.625, between 0.5 and 0.7
         complexity = 5
 
-        score_no_check = compute_promotion_score(
+        # With healthy IS data (ratio >= 0.7, no overfit penalty)
+        score_healthy = compute_promotion_score(
             oos_scores=oos_scores,
             holdout_score=holdout_score,
-            is_median=0.0,
+            is_median=0.50,  # ratio = 0.50/0.50 = 1.0 (healthy)
             complexity=complexity,
         )
 
@@ -887,33 +888,36 @@ class TestOverfitDetection:
         )
 
         # Penalty should be 0.08
-        assert score_no_check - score_with_penalty == pytest.approx(0.08, abs=0.01)
+        assert score_healthy - score_with_penalty == pytest.approx(0.08, abs=0.01)
 
     def test_no_penalty_when_oos_close_to_is(self):
-        """oos_is_ratio >= 0.7 should have no penalty."""
+        """oos_is_ratio >= 0.7 should have no overfit penalty."""
         from novatrade.evaluation.fitness import compute_promotion_score
 
         oos_scores = [0.60, 0.60, 0.60]
         holdout_score = 0.60
-        is_median = 0.70  # ratio = 0.60/0.70 = 0.857 >= 0.7
         complexity = 5
 
-        score_no_check = compute_promotion_score(
+        # Two cases with sufficient IS data: one healthy, one also healthy
+        is_median_a = 0.70  # ratio = 0.60/0.70 = 0.857 >= 0.7
+        is_median_b = 0.60  # ratio = 0.60/0.60 = 1.0 >= 0.7
+
+        score_a = compute_promotion_score(
             oos_scores=oos_scores,
             holdout_score=holdout_score,
-            is_median=0.0,
+            is_median=is_median_a,
             complexity=complexity,
         )
 
-        score_with_is = compute_promotion_score(
+        score_b = compute_promotion_score(
             oos_scores=oos_scores,
             holdout_score=holdout_score,
-            is_median=is_median,
+            is_median=is_median_b,
             complexity=complexity,
         )
 
-        # No overfit penalty
-        assert score_no_check == pytest.approx(score_with_is, abs=0.01)
+        # Both have ratio >= 0.7, no overfit penalty in either case
+        assert score_a == pytest.approx(score_b, abs=0.01)
 
     def test_promotion_pipeline_uses_true_is_median(self):
         """Verify that promotion.py passes wf_result.median_is_score
@@ -927,3 +931,56 @@ class TestOverfitDetection:
         assert "median_is_score" in source
         # Should NOT use median_oos_score as IS
         assert "median_oos_score" not in source.split("is_median =")[1].split("\n")[0]
+
+    def test_insufficient_is_data_applies_penalty(self):
+        """When is_median <= 0, a 0.10 penalty is applied instead of silently passing."""
+        from novatrade.evaluation.fitness import compute_promotion_score
+
+        oos_scores = [0.50, 0.50, 0.50]
+        holdout_score = 0.50
+        complexity = 5
+
+        # Healthy IS (ratio = 1.0, no penalty)
+        score_healthy = compute_promotion_score(
+            oos_scores=oos_scores,
+            holdout_score=holdout_score,
+            is_median=0.50,
+            complexity=complexity,
+        )
+
+        # Insufficient IS (is_median=0.0, should get 0.10 penalty)
+        score_insufficient = compute_promotion_score(
+            oos_scores=oos_scores,
+            holdout_score=holdout_score,
+            is_median=0.0,
+            complexity=complexity,
+        )
+
+        # Should be penalized vs healthy
+        assert score_insufficient < score_healthy
+        assert score_healthy - score_insufficient == pytest.approx(0.10, abs=0.01)
+
+    def test_insufficient_is_data_never_silently_passes(self):
+        """is_median=0 must not produce the same score as is_median with healthy ratio."""
+        from novatrade.evaluation.fitness import compute_promotion_score
+
+        oos_scores = [0.40, 0.45, 0.42]
+        holdout_score = 0.42
+        complexity = 4
+
+        score_no_is = compute_promotion_score(
+            oos_scores=oos_scores,
+            holdout_score=holdout_score,
+            is_median=0.0,
+            complexity=complexity,
+        )
+
+        score_healthy = compute_promotion_score(
+            oos_scores=oos_scores,
+            holdout_score=holdout_score,
+            is_median=0.42,  # ratio ≈ 1.0
+            complexity=complexity,
+        )
+
+        # Insufficient IS data must never score the same as verified healthy
+        assert score_no_is < score_healthy

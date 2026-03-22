@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260322_9_afternoon_review_1774209979",
+  "workflow_id": "shift_20260322_9_afternoon_review",
+  "task_summary": "Afternoon review confirms exceptional morning performance (8/8 blocks) but reveals degrading stability (233 uncommitted files, persistent health failures) requiring immediate stabilization before selective PM execution",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Afternoon review confirms exceptional morning performance (8/8 blocks) but reveals degrading stability (233 uncommitted files, persistent health failures) requiring immediate stabilization before selective PM execution"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_9_afternoon_review"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Afternoon review confirms exceptional morning performance (8/8 blocks) but reveals degrading stability (233 uncommitted files, persistent health failures) requiring immediate stabilization before selective PM execution",
+  "created_at": "2026-03-22T20:06:19Z",
+  "confidence": "low",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_9_afternoon_review_1774210537"
+}

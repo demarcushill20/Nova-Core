@@ -451,6 +451,121 @@ class TestDailyReset:
         assert risk.halted is True  # halt NOT cleared
 
 
+class TestDailyResetCEST:
+    """CEST/CET-aware daily reset — FTMO resets at midnight Prague time.
+
+    CET  = UTC+1 (winter, Nov–Mar)
+    CEST = UTC+2 (summer, Mar–Oct)
+    DST transition 2026: March 29 at 02:00 Prague → 03:00 Prague (spring forward)
+    """
+
+    @pytest.mark.asyncio
+    async def test_reset_at_midnight_cet(self):
+        """Before DST: midnight Prague = 23:00 UTC previous day.
+        At 22:59 UTC on Mar 16, Prague date is still Mar 16.
+        At 23:00 UTC on Mar 16, Prague date becomes Mar 17.
+        """
+        cfg = _cfg(risk=RiskConfig(daily_reset_tz="Europe/Prague"))
+        adapter = _mock_adapter(account=_account(equity=100_000))
+        risk = RiskEngine(cfg)
+        risk.initialize(_account())
+
+        # 22:59 UTC on Mar 16 → Prague 23:59 Mar 16 (still same day)
+        clock_before = _make_clock(year=2026, month=3, day=16, hour=22, minute=59)
+        monitor = _build_monitor(adapter=adapter, risk_engine=risk, clock=clock_before, cfg=cfg)
+        monitor._last_reset_date = "2026-03-16"
+        result = await monitor.run_cycle()
+        assert result.daily_reset_performed is False
+
+        # 23:00 UTC on Mar 16 → Prague 00:00 Mar 17 (new day → reset)
+        clock_after = _make_clock(year=2026, month=3, day=16, hour=23, minute=0)
+        risk2 = RiskEngine(cfg)
+        risk2.initialize(_account())
+        monitor2 = _build_monitor(adapter=adapter, risk_engine=risk2, clock=clock_after, cfg=cfg)
+        monitor2._last_reset_date = "2026-03-16"
+        result2 = await monitor2.run_cycle()
+        assert result2.daily_reset_performed is True
+
+    @pytest.mark.asyncio
+    async def test_reset_at_midnight_cest_after_dst(self):
+        """After DST (Mar 29+): midnight Prague = 22:00 UTC.
+        At 21:59 UTC on Mar 30, Prague date is still Mar 30.
+        At 22:00 UTC on Mar 30, Prague date becomes Mar 31.
+        """
+        cfg = _cfg(risk=RiskConfig(daily_reset_tz="Europe/Prague"))
+        adapter = _mock_adapter(account=_account(equity=100_000))
+
+        # 21:59 UTC on Mar 30 → Prague 23:59 Mar 30 (same day)
+        risk1 = RiskEngine(cfg)
+        risk1.initialize(_account())
+        clock_before = _make_clock(year=2026, month=3, day=30, hour=21, minute=59)
+        monitor = _build_monitor(adapter=adapter, risk_engine=risk1, clock=clock_before, cfg=cfg)
+        monitor._last_reset_date = "2026-03-30"
+        result = await monitor.run_cycle()
+        assert result.daily_reset_performed is False
+
+        # 22:00 UTC on Mar 30 → Prague 00:00 Mar 31 (new day → reset)
+        risk2 = RiskEngine(cfg)
+        risk2.initialize(_account())
+        clock_after = _make_clock(year=2026, month=3, day=30, hour=22, minute=0)
+        monitor2 = _build_monitor(adapter=adapter, risk_engine=risk2, clock=clock_after, cfg=cfg)
+        monitor2._last_reset_date = "2026-03-30"
+        result2 = await monitor2.run_cycle()
+        assert result2.daily_reset_performed is True
+
+    @pytest.mark.asyncio
+    async def test_dst_transition_day_march_29(self):
+        """March 29 2026: clocks spring forward at 02:00 → 03:00 Prague.
+        Midnight Prague on Mar 29 = 23:00 UTC Mar 28 (still CET).
+        Midnight Prague on Mar 30 = 22:00 UTC Mar 29 (now CEST).
+        """
+        cfg = _cfg(risk=RiskConfig(daily_reset_tz="Europe/Prague"))
+        adapter = _mock_adapter(account=_account(equity=100_000))
+
+        # 23:00 UTC Mar 28 → Prague 00:00 Mar 29 (CET, UTC+1)
+        risk1 = RiskEngine(cfg)
+        risk1.initialize(_account())
+        clock1 = _make_clock(year=2026, month=3, day=28, hour=23, minute=0)
+        m1 = _build_monitor(adapter=adapter, risk_engine=risk1, clock=clock1, cfg=cfg)
+        m1._last_reset_date = "2026-03-28"
+        r1 = await m1.run_cycle()
+        assert r1.daily_reset_performed is True  # new Prague day
+
+        # 22:00 UTC Mar 29 → Prague 00:00 Mar 30 (CEST, UTC+2)
+        risk2 = RiskEngine(cfg)
+        risk2.initialize(_account())
+        clock2 = _make_clock(year=2026, month=3, day=29, hour=22, minute=0)
+        m2 = _build_monitor(adapter=adapter, risk_engine=risk2, clock=clock2, cfg=cfg)
+        m2._last_reset_date = "2026-03-29"
+        r2 = await m2.run_cycle()
+        assert r2.daily_reset_performed is True  # new Prague day (CEST now)
+
+    @pytest.mark.asyncio
+    async def test_utc_would_reset_wrong_time_without_tz(self):
+        """Demonstrate that UTC-based reset fires at the wrong hour.
+        At 00:01 UTC on Mar 30 (after CEST), Prague time is 02:01 Mar 30.
+        A UTC-based reset would fire here, but FTMO's day started at 22:00 UTC.
+        With TZ-aware logic, this is NOT a new Prague day if already reset for Mar 30.
+        """
+        cfg = _cfg(risk=RiskConfig(daily_reset_tz="Europe/Prague"))
+        adapter = _mock_adapter(account=_account(equity=100_000))
+        risk = RiskEngine(cfg)
+        risk.initialize(_account())
+
+        # 00:01 UTC Mar 30 → Prague 02:01 Mar 30 (same Prague day)
+        clock = _make_clock(year=2026, month=3, day=30, hour=0, minute=1)
+        monitor = _build_monitor(adapter=adapter, risk_engine=risk, clock=clock, cfg=cfg)
+        monitor._last_reset_date = "2026-03-30"  # already reset for this Prague day
+        result = await monitor.run_cycle()
+        assert result.daily_reset_performed is False
+
+    @pytest.mark.asyncio
+    async def test_default_tz_is_prague(self):
+        """Default daily_reset_tz should be Europe/Prague."""
+        cfg = _cfg()
+        assert cfg.risk.daily_reset_tz == "Europe/Prague"
+
+
 # ---------------------------------------------------------------------------
 # Risk action execution
 # ---------------------------------------------------------------------------

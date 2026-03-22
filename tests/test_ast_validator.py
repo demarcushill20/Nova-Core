@@ -13,6 +13,7 @@ import pytest
 from utils.ast_validator import (
     complexity_check,
     extract_python_blocks,
+    nesting_depth_check,
     validate_all_outputs,
     validate_output_file,
     validate_python,
@@ -300,16 +301,16 @@ class TestValidateAllOutputs:
 
 
 # ======================================================================
-# complexity_check
+# nesting_depth_check (formerly complexity_check)
 # ======================================================================
 
 
-class TestComplexityCheck:
-    """Basic complexity heuristic."""
+class TestNestingDepthCheck:
+    """Nesting depth analysis (not McCabe CC — see docstring)."""
 
     def test_simple_function_no_warnings(self):
         code = "def f():\n    return 1\n"
-        warnings = complexity_check(code, max_complexity=5)
+        warnings = nesting_depth_check(code, max_depth=5)
         assert warnings == []
 
     def test_deeply_nested_triggers_warning(self):
@@ -320,7 +321,7 @@ class TestComplexityCheck:
             lines.append(f"{indent}if True:")
         lines.append("    " * 11 + "pass")
         code = "\n".join(lines) + "\n"
-        warnings = complexity_check(code, max_complexity=5)
+        warnings = nesting_depth_check(code, max_depth=5)
         assert len(warnings) >= 1
         assert warnings[0]["function"] == "deep"
         assert warnings[0]["depth"] > 5
@@ -333,10 +334,10 @@ class TestComplexityCheck:
                     if True:
                         pass
         """)
-        # Depth = 1 (func) + 2 (ifs) = 3; max_complexity=3 => no warning
-        assert complexity_check(code, max_complexity=3) == []
-        # max_complexity=2 => warning
-        warnings = complexity_check(code, max_complexity=2)
+        # Depth = 1 (func) + 2 (ifs) = 3; max_depth=3 => no warning
+        assert nesting_depth_check(code, max_depth=3) == []
+        # max_depth=2 => warning
+        warnings = nesting_depth_check(code, max_depth=2)
         assert len(warnings) == 1
 
     def test_class_method_depth(self):
@@ -349,20 +350,20 @@ class TestComplexityCheck:
                                 pass
         """)
         # depth = class(1) + method(1) + 3 fors = 5
-        warnings = complexity_check(code, max_complexity=4)
+        warnings = nesting_depth_check(code, max_depth=4)
         assert len(warnings) >= 1
         assert warnings[0]["function"] == "bar"
 
     def test_syntax_error_returns_parse_error(self):
-        warnings = complexity_check("def bad(\n")
+        warnings = nesting_depth_check("def bad(\n")
         assert len(warnings) == 1
         assert warnings[0]["function"] == "<parse-error>"
         assert "SyntaxError" in warnings[0]["reason"]
 
     def test_empty_code_no_warnings(self):
-        assert complexity_check("") == []
+        assert nesting_depth_check("") == []
 
-    def test_multiple_functions_only_complex_flagged(self):
+    def test_multiple_functions_only_deep_flagged(self):
         code = textwrap.dedent("""\
             def simple():
                 return 1
@@ -375,7 +376,7 @@ class TestComplexityCheck:
                                 if True:
                                     pass
         """)
-        warnings = complexity_check(code, max_complexity=3)
+        warnings = nesting_depth_check(code, max_depth=3)
         names = [w["function"] for w in warnings]
         assert "simple" not in names
         assert "complex_one" in names
@@ -389,7 +390,7 @@ class TestComplexityCheck:
                             if True:
                                 pass
         """)
-        warnings = complexity_check(code, max_complexity=3)
+        warnings = nesting_depth_check(code, max_depth=3)
         # inner has depth 2 (outer+inner) + 3 ifs = 5
         names = [w["function"] for w in warnings]
         assert "inner" in names
@@ -405,7 +406,7 @@ class TestComplexityCheck:
                                 if True:
                                     pass
         """)
-        warnings = complexity_check(code, max_complexity=3)
+        warnings = nesting_depth_check(code, max_depth=3)
         assert len(warnings) >= 1
         assert warnings[0]["function"] == "handler"
 
@@ -420,7 +421,7 @@ class TestComplexityCheck:
                             if True:
                                 pass
         """)
-        warnings = complexity_check(code, max_complexity=3)
+        warnings = nesting_depth_check(code, max_depth=3)
         assert len(warnings) >= 1
         assert warnings[0]["lineno"] == 3
 
@@ -431,7 +432,13 @@ class TestComplexityCheck:
                     for j in range(10):
                         pass
         """)
-        assert complexity_check(code, max_complexity=100) == []
+        assert nesting_depth_check(code, max_depth=100) == []
+
+    def test_backwards_compatible_alias(self):
+        """complexity_check alias still works for existing callers."""
+        code = "def f():\n    return 1\n"
+        assert complexity_check(code, max_depth=5) == []
+        assert complexity_check is nesting_depth_check
 
 
 # ======================================================================

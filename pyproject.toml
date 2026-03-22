@@ -135,6 +135,7 @@ markers = [
     "property: Hypothesis property-based tests",
     "eval: All evaluation tests (deterministic, no LLM required)",
     "eval_llm: LLM-dependent evaluation tests (requires OPENAI_API_KEY)",
+    "slow: Tests that take more than 10 seconds to run",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",

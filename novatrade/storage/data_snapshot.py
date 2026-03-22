@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import struct
 from dataclasses import asdict, dataclass
@@ -17,6 +18,8 @@ from pathlib import Path
 import pandas as pd
 
 from novatrade.models import Candle
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # DataSnapshot (frozen metadata)
@@ -204,7 +207,10 @@ def load_snapshot(
     if not meta_path.exists():
         raise FileNotFoundError(f"Snapshot metadata not found: {meta_path}")
 
-    meta_dict = json.loads(meta_path.read_text())
+    try:
+        meta_dict = json.loads(meta_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed snapshot metadata JSON at {meta_path}: {exc}") from exc
     snapshot = DataSnapshot(**meta_dict)
 
     h1_path = snapshot_dir / f"{snapshot_id}_h1.parquet"
@@ -237,6 +243,10 @@ def list_snapshots(snapshot_dir: Path) -> list[DataSnapshot]:
 
     snapshots: list[DataSnapshot] = []
     for meta_file in sorted(snapshot_dir.glob("*_meta.json")):
-        meta_dict = json.loads(meta_file.read_text())
+        try:
+            meta_dict = json.loads(meta_file.read_text())
+        except json.JSONDecodeError:
+            log.warning("Skipping malformed snapshot metadata: %s", meta_file)
+            continue
         snapshots.append(DataSnapshot(**meta_dict))
     return snapshots

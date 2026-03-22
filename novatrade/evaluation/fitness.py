@@ -151,13 +151,22 @@ def compute_promotion_score(
 
     # IS/OOS degradation penalty: penalize when OOS is much worse than IS
     # This is the core overfit detection — large IS/OOS gap = overfitting
+    #
+    # When is_median <= 0, IS data is insufficient to compute a meaningful
+    # overfit ratio.  Rather than silently passing (old behavior), we apply
+    # a moderate penalty — if we cannot verify the strategy is NOT overfit,
+    # we should not give it full marks.
     is_oos_penalty = 0.0
-    if is_median > 0:
+    is_data_sufficient = is_median > 0
+    if is_data_sufficient:
         oos_is_ratio = median_oos / is_median
         if oos_is_ratio < 0.5:
             is_oos_penalty = 0.15  # severe degradation
         elif oos_is_ratio < 0.7:
             is_oos_penalty = 0.08  # moderate degradation
+    else:
+        # Insufficient IS data — cannot verify absence of overfitting
+        is_oos_penalty = 0.10
 
     # Complexity penalty: -0.02 per parameter above 5
     complexity_penalty = max(0.0, (complexity - 5) * 0.02)

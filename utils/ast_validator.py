@@ -256,13 +256,15 @@ class _ComplexityVisitor(ast.NodeVisitor):
         return best
 
 
-def complexity_check(code: str, max_complexity: int = 15) -> list[dict]:
-    """Analyse *code* for overly complex functions.
+def nesting_depth_check(code: str, max_depth: int = 15) -> list[dict]:
+    """Analyse *code* for deeply nested functions.
 
-    Uses the AST to count function nesting depth (including enclosing
-    classes/functions and inner control-flow structures).  Returns a list
-    of warning dicts for every function whose combined depth exceeds
-    *max_complexity*::
+    Measures **nesting depth** (enclosing classes/functions plus inner
+    control-flow structures), *not* McCabe cyclomatic complexity.  Use
+    ``radon`` or the CI complexity gate for true CC measurement.
+
+    Returns a list of warning dicts for every function whose combined
+    nesting depth exceeds *max_depth*::
 
         {"function": str, "lineno": int, "depth": int, "reason": str}
 
@@ -281,6 +283,10 @@ def complexity_check(code: str, max_complexity: int = 15) -> list[dict]:
             }
         ]
 
-    visitor = _ComplexityVisitor(max_complexity)
+    visitor = _ComplexityVisitor(max_depth)
     visitor.visit(tree)
     return visitor.warnings
+
+
+# Backwards-compatible alias
+complexity_check = nesting_depth_check

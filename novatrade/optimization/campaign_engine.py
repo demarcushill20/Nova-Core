@@ -140,18 +140,17 @@ def save_checkpoint(checkpoint: CampaignCheckpoint, campaign_dir: Path) -> Path:
     }
     encoded = json.dumps(data, indent=2)
     fd, tmp_path = tempfile.mkstemp(dir=str(cp_dir), suffix=".tmp")
-    closed = False
     try:
         os.write(fd, encoded.encode())
+        os.fsync(fd)
         os.close(fd)
-        closed = True
+        fd = -1  # mark as closed
         os.replace(tmp_path, str(out_path))
-    except BaseException:
-        if not closed:
+    finally:
+        if fd >= 0:
             os.close(fd)
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
-        raise
     return out_path
 
 

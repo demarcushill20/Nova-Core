@@ -34,5 +34,17 @@ LOGS/
 # Playwright MCP cache
 .playwright-mcp/
 
+# Runtime data
+data/
+
+# Test/coverage artifacts
+.coverage
+.deepeval/
+.hypothesis/
+
+# Claude Code ephemeral
+.claude/worktrees/
+.bak/
+
 # OS
 .DS_Store

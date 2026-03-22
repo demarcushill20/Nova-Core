@@ -422,7 +422,7 @@ class GovernanceEngine:
 
                 if loop_age >= OPEN_LOOP_STALE_AGE:
                     result = GovernanceResult(
-                        action="marked_stale" if not dry_run else "marked_stale",
+                        action="marked_stale",
                         target_store="open_loops",
                         target_path=str(f),
                         rule_name="open_loop_stale_14d",

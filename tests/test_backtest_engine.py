@@ -568,9 +568,9 @@ class TestTransactionCostDeduction:
     def test_commission_only_deduction(self):
         """Commission alone should reduce PnL in USD but not in pips.
 
-        Commission is per-lot, round-trip (entry + exit = 2x).
+        Commission is per-lot, round-trip (single charge covering entry + exit).
         """
-        commission = 3.50  # USD per lot per side
+        commission = 3.50  # USD per lot round-trip
         env = self._make_env(
             spread=SpreadAssumptions(
                 avg_spread_pips=0.0,
@@ -591,8 +591,8 @@ class TestTransactionCostDeduction:
         trade = bt._trades[0]
         # Pips should be unaffected by commission
         assert trade.pnl_pips == pytest.approx(50.0, abs=0.01)
-        # USD: raw = 50 * 0.1 * 10 = $50. Commission = 3.50 * 0.10 * 2 = $0.70
-        expected_usd = 50.0 * vol * 10.0 - commission * vol * 2
+        # USD: raw = 50 * 0.1 * 10 = $50. Commission = 3.50 * 0.10 = $0.35
+        expected_usd = 50.0 * vol * 10.0 - commission * vol
         assert trade.pnl_usd == pytest.approx(expected_usd, abs=0.01)
 
     def test_all_costs_combined(self):
@@ -620,8 +620,8 @@ class TestTransactionCostDeduction:
         trade = bt._trades[0]
         # total_cost_pips = 1.2 + 2*0.5 = 2.2
         expected_pips = 50.0 - (spread_pips + 2 * slippage_pips)  # 50 - 2.2 = 47.8
-        expected_usd = expected_pips * vol * 10.0 - commission * vol * 2
-        # 47.8 * 0.1 * 10 = $47.80 - $0.70 = $47.10
+        expected_usd = expected_pips * vol * 10.0 - commission * vol
+        # 47.8 * 0.1 * 10 = $47.80 - $0.35 = $47.45
         assert trade.pnl_pips == pytest.approx(expected_pips, abs=0.01)
         assert trade.pnl_usd == pytest.approx(expected_usd, abs=0.01)
 

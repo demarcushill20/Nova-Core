@@ -299,7 +299,13 @@ _ACTION_VERBS = _re.compile(
     r"\b(implement|refactor|build|deploy|create|fix|update|write|rewrite"
     r"|test|review|analyze|investigate|research|scan|optimize|migrate"
     r"|set up|install|configure|add|remove|delete|move|rename"
-    r"|generate|scaffold|upgrade|patch|redesign|rearchitect)\b",
+    r"|generate|scaffold|upgrade|patch|redesign|rearchitect"
+    # Phase 10.1: natural command verbs (fixes affirmative misclassification)
+    r"|kick off|start|launch|begin|proceed|execute"
+    r"|handle|process|finish|complete|wrap up|clean up"
+    r"|commit|push|merge|release|ship|roll out|roll back"
+    r"|run|trigger|enable|disable|restart"
+    r"|check|verify|validate|forward)\b",
     _re.IGNORECASE,
 )
 
@@ -330,8 +336,12 @@ _DELIVERABLE_RE = _re.compile(
     r"\b(build|create|implement|write|deploy|set up|install|fix|refactor"
     r"|generate|scaffold|migrate|redesign|configure|patch|add|move"
     r"|delete|remove|rewrite|upgrade|optimize|research|investigate"
-    r"|analyze|scan|test|review)\s+"
-    r"(?:(?:a|an|the|my|our|new|this|that|some)\s+)*"
+    r"|analyze|scan|test|review"
+    # Phase 10.1: match expanded ACTION_VERBS
+    r"|kick off|start|launch|begin|handle|process|finish|complete"
+    r"|commit|push|merge|release|run|trigger|enable|disable"
+    r"|check|verify|validate|send|execute|wrap up|clean up)\s+"
+    r"(?:(?:a|an|the|my|our|new|this|that|some|both|all|each|every)\s+)*"
     r"(?!it\b|them\b|me\b|us\b|him\b|her\b)"
     r"[a-zA-Z]\w{2,}",
     _re.IGNORECASE,
@@ -346,7 +356,11 @@ _REQUEST_VERB = _re.compile(
     r"(?:implement|refactor|build|deploy|create|fix|update|write|rewrite"
     r"|test|review|analyze|investigate|research|scan|optimize|migrate"
     r"|set up|install|configure|add|remove|delete|move|rename"
-    r"|generate|scaffold|upgrade|patch|redesign|rearchitect)\b",
+    r"|generate|scaffold|upgrade|patch|redesign|rearchitect"
+    # Phase 10.1: match expanded ACTION_VERBS
+    r"|kick off|start|launch|begin|handle|process|finish|complete"
+    r"|commit|push|merge|release|run|trigger|enable|disable"
+    r"|check|verify|validate|send|execute|proceed)\b",
     _re.IGNORECASE,
 )
 
@@ -377,6 +391,42 @@ _MEMORY_PERSIST_REQUEST = _re.compile(
 )
 
 
+# Bare confirmation signals: standalone task confirmations.
+# "do it", "go ahead", "ship it" etc. confirm a previously proposed action.
+# Only matches when the message is primarily the confirmation phrase.
+_BARE_CONFIRMATION = _re.compile(
+    r"^(?:yes|yeah|yep|yup|ok|okay|sure|absolutely|definitely|for sure)?"
+    r"\s*,?\s*"
+    r"(do it|do that|go for it|let'?s do it|let'?s do that"
+    r"|go ahead|please do|make it so|ship it|lgtm"
+    r"|proceed|let'?s proceed|let'?s go"
+    r"|approved|approve it|green light"
+    r"|just do it|get it done|make it happen"
+    r")\s*[.!]*\s*$",
+    _re.IGNORECASE,
+)
+
+# Work-item reference: "phase 4", "phase 4-7", "step 3", "task 42" etc.
+# If the message references specific work items alongside an affirmative,
+# it's a task command, not casual conversation.
+_WORK_ITEM_REF = _re.compile(
+    r"\b(?:phase|step|task|stage|sprint|milestone|ticket|issue|pr|branch)\s*"
+    r"[#]?\d+(?:\s*[-\u2013]\s*\d+)?",
+    _re.IGNORECASE,
+)
+
+# Affirmative prefix: positive confirmations that, when followed by action verbs,
+# indicate a task command. Excludes questions ("should we", "what do you think").
+_AFFIRMATIVE_PREFIX = _re.compile(
+    r"^(yes|yeah|yep|yup|ok|okay|sure|absolutely|definitely|for sure"
+    r"|right|exactly|agreed|fair enough|makes sense"
+    r"|sounds good|works for me|all good|perfect|great|awesome|nice|cool"
+    r"|go ahead|lgtm|let'?s go)\b"
+    r"[\s,!.]*",
+    _re.IGNORECASE,
+)
+
+
 def classify_intent(message: str) -> str:
     """Classify a raw user message as 'chat' or 'task'.
 
@@ -390,7 +440,10 @@ def classify_intent(message: str) -> str:
       7. Memory-persistence requests (save to obsidian, remember this) → chat
          (CEO Nova handles these inline via nova-vault/nova-memory MCP)
       8. Explicit request verbs (can you build...) → task
+     8b. Bare confirmations (do it, go ahead, ship it) → task
       9. Deliverable detector (action verb + object) → task
+     9b. Affirmative + work-item reference (Yes phase 4-7) → task
+     9c. Affirmative + action verb (Yes handle both) → task
      10. Action verbs WITHOUT chat signals → task
      11. Default plain text → chat
     """
@@ -430,6 +483,11 @@ def classify_intent(message: str) -> str:
     if _REQUEST_VERB.search(text):
         return "task"
 
+    # Bare confirmations: "do it", "go ahead", "ship it", "yes do it"
+    # These are standalone task confirmations for a previously proposed action.
+    if _BARE_CONFIRMATION.match(text):
+        return "task"
+
     # Deliverable detector: if the message implies a concrete output artifact,
     # it's a task even if it starts with a chat signal.
     # "Should we build a billing system?" → task (has deliverable)
@@ -437,6 +495,21 @@ def classify_intent(message: str) -> str:
     # "Should we refactor?" → chat (no deliverable object)
     if has_action and has_chat_signal and _DELIVERABLE_RE.search(text):
         return "task"
+
+    # Affirmative + work-item reference: "Yes kick off phase 4-7" → task
+    # References to numbered phases, tasks, steps etc. are clearly task commands.
+    if has_chat_signal and _WORK_ITEM_REF.search(text):
+        return "task"
+
+    # Affirmative + action verb: "Yes handle both", "Sure, deploy the changes"
+    # When a positive affirmative is followed by an action verb, it's a command.
+    # Excludes questions like "should we refactor?" (not an affirmative).
+    # Also excludes verb + bare pronoun ("ok build them", "sure fix it") —
+    # pronoun-only objects are vague references best handled in chat context.
+    if has_action and has_chat_signal and _AFFIRMATIVE_PREFIX.match(text):
+        remainder = _AFFIRMATIVE_PREFIX.sub("", text, count=1).strip()
+        if not _re.match(r"\w+\s+(it|them|me|us|him|her)\s*[.!?]*$", remainder, _re.IGNORECASE):
+            return "task"
 
     # Action verbs route to task UNLESS the message also starts with
     # a conversational signal (e.g., "should we refactor?" → chat)

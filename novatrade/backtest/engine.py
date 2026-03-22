@@ -77,6 +77,7 @@ class _OpenPosition:
     current_stop: float = 0.0
     best_close: float = 0.0
     bars_held: int = 0
+    breakeven_hit: bool = False  # v4: tracks if BE level was reached
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +209,7 @@ class IRBBacktester:
         self._position: _OpenPosition | None = None
         self._equity = self.env.initial_equity
         self._trade_counter = 0
+        self._consecutive_losses = 0  # circuit breaker tracking
 
         # Result accumulators
         self._trades: list[CompletedTrade] = []
@@ -240,6 +242,23 @@ class IRBBacktester:
         atr_h1 = compute_atr(h1_candles, self.env.atr_period)
         adx_h1 = compute_adx(h1_candles, self.env.adx_period)
 
+        # EMA fast/slow for stack filter and confirmation
+        ema_fast = compute_ema(h1_closes, self.env.ema_fast_period) if self.env.ema_fast_period > 0 else ema_h1
+        ema_slow = compute_ema(h1_closes, self.env.ema_slow_period) if self.env.ema_slow_period > 0 else ema_h1
+
+        # EMA for trailing stop (if enabled)
+        trail_ema = compute_ema(h1_closes, self.env.trail_ema_period) if self.env.trail_ema_period > 0 else []
+
+        # ATR simple moving average for volatility filter (v4)
+        atr_sma: list[float] = []
+        if self.env.use_volatility_filter:
+            ma_period = self.env.volatility_atr_ma_period
+            atr_sma = [float("nan")] * n
+            for j in range(ma_period - 1, n):
+                vals = [atr_h1[k] for k in range(j - ma_period + 1, j + 1) if not math.isnan(atr_h1[k])]
+                if len(vals) == ma_period:
+                    atr_sma[j] = sum(vals) / ma_period
+
         # Pre-compute H4 EMA
         h4_closes = [c.close for c in h4_candles]
         ema_h4 = compute_ema(h4_closes, self.env.ema_period) if h4_candles else []
@@ -258,6 +277,10 @@ class IRBBacktester:
                 adx_h1,
                 ema_h4,
                 h4_map,
+                ema_fast,
+                ema_slow,
+                trail_ema,
+                atr_sma,
             )
 
         # Close any remaining position at last bar close
@@ -292,6 +315,10 @@ class IRBBacktester:
         adx_h1: list[float],
         ema_h4: list[float],
         h4_map: list[int],
+        ema_fast: list[float] | None = None,
+        ema_slow: list[float] | None = None,
+        trail_ema: list[float] | None = None,
+        atr_sma: list[float] | None = None,
     ) -> None:
         """Process a single H1 bar."""
         # 1. Check if pending order fills on this bar
@@ -300,7 +327,7 @@ class IRBBacktester:
 
         # 2. If in a position, manage trailing stop and check exits
         if self._position is not None and self._state in (StrategyState.LONG, StrategyState.SHORT):
-            self._manage_position(i, bar, atr_h1)
+            self._manage_position(i, bar, atr_h1, trail_ema)
 
         # 3. Evaluate IRB signal on bar close (only if warmup is satisfied)
         if i < self.env.warmup_bars:
@@ -318,8 +345,13 @@ class IRBBacktester:
             self._rejections.existing_position += 1
             return
 
+        # Circuit breaker: skip signal evaluation after N consecutive losses
+        if self.env.max_consecutive_losses > 0 and self._consecutive_losses >= self.env.max_consecutive_losses:
+            self._rejections.circuit_breaker += 1
+            return
+
         # Evaluate IRB signal
-        self._evaluate_signal(i, bar, all_bars, ema_h1, atr_h1, adx_h1, ema_h4, h4_map)
+        self._evaluate_signal(i, bar, all_bars, ema_h1, atr_h1, adx_h1, ema_h4, h4_map, ema_fast, ema_slow, atr_sma)
 
     def _evaluate_signal(
         self,
@@ -331,6 +363,9 @@ class IRBBacktester:
         adx_h1: list[float],
         ema_h4: list[float],
         h4_map: list[int],
+        ema_fast: list[float] | None = None,
+        ema_slow: list[float] | None = None,
+        atr_sma: list[float] | None = None,
     ) -> None:
         """Evaluate IRB geometry and all filters on bar close."""
         e = self.env
@@ -340,6 +375,30 @@ class IRBBacktester:
         if math.isnan(ema_h1[i]) or math.isnan(atr_h1[i]) or math.isnan(adx_h1[i]):
             return
         if atr_h1[i] <= 0:
+            return
+
+        # --- Session filter [v4] ---
+        if e.session_filter is not None and bar.timestamp > 0:
+            from datetime import datetime, timezone
+
+            bar_hour = datetime.fromtimestamp(bar.timestamp, tz=timezone.utc).hour
+            if (
+                (e.session_filter == "london" and not (7 <= bar_hour < 16))
+                or (e.session_filter == "newyork" and not (13 <= bar_hour < 22))
+                or (e.session_filter == "london_ny_overlap" and not (13 <= bar_hour < 16))
+            ):
+                self._rejections.session_filter += 1
+                return
+
+        # --- Volatility filter [v4]: ATR must be above its SMA ---
+        if (
+            e.use_volatility_filter
+            and atr_sma
+            and i < len(atr_sma)
+            and not math.isnan(atr_sma[i])
+            and atr_h1[i] < atr_sma[i]
+        ):
+            self._rejections.volatility_filter += 1
             return
 
         # --- IRB geometry detection [A1] ---
@@ -375,6 +434,39 @@ class IRBBacktester:
         else:
             self._rejections.trend_filter += 1
             return
+
+        # --- EMA stack filter (EMA fast > EMA mid > EMA slow for longs) ---
+        if e.use_ema_stack_filter and ema_fast is not None and ema_slow is not None:
+            ef = ema_fast[i] if i < len(ema_fast) else float("nan")
+            em = ema_h1[i]
+            es = ema_slow[i] if i < len(ema_slow) else float("nan")
+            if math.isnan(ef) or math.isnan(es):
+                self._rejections.trend_filter += 1
+                return
+            if side == TradeSide.LONG and not (ef > em > es):
+                self._rejections.trend_filter += 1
+                return
+            if side == TradeSide.SHORT and not (ef < em < es):
+                self._rejections.trend_filter += 1
+                return
+
+        # --- EMA close confirmation (N bars closing above/below EMA fast) ---
+        if e.ema_confirm_bars > 0 and ema_fast is not None:
+            confirm_ok = True
+            for j in range(e.ema_confirm_bars):
+                idx = i - j
+                if idx < 0 or idx >= len(ema_fast) or math.isnan(ema_fast[idx]):
+                    confirm_ok = False
+                    break
+                if side == TradeSide.LONG and all_bars[idx].close <= ema_fast[idx]:
+                    confirm_ok = False
+                    break
+                if side == TradeSide.SHORT and all_bars[idx].close >= ema_fast[idx]:
+                    confirm_ok = False
+                    break
+            if not confirm_ok:
+                self._rejections.trend_filter += 1
+                return
 
         # --- MTF alignment [A8] ---
         h4_idx = h4_map[i] if i < len(h4_map) else -1
@@ -548,7 +640,13 @@ class IRBBacktester:
     # Position management
     # ------------------------------------------------------------------
 
-    def _manage_position(self, i: int, bar: Candle, atr_h1: list[float]) -> None:
+    def _manage_position(
+        self,
+        i: int,
+        bar: Candle,
+        atr_h1: list[float],
+        trail_ema: list[float] | None = None,
+    ) -> None:
         """Manage trailing stop and check exit conditions."""
         pos = self._position
         if pos is None:
@@ -571,30 +669,81 @@ class IRBBacktester:
             self._close_position(i, bar.close, ExitReason.TIME_STOP)
             return
 
-        # --- Update trailing stop [A9][U3] ---
-        atr_val = atr_h1[i] if i < len(atr_h1) and not math.isnan(atr_h1[i]) else 0
-        if atr_val <= 0:
+        # --- Breakeven mechanism [v4]: move SL to entry after N*R profit ---
+        if self.env.breakeven_r > 0 and not pos.breakeven_hit:
+            pip = self.env.pip_value
+            stop_distance = abs(pos.entry_price - pos.stop_loss)
+            target_distance = stop_distance * self.env.breakeven_r
+
+            if pos.side == TradeSide.LONG:
+                unrealized = bar.close - pos.entry_price
+                if unrealized >= target_distance:
+                    pos.current_stop = max(pos.current_stop, pos.entry_price + pip)
+                    pos.breakeven_hit = True
+                    log.debug("bar %d: breakeven hit for LONG, stop → %.5f", i, pos.current_stop)
+            else:
+                unrealized = pos.entry_price - bar.close
+                if unrealized >= target_distance:
+                    pos.current_stop = min(pos.current_stop, pos.entry_price - pip)
+                    pos.breakeven_hit = True
+                    log.debug("bar %d: breakeven hit for SHORT, stop → %.5f", i, pos.current_stop)
+
+        # --- Trail delay [v4]: don't start trailing for first N bars ---
+        if self.env.trail_delay_bars > 0 and pos.bars_held < self.env.trail_delay_bars:
             return
 
-        if pos.side == TradeSide.LONG:
-            pos.best_close = max(pos.best_close, bar.close)
-            new_trail = pos.best_close - self.env.trail_atr_multiplier * atr_val
-            if new_trail > pos.current_stop:
-                old_stop = pos.current_stop
-                pos.current_stop = new_trail
-                # Check if trailing stop triggers on this bar's low
-                if bar.low <= pos.current_stop and bar.low > old_stop:
-                    self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
-                    return
+        # --- Update trailing stop ---
+        use_ema_trail = self.env.trail_ema_period > 0 and trail_ema is not None and i < len(trail_ema)
+
+        if use_ema_trail and trail_ema is not None:
+            # EMA-based trailing stop (Pine Script v2.0.0 style)
+            ema_val = trail_ema[i]
+            if math.isnan(ema_val):
+                return
+
+            if pos.side == TradeSide.LONG:
+                pos.best_close = max(pos.best_close, bar.close)
+                # Trailing stop = max(current_stop, trail_ema)
+                new_trail = ema_val
+                if new_trail > pos.current_stop:
+                    old_stop = pos.current_stop
+                    pos.current_stop = new_trail
+                    if bar.low <= pos.current_stop and bar.low > old_stop:
+                        self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
+                        return
+            else:
+                pos.best_close = min(pos.best_close, bar.close)
+                new_trail = ema_val
+                if new_trail < pos.current_stop:
+                    old_stop = pos.current_stop
+                    pos.current_stop = new_trail
+                    if bar.high >= pos.current_stop and bar.high < old_stop:
+                        self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
+                        return
         else:
-            pos.best_close = min(pos.best_close, bar.close)
-            new_trail = pos.best_close + self.env.trail_atr_multiplier * atr_val
-            if new_trail < pos.current_stop:
-                old_stop = pos.current_stop
-                pos.current_stop = new_trail
-                if bar.high >= pos.current_stop and bar.high < old_stop:
-                    self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
-                    return
+            # ATR-based trailing stop (original)
+            atr_val = atr_h1[i] if i < len(atr_h1) and not math.isnan(atr_h1[i]) else 0
+            if atr_val <= 0:
+                return
+
+            if pos.side == TradeSide.LONG:
+                pos.best_close = max(pos.best_close, bar.close)
+                new_trail = pos.best_close - self.env.trail_atr_multiplier * atr_val
+                if new_trail > pos.current_stop:
+                    old_stop = pos.current_stop
+                    pos.current_stop = new_trail
+                    if bar.low <= pos.current_stop and bar.low > old_stop:
+                        self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
+                        return
+            else:
+                pos.best_close = min(pos.best_close, bar.close)
+                new_trail = pos.best_close + self.env.trail_atr_multiplier * atr_val
+                if new_trail < pos.current_stop:
+                    old_stop = pos.current_stop
+                    pos.current_stop = new_trail
+                    if bar.high >= pos.current_stop and bar.high < old_stop:
+                        self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
+                        return
 
     def _close_position(self, bar_idx: int, exit_price: float, reason: ExitReason) -> None:
         """Close the current position and record the trade."""
@@ -615,8 +764,8 @@ class IRBBacktester:
 
         pnl_usd = pnl_pips * pos.volume * lot_val
 
-        # Deduct commission (round-trip: entry + exit)
-        pnl_usd -= self.env.spread.commission_per_lot_usd * pos.volume * 2
+        # Deduct commission (round-trip per lot)
+        pnl_usd -= self.env.spread.commission_per_lot_usd * pos.volume
 
         # Risk R-multiple
         stop_distance_pips = abs(pos.entry_price - pos.stop_loss) / pip
@@ -639,6 +788,12 @@ class IRBBacktester:
         )
         self._trades.append(trade)
         self._equity += pnl_usd
+
+        # Update consecutive loss tracker for circuit breaker
+        if pnl_pips > 0:
+            self._consecutive_losses = 0
+        else:
+            self._consecutive_losses += 1
 
         log.debug(
             "bar %d: %s closed (%s) pnl=%.1f pips $%.2f (%.2fR) equity=$%.2f",
@@ -819,7 +974,7 @@ class StrategyBacktesterAdapter:
             volume = self.env.min_volume
 
         pnl_usd = pnl_pips * volume * lot_val
-        pnl_usd -= self.env.spread.commission_per_lot_usd * volume * 2
+        pnl_usd -= self.env.spread.commission_per_lot_usd * volume
 
         risk_r = pnl_pips / stop_distance_pips if stop_distance_pips > 0 else 0.0
 

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260320_16_evening_wrap_1774035182",
+  "workflow_id": "shift_20260320_16_evening_wrap",
+  "task_summary": "0/1 steps succeeded, 0/1 contracts valid, aggregate F (0.00)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "0/1 steps succeeded, 0/1 contracts valid, aggregate F (0.00)"
+  ],
+  "successful_patterns": [
+    "plan_revised: plan plan_shift_20260320_16_evening_wrap_1774035143 (failed)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "0/1 steps succeeded, 0/1 contracts valid, aggregate F (0.00)",
+  "created_at": "2026-03-20T19:33:02Z",
+  "confidence": "medium",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260321_8_session_wrap_1774090997"
+}

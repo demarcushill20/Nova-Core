@@ -120,6 +120,9 @@ class FilterRejection:
     existing_position: int = 0
     existing_pending: int = 0
     warmup: int = 0
+    session_filter: int = 0  # v4: rejected by session hours
+    volatility_filter: int = 0  # v4: rejected by low-volatility regime
+    circuit_breaker: int = 0  # v4: rejected by consecutive-loss breaker
 
 
 # ---------------------------------------------------------------------------

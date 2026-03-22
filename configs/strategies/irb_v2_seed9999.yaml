@@ -1,0 +1,24 @@
+strategy_type: irb
+irb_threshold: 0.5305640555147589
+ema_period: 48
+ema_fast_period: 6
+ema_slow_period: 89
+atr_period: 9
+adx_period: 7
+trend_slope_threshold: 0.41040785710690764
+adx_threshold: 16.28189560941797
+overextension_threshold: 2.727232384538759
+trail_atr_multiplier: 1.6995303362425553
+trail_ema_period: 39
+ema_confirm_bars: 2
+use_ema_stack_filter: true
+trigger_window_bars: 10
+time_stop_bars: 35
+mtf_lookback: 50
+warmup_bars: 86
+filters_enabled: []
+session_filter: null
+name: irb_v2_seed9999
+version: 2.3.0
+description: Autoresearch seed9999 — PF 1.20, 146 trades, WF 4/6
+parent_config: null

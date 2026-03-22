@@ -139,9 +139,22 @@ class TestCheckTaskQueue:
     def test_too_many_pending(self, tmp_path):
         _make_tmp_base(tmp_path)
         for i in range(15):
-            (tmp_path / "TASKS" / f"{i:04d}_task.md").write_text("x")
+            p = tmp_path / "TASKS" / f"{i:04d}_task.md"
+            p.write_text("x")
+            # Backdate to make stale (older than PENDING_ALERT_AGE_HOURS)
+            old_ts = (datetime.now(timezone.utc) - timedelta(hours=10)).timestamp()
+            os.utime(p, (old_ts, old_ts))
         result = heartbeat.check_task_queue()
         assert result["ok"] is False
+
+    def test_fresh_tasks_dont_trigger_alert(self, tmp_path):
+        """Fresh tasks (< PENDING_ALERT_AGE_HOURS) should not trigger alert."""
+        _make_tmp_base(tmp_path)
+        for i in range(15):
+            (tmp_path / "TASKS" / f"{i:04d}_task.md").write_text("x")
+        result = heartbeat.check_task_queue()
+        assert result["ok"] is True
+        assert "0 stale" in result["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +325,7 @@ class TestTelegramAlert:
             heartbeat.send_telegram_alert(checks)
         m.assert_called_once()
         msg = m.call_args[0][0]
-        assert "UNHEALTHY" in msg
+        assert "attention" in msg
         assert "service:watcher" in msg
 
 
@@ -326,8 +339,7 @@ class TestTelegramHeartbeat:
             heartbeat.send_telegram_heartbeat(checks)
         m.assert_called_once()
         msg = m.call_args[0][0]
-        assert "HEALTHY" in msg
-        assert "2/2" in msg
+        assert "healthy" in msg.lower()
 
     def test_unhealthy_pulse(self):
         checks = [
@@ -338,7 +350,7 @@ class TestTelegramHeartbeat:
             heartbeat.send_telegram_heartbeat(checks)
         m.assert_called_once()
         msg = m.call_args[0][0]
-        assert "UNHEALTHY" in msg
+        assert "issue" in msg.lower()
         assert "disk" in msg
 
 
@@ -475,15 +487,31 @@ class TestCheckCostRouter:
 class TestMain:
     def test_healthy_run(self, tmp_path):
         _make_tmp_base(tmp_path)
+
+        def _ok(name):
+            return {"name": name, "ok": True, "detail": "ok"}
+
         with (
             mock.patch("heartbeat.check_service") as m_svc,
             mock.patch("heartbeat.check_disk") as m_disk,
             mock.patch("heartbeat.check_claude_binary") as m_claude,
+            mock.patch("heartbeat.check_backup") as m_backup,
+            mock.patch("heartbeat.check_memory_systems") as m_mem,
+            mock.patch("heartbeat.check_google_workspace") as m_gw,
+            mock.patch("heartbeat.check_pip_audit") as m_pip,
+            mock.patch("heartbeat.check_ruff") as m_ruff,
+            mock.patch("utils.max_plan_guard.check_max_plan_usage", return_value=_ok("max_plan_usage")),
+            mock.patch("heartbeat._mpg_allow", return_value=(False, "blocked: test")),
             mock.patch("heartbeat.send_telegram_heartbeat") as m_hb,
         ):
-            m_svc.return_value = {"name": "svc", "ok": True, "detail": "ok"}
-            m_disk.return_value = {"name": "disk", "ok": True, "detail": "ok"}
-            m_claude.return_value = {"name": "claude", "ok": True, "detail": "ok"}
+            m_svc.return_value = _ok("svc")
+            m_disk.return_value = _ok("disk")
+            m_claude.return_value = _ok("claude")
+            m_backup.return_value = _ok("backup")
+            m_mem.return_value = _ok("memory_systems")
+            m_gw.return_value = _ok("google_workspace")
+            m_pip.return_value = _ok("pip_audit")
+            m_ruff.return_value = _ok("ruff")
             code = heartbeat.main()
         assert code == 0
         assert heartbeat.HEARTBEAT_FILE.exists()

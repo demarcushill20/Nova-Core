@@ -426,6 +426,32 @@ class TestSupersessionMetadata:
         result = supersede_artifact(a_path, b_path, dry_run=False)
         assert result.action == "no_action"
 
+    def test_reverse_circular_supersession_rejected(self, tmp_path):
+        """B already supersedes A — making A supersede B would create A↔B cycle."""
+        wl = tmp_path / "wl"
+        a_path, _ = _make_artifact(wl, "mem_a_100.json")
+        b_path, _ = _make_artifact(wl, "mem_b_200.json", supersedes="mem_a_100", age_days=5)
+
+        result = supersede_artifact(a_path, b_path, dry_run=False)
+        assert result.action == "rejected_unsafe"
+        assert result.rejection_reason == "circular_supersession"
+
+    def test_already_superseded_by_other_rejected(self, tmp_path):
+        """B is already superseded by C — making A supersede B would conflict."""
+        wl = tmp_path / "wl"
+        a_path, _ = _make_artifact(wl, "mem_a_100.json")
+        b_path, _ = _make_artifact(
+            wl,
+            "mem_b_200.json",
+            superseded_by="mem_c_300",
+            promotion_status="superseded",
+            age_days=5,
+        )
+
+        result = supersede_artifact(a_path, b_path, dry_run=False)
+        assert result.action == "rejected_unsafe"
+        assert result.rejection_reason == "already_superseded_by_other"
+
 
 # ---------------------------------------------------------------------------
 # Test: Exact dedup workflow

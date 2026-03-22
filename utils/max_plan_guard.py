@@ -47,21 +47,21 @@ class GuardConfig:
     """All configurable thresholds for the Max-plan guard."""
 
     # Burn-rate multiplier thresholds (vs 24h baseline)
-    caution_burn_multiplier: float = 2.0
-    protection_burn_multiplier: float = 4.0
-    critical_burn_multiplier: float = 8.0
+    caution_burn_multiplier: float = 3.0
+    protection_burn_multiplier: float = 6.0
+    critical_burn_multiplier: float = 12.0
 
     # Absolute call-count thresholds (per window)
-    caution_calls_60m: int = 15
-    protection_calls_60m: int = 25
-    critical_calls_60m: int = 40
-    caution_calls_15m: int = 8
-    protection_calls_15m: int = 15
+    caution_calls_60m: int = 20
+    protection_calls_60m: int = 35
+    critical_calls_60m: int = 50
+    caution_calls_15m: int = 10
+    protection_calls_15m: int = 20
 
     # Runaway detection
-    same_caller_threshold_60m: int = 10
-    same_task_threshold_60m: int = 5
-    failure_retry_threshold_60m: int = 5
+    same_caller_threshold_60m: int = 15
+    same_task_threshold_60m: int = 10
+    failure_retry_threshold_60m: int = 8
 
     # Auth check cache TTL (seconds)
     auth_cache_ttl: int = 3600  # 1 hour

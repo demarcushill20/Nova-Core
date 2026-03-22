@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260322_9_afternoon_review_1774208474",
+  "workflow_id": "shift_20260322_9_afternoon_review",
+  "task_summary": "Afternoon review confirming 8/8 morning shift success, 5 services healthy, 7 critical open threads documented, task 0513 fixed, seed9999 strategy validated",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Afternoon review confirming 8/8 morning shift success, 5 services healthy, 7 critical open threads documented, task 0513 fixed, seed9999 strategy validated"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_9_afternoon_review"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Afternoon review confirming 8/8 morning shift success, 5 services healthy, 7 critical open threads documented, task 0513 fixed, seed9999 strategy validated",
+  "created_at": "2026-03-22T19:41:14Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_9_afternoon_review_1774210537"
+}

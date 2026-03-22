@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0507_Ok_are_you_fixing_the_test_failures__1774024410",
+  "workflow_id": "0507_Ok_are_you_fixing_the_test_failures_",
+  "task_summary": "Fixed 3 categories of test failures \u2014 Telegram intent classifier pronoun handling, \"send\" over-classification, and stale mutation API tests. 8037 tests passing.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 3 categories of test failures \u2014 Telegram intent classifier pronoun handling, \"send\" over-classification, and stale mutation API tests. 8037 tests passing."
+  ],
+  "successful_patterns": [
+    "task_completed: 0507_Ok_are_you_fixing_the_test_failures_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 3 categories of test failures \u2014 Telegram intent classifier pronoun handling, \"send\" over-classification, and stale mutation API tests. 8037 tests passing.",
+  "created_at": "2026-03-20T16:33:30Z",
+  "confidence": "high"
+}

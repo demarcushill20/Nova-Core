@@ -384,8 +384,8 @@ class TestGateStageB:
         """Spread gate uses >= (consistent with slippage/commission gates)."""
         from novatrade.evaluation.gates import GateConfig
 
-        env = _make_environment(avg_spread_pips=1.0)
-        config = GateConfig()  # min_avg_spread_pips=1.0
+        env = _make_environment(avg_spread_pips=0.5)
+        config = GateConfig()  # min_avg_spread_pips=0.5
         results = evaluate_stage_b(env, config=config)
         spread_gate = [r for r in results if r.gate == "B.spread_applied"][0]
         assert spread_gate.passed is True
@@ -394,8 +394,8 @@ class TestGateStageB:
         """Spread gate fails when below a non-zero custom threshold."""
         from novatrade.evaluation.gates import GateConfig
 
-        env = _make_environment(avg_spread_pips=0.5)
-        custom_config = GateConfig(min_avg_spread_pips=1.0)
+        env = _make_environment(avg_spread_pips=0.4)
+        custom_config = GateConfig(min_avg_spread_pips=0.5)
         results = evaluate_stage_b(env, config=custom_config)
         spread_gate = [r for r in results if r.gate == "B.spread_applied"][0]
         assert spread_gate.passed is False

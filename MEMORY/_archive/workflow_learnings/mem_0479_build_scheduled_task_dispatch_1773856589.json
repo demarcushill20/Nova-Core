@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0479_build_scheduled_task_dispatch_1773856589",
+  "workflow_id": "0479_build_scheduled_task_dispatch",
+  "task_summary": "Added scheduled_at frontmatter filtering to watcher get_pending_tasks() with 19 passing tests",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added scheduled_at frontmatter filtering to watcher get_pending_tasks() with 19 passing tests"
+  ],
+  "successful_patterns": [
+    "task_completed: 0479_build_scheduled_task_dispatch"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added scheduled_at frontmatter filtering to watcher get_pending_tasks() with 19 passing tests",
+  "created_at": "2026-03-18T17:56:29Z",
+  "confidence": "low"
+}

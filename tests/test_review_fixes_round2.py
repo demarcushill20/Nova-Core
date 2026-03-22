@@ -75,7 +75,7 @@ class TestTransactionCostDeduction:
             spread=SpreadAssumptions(
                 avg_spread_pips=0.0,
                 slippage_pips=0.0,
-                commission_per_lot_usd=3.50,  # $3.50 per lot per side
+                commission_per_lot_usd=3.50,  # $3.50 per lot round-trip
             ),
         )
         engine = IRBBacktester(env=env)
@@ -91,9 +91,9 @@ class TestTransactionCostDeduction:
 
         trade = engine._trades[0]
         # Raw PnL: 10 pips * 1.0 lot * $10/pip = $100
-        # Commission: $3.50 * 1.0 lot * 2 (round-trip) = $7.00
-        # Net: $100 - $7 = $93.00
-        assert abs(trade.pnl_usd - 93.0) < 0.01
+        # Commission: $3.50 * 1.0 lot (round-trip) = $3.50
+        # Net: $100 - $3.50 = $96.50
+        assert abs(trade.pnl_usd - 96.50) < 0.01
 
     def test_spread_turns_marginal_winner_into_loser(self):
         """A 1-pip winner with 2-pip spread should be a net loser."""

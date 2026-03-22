@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260327_1_system_health_1773942456",
+  "workflow_id": "shift_20260327_1_system_health",
+  "task_summary": "4/4 steps succeeded, 3/4 contracts valid, aggregate C (0.70)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 3/4 contracts valid, aggregate C (0.70)"
+  ],
+  "successful_patterns": [
+    "plan_revised: plan plan_shift_20260327_1_system_health_1773936236 (failed)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 3/4 contracts valid, aggregate C (0.70)",
+  "created_at": "2026-03-19T17:47:36Z",
+  "confidence": "medium"
+}

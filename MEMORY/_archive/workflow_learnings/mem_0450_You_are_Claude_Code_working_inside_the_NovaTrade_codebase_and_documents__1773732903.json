@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0450_You_are_Claude_Code_working_inside_the_NovaTrade_codebase_and_documents__1773732903",
+  "workflow_id": "0450_You_are_Claude_Code_working_inside_the_NovaTrade_codebase_and_documents_",
+  "task_summary": "3/3 steps succeeded, 2/3 contracts valid, aggregate C (0.67)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 2/3 contracts valid, aggregate C (0.67)"
+  ],
+  "successful_patterns": [
+    "plan_revised: plan plan_0450_You_are_Claude_Code_working_inside_the_NovaTrade_codebase_and_documents"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 2/3 contracts valid, aggregate C (0.67)",
+  "created_at": "2026-03-17T07:35:03Z",
+  "confidence": "medium",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0490_Thanks_because_I_love_reading_about_you_re_research_and_plans_without_all_the_ex_1773897789"
+}

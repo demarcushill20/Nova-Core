@@ -1,0 +1,35 @@
+# IRB v2.0.0 Pine Script Configuration
+# Exact parameter match to NovaTrade IRB v2.0.0 Pine Script
+# Features: EMA stack filter, EMA close confirmation, EMA trailing stop
+
+name: irb_v2_pine
+version: 2.0.0
+description: Pine Script v2.0.0 — EMA stack (10>20>50), 3-bar EMA10 confirmation, EMA(40) trailing stop
+parent_config: irb_baseline
+
+# --- Signal parameters ---
+irb_threshold: 0.45
+ema_period: 20
+ema_fast_period: 10
+ema_slow_period: 50
+atr_period: 14
+adx_period: 14
+trend_slope_threshold: 0.4
+adx_threshold: 20.0
+overextension_threshold: 2.0
+
+# --- v2.0.0 additions ---
+use_ema_stack_filter: true       # EMA 10 > EMA 20 > EMA 50 ordering
+ema_confirm_bars: 3              # 3 bars closing above/below EMA 10
+trail_ema_period: 40             # EMA(40) trailing stop instead of ATR
+trail_atr_multiplier: 1.5        # fallback (not used when trail_ema_period > 0)
+
+# --- Entry / exit ---
+trigger_window_bars: 20
+time_stop_bars: 40
+mtf_lookback: 20                 # Pine uses 20 H1 bars for H4 EMA direction
+warmup_bars: 50                  # Pine uses max(WARMUP, EMA_CONFIRM_BARS, TRAIL_EMA_PERIOD)
+
+# --- Filter toggles ---
+filters_enabled: []
+session_filter: null

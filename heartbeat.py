@@ -16,7 +16,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -115,6 +115,7 @@ LOGS_DIR = BASE / "LOGS"
 DISK_WARN_PERCENT = 85
 ORPHAN_INPROGRESS_MINUTES = 15
 MAX_PENDING_TASKS = 10
+PENDING_ALERT_AGE_HOURS = 6  # only count tasks pending longer than this as problematic
 BACKUP_DIR = Path("/home/nova/backups")
 BACKUP_MAX_AGE_HOURS = 26  # alert if no backup in ~1 day
 LOG_SIZE_WARN_MB = 50
@@ -187,23 +188,38 @@ def check_claude_binary() -> dict:
 
 
 def check_task_queue() -> dict:
-    """Check for pending tasks and orphaned .inprogress files."""
+    """Check for pending tasks and orphaned .inprogress files.
+
+    Only tasks older than PENDING_ALERT_AGE_HOURS are counted as problematic
+    to avoid false alarms from freshly generated shift/conversation tasks.
+    """
     if not TASKS_DIR.exists():
         return {"name": "task_queue", "ok": True, "detail": "no TASKS dir"}
 
     lifecycle_suffixes = (".inprogress", ".done", ".failed", ".cancelled")
     pending = [p for p in TASKS_DIR.glob("*.md") if not any(p.name.endswith(s) for s in lifecycle_suffixes)]
 
-    inprogress = list(TASKS_DIR.glob("*.inprogress"))
+    # Only count stale tasks (older than PENDING_ALERT_AGE_HOURS) toward the alert threshold
     now = datetime.now(timezone.utc)
+    age_cutoff = now - timedelta(hours=PENDING_ALERT_AGE_HOURS)
+    stale_pending = []
+    for p in pending:
+        try:
+            mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+            if mtime < age_cutoff:
+                stale_pending.append(p)
+        except OSError:
+            continue
+
+    inprogress = list(TASKS_DIR.glob("*.inprogress"))
     orphaned = []
     for ip in inprogress:
         age_min = (now - datetime.fromtimestamp(ip.stat().st_mtime, tz=timezone.utc)).total_seconds() / 60
         if age_min > ORPHAN_INPROGRESS_MINUTES:
             orphaned.append(ip.name)
 
-    ok = len(pending) <= MAX_PENDING_TASKS and len(orphaned) == 0
-    detail = f"{len(pending)} pending, {len(inprogress)} in-progress"
+    ok = len(stale_pending) <= MAX_PENDING_TASKS and len(orphaned) == 0
+    detail = f"{len(pending)} pending ({len(stale_pending)} stale), {len(inprogress)} in-progress"
     if orphaned:
         detail += f", ORPHANED: {', '.join(orphaned)}"
     return {"name": "task_queue", "ok": ok, "detail": detail}
@@ -642,6 +658,100 @@ def get_trend_summary(window: int = 100) -> dict:
     }
 
 
+def get_daily_delta() -> dict:
+    """Compare today's heartbeat health with yesterday's.
+
+    Groups metrics by calendar date (UTC) and returns:
+      - today_score: average health score for today's snapshots
+      - yesterday_score: average health score for yesterday's snapshots
+      - delta: today - yesterday
+      - today_samples: number of snapshots today
+      - new_failures: checks that failed today but not yesterday
+      - resolved_failures: checks that failed yesterday but not today
+    """
+    if not METRICS_JSONL.exists():
+        return {
+            "today_score": 100,
+            "yesterday_score": 100,
+            "delta": 0,
+            "today_samples": 0,
+            "new_failures": [],
+            "resolved_failures": [],
+        }
+
+    try:
+        lines = METRICS_JSONL.read_text().splitlines()
+    except OSError:
+        return {
+            "today_score": 100,
+            "yesterday_score": 100,
+            "delta": 0,
+            "today_samples": 0,
+            "new_failures": [],
+            "resolved_failures": [],
+        }
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Bucket entries by date
+    by_date: dict[str, list[dict]] = {}
+    for ln in lines:
+        if not ln.strip():
+            continue
+        try:
+            entry = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        ts = entry.get("ts", "")
+        date_key = ts[:10] if len(ts) >= 10 else ""
+        if date_key:
+            by_date.setdefault(date_key, []).append(entry)
+
+    # Sort dates to find yesterday
+    sorted_dates = sorted(by_date.keys())
+    today_entries = by_date.get(today_str, [])
+
+    # Find yesterday (most recent date before today)
+    yesterday_str = ""
+    for d in reversed(sorted_dates):
+        if d < today_str:
+            yesterday_str = d
+            break
+
+    yesterday_entries = by_date.get(yesterday_str, []) if yesterday_str else []
+
+    def _avg_score(entries: list[dict]) -> int:
+        if not entries:
+            return 100
+        scores = []
+        for e in entries:
+            total = e.get("total_checks", 22)
+            passed = e.get("passed", total)
+            scores.append(round(passed / total * 100) if total > 0 else 100)
+        return round(sum(scores) / len(scores))
+
+    def _all_failures(entries: list[dict]) -> set[str]:
+        fails: set[str] = set()
+        for e in entries:
+            fails.update(e.get("failed_names", []))
+        return fails
+
+    today_score = _avg_score(today_entries)
+    yesterday_score = _avg_score(yesterday_entries)
+    today_fails = _all_failures(today_entries)
+    yesterday_fails = _all_failures(yesterday_entries)
+
+    return {
+        "today_score": today_score,
+        "yesterday_score": yesterday_score,
+        "delta": today_score - yesterday_score,
+        "today_samples": len(today_entries),
+        "yesterday_date": yesterday_str,
+        "new_failures": sorted(today_fails - yesterday_fails),
+        "resolved_failures": sorted(yesterday_fails - today_fails),
+    }
+
+
 # --- Alerting ----------------------------------------------------------------
 
 
@@ -663,7 +773,12 @@ def _send_telegram(text: str) -> None:
 
 
 def _normalize_fingerprint(text: str) -> str:
-    """Strip volatile parts (timestamps, exact dollar amounts) to produce a stable fingerprint."""
+    """Strip volatile parts (timestamps, dollar amounts, metrics) to produce a stable fingerprint.
+
+    Alerts of the same *type* should match regardless of specific numbers.
+    E.g. "High burn rate 4.75x baseline (13 calls/60m)" and
+         "High burn rate 6.21x baseline (17 calls/60m)" → same fingerprint.
+    """
     import hashlib
     import re
 
@@ -672,6 +787,9 @@ def _normalize_fingerprint(text: str) -> str:
     normalized = re.sub(r"\d{4}-\d{2}-\d{2}T[\d:]+Z?", "", normalized)
     # Collapse dollar amounts to just the integer part (so $22.50 and $22.51 match)
     normalized = re.sub(r"\$(\d+)\.\d+", r"$\1", normalized)
+    # Strip all remaining digit sequences — metric values (burn rates, call counts,
+    # thresholds) change every cycle but the alert *type* is what matters for dedup.
+    normalized = re.sub(r"\d+", "", normalized)
     # Collapse whitespace
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return hashlib.sha256(normalized.encode()).hexdigest()[:16]
@@ -770,9 +888,9 @@ def _ground_service_alert(message: str, checks: list | None) -> bool:
 def send_telegram_alert(checks: list) -> None:
     """Send Telegram message listing failed checks. Only called when unhealthy."""
     failed = [c for c in checks if not c["ok"]]
-    lines = ["⚠️ NovaCore Heartbeat — UNHEALTHY", ""]
+    lines = ["Something needs attention:", ""]
     for c in failed:
-        lines.append(f"❌ {c['name']}: {c['detail']}")
+        lines.append(f"- {c['name']}: {c['detail']}")
     _send_telegram("\n".join(lines))
 
 
@@ -783,12 +901,12 @@ def send_telegram_heartbeat(checks: list) -> None:
     fail_count = len([c for c in checks if not c["ok"]])
 
     if all_ok:
-        text = f"💚 Heartbeat {now} — HEALTHY ({len(checks)}/{len(checks)} checks passed)"
+        text = f"All systems healthy at {now}."
     else:
         failed = [c for c in checks if not c["ok"]]
-        lines = [f"🔴 Heartbeat {now} — UNHEALTHY ({fail_count} failed)"]
+        lines = [f"Heads up — {fail_count} issue{'s' if fail_count != 1 else ''} at {now}:"]
         for c in failed:
-            lines.append(f"  ❌ {c['name']}: {c['detail']}")
+            lines.append(f"- {c['name']}: {c['detail']}")
         text = "\n".join(lines)
 
     _send_telegram(text)
@@ -1022,7 +1140,7 @@ def _handle_agent_actions(response: str, checks: list | None = None) -> None:
             if action_type == "notify":
                 msg = action.get("message", "")
                 if msg:
-                    full_msg = f"🤖 Nova Heartbeat Agent:\n{msg}"
+                    full_msg = msg
                     if not _ground_service_alert(msg, checks):
                         continue
                     if _telegram_cooldown_gate(full_msg):
@@ -1035,7 +1153,7 @@ def _handle_agent_actions(response: str, checks: list | None = None) -> None:
                 _inject_proactive_task(title, body)
     else:
         # No structured JSON — treat the whole response as a notification
-        full_msg = f"🤖 Nova Heartbeat Agent:\n{response[:500]}"
+        full_msg = response[:500]
         if not _ground_service_alert(response, checks):
             return
         if _telegram_cooldown_gate(full_msg):
@@ -1373,7 +1491,7 @@ def _run_claude_cycle(
         if outcome.memory_write == WriteStatus.SUCCESS:
             sinks.append("memory \u2713")
         sink_str = f" [{', '.join(sinks)}]" if sinks else ""
-        _send_telegram(f"{emoji} {label} Complete:\n{title}{sink_str}")
+        _send_telegram(f"Finished {label.lower()}: {title}{sink_str}")
 
     except subprocess.TimeoutExpired:
         if _mpg_record is not None:
@@ -1558,7 +1676,7 @@ def main() -> int:
         sh_alerts = sh_result.get("alerts", [])
         for alert in sh_alerts:
             if alert.get("severity") in ("warning", "critical"):
-                alert_msg = f"🛡️ Self-Healing [{alert['severity'].upper()}]: {alert['title']}\n{alert['detail']}"
+                alert_msg = f"Self-healing ({alert['severity']}): {alert['title']}\n{alert['detail']}"
                 if _telegram_cooldown_gate(alert_msg):
                     _send_telegram(alert_msg)
     except Exception as e:
@@ -1587,7 +1705,7 @@ def main() -> int:
         mpg_alerts = mpg_result.get("alerts", [])
         for alert in mpg_alerts:
             if alert.get("severity") in ("warning", "critical"):
-                alert_msg = f"⚡ Max-Plan Guard [{alert['severity'].upper()}]: {alert['title']}\n{alert['detail']}"
+                alert_msg = f"Budget alert ({alert['severity']}): {alert['title']}\n{alert['detail']}"
                 if _telegram_cooldown_gate(alert_msg):
                     _send_telegram(alert_msg)
     except Exception as e:

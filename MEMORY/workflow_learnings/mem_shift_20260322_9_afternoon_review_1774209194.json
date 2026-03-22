@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260322_9_afternoon_review_1774209194",
+  "workflow_id": "shift_20260322_9_afternoon_review",
+  "task_summary": "Afternoon review confirms morning 8/8 success, 5 services healthy, 7 open threads documented, immediate priority is committing 230 files to prevent data loss",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Afternoon review confirms morning 8/8 success, 5 services healthy, 7 open threads documented, immediate priority is committing 230 files to prevent data loss"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_9_afternoon_review"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Afternoon review confirms morning 8/8 success, 5 services healthy, 7 open threads documented, immediate priority is committing 230 files to prevent data loss",
+  "created_at": "2026-03-22T19:53:14Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_9_afternoon_review_1774210537"
+}

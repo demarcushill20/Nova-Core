@@ -95,14 +95,15 @@ class TestBacktestEnvironment:
 class TestSpreadAssumptions:
     def test_total_cost_pips_default(self):
         s = SpreadAssumptions()
-        assert s.total_cost_pips == 1.0  # avg_spread=1.0, no slippage
+        # avg_spread=1.0 + 2*slippage=2*0.2 = 1.4
+        assert s.total_cost_pips == pytest.approx(1.4)
 
     def test_total_cost_pips_with_slippage(self):
         s = SpreadAssumptions(avg_spread_pips=1.5, slippage_pips=0.5)
         assert s.total_cost_pips == 2.5
 
     def test_fixed_spread_overrides_avg(self):
-        s = SpreadAssumptions(fixed_spread_pips=2.0, avg_spread_pips=1.0)
+        s = SpreadAssumptions(fixed_spread_pips=2.0, avg_spread_pips=1.0, slippage_pips=0.0)
         assert s.total_cost_pips == 2.0
 
 

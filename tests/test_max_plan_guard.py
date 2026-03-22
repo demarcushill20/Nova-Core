@@ -426,14 +426,14 @@ class TestProtectionMode:
 
     def test_caution_on_burn_rate(self, tmp_path):
         """Elevated burn rate triggers CAUTION."""
-        burn = BurnRateMetrics(burn_rate_multiplier=2.5, claude_calls_last_60m=5)
+        burn = BurnRateMetrics(burn_rate_multiplier=3.5, claude_calls_last_60m=5)
         runaway = RunawayDetection()
         state = evaluate_protection_mode(burn, runaway, self._make_auth())
         assert state.mode == ProtectionMode.CAUTION
 
     def test_protection_on_high_burn(self, tmp_path):
         """High burn rate triggers PROTECTION."""
-        burn = BurnRateMetrics(burn_rate_multiplier=5.0, claude_calls_last_60m=5)
+        burn = BurnRateMetrics(burn_rate_multiplier=7.0, claude_calls_last_60m=5)
         runaway = RunawayDetection()
         state = evaluate_protection_mode(burn, runaway, self._make_auth())
         assert state.mode == ProtectionMode.PROTECTION
@@ -447,14 +447,14 @@ class TestProtectionMode:
 
     def test_critical_lockdown_on_extreme_burn(self, tmp_path):
         """Extreme burn rate triggers CRITICAL_LOCKDOWN."""
-        burn = BurnRateMetrics(burn_rate_multiplier=10.0, claude_calls_last_60m=5)
+        burn = BurnRateMetrics(burn_rate_multiplier=13.0, claude_calls_last_60m=5)
         runaway = RunawayDetection()
         state = evaluate_protection_mode(burn, runaway, self._make_auth())
         assert state.mode == ProtectionMode.CRITICAL_LOCKDOWN
 
     def test_critical_lockdown_on_calls_threshold(self, tmp_path):
         """Extreme call count triggers CRITICAL_LOCKDOWN."""
-        burn = BurnRateMetrics(claude_calls_last_60m=45)
+        burn = BurnRateMetrics(claude_calls_last_60m=55)
         runaway = RunawayDetection()
         state = evaluate_protection_mode(burn, runaway, self._make_auth())
         assert state.mode == ProtectionMode.CRITICAL_LOCKDOWN
@@ -486,7 +486,7 @@ class TestProtectionMode:
         evaluate_protection_mode(burn0, runaway0, self._make_auth())
 
         # Second evaluation: spike → caution
-        burn1 = BurnRateMetrics(burn_rate_multiplier=3.0)
+        burn1 = BurnRateMetrics(burn_rate_multiplier=4.0)
         state = evaluate_protection_mode(burn1, runaway0, self._make_auth())
         assert state.mode == ProtectionMode.CAUTION
         assert len(state.history) >= 1
@@ -577,15 +577,15 @@ class TestAlerts:
         prot = ProtectionState()
 
         # Elevated
-        alerts = generate_alerts(auth, BurnRateMetrics(burn_rate_multiplier=2.5), runaway, prot)
+        alerts = generate_alerts(auth, BurnRateMetrics(burn_rate_multiplier=4.0), runaway, prot)
         assert any(a.severity == "info" and "Elevated" in a.title for a in alerts)
 
         # High
-        alerts = generate_alerts(auth, BurnRateMetrics(burn_rate_multiplier=5.0), runaway, prot)
+        alerts = generate_alerts(auth, BurnRateMetrics(burn_rate_multiplier=7.0), runaway, prot)
         assert any(a.severity == "warning" and "High" in a.title for a in alerts)
 
         # Critical
-        alerts = generate_alerts(auth, BurnRateMetrics(burn_rate_multiplier=9.0), runaway, prot)
+        alerts = generate_alerts(auth, BurnRateMetrics(burn_rate_multiplier=13.0), runaway, prot)
         assert any(a.severity == "critical" and "Critical" in a.title for a in alerts)
 
     def test_runaway_alert(self):

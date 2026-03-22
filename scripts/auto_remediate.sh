@@ -8,18 +8,20 @@ echo "=== NovaCore Auto-Remediation Pipeline ==="
 rc=0
 
 echo "[1/3] Ruff auto-fix..."
-if ! ruff check . --fix --quiet 2>/dev/null; then
-    # Exit code 1 from ruff check means violations remain (expected).
-    # Exit code 2 means ruff itself crashed — that's a real failure.
-    if [ $? -eq 2 ]; then
-        echo "ERROR: ruff check crashed"
-        rc=1
-    fi
+ruff check . --fix --quiet 2>/dev/null
+ruff_rc=$?
+if [ $ruff_rc -eq 2 ]; then
+    echo "ERROR: ruff check crashed (exit 2)"
+    rc=1
+elif [ $ruff_rc -eq 1 ]; then
+    echo "  ruff check: violations remain (non-fatal)"
 fi
 
 echo "[2/3] Ruff format..."
-if ! ruff format . --quiet 2>/dev/null; then
-    echo "ERROR: ruff format failed"
+ruff format . --quiet 2>/dev/null
+fmt_rc=$?
+if [ $fmt_rc -ne 0 ]; then
+    echo "ERROR: ruff format failed (exit $fmt_rc)"
     rc=1
 fi
 

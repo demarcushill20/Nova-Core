@@ -44,9 +44,11 @@ class SpreadAssumptions:
 
     fixed_spread_pips: float | None = None
     avg_spread_pips: float = 1.0
-    commission_per_lot_usd: float = 0.0
-    slippage_pips: float = 0.0
-    description: str = "OANDA demo typical 0.5-1.5 pips; no commission (embedded in spread)"
+    # Non-zero defaults ensure backtests always model real execution costs.
+    # Zero-cost backtests are rejected by the Stage B realism gate.
+    commission_per_lot_usd: float = 3.5  # typical ECN round-turn commission (USD)
+    slippage_pips: float = 0.2  # conservative estimate for major pairs
+    description: str = "OANDA demo typical 0.5-1.5 pips; ECN commission + slippage modelled"
 
     @property
     def total_cost_pips(self) -> float:
@@ -157,6 +159,8 @@ class BacktestEnvironment:
     # --- Strategy parameters ---
     irb_threshold: float = 0.45
     ema_period: int = 20
+    ema_fast_period: int = 10
+    ema_slow_period: int = 50
     atr_period: int = 14
     adx_period: int = 14
     trend_slope_threshold: float = 0.4
@@ -166,8 +170,22 @@ class BacktestEnvironment:
     trigger_window_bars: int = 20
     time_stop_bars: int = 40
     trail_atr_multiplier: float = 1.5
+    trail_ema_period: int = 0  # 0 = use ATR trailing; >0 = use EMA trailing
+    ema_confirm_bars: int = 0  # 0 = disabled; >0 = N bars closing above/below EMA fast
+    use_ema_stack_filter: bool = False  # EMA 10 > 20 > 50 ordering
     warmup_bars: int = 34
     pip_buffer: float = 0.0001
+
+    # --- Enhanced exit parameters (v4) ---
+    breakeven_r: float = 0.0  # 0 = disabled; >0 = move SL to breakeven after N*R profit
+    trail_delay_bars: int = 0  # 0 = trail immediately; >0 = don't trail for first N bars
+
+    # --- Enhanced filter parameters (v4) ---
+    use_volatility_filter: bool = False  # Only trade when ATR > SMA(ATR, vol_atr_ma_period)
+    volatility_atr_ma_period: int = 50  # Period for ATR moving average filter
+
+    # --- Risk management (v4) ---
+    max_consecutive_losses: int = 0  # 0 = disabled; >0 = pause trading after N consecutive losses
 
     # --- Measurement vs inference ---
     directly_measured: tuple[str, ...] = (

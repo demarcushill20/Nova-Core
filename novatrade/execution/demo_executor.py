@@ -85,7 +85,7 @@ class DemoExecutor:
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             msg = str(exc)
-            log.error("execution exception: %s", msg)
+            log.exception("execution exception: %s", msg)
             result = ExecutionResult(
                 outcome=ExecutionOutcome.EXCEPTION,
                 error=msg,

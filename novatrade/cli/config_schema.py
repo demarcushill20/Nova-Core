@@ -59,16 +59,32 @@ class StrategyConfig(BaseModel):
     # --- Signal parameters (Level 1) ------------------------------------
     irb_threshold: float = Field(default=0.45, ge=0.30, le=0.60)
     ema_period: int = Field(default=20, ge=10, le=50)
+    ema_fast_period: int = Field(default=10, ge=5, le=20)
+    ema_slow_period: int = Field(default=50, ge=30, le=100)
     atr_period: int = Field(default=14, ge=7, le=21)
     adx_period: int = Field(default=14, ge=7, le=21)
     trend_slope_threshold: float = Field(default=0.4, ge=0.1, le=1.0)
     adx_threshold: float = Field(default=20.0, ge=15.0, le=30.0)
     overextension_threshold: float = Field(default=2.0, ge=1.5, le=3.0)
     trail_atr_multiplier: float = Field(default=1.5, ge=1.0, le=3.0)
+    trail_ema_period: int = Field(default=0, ge=0, le=100)
+    ema_confirm_bars: int = Field(default=0, ge=0, le=10)
+    use_ema_stack_filter: bool = Field(default=False)
     trigger_window_bars: int = Field(default=20, ge=10, le=40)
     time_stop_bars: int = Field(default=40, ge=20, le=80)
-    mtf_lookback: int = Field(default=5, ge=1, le=20)
-    warmup_bars: int = Field(default=34, ge=20, le=60)
+    mtf_lookback: int = Field(default=5, ge=1, le=50)
+    warmup_bars: int = Field(default=34, ge=20, le=100)
+
+    # --- Enhanced exit parameters (v4) ----------------------------------
+    breakeven_r: float = Field(default=0.0, ge=0.0, le=3.0)
+    trail_delay_bars: int = Field(default=0, ge=0, le=20)
+
+    # --- Enhanced filter parameters (v4) --------------------------------
+    use_volatility_filter: bool = Field(default=False)
+    volatility_atr_ma_period: int = Field(default=50, ge=20, le=100)
+
+    # --- Risk management (v4) -------------------------------------------
+    max_consecutive_losses: int = Field(default=0, ge=0, le=20)
 
     # --- Level 2: filter toggles ----------------------------------------
     filters_enabled: list[str] = Field(default_factory=list)
@@ -85,31 +101,47 @@ class StrategyConfig(BaseModel):
     PARAMETER_BOUNDS: ClassVar[dict[str, ParameterBounds]] = {
         "irb_threshold": ParameterBounds(min_val=0.30, max_val=0.60, step=0.01),
         "ema_period": ParameterBounds(min_val=10, max_val=50, step=1),
+        "ema_fast_period": ParameterBounds(min_val=5, max_val=20, step=1),
+        "ema_slow_period": ParameterBounds(min_val=30, max_val=100, step=1),
         "atr_period": ParameterBounds(min_val=7, max_val=21, step=1),
         "adx_period": ParameterBounds(min_val=7, max_val=21, step=1),
         "trend_slope_threshold": ParameterBounds(min_val=0.1, max_val=1.0, step=0.05),
         "adx_threshold": ParameterBounds(min_val=15.0, max_val=30.0, step=0.5),
         "overextension_threshold": ParameterBounds(min_val=1.5, max_val=3.0, step=0.1),
         "trail_atr_multiplier": ParameterBounds(min_val=1.0, max_val=3.0, step=0.1),
+        "trail_ema_period": ParameterBounds(min_val=10, max_val=60, step=1),
+        "ema_confirm_bars": ParameterBounds(min_val=1, max_val=5, step=1),
         "trigger_window_bars": ParameterBounds(min_val=10, max_val=40, step=1),
         "time_stop_bars": ParameterBounds(min_val=20, max_val=80, step=1),
-        "mtf_lookback": ParameterBounds(min_val=1, max_val=20, step=1),
-        "warmup_bars": ParameterBounds(min_val=20, max_val=60, step=1),
+        "mtf_lookback": ParameterBounds(min_val=1, max_val=50, step=1),
+        "warmup_bars": ParameterBounds(min_val=20, max_val=100, step=1),
+        "breakeven_r": ParameterBounds(min_val=0.5, max_val=3.0, step=0.1),
+        "trail_delay_bars": ParameterBounds(min_val=1, max_val=20, step=1),
+        "volatility_atr_ma_period": ParameterBounds(min_val=20, max_val=100, step=5),
+        "max_consecutive_losses": ParameterBounds(min_val=3, max_val=20, step=1),
     }
 
     OPTIMIZABLE_PARAMS: ClassVar[list[str]] = [
         "irb_threshold",
         "ema_period",
+        "ema_fast_period",
+        "ema_slow_period",
         "atr_period",
         "adx_period",
         "trend_slope_threshold",
         "adx_threshold",
         "overextension_threshold",
         "trail_atr_multiplier",
+        "trail_ema_period",
+        "ema_confirm_bars",
         "trigger_window_bars",
         "time_stop_bars",
         "mtf_lookback",
         "warmup_bars",
+        "breakeven_r",
+        "trail_delay_bars",
+        "volatility_atr_ma_period",
+        "max_consecutive_losses",
     ]
 
     # --- Conversion methods ---------------------------------------------
@@ -123,16 +155,26 @@ class StrategyConfig(BaseModel):
         return {
             "irb_threshold": self.irb_threshold,
             "ema_period": self.ema_period,
+            "ema_fast_period": self.ema_fast_period,
+            "ema_slow_period": self.ema_slow_period,
             "atr_period": self.atr_period,
             "adx_period": self.adx_period,
             "trend_slope_threshold": self.trend_slope_threshold,
             "adx_threshold": self.adx_threshold,
             "overextension_threshold": self.overextension_threshold,
             "trail_atr_multiplier": self.trail_atr_multiplier,
+            "trail_ema_period": self.trail_ema_period,
+            "ema_confirm_bars": self.ema_confirm_bars,
+            "use_ema_stack_filter": self.use_ema_stack_filter,
             "trigger_window_bars": self.trigger_window_bars,
             "time_stop_bars": self.time_stop_bars,
             "mtf_lookback": self.mtf_lookback,
             "warmup_bars": self.warmup_bars,
+            "breakeven_r": self.breakeven_r,
+            "trail_delay_bars": self.trail_delay_bars,
+            "use_volatility_filter": self.use_volatility_filter,
+            "volatility_atr_ma_period": self.volatility_atr_ma_period,
+            "max_consecutive_losses": self.max_consecutive_losses,
         }
 
     def content_hash(self) -> str:

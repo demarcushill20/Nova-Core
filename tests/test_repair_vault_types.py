@@ -8,10 +8,13 @@ Covers:
 - Safety: unfixable notes must NOT be mutated
 """
 
+import sys
 import textwrap
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.repair_vault_types import (
     _apply_fix,

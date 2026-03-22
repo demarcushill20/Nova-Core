@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0495_Parameters_only__but_exclude__1773944635",
+  "workflow_id": "0495_Parameters_only__but_exclude_",
+  "task_summary": "Implemented all AutoResearch architecture redlines \u2014 search levels DSL, gated evaluation ladder, doctrine v2, MCP thin wrappers (60 tests passing)",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented all AutoResearch architecture redlines \u2014 search levels DSL, gated evaluation ladder, doctrine v2, MCP thin wrappers (60 tests passing)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0495_Parameters_only__but_exclude_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented all AutoResearch architecture redlines \u2014 search levels DSL, gated evaluation ladder, doctrine v2, MCP thin wrappers (60 tests passing)",
+  "created_at": "2026-03-19T18:23:55Z",
+  "confidence": "high"
+}

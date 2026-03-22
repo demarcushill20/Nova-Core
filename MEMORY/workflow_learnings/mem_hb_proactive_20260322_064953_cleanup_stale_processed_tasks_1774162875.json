@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_hb_proactive_20260322_064953_cleanup_stale_processed_tasks_1774162875",
+  "workflow_id": "hb_proactive_20260322_064953_cleanup_stale_processed_tasks",
+  "task_summary": "Archived 4 stale processed tasks to TASKS/archive/ after confirming matching OUTPUT files exist",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Archived 4 stale processed tasks to TASKS/archive/ after confirming matching OUTPUT files exist"
+  ],
+  "successful_patterns": [
+    "task_completed: hb_proactive_20260322_064953_cleanup_stale_processed_tasks"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Archived 4 stale processed tasks to TASKS/archive/ after confirming matching OUTPUT files exist",
+  "created_at": "2026-03-22T07:01:15Z",
+  "confidence": "high"
+}

@@ -140,7 +140,10 @@ def save_manifest(manifest: ReproducibilityManifest, output_dir: Path) -> Path:
 
 def load_manifest(path: Path) -> ReproducibilityManifest:
     """Load a manifest from JSON file."""
-    data = json.loads(Path(path).read_text())
+    try:
+        data = json.loads(Path(path).read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed manifest JSON at {path}: {exc}") from exc
     return ReproducibilityManifest(**data)
 
 

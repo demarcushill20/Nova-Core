@@ -141,6 +141,142 @@ def unclaim_send(name: str) -> None:
 
 SUMMARY_MAX_CHARS = 300
 
+# --- Heartbeat output detection & smart summarization ----------------------
+
+_HB_PREFIX_RE = re.compile(r"^hb_(plan|research)_\d{8}-\d{6}\.md$")
+
+
+def _is_heartbeat_output(name: str) -> bool:
+    """Check if the output file is a heartbeat plan or research report."""
+    return bool(_HB_PREFIX_RE.match(name))
+
+
+def _extract_plan_version(md_text: str) -> str:
+    """Extract version label like 'v50' from the title line."""
+    m = re.search(r"Plan\s+(v\d+)", md_text)
+    return m.group(1) if m else ""
+
+
+def _extract_what_changed(md_text: str) -> list[str]:
+    """Pull the numbered 'What changed since' items as short summaries."""
+    # Find the section
+    m = re.search(
+        r"\*\*What changed since[^*]*\*\*[:\s]*\n(.*?)(?:\n\*\*Known Issues|\n---|\Z)",
+        md_text,
+        flags=re.DOTALL,
+    )
+    if not m:
+        return []
+
+    items = []
+    for line in m.group(1).strip().splitlines():
+        # Match numbered items like "1. **Title** — description..."
+        im = re.match(r"\d+\.\s+\*\*([^*]+)\*\*\s*(?:—|--|-)\s*(.+)", line.strip())
+        if im:
+            title = im.group(1).strip()
+            detail = im.group(2).strip()
+            # Truncate detail to keep it readable
+            if len(detail) > 120:
+                detail = detail[:117].rstrip() + "..."
+            items.append(f"  {title} — {detail}")
+        elif line.strip().startswith(("1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.")):
+            # Fallback: plain numbered items without bold
+            clean = re.sub(r"^\d+\.\s*", "", line.strip())
+            if len(clean) > 140:
+                clean = clean[:137].rstrip() + "..."
+            items.append(f"  {clean}")
+    return items
+
+
+def _extract_known_issues_count(md_text: str) -> int:
+    """Count lines under **Known Issues:**."""
+    m = re.search(
+        r"\*\*Known Issues:\*\*\s*\n(.*?)(?:\n---|\n##|\Z)",
+        md_text,
+        flags=re.DOTALL,
+    )
+    if not m:
+        return 0
+    return sum(1 for line in m.group(1).strip().splitlines() if line.strip().startswith("-"))
+
+
+def _extract_codebase_stats(md_text: str) -> str:
+    """Extract codebase stats line."""
+    m = re.search(r"\*\*Codebase:\*\*\s*([^\n]+)", md_text)
+    if m:
+        raw = m.group(1).strip()
+        # Shorten to key numbers
+        tests_m = re.search(r"([\d,]+\+?)\s*tests", raw)
+        loc_m = re.search(r"~?([\d,]+K)\s*Python\s*LOC", raw)
+        parts = []
+        if loc_m:
+            parts.append(f"{loc_m.group(1)} LOC")
+        if tests_m:
+            parts.append(f"{tests_m.group(1)} tests")
+        return " | ".join(parts) if parts else ""
+    return ""
+
+
+def _extract_progress(md_text: str) -> str:
+    """Extract progress line."""
+    m = re.search(r"\*\*Progress:\s*([^\n*]+)", md_text)
+    return m.group(1).strip() if m else ""
+
+
+def _build_heartbeat_digest(output_path: Path, md_text: str) -> str:
+    """Build a concise, readable digest for heartbeat plan/research outputs."""
+    kind = "Plan" if "hb_plan_" in output_path.name else "Research"
+    version = _extract_plan_version(md_text)
+    changes = _extract_what_changed(md_text)
+    issues_count = _extract_known_issues_count(md_text)
+    stats = _extract_codebase_stats(md_text)
+    progress = _extract_progress(md_text)
+
+    # Extract timestamp from filename
+    ts_m = re.search(r"(\d{8})-(\d{6})", output_path.name)
+    time_str = ""
+    if ts_m:
+        try:
+            dt = datetime.strptime(f"{ts_m.group(1)}{ts_m.group(2)}", "%Y%m%d%H%M%S")
+            time_str = dt.strftime("%H:%M UTC")
+        except ValueError:
+            pass
+
+    # Build the message
+    header = f"\U0001f4cb {kind} Update"
+    if version:
+        header += f" ({version})"
+    if time_str:
+        header += f" — {time_str}"
+
+    lines = [header, ""]
+
+    if progress:
+        lines.append(f"\U0001f3af {progress}")
+
+    if stats:
+        lines.append(f"\U0001f4e6 {stats}")
+
+    if lines[-1]:  # add separator if we had stats
+        lines.append("")
+
+    if changes:
+        lines.append(f"What's new ({len(changes)}):")
+        lines.extend(changes[:6])
+        if len(changes) > 6:
+            lines.append(f"  ...and {len(changes) - 6} more")
+    else:
+        lines.append("No changes since last revision.")
+
+    if issues_count > 0:
+        lines.append("")
+        lines.append(f"\u26a0\ufe0f {issues_count} known issue{'s' if issues_count != 1 else ''}")
+
+    lines.append("")
+    lines.append(f"\U0001f4c4 Full report: OUTPUT/{output_path.name}")
+
+    return "\n".join(lines)
+
 
 def _extract_section(md_text: str, heading: str) -> str | None:
     """Extract body text under a ## heading, stopping at next ## or #."""
@@ -412,71 +548,62 @@ def _build_chat_message(output_path: Path) -> str:
 
 def build_message(output_path: Path) -> str:
     txt = output_path.read_text(encoding="utf-8", errors="replace")
+
+    # Smart digest for heartbeat outputs — always concise regardless of mode
+    if _is_heartbeat_output(output_path.name):
+        return _build_heartbeat_digest(output_path, txt)
+
     info = parse_task_report(txt, output_name=output_path.name)
     metrics = compute_metrics(output_path)
     mode = get_mode()
 
-    header = (
-        f"✅ NovaCore completed ({mode.upper()})\n"
-        f"Output: {output_path.name}\n"
-        f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
-    )
+    # Build a natural summary line
+    summary = info.get("summary") or "(no summary available)"
+    task_id = info.get("task_id") or ""
+    task_label = f"Task {task_id}" if task_id else output_path.name
 
-    # Metrics line
+    # Latency in human-readable form
     lat = metrics["latency_sec"]
-    lat_str = f"{lat}s" if isinstance(lat, int) else "n/a"
-    queued = metrics["queued_ts"] or "n/a"
-    done = metrics["done_ts"] or "n/a"
-    size = metrics["size_bytes"]
-    metrics_block = (
-        "\n📊 Metrics\n"
-        f"- Queue timestamp (from filename): {queued} UTC\n"
-        f"- Output timestamp (from filename): {done} UTC\n"
-        f"- Queue→Output latency: {lat_str}\n"
-        f"- Output size: {size} bytes\n"
-    )
-
-    # Key files
-    files = info.get("files") or []
-    key_files = []
-    key_files.append(f"- OUTPUT: {output_path}")
-    wlog = worker_log_for_output(output_path, task_id=info.get("task_id"))
-    if wlog:
-        key_files.append(f"- Worker log: {wlog} ({'exists' if wlog.exists() else 'missing'})")
+    if isinstance(lat, int):
+        if lat < 60:
+            lat_str = f"{lat}s"
+        elif lat < 3600:
+            lat_str = f"{lat // 60}m {lat % 60}s"
+        else:
+            lat_str = f"{lat // 3600}h {(lat % 3600) // 60}m"
     else:
-        key_files.append("- Worker log: (not found)")
-    for f in files:
-        key_files.append(f"- {f}")
+        lat_str = None
 
-    key_files_block = "\n📁 Key Files\n" + "\n".join(key_files) + "\n"
-
-    # Content behavior by mode
     if mode == "compact":
-        return header + metrics_block + key_files_block
+        line = f"{task_label} finished."
+        if lat_str:
+            line += f" Took {lat_str}."
+        return line
 
     if mode == "normal":
+        lines = [f"{task_label} finished."]
+        if lat_str:
+            lines[0] += f" Took {lat_str}."
+        lines.append("")
+        lines.append(summary)
         preview = "\n".join(txt.splitlines()[:30])
-        return header + metrics_block + key_files_block + "\n🧾 Preview\n" + preview
+        if preview.strip():
+            lines.append("")
+            lines.append(preview)
+        return "\n".join(lines)
 
-    # VERBOSE: include full Summary + Files Created + any other sections (still chunked)
-    summary = info.get("summary") or "(no Summary section found)"
-    task_id = info.get("task_id") or "(unknown)"
-    completed = info.get("completed") or "(unknown)"
-
-    verbose_top = (
-        header
-        + f"\n🧠 Report Fields\n- Task ID: {task_id}\n- Completed: {completed}\n"
-        + metrics_block
-        + key_files_block
-        + "\n🧾 Full Summary\n"
-        + summary.strip()
-        + "\n"
-    )
-
-    # Append rest of the report (minus header lines) for “full summary + key files + metrics”
-    # We’ll keep the entire report as well, chunked.
-    verbose_full = verbose_top + "\n📄 Full Report\n" + txt.strip()
-    return verbose_full
+    # verbose
+    completed = info.get("completed") or ""
+    lines = [f"{task_label} finished."]
+    if lat_str:
+        lines[0] += f" Took {lat_str}."
+    if completed:
+        lines.append(f"Completed: {completed}")
+    lines.append("")
+    lines.append(summary)
+    lines.append("")
+    lines.append(txt.strip())
+    return "\n".join(lines)
 
 
 def _is_ceo_delegated(output_path: Path) -> bool:
@@ -520,9 +647,6 @@ def maybe_notify(path: Path) -> None:
             msg = _build_chat_message(path)
         else:
             msg = build_message(path)
-            # Append source identity footer only in task/report mode
-            footer = f"\n---\nnotifier_pid={os.getpid()} host={platform.node()}"
-            msg += footer
         send_message_chunked(msg)
         log(f"Sent notification for {path.name} (intent={intent}, mode={get_mode()}, pid={os.getpid()})")
     except Exception as e:
@@ -581,7 +705,7 @@ def main() -> None:
 
     # Startup ping includes mode
     try:
-        send_text(f"🟢 NovaCore notifier is online (mode={get_mode()}).")
+        send_text(f"Nova notifier is up, running in {get_mode()} mode.")
         log("Startup ping sent")
     except Exception as e:
         log(f"Startup ping failed: {e}")

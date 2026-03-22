@@ -161,20 +161,21 @@ def record_batch_scores(scores: list[dict]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def get_quality_trend(category: str, days: int = 7) -> dict | None:
+def get_quality_trend(category: str, days: int = 7) -> dict:
     """Get quality score trend for a category over N days.
 
     Returns a dict with ``average``, ``min``, ``max``, ``count``, ``trend``
-    keys, or None if Langfuse is unavailable.
+    keys.
 
-    Note: Full implementation requires Langfuse SDK score query support which
-    is not yet available in the v4 SDK.  Currently returns None.
+    Raises:
+        NotImplementedError: Langfuse SDK v4 does not yet support score
+            queries.  This will be implemented when SDK support lands.
     """
-    client = _get_langfuse()
-    if client is None:
-        return None
-    # TODO: Implement when Langfuse SDK supports score queries
-    return None
+    raise NotImplementedError(
+        "get_quality_trend() requires Langfuse SDK score query support "
+        "which is not yet available in the v4 SDK. "
+        "Track https://github.com/langfuse/langfuse-python/issues for updates."
+    )
 
 
 # ---------------------------------------------------------------------------

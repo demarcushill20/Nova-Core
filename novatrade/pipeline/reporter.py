@@ -437,17 +437,15 @@ def report_to_file(
 
     # Atomic write
     fd, tmp_path = tempfile.mkstemp(dir=str(output_dir), suffix=".tmp")
-    closed = False
     try:
         os.write(fd, content.encode("utf-8"))
         os.close(fd)
-        closed = True
+        fd = -1  # mark as closed
         os.replace(tmp_path, str(out_path))
-    except BaseException:
-        if not closed:
+    finally:
+        if fd >= 0:
             os.close(fd)
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
-        raise
 
     return out_path

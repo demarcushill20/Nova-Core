@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0501_Can_you_review_the_back_testing_engine__249_tests__all_passing__zero_conflicts_b_1773980406",
+  "workflow_id": "0501_Can_you_review_the_back_testing_engine__249_tests__all_passing__zero_conflicts_b",
+  "task_summary": "Production review of 8 NovaTrade backtest files \u2014 all 7 fixes verified correct, 1 new MEDIUM issue (Sortino formula), 7401 tests passing",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Production review of 8 NovaTrade backtest files \u2014 all 7 fixes verified correct, 1 new MEDIUM issue (Sortino formula), 7401 tests passing"
+  ],
+  "successful_patterns": [
+    "task_completed: 0501_Can_you_review_the_back_testing_engine__249_tests__all_passing__zero_conflicts_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Production review of 8 NovaTrade backtest files \u2014 all 7 fixes verified correct, 1 new MEDIUM issue (Sortino formula), 7401 tests passing",
+  "created_at": "2026-03-20T04:20:06Z",
+  "confidence": "low"
+}

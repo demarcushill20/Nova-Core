@@ -126,18 +126,16 @@ def save_checkpoint(
         suffix=".tmp",
         prefix="cp_",
     )
-    closed = False
     try:
         os.write(fd, encoded.encode("utf-8"))
         os.close(fd)
-        closed = True
+        fd = -1  # mark as closed
         os.replace(tmp_path, str(out_path))
-    except BaseException:
-        if not closed:
+    finally:
+        if fd >= 0:
             os.close(fd)
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
-        raise
 
     log.debug(
         "Checkpoint saved: campaign=%s experiment=%d score=%.4f",

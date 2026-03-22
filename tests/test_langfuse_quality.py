@@ -297,22 +297,21 @@ class TestCheckQualityRegression:
 
 
 class TestGetQualityTrend:
-    """Tests for get_quality_trend (currently a placeholder)."""
+    """Tests for get_quality_trend (raises NotImplementedError until SDK support)."""
 
-    def test_returns_none_when_unavailable(self):
-        """Should return None when Langfuse is not available."""
+    def test_raises_not_implemented(self):
+        """Should raise NotImplementedError since Langfuse SDK lacks score queries."""
         from utils.langfuse_quality import get_quality_trend
 
-        with patch("utils.langfuse_quality._get_langfuse", return_value=None):
-            assert get_quality_trend("heartbeat") is None
+        with pytest.raises(NotImplementedError, match="score query support"):
+            get_quality_trend("heartbeat")
 
-    def test_returns_none_placeholder(self):
-        """Currently a placeholder — should return None even with client."""
+    def test_raises_not_implemented_with_days(self):
+        """Should raise NotImplementedError regardless of arguments."""
         from utils.langfuse_quality import get_quality_trend
 
-        mock_client = _make_mock_client()
-        with patch("utils.langfuse_quality._get_langfuse", return_value=mock_client):
-            assert get_quality_trend("heartbeat", days=7) is None
+        with pytest.raises(NotImplementedError, match="score query support"):
+            get_quality_trend("heartbeat", days=7)
 
 
 # =========================================================================

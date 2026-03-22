@@ -19,10 +19,27 @@ import yaml
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 THRESHOLDS_PATH = BASE_DIR / "configs" / "thresholds.yaml"
 
-# Import vendored eval runner
-sys.path.insert(0, str(BASE_DIR / ".claude" / "skills" / "skill-creator"))
-from scripts.run_eval import find_project_root, run_eval  # noqa: E402
-from scripts.utils import parse_skill_md  # noqa: E402
+# Import skill-creator's scripts without permanently polluting sys.path.
+# Temporarily swap the cached `scripts` module to prevent the skill-creator's
+# `scripts` package from shadowing the project-root `scripts` package.
+_skill_creator_path = str(BASE_DIR / ".claude" / "skills" / "skill-creator")
+_saved_scripts = sys.modules.pop("scripts", None)
+_saved_scripts_utils = sys.modules.pop("scripts.utils", None)
+sys.path.insert(0, _skill_creator_path)
+try:
+    from scripts.run_eval import find_project_root, run_eval
+    from scripts.utils import parse_skill_md
+finally:
+    try:
+        sys.path.remove(_skill_creator_path)
+    except ValueError:
+        pass
+    if _saved_scripts is not None:
+        sys.modules["scripts"] = _saved_scripts
+    else:
+        sys.modules.pop("scripts", None)
+    if _saved_scripts_utils is not None:
+        sys.modules["scripts.utils"] = _saved_scripts_utils
 
 
 @dataclass

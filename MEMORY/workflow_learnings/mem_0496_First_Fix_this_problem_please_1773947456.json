@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0496_First_Fix_this_problem_please_1773947456",
+  "workflow_id": "0496_First_Fix_this_problem_please",
+  "task_summary": "Fixed evaluation ladder test failure \u2014 wrong attribute names in mock metrics fixture (avg_win_pips -> average_winner_pips, avg_loss_pips -> average_loser_pips)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed evaluation ladder test failure \u2014 wrong attribute names in mock metrics fixture (avg_win_pips -> average_winner_pips, avg_loss_pips -> average_loser_pips)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0496_First_Fix_this_problem_please"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed evaluation ladder test failure \u2014 wrong attribute names in mock metrics fixture (avg_win_pips -> average_winner_pips, avg_loss_pips -> average_loser_pips)",
+  "created_at": "2026-03-19T19:10:56Z",
+  "confidence": "high"
+}

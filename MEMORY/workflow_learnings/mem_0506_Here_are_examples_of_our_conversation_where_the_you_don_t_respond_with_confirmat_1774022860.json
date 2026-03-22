@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0506_Here_are_examples_of_our_conversation_where_the_you_don_t_respond_with_confirmat_1774022860",
+  "workflow_id": "0506_Here_are_examples_of_our_conversation_where_the_you_don_t_respond_with_confirmat",
+  "task_summary": "Fixed Telegram intent classifier \u2014 affirmative commands (Yes kick off phase 4-7) now correctly route to task queue instead of chat handler",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed Telegram intent classifier \u2014 affirmative commands (Yes kick off phase 4-7) now correctly route to task queue instead of chat handler"
+  ],
+  "successful_patterns": [
+    "task_completed: 0506_Here_are_examples_of_our_conversation_where_the_you_don_t_respond_with_confirma"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed Telegram intent classifier \u2014 affirmative commands (Yes kick off phase 4-7) now correctly route to task queue instead of chat handler",
+  "created_at": "2026-03-20T16:07:40Z",
+  "confidence": "low"
+}

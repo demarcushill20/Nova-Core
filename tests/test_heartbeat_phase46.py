@@ -415,7 +415,7 @@ class TestRunClaudeCycle:
         # Telegram was notified
         mock_tg.assert_called_once()
         tg_text = mock_tg.call_args[0][0]
-        assert "Research Cycle Complete" in tg_text
+        assert "research cycle" in tg_text.lower()
         assert "My Research Topic" in tg_text
         # Log was called (VAULT_WRITE, FUSION_MEMORY, COMPLETED)
         assert log_fn.call_count >= 3
