@@ -59,7 +59,7 @@ class GuardConfig:
     protection_calls_15m: int = 20
 
     # Runaway detection
-    same_caller_threshold_60m: int = 15
+    same_caller_threshold_60m: int = 25
     same_task_threshold_60m: int = 10
     failure_retry_threshold_60m: int = 8
 
@@ -439,12 +439,23 @@ def detect_runaway() -> RunawayDetection:
     severity = "info"
 
     # 1. Same caller repeated excessively
+    # Track both total calls and unique task IDs per caller.
+    # If a caller dispatches many *distinct* tasks, that's legitimate
+    # parallel work — not a runaway loop.
     caller_counts: dict[str, int] = {}
+    caller_unique_tasks: dict[str, set] = {}
     for e in last_60m:
         c = e.get("caller", "unknown")
         caller_counts[c] = caller_counts.get(c, 0) + 1
+        t = e.get("task_id", "")
+        if t:
+            caller_unique_tasks.setdefault(c, set()).add(t)
     for caller, count in caller_counts.items():
         if count >= cfg.same_caller_threshold_60m:
+            unique_tasks = len(caller_unique_tasks.get(caller, set()))
+            # If ≥80% of calls are for distinct tasks, it's legitimate dispatch
+            if unique_tasks >= count * 0.8:
+                continue
             reasons.append(f"runaway_same_caller: {caller} ({count} calls in 60m)")
             severity = "warning"
 

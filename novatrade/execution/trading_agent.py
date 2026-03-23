@@ -38,6 +38,7 @@ from novatrade.models import (
     OrderType,
     RiskVerdict,
 )
+from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor
 from novatrade.risk.risk_engine import RiskEngine
 from novatrade.validation.evidence import EvidenceRecorder
 
@@ -359,11 +360,13 @@ class TradingAgent:
         adapter: MT5Adapter,
         risk_engine: RiskEngine,
         recorder: EvidenceRecorder | None = None,
+        supervisor: HardRiskSupervisor | None = None,
     ) -> None:
         self._cfg = cfg
         self._adapter = adapter
         self._risk = risk_engine
         self._recorder = recorder
+        self._supervisor = supervisor
 
         # FSM state
         self._state = AgentState.FLAT
@@ -580,9 +583,54 @@ class TradingAgent:
             strategy_version="2.0.0",
         )
 
-        # Risk check
+        # --- Hard Risk Supervisor veto (BEFORE RiskEngine) ---
         account = await self._adapter.get_account()
         positions = await self._adapter.get_positions()
+
+        if self._supervisor is not None:
+            pos_dicts = [
+                {
+                    "symbol": p.symbol,
+                    "side": p.side.value,
+                    "volume": p.volume,
+                    "position_id": p.position_id,
+                }
+                for p in positions
+            ]
+            sv = self._supervisor.veto(
+                symbol=broker_symbol,
+                side=payload["side"],
+                volume=payload["volume"],
+                entry_price=payload["entry_price"],
+                stop_loss=payload.get("stop_loss"),
+                account_equity=account.equity,
+                open_positions=pos_dicts,
+            )
+            if sv.vetoed:
+                elapsed = (time.monotonic() - t0) * 1000
+                log.info(
+                    "SUPERVISOR VETO: %s — %s",
+                    sv.rule,
+                    sv.detail,
+                )
+                self._record_event(
+                    "SUPERVISOR_VETO",
+                    {
+                        "intent": intent.to_dict(),
+                        "rule": sv.rule,
+                        "detail": sv.detail,
+                        "verdict": sv.verdict.value,
+                    },
+                )
+                return AgentResult(
+                    success=False,
+                    intent=intent,
+                    state_after=self._state,
+                    rejected_reason=f"supervisor_{sv.verdict.value.lower()}: {sv.rule}",
+                    elapsed_ms=elapsed,
+                )
+
+        # Risk check
         decision = self._risk.pre_trade_check(order_req, account, positions)
 
         if decision.denied:
@@ -634,6 +682,10 @@ class TradingAgent:
                 error=order_result.error,
                 elapsed_ms=elapsed,
             )
+
+        # Notify supervisor of trade opened
+        if self._supervisor is not None:
+            self._supervisor.on_trade_opened(payload["volume"])
 
         # State transition
         new_state = AgentState.PENDING_LONG if side == OrderSide.BUY else AgentState.PENDING_SHORT
@@ -915,6 +967,10 @@ class TradingAgent:
             pnl_pips=0.0,
             exit_reason=payload.get("close_reason", "TIME_STOP"),
         )
+
+        # Notify supervisor (P&L resolved later by ops_monitor)
+        if self._supervisor is not None:
+            self._supervisor.on_trade_closed(0.0)
 
         # State transition: LONG/SHORT -> FLAT
         self._state = AgentState.FLAT

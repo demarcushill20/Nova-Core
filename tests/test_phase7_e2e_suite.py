@@ -1002,7 +1002,12 @@ class TestFailure_RestartRecovery:
     def test_inprogress_tasks_requeued(self, tmp_path):
         tasks_dir = tmp_path / "TASKS"
         tasks_dir.mkdir(parents=True, exist_ok=True)
-        (tasks_dir / "0099_test.md.inprogress").write_text("# Task")
+        ip = tasks_dir / "0099_test.md.inprogress"
+        ip.write_text("# Task")
+        # Age the file beyond the post-processing grace period so it
+        # is considered truly abandoned (no PID, no checkpoint, stale).
+        stale_time = time.time() - 600
+        os.utime(ip, (stale_time, stale_time))
 
         rr = RestartRecovery(base=tmp_path)
         result = rr.reconcile()

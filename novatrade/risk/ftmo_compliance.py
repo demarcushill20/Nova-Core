@@ -31,8 +31,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
 from typing import NamedTuple
+from zoneinfo import ZoneInfo
 
 from novatrade.models import RiskCheckResult
+
+_FTMO_TZ = ZoneInfo("Europe/Prague")
 
 log = logging.getLogger("novatrade.risk.ftmo_compliance")
 
@@ -193,8 +196,8 @@ class ServerRequestCounter:
     _log: list[tuple[float, str]] = field(default_factory=list, repr=False)
 
     def _ensure_day(self) -> None:
-        """Reset counter on new trading day (UTC)."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        """Reset counter on new trading day (Europe/Prague, DST-safe)."""
+        today = datetime.now(timezone.utc).astimezone(_FTMO_TZ).strftime("%Y-%m-%d")
         if today != self._day_key:
             if self._day_key:
                 log.info(
@@ -284,7 +287,7 @@ class ServerRequestCounter:
             return False
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            today = datetime.now(timezone.utc).astimezone(_FTMO_TZ).strftime("%Y-%m-%d")
             if data.get("day") == today:
                 self._day_key = today
                 self._count = data.get("count", 0)
@@ -329,7 +332,7 @@ class TradingDaysTracker:
             date_str: ISO date string (YYYY-MM-DD).  Defaults to today UTC.
         """
         if date_str is None:
-            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            date_str = datetime.now(timezone.utc).astimezone(_FTMO_TZ).strftime("%Y-%m-%d")
         self._trading_dates.add(date_str)
 
     @property

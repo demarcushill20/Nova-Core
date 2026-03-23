@@ -22,6 +22,7 @@ All tests use real blackboard state on disk (tmp_path), not mocks.
 """
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -895,6 +896,10 @@ class TestRestartRecovery:
         tasks_dir.mkdir(parents=True, exist_ok=True)
         ip_file = tasks_dir / "0099_test.md.inprogress"
         ip_file.write_text("# Task\nDo something")
+        # Age the file beyond the post-processing grace period so it
+        # is considered truly abandoned (no PID, no checkpoint, stale).
+        stale_time = time.time() - 600
+        os.utime(ip_file, (stale_time, stale_time))
 
         recovery = RestartRecovery(base=tmp_path)
         result = recovery.reconcile()

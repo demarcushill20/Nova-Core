@@ -566,9 +566,13 @@ class TestRestartRecovery:
         assert len(wf_actions) == 0
 
     def test_inprogress_task_requeued(self, tmp_path):
-        """Task .inprogress with no running worker → requeued to .md."""
+        """Task .inprogress with no running worker, no checkpoint, and stale mtime → requeued to .md."""
         ip = tmp_path / "TASKS" / "0042_test.md.inprogress"
         ip.write_text("# Test task")
+        # Age the file beyond the post-processing grace period so it
+        # is considered truly abandoned (not just in post-processing).
+        stale_time = time.time() - 600  # 10 minutes old
+        os.utime(ip, (stale_time, stale_time))
 
         rr = RestartRecovery(tmp_path)
         result = rr.reconcile()
@@ -592,6 +596,55 @@ class TestRestartRecovery:
 
         requeue_actions = [a for a in result["actions"] if a["type"] == "task_requeued"]
         assert len(requeue_actions) == 0
+        assert ip.exists()
+
+    def test_inprogress_task_with_checkpoint_not_requeued(self, tmp_path):
+        """Task .inprogress with no PID but active checkpoint → not requeued (post-processing)."""
+        ip = tmp_path / "TASKS" / "0044_test.md.inprogress"
+        ip.write_text("# Test task")
+        # Age the file so mtime guard alone wouldn't protect it
+        stale_time = time.time() - 600
+        os.utime(ip, (stale_time, stale_time))
+
+        # Create a checkpoint — signals the watcher is still managing this task
+        cp_dir = tmp_path / "STATE" / "checkpoints"
+        cp_dir.mkdir(parents=True, exist_ok=True)
+        (cp_dir / "0044_test.json").write_text(
+            json.dumps(
+                {
+                    "task_id": "0044_test",
+                    "task_file": "0044_test.md",
+                    "status": "dispatched",
+                    "started_at": "2026-01-01T00:00:00",
+                    "last_updated": "2026-01-01T00:00:00",
+                }
+            )
+        )
+
+        rr = RestartRecovery(tmp_path)
+        result = rr.reconcile()
+
+        requeue_actions = [a for a in result["actions"] if a["type"] == "task_requeued"]
+        assert len(requeue_actions) == 0
+        postproc_actions = [a for a in result["actions"] if a["type"] == "task_postprocessing"]
+        assert len(postproc_actions) == 1
+        assert "checkpoint exists" in postproc_actions[0]["detail"]
+        assert ip.exists()
+
+    def test_inprogress_task_recent_mtime_not_requeued(self, tmp_path):
+        """Task .inprogress with no PID, no checkpoint, but recent mtime → not requeued."""
+        ip = tmp_path / "TASKS" / "0045_test.md.inprogress"
+        ip.write_text("# Test task")
+        # File was just created — mtime is now, well within grace period
+
+        rr = RestartRecovery(tmp_path)
+        result = rr.reconcile()
+
+        requeue_actions = [a for a in result["actions"] if a["type"] == "task_requeued"]
+        assert len(requeue_actions) == 0
+        postproc_actions = [a for a in result["actions"] if a["type"] == "task_postprocessing"]
+        assert len(postproc_actions) == 1
+        assert "recent" in postproc_actions[0]["detail"]
         assert ip.exists()
 
     def test_recovery_log_written(self, tmp_path):

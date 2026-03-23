@@ -10,6 +10,7 @@ Stdlib only — no pip installs required.
 
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -187,11 +188,44 @@ def check_claude_binary() -> dict:
     return {"name": "claude_binary", "ok": ok, "detail": detail}
 
 
+def _parse_scheduled_at(path: Path) -> datetime | None:
+    """Extract ``scheduled_at`` from YAML frontmatter without a YAML dependency.
+
+    Returns a timezone-aware (UTC) datetime if found, else None.
+    """
+    _SCHEDULED_RE = re.compile(r"^scheduled_at:\s*(.+)$", re.MULTILINE)
+    try:
+        # Read only the first 1 KB — frontmatter is always at the top
+        text = path.read_text(encoding="utf-8", errors="replace")[:1024]
+    except OSError:
+        return None
+    if not text.startswith("---"):
+        return None
+    end = text.find("---", 3)
+    if end < 0:
+        return None
+    fm_block = text[3:end]
+    m = _SCHEDULED_RE.search(fm_block)
+    if not m:
+        return None
+    raw = m.group(1).strip().strip("'\"")
+    try:
+        dt = datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+    # Treat naive datetimes as UTC (the watcher does the same)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def check_task_queue() -> dict:
     """Check for pending tasks and orphaned .inprogress files.
 
     Only tasks older than PENDING_ALERT_AGE_HOURS are counted as problematic
     to avoid false alarms from freshly generated shift/conversation tasks.
+    Tasks with a future ``scheduled_at`` frontmatter field are excluded from
+    the stale count — they are correctly waiting for their scheduled time.
     """
     if not TASKS_DIR.exists():
         return {"name": "task_queue", "ok": True, "detail": "no TASKS dir"}
@@ -200,10 +234,17 @@ def check_task_queue() -> dict:
     pending = [p for p in TASKS_DIR.glob("*.md") if not any(p.name.endswith(s) for s in lifecycle_suffixes)]
 
     # Only count stale tasks (older than PENDING_ALERT_AGE_HOURS) toward the alert threshold
+    # Exclude tasks with a future scheduled_at — they are properly deferred, not stale
     now = datetime.now(timezone.utc)
     age_cutoff = now - timedelta(hours=PENDING_ALERT_AGE_HOURS)
     stale_pending = []
+    deferred_count = 0
     for p in pending:
+        # Check scheduled_at first — future-scheduled tasks are never stale
+        sched = _parse_scheduled_at(p)
+        if sched is not None and sched > now:
+            deferred_count += 1
+            continue
         try:
             mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
             if mtime < age_cutoff:
@@ -219,7 +260,9 @@ def check_task_queue() -> dict:
             orphaned.append(ip.name)
 
     ok = len(stale_pending) <= MAX_PENDING_TASKS and len(orphaned) == 0
-    detail = f"{len(pending)} pending ({len(stale_pending)} stale), {len(inprogress)} in-progress"
+    detail = (
+        f"{len(pending)} pending ({len(stale_pending)} stale, {deferred_count} deferred), {len(inprogress)} in-progress"
+    )
     if orphaned:
         detail += f", ORPHANED: {', '.join(orphaned)}"
     return {"name": "task_queue", "ok": ok, "detail": detail}

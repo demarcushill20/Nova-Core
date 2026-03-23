@@ -29,6 +29,7 @@ from fastapi import FastAPI, HTTPException, Request
 from novatrade.execution.trading_agent import TradingAgent
 from novatrade.models import EvidenceRecord, EvidenceType
 from novatrade.monitor.ops_monitor import OpsMonitor
+from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor
 from novatrade.risk.risk_engine import RiskEngine
 from novatrade.runtime.launch_gate import LaunchMode
 from novatrade.validation.evidence import EvidenceRecorder
@@ -48,6 +49,7 @@ class WebhookState:
     risk_engine: RiskEngine | None = None
     monitor: OpsMonitor | None = None
     recorder: EvidenceRecorder | None = None
+    supervisor: HardRiskSupervisor | None = None
     dry_run: bool = True
     launch_mode: LaunchMode = LaunchMode.DRY_RUN
     adapter_type: str = "DryRunAdapter"
@@ -161,6 +163,7 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
         ws: WebhookState = request.app.state.ws
         agent_state = ws.agent.state.value if ws.agent else "not_initialized"
         halted = ws.risk_engine.halted if ws.risk_engine else False
+        sv_halted = ws.supervisor.halted if ws.supervisor else False
         return {
             "status": "ok" if ws.agent else "degraded",
             "dry_run": ws.dry_run,
@@ -168,6 +171,7 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
             "adapter_type": ws.adapter_type,
             "agent_state": agent_state,
             "risk_halted": halted,
+            "supervisor_halted": sv_halted,
             "uptime_seconds": time.time() - ws.started_at if ws.started_at else 0,
         }
 
@@ -264,6 +268,7 @@ def build_status(ws: WebhookState) -> dict:
             "halted": halted,
             "halt_reason": halt_reason,
         },
+        "hard_supervisor": ws.supervisor.snapshot() if ws.supervisor else {"enabled": False},
         "ops_monitor": {
             "initialized": ws.monitor is not None,
         },

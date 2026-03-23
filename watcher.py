@@ -445,6 +445,9 @@ def reap_stale_tasks(*, force: bool = False) -> list[str]:
     Tasks handled via direct Telegram conversation never go through the watcher
     pipeline, so they accumulate as stale .md files. This reaper cleans them up.
 
+    Tasks with a future ``scheduled_at`` frontmatter field are exempt — they are
+    legitimately waiting for their scheduled time and must not be reaped early.
+
     Runs at most once per STALE_REAP_INTERVAL seconds unless force=True.
     Returns list of reaped task filenames.
     """
@@ -467,6 +470,10 @@ def reap_stale_tasks(*, force: bool = False) -> list[str]:
             continue
         # Skip tasks currently being processed
         if p.with_suffix(".md.inprogress").exists():
+            continue
+        # Skip tasks with a future scheduled_at — they are properly deferred
+        fm = parse_frontmatter(p)
+        if not _check_scheduled(fm.get("scheduled_at")):
             continue
         try:
             mtime = p.stat().st_mtime

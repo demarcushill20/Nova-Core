@@ -925,13 +925,36 @@ class RestartRecovery:
 
         return actions
 
+    # Grace period (seconds) after .inprogress file creation during which the
+    # task is assumed to be in post-processing (verification, test gate, memory
+    # capture) even if the worker PID file has already been cleaned up.
+    _POST_PROCESS_GRACE_S = 300  # 5 minutes
+
     def _reconcile_inprogress_tasks(self) -> list[dict]:
-        """Requeue .inprogress tasks that have no running worker."""
+        """Requeue .inprogress tasks that have no running worker.
+
+        Guards against a race condition where the worker subprocess finishes
+        (PID file removed) but the watcher is still post-processing the task
+        (running test gate, verifying artifacts, writing output, renaming to
+        .done/.failed).  Two signals indicate active post-processing:
+
+        1. A checkpoint file exists in STATE/checkpoints/ for this task —
+           the watcher creates it on dispatch and clears it only after the
+           final rename to .done.
+        2. The .inprogress file was modified recently (within the grace
+           period) — covers the window between PID cleanup and checkpoint
+           clearance.
+
+        Only truly abandoned tasks (no PID, no checkpoint, stale mtime)
+        are requeued.
+        """
         tasks_dir = self.base / "TASKS"
         if not tasks_dir.exists():
             return []
 
         running_dir = self.base / "STATE" / "running"
+        checkpoint_dir = self.base / "STATE" / "checkpoints"
+        now = time.time()
         actions = []
 
         for ip_file in tasks_dir.glob("*.inprogress"):
@@ -941,7 +964,7 @@ class RestartRecovery:
 
             task_stem = stem.replace(".md.inprogress", "")
 
-            # Check if worker is still running
+            # Check if worker subprocess is still running
             worker_alive = False
             if running_dir.exists():
                 pid_file = running_dir / f"{task_stem}.pid"
@@ -953,18 +976,57 @@ class RestartRecovery:
                     except (ProcessLookupError, ValueError, PermissionError, OSError):
                         pass
 
-            if not worker_alive:
-                # Requeue: rename back to .md
-                original_name = stem.replace(".inprogress", "")
-                original = ip_file.parent / original_name
-                ip_file.rename(original)
+            if worker_alive:
+                continue
+
+            # --- Post-processing guard ---
+            # The worker PID is gone, but the watcher may still be
+            # post-processing (test gate, verification, rename).  Check for
+            # evidence of active post-processing before assuming abandonment.
+
+            # Signal 1: checkpoint file exists → watcher is still managing
+            # this task (cleared only after successful .done rename).
+            checkpoint_file = checkpoint_dir / f"{task_stem}.json"
+            if checkpoint_file.exists():
                 actions.append(
                     {
-                        "type": "task_requeued",
+                        "type": "task_postprocessing",
                         "file": stem,
-                        "detail": "Requeued abandoned task (no worker running)",
+                        "detail": "Skipped — checkpoint exists (post-processing in progress)",
                     }
                 )
+                continue
+
+            # Signal 2: .inprogress file is recent — worker just finished
+            # and post-processing may not have written/cleared checkpoint yet.
+            try:
+                ip_age = now - ip_file.stat().st_mtime
+            except OSError:
+                continue  # file vanished mid-iteration
+            if ip_age < self._POST_PROCESS_GRACE_S:
+                actions.append(
+                    {
+                        "type": "task_postprocessing",
+                        "file": stem,
+                        "detail": (
+                            f"Skipped — .inprogress file is recent"
+                            f" ({ip_age:.0f}s old, grace={self._POST_PROCESS_GRACE_S}s)"
+                        ),
+                    }
+                )
+                continue
+
+            # Truly abandoned: no PID, no checkpoint, stale file → requeue
+            original_name = stem.replace(".inprogress", "")
+            original = ip_file.parent / original_name
+            ip_file.rename(original)
+            actions.append(
+                {
+                    "type": "task_requeued",
+                    "file": stem,
+                    "detail": f"Requeued abandoned task (no worker, no checkpoint, {ip_age:.0f}s old)",
+                }
+            )
 
         return actions
 
