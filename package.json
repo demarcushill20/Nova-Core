@@ -1,0 +1,27 @@
+{
+  "name": "nova-core",
+  "version": "1.0.0",
+  "description": "A persistent autonomous AI runtime on a VPS. Claude operates as an executive agent coordinating research, coding, automation, and sub-agent workflows.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/demarcushill20/Nova-Core.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/demarcushill20/Nova-Core/issues"
+  },
+  "homepage": "https://github.com/demarcushill20/Nova-Core#readme",
+  "dependencies": {
+    "@mathieuc/tradingview": "^3.5.2"
+  }
+}

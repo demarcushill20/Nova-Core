@@ -34,8 +34,8 @@ LOGS/
 # Playwright MCP cache
 .playwright-mcp/
 
-# Runtime data
-data/
+# Runtime data (root-level only, not novatrade/data/)
+/data/
 
 # Test/coverage artifacts
 .coverage
@@ -45,6 +45,10 @@ data/
 # Claude Code ephemeral
 .claude/worktrees/
 .bak/
+
+# Node.js
+node_modules/
+package-lock.json
 
 # OS
 .DS_Store
