@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
+import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +20,9 @@ LOGS = ROOT / "LOGS"
 STATE = ROOT / "STATE"
 INTENTS_DIR = STATE / "intents"
 STATE.mkdir(parents=True, exist_ok=True)
+
+VAULT_DIR = Path("/home/nova/nova-vault")
+VAULT_DIARY = VAULT_DIR / "90-diary"
 
 SENT_LOG = STATE / "tg_sent_outputs.txt"  # legacy; kept for backward compat reads
 NOTIFIED_DIR = STATE / "notified"  # durable marker dir (one file per output)
@@ -614,6 +619,205 @@ def _is_ceo_delegated(output_path: Path) -> bool:
     return (CEO_DELEGATED_DIR / f"{stem}.delegated").exists()
 
 
+VAULT_MAX_BYTES = 34_000  # vault_write enforces 34KB cap
+NOTEBOOKLM_BIN = "/home/nova/.local/bin/notebooklm"
+
+
+# ---------------------------------------------------------------------------
+# NotebookLM summarization
+# ---------------------------------------------------------------------------
+
+
+def _nlm(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
+    """Run a notebooklm CLI command."""
+    return subprocess.run(
+        [NOTEBOOKLM_BIN, *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _nlm_json(args: list[str], timeout: int = 120) -> dict | None:
+    """Run a notebooklm CLI command that returns JSON, parse it."""
+    r = _nlm(args, timeout=timeout)
+    if r.returncode != 0:
+        log(f"NLM {args[0]} failed (rc={r.returncode}): {r.stderr.strip()[:200]}")
+        return None
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        log(f"NLM {args[0]}: bad JSON: {r.stdout[:200]}")
+        return None
+
+
+def summarize_with_notebooklm(file_path: Path, task_id: str) -> str | None:
+    """Create a temp NotebookLM notebook, add output as source, get summary, cleanup.
+
+    Returns the NLM-generated summary string, or None on failure.
+    """
+    notebook_id: str | None = None
+    try:
+        # 1. Create notebook
+        data = _nlm_json(["create", f"Summary: {task_id}", "--json"])
+        if not data:
+            return None
+        # id is nested: {"notebook": {"id": "..."}}
+        notebook_id = (data.get("notebook") or data).get("id")
+        if not notebook_id:
+            log(f"NLM create: no id in response: {json.dumps(data)[:200]}")
+            return None
+        log(f"NLM notebook created: {notebook_id[:8]}…")
+
+        # 2. Add output file as source
+        src = _nlm_json(
+            ["source", "add", str(file_path), "--notebook", notebook_id, "--json"],
+            timeout=60,
+        )
+        # id is nested: {"source": {"id": "..."}}
+        src_inner = (src or {}).get("source") or src or {}
+        source_id = src_inner.get("id") or src_inner.get("source_id")
+
+        # 3. Wait for source indexing
+        if source_id:
+            wr = _nlm(
+                ["source", "wait", source_id, "-n", notebook_id, "--timeout", "300"],
+                timeout=330,
+            )
+            if wr.returncode != 0:
+                log(f"NLM source wait rc={wr.returncode}, proceeding anyway")
+        else:
+            # Fallback: blind wait
+            log("NLM: no source_id, blind-waiting 45s")
+            time.sleep(45)
+
+        # 4. Ask for executive summary
+        ask = _nlm_json(
+            [
+                "ask",
+                (
+                    "Provide a concise executive summary of this completed task. "
+                    "Cover: what was accomplished, key results or changes, "
+                    "any issues or risks noted, and next steps if mentioned. "
+                    "Keep it under 500 words. Use markdown formatting."
+                ),
+                "--notebook",
+                notebook_id,
+                "--json",
+            ],
+            timeout=120,
+        )
+        if not ask:
+            return None
+        answer = ask.get("answer", "").strip()
+        log(f"NLM summary received ({len(answer)} chars)")
+        return answer or None
+
+    except subprocess.TimeoutExpired:
+        log("NLM summarization timed out")
+        return None
+    except OSError as e:
+        log(f"NLM OS error: {e}")
+        return None
+    finally:
+        # 5. Cleanup — delete temp notebook
+        if notebook_id:
+            try:
+                _nlm(["delete", "-n", notebook_id, "-y"], timeout=30)
+                log(f"NLM notebook {notebook_id[:8]}… deleted")
+            except Exception:
+                log(f"NLM cleanup failed for {notebook_id[:8]}…")
+
+
+# ---------------------------------------------------------------------------
+# Vault diary writer
+# ---------------------------------------------------------------------------
+
+
+def write_to_vault_diary(output_path: Path) -> None:
+    """Summarize completed output via NotebookLM, then write diary to 90-diary/."""
+    VAULT_DIARY.mkdir(parents=True, exist_ok=True)
+
+    raw = output_path.read_text(encoding="utf-8", errors="replace")
+    info = parse_task_report(raw, output_name=output_path.name)
+    task_id = info.get("task_id") or output_path.stem.split("__")[0]
+    fallback_summary = info.get("summary") or ""
+    completed = info.get("completed") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    now = datetime.utcnow()
+    date_str = now.strftime("%Y-%m-%d")
+    slug = re.sub(r"[^a-zA-Z0-9_-]", "-", output_path.stem)[:60].rstrip("-")
+    vault_filename = f"completed-{date_str}-{slug}.md"
+    vault_path = VAULT_DIARY / vault_filename
+
+    if vault_path.exists():
+        log(f"Vault diary already exists: {vault_filename} — skipping")
+        return
+
+    # Try NotebookLM summarization
+    nlm_summary = summarize_with_notebooklm(output_path, task_id)
+
+    if nlm_summary:
+        note = f"""---
+type: diary
+title: "Completed: {task_id}"
+date: "{date_str}"
+source: nova-core-notifier
+summarized_by: notebooklm
+tags:
+  - "#type/diary"
+  - "#project/novacore"
+---
+
+## Task Completed
+
+**Task:** {task_id}
+**Completed:** {completed}
+**Source:** `OUTPUT/{output_path.name}`
+
+## Summary (NotebookLM)
+
+{nlm_summary}
+"""
+        log(f"Diary uses NLM summary for {task_id}")
+    else:
+        # Fallback: extracted summary + truncated raw output
+        log(f"NLM unavailable — falling back to raw summary for {task_id}")
+        full_output = raw.strip()
+        overhead = 600 + len(fallback_summary)
+        budget = VAULT_MAX_BYTES - overhead
+        if len(full_output.encode("utf-8")) > budget:
+            full_output = full_output[: budget - 40] + "\n\n…(truncated — see OUTPUT/ for full)"
+
+        note = f"""---
+type: diary
+title: "Completed: {task_id}"
+date: "{date_str}"
+source: nova-core-notifier
+tags:
+  - "#type/diary"
+  - "#project/novacore"
+---
+
+## Task Completed
+
+**Task:** {task_id}
+**Completed:** {completed}
+**Source:** `OUTPUT/{output_path.name}`
+
+## Summary
+
+{fallback_summary}
+
+## Full Output
+
+{full_output}
+"""
+
+    vault_path.write_text(note, encoding="utf-8")
+    log(f"Wrote vault diary: {vault_filename} ({len(note)} bytes)")
+
+
 def maybe_notify(path: Path) -> None:
     # Notify for all .md output files (numbered tasks + legacy tg_ tasks)
     if path.suffix.lower() != ".md":
@@ -643,14 +847,21 @@ def maybe_notify(path: Path) -> None:
 
     try:
         intent = _load_intent(path)
-        if intent == "chat":
-            msg = _build_chat_message(path)
+        mode = get_mode()
+
+        if mode == "verbose" and intent != "chat":
+            # Route verbose task output to nova-vault diary instead of Telegram
+            write_to_vault_diary(path)
+            log(f"Routed to vault diary for {path.name} (mode=verbose, pid={os.getpid()})")
         else:
-            msg = build_message(path)
-        send_message_chunked(msg)
-        log(f"Sent notification for {path.name} (intent={intent}, mode={get_mode()}, pid={os.getpid()})")
+            if intent == "chat":
+                msg = _build_chat_message(path)
+            else:
+                msg = build_message(path)
+            send_message_chunked(msg)
+            log(f"Sent Telegram for {path.name} (intent={intent}, mode={mode}, pid={os.getpid()})")
     except Exception as e:
-        # Send failed — remove marker so next attempt can retry
+        # Send/write failed — remove marker so next attempt can retry
         unclaim_send(path.name)
         log(f"Send FAILED for {path.name}, marker removed for retry: {e}")
         raise
@@ -703,10 +914,12 @@ def main() -> None:
     # Purge stale markers older than 7 days
     _cleanup_old_markers()
 
-    # Startup ping includes mode
+    # Startup ping includes mode + routing info
+    mode = get_mode()
+    route = "→ nova-vault diary" if mode == "verbose" else "→ Telegram"
     try:
-        send_text(f"Nova notifier is up, running in {get_mode()} mode.")
-        log("Startup ping sent")
+        send_text(f"Nova notifier is up, running in {mode} mode ({route}).")
+        log(f"Startup ping sent — mode={mode} route={route}")
     except Exception as e:
         log(f"Startup ping failed: {e}")
 
