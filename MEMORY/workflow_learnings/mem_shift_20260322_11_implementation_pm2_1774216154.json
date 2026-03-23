@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260322_11_implementation_pm2_1774216154",
+  "workflow_id": "shift_20260322_11_implementation_pm2",
+  "task_summary": "Implemented FTMO lot-size consistency checker and server request counter with 35 tests, integrated into PreTradeGate pipeline",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented FTMO lot-size consistency checker and server request counter with 35 tests, integrated into PreTradeGate pipeline"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_11_implementation_pm2"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented FTMO lot-size consistency checker and server request counter with 35 tests, integrated into PreTradeGate pipeline",
+  "created_at": "2026-03-22T21:49:14Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_11_implementation_pm2_1774220205"
+}

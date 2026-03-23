@@ -371,6 +371,9 @@ class TradingAgent:
         self._position_id: str | None = None
         self._pending_side: OrderSide | None = None
         self._position_side: OrderSide | None = None
+        self._pending_symbol: str | None = None
+        self._position_symbol: str | None = None
+        self._position_volume: float = 0.0
 
         # Idempotency — bounded set of seen keys
         self._seen_keys: set[str] = set()
@@ -389,6 +392,14 @@ class TradingAgent:
     @property
     def position_id(self) -> str | None:
         return self._position_id
+
+    @property
+    def position_symbol(self) -> str | None:
+        return self._position_symbol
+
+    @property
+    def position_volume(self) -> float:
+        return self._position_volume
 
     # -- Main entry point --------------------------------------------------
 
@@ -629,6 +640,7 @@ class TradingAgent:
         self._state = new_state
         self._pending_order_id = order_result.order_id
         self._pending_side = side
+        self._pending_symbol = broker_symbol
 
         log.info(
             "%s -> %s order_id=%s entry=%.5f sl=%.5f vol=%.2f",
@@ -808,6 +820,7 @@ class TradingAgent:
         self._state = AgentState.FLAT
         self._pending_order_id = None
         self._pending_side = None
+        self._pending_symbol = None
 
         log.info(
             "order cancelled: %s reason=%s -> FLAT",
@@ -897,8 +910,8 @@ class TradingAgent:
             position_id=old_position,
             symbol=broker_symbol,
             side=side.value,
-            volume=0.0,
-            pnl_usd=0.0,
+            volume=self._position_volume,
+            pnl_usd=0.0,  # actual P&L resolved by ops_monitor from broker
             pnl_pips=0.0,
             exit_reason=payload.get("close_reason", "TIME_STOP"),
         )
@@ -907,6 +920,8 @@ class TradingAgent:
         self._state = AgentState.FLAT
         self._position_id = None
         self._position_side = None
+        self._position_symbol = None
+        self._position_volume = 0.0
 
         log.info(
             "position closed: %s reason=%s -> FLAT",
@@ -955,14 +970,20 @@ class TradingAgent:
             log.warning("notify_fill in state %s — ignoring", self._state.value)
             return
 
+        # Carry symbol from pending state; clear pending trackers
+        self._position_symbol = self._pending_symbol
+        self._position_volume = volume
         self._pending_order_id = None
         self._pending_side = None
+        self._pending_symbol = None
 
-        # Inform risk engine
+        # Inform risk engine — use tracked symbol, not hardcoded
+        symbol = self._position_symbol or self._cfg.symbols[0]
+        resolved = self._resolve_symbol({"symbol": symbol})
         if self._position_side:
             self._risk.on_trade_fill(
                 position_id=position_id,
-                symbol=self._resolve_symbol({"symbol": "EURUSD"}),
+                symbol=resolved,
                 side=self._position_side,
                 volume=volume,
                 fill_price=fill_price,
@@ -1007,6 +1028,8 @@ class TradingAgent:
         self._state = AgentState.FLAT
         self._position_id = None
         self._position_side = None
+        self._position_symbol = None
+        self._position_volume = 0.0
 
         log.info("broker close: %s -> FLAT reason=%s", old_state.value, exit_reason)
         self._record_event(
@@ -1030,8 +1053,11 @@ class TradingAgent:
         self._state = AgentState.FLAT
         self._pending_order_id = None
         self._pending_side = None
+        self._pending_symbol = None
         self._position_id = None
         self._position_side = None
+        self._position_symbol = None
+        self._position_volume = 0.0
 
         log.info("force_flat: %s -> FLAT reason=%s", old_state.value, reason)
         self._record_event(

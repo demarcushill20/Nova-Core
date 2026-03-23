@@ -217,7 +217,8 @@ def _crossover(a: Organism, b: Organism, rng: np.random.Generator, gen: int) -> 
     """Uniform crossover — randomly pick each gene from parent a or b."""
     params = {}
     for p in StrategyConfig.OPTIMIZABLE_PARAMS:
-        params[p] = a.params[p] if rng.random() < 0.5 else b.params[p]
+        val = a.params[p] if rng.random() < 0.5 else b.params[p]
+        params[p] = round(val) if p in INT_PARAMS else float(val)
 
     features = {}
     for k in a.features:

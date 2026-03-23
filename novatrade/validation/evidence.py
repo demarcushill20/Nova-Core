@@ -4,6 +4,9 @@ Records structured events (executions, health snapshots, reconciliation runs,
 risk decisions, adapter errors) to a local JSONL file.  Each line is a
 self-contained JSON object that can be loaded independently.
 
+Includes daily rotation: records older than today are moved to dated archive
+files (``evidence_YYYY-MM-DD.jsonl``), keeping the main file small.
+
 Provider-neutral — only uses NovaTrade-native models.
 """
 
@@ -11,6 +14,9 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
+from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 from novatrade.models import (
@@ -181,3 +187,146 @@ class EvidenceRecorder:
                 except (json.JSONDecodeError, KeyError, ValueError) as exc:
                     log.warning("evidence: skipping malformed line %d: %s", lineno, exc)
         return records
+
+    def load_all(self) -> list[EvidenceRecord]:
+        """Load records from the current file *and* all rotated daily files.
+
+        Returns records sorted by timestamp (oldest first).
+        """
+        records = self.load()
+        for rotated in sorted(self._path.parent.glob("evidence_*.jsonl")):
+            records.extend(_load_jsonl(rotated))
+        records.sort(key=lambda r: r.timestamp)
+        return records
+
+    # -- Rotation --------------------------------------------------------------
+
+    def rotate(self, *, today: date | None = None) -> RotationResult:
+        """Rotate evidence: move records older than *today* to daily files.
+
+        Records from today stay in the main file.  Older records are appended
+        to ``evidence_YYYY-MM-DD.jsonl`` in the same directory.
+
+        Safe to call repeatedly — already-rotated records are not duplicated.
+        Uses atomic writes (temp + rename) to prevent data loss.
+
+        Returns a :class:`RotationResult` with counts and bytes moved.
+        """
+        today = today or date.today()
+        if not self._path.exists() or self._path.stat().st_size == 0:
+            return RotationResult()
+
+        # Partition lines by date (raw strings, not parsed objects — fast)
+        today_lines: list[str] = []
+        by_date: dict[str, list[str]] = defaultdict(list)
+        total_moved = 0
+
+        with self._path.open() as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    ts = json.loads(stripped).get("timestamp", 0)
+                    record_date = date.fromtimestamp(ts)
+                except (json.JSONDecodeError, ValueError, OSError):
+                    today_lines.append(stripped)
+                    continue
+
+                if record_date >= today:
+                    today_lines.append(stripped)
+                else:
+                    by_date[record_date.isoformat()].append(stripped)
+                    total_moved += 1
+
+        if not by_date:
+            return RotationResult(records_kept=len(today_lines))
+
+        # Write dated archive files (append if they already exist)
+        bytes_moved = 0
+        dates_rotated: list[str] = []
+        for date_str, lines in sorted(by_date.items()):
+            archive_path = self._path.parent / f"evidence_{date_str}.jsonl"
+            payload = "\n".join(lines) + "\n"
+            bytes_moved += len(payload.encode())
+            dates_rotated.append(date_str)
+            with archive_path.open("a") as f:
+                f.write(payload)
+            log.info(
+                "evidence: rotated %d records to %s",
+                len(lines),
+                archive_path.name,
+            )
+
+        # Rewrite main file with only today's records (atomic)
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=self._path.parent,
+            prefix=".evidence_rotate_",
+            suffix=".tmp",
+        )
+        try:
+            with open(tmp_fd, "w") as f:
+                if today_lines:
+                    f.write("\n".join(today_lines) + "\n")
+            Path(tmp_path).replace(self._path)
+        except BaseException:
+            Path(tmp_path).unlink(missing_ok=True)
+            raise
+
+        log.info(
+            "evidence: rotation complete — %d records moved to %d daily files, %d records kept (%s freed)",
+            total_moved,
+            len(by_date),
+            len(today_lines),
+            _fmt_bytes(bytes_moved),
+        )
+        return RotationResult(
+            records_moved=total_moved,
+            records_kept=len(today_lines),
+            bytes_moved=bytes_moved,
+            dates_rotated=dates_rotated,
+        )
+
+
+# -- Helpers -------------------------------------------------------------------
+
+
+class RotationResult:
+    """Result of an evidence rotation operation."""
+
+    __slots__ = ("bytes_moved", "dates_rotated", "records_kept", "records_moved")
+
+    def __init__(
+        self,
+        records_moved: int = 0,
+        records_kept: int = 0,
+        bytes_moved: int = 0,
+        dates_rotated: list[str] | None = None,
+    ) -> None:
+        self.records_moved = records_moved
+        self.records_kept = records_kept
+        self.bytes_moved = bytes_moved
+        self.dates_rotated = dates_rotated or []
+
+
+def _load_jsonl(path: Path) -> list[EvidenceRecord]:
+    """Load EvidenceRecords from a JSONL file, skipping malformed lines."""
+    records: list[EvidenceRecord] = []
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(EvidenceRecord.from_dict(json.loads(line)))
+            except (json.JSONDecodeError, KeyError, ValueError):
+                pass
+    return records
+
+
+def _fmt_bytes(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"

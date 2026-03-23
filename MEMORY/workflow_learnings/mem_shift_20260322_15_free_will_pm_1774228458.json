@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_shift_20260322_15_free_will_pm_1774228458",
+  "workflow_id": "shift_20260322_15_free_will_pm",
+  "task_summary": "Fixed 4 failing tests and Pydantic serialization warnings \u2014 full suite now 7950/7950 green",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 4 failing tests and Pydantic serialization warnings \u2014 full suite now 7950/7950 green"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 4 failing tests and Pydantic serialization warnings \u2014 full suite now 7950/7950 green",
+  "created_at": "2026-03-23T01:14:18Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260322_15_free_will_pm_1774224520"
+}

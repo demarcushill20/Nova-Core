@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260322_11_implementation_pm2_1774217996",
+  "workflow_id": "shift_20260322_11_implementation_pm2",
+  "task_summary": "Committed and pushed FTMO server request wiring (5 files), Pine trailing stop fix, and test isolation \u2014 258 tests passing",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Committed and pushed FTMO server request wiring (5 files), Pine trailing stop fix, and test isolation \u2014 258 tests passing"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_11_implementation_pm2"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Committed and pushed FTMO server request wiring (5 files), Pine trailing stop fix, and test isolation \u2014 258 tests passing",
+  "created_at": "2026-03-22T22:19:56Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_11_implementation_pm2_1774220205"
+}

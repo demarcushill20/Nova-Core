@@ -541,7 +541,9 @@ class TestMain:
             m_disk.return_value = {"name": "disk", "ok": True, "detail": "ok"}
             m_claude.return_value = {"name": "claude", "ok": True, "detail": "ok"}
             code = heartbeat.main()
-        assert code == 1
+        # main() always returns 0 — health issues are reported via Telegram/repair tasks,
+        # not via exit code (exit 1 confuses systemd oneshot status).
+        assert code == 0
         m_hb.assert_called_once()
         m_repair.assert_called_once()
 

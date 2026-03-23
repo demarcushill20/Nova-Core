@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "2/2 steps succeeded, 2/2 contracts valid, aggregate A (1.00)",
   "created_at": "2026-03-22T21:02:13Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_t001_1774228431"
 }

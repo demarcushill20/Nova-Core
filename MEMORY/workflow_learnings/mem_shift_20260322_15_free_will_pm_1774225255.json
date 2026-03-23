@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260322_15_free_will_pm_1774225255",
+  "workflow_id": "shift_20260322_15_free_will_pm",
+  "task_summary": "Built evidence.jsonl daily rotation for NovaTrade, reduced main file from 9.3 MB to 58.5 KB, 11 tests passing",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Built evidence.jsonl daily rotation for NovaTrade, reduced main file from 9.3 MB to 58.5 KB, 11 tests passing"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Built evidence.jsonl daily rotation for NovaTrade, reduced main file from 9.3 MB to 58.5 KB, 11 tests passing",
+  "created_at": "2026-03-23T00:20:55Z",
+  "confidence": "low",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_15_free_will_pm_1774228458"
+}

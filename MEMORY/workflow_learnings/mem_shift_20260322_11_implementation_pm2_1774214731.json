@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Productionized quota-aware scheduling into utils/quota_manager.py with watcher integration, 27 new tests, 206 total passing",
   "created_at": "2026-03-22T21:25:31Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_11_implementation_pm2_1774220205"
 }

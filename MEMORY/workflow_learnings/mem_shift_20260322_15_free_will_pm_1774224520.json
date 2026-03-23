@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260322_15_free_will_pm_1774224520",
+  "workflow_id": "shift_20260322_15_free_will_pm",
+  "task_summary": "Built task archival system, cleaned TASKS/ from 386 to 60 files, unified archive location, 14 tests passing",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Built task archival system, cleaned TASKS/ from 386 to 60 files, unified archive location, 14 tests passing"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Built task archival system, cleaned TASKS/ from 386 to 60 files, unified archive location, 14 tests passing",
+  "created_at": "2026-03-23T00:08:40Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_15_free_will_pm_1774228458"
+}

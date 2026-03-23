@@ -882,6 +882,17 @@ def _ground_service_alert(message: str, checks: list | None) -> bool:
 
     # LLM claims services are down but all service checks pass — suppress
     print(f"[heartbeat] SUPPRESSED false service-down alert (all {len(service_checks)} service checks pass)")
+
+    # Overwrite the last log entry to break the feedback loop —
+    # the LLM reads the last agent action and reinforces its hallucination
+    try:
+        log_path = LOGS_DIR / "heartbeat_agent.log"
+        if log_path.exists():
+            ts = datetime.now(timezone.utc).isoformat()
+            log_path.write_text(f"[{ts}] HEARTBEAT_OK — false service-down alert suppressed\n")
+    except Exception:
+        pass
+
     return False
 
 
@@ -1037,13 +1048,28 @@ def _run_heartbeat_agent(checks: list) -> None:
     system_state = _gather_extended_state(checks)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # Count actual service failures for the prompt
+    _svc_checks = [c for c in checks if c["name"].startswith("service:")]
+    _svc_all_ok = all(c["ok"] for c in _svc_checks)
+    _svc_status = (
+        f"FACT: All {len(_svc_checks)} services are RUNNING (verified by systemctl). "
+        f"Do NOT claim services are down — they are confirmed healthy."
+        if _svc_all_ok
+        else f"WARNING: {sum(1 for c in _svc_checks if not c['ok'])} service(s) are actually down."
+    )
+
     prompt = (
         f"You are Nova, running a periodic heartbeat check.\n\n"
         f"Current time: {now}\n\n"
         f"## Your Checklist\n{checklist}\n\n"
         f"## Current System State\n{system_state}\n\n"
+        f"## SERVICE HEALTH — GROUND TRUTH\n{_svc_status}\n\n"
         f"Review each checklist item against the system state. "
         f"Only flag things that genuinely need attention — no false alarms. "
+        f"ABSOLUTE RULE: The SERVICE STATUS section at the top of the system state is "
+        f"ground truth from systemctl. If it says ALL SERVICES RUNNING, you MUST NOT "
+        f"report any service as down, dead, stopped, or failed. Any prior agent action "
+        f"claiming services were down was a false alarm — ignore it completely. "
         f"If nothing needs attention, respond with exactly: HEARTBEAT_OK"
     )
 
@@ -1150,6 +1176,11 @@ def _handle_agent_actions(response: str, checks: list | None = None) -> None:
             elif action_type == "task":
                 title = action.get("title", "heartbeat_proactive")
                 body = action.get("body", "")
+                # Ground task injections too — suppress hallucinated service-down tasks
+                task_text = f"{title} {body}"
+                if not _ground_service_alert(task_text, checks):
+                    print(f"[heartbeat] SUPPRESSED false service-down task: {title}")
+                    continue
                 _inject_proactive_task(title, body)
     else:
         # No structured JSON — treat the whole response as a notification
@@ -1947,7 +1978,10 @@ def main() -> int:
         except Exception:
             pass  # sd_notify is best-effort
 
-    return 0 if all_ok else 1
+    # Always exit 0 — the heartbeat process itself succeeded even if checks found issues.
+    # Exiting 1 causes systemd to show "failed" for this oneshot service, which
+    # confuses the heartbeat LLM agent into hallucinating "services are dead".
+    return 0
 
 
 if __name__ == "__main__":

@@ -822,3 +822,120 @@ class TestAgentResult:
         )
         assert r.state_before == AgentState.FLAT
         assert r.state_after == AgentState.PENDING_LONG
+
+
+# ---------------------------------------------------------------------------
+# Position tracking tests (symbol/volume carried through FSM)
+# ---------------------------------------------------------------------------
+
+
+class TestPositionTracking:
+    """Verify symbol and volume are tracked across FSM states."""
+
+    @pytest.mark.asyncio
+    async def test_notify_fill_uses_tracked_symbol(self):
+        """notify_fill passes the symbol from the pending order, not hardcoded EURUSD."""
+        agent = _make_agent()
+        # Place order — this sets _pending_symbol to the resolved broker symbol
+        result = await agent.process_alert(_signal_payload())
+        assert result.success
+        assert agent.state == AgentState.PENDING_LONG
+
+        # Fill — should track the correct symbol
+        agent.notify_fill("POS-001", fill_price=1.08765, volume=0.19)
+        assert agent.state == AgentState.LONG
+        assert agent.position_symbol == "EURUSD.sim"
+        assert agent.position_volume == 0.19
+
+    @pytest.mark.asyncio
+    async def test_notify_fill_short_tracks_symbol(self):
+        """Short-side fill also tracks the correct symbol."""
+        agent = _make_agent()
+        payload = _signal_payload(
+            side="SELL",
+            order_type="SELL_STOP",
+            action="PLACE_STOP_ORDER",
+        )
+        result = await agent.process_alert(payload)
+        assert result.success
+
+        agent.notify_fill("POS-002", fill_price=1.08765, volume=0.25)
+        assert agent.state == AgentState.SHORT
+        assert agent.position_symbol == "EURUSD.sim"
+        assert agent.position_volume == 0.25
+
+    @pytest.mark.asyncio
+    async def test_close_passes_tracked_volume(self):
+        """_handle_close passes the tracked volume to risk engine on_trade_close."""
+        risk = _make_risk_engine()
+        agent = _make_agent(risk_engine=risk)
+
+        # Place + fill
+        await agent.process_alert(_signal_payload())
+        agent.notify_fill("POS-001", fill_price=1.08765, volume=0.19)
+        assert agent.position_volume == 0.19
+
+        # Close — check that the risk engine gets the real volume
+        original_on_close = risk.on_trade_close
+        close_calls = []
+
+        def capture_close(**kwargs):
+            close_calls.append(kwargs)
+            return original_on_close(**kwargs)
+
+        risk.on_trade_close = capture_close
+
+        result = await agent.process_alert(_close_payload())
+        assert result.success
+        assert agent.state == AgentState.FLAT
+        assert len(close_calls) == 1
+        assert close_calls[0]["volume"] == 0.19  # not 0.0
+
+    @pytest.mark.asyncio
+    async def test_close_resets_tracking_fields(self):
+        """After close, position_symbol and position_volume are cleared."""
+        agent = _make_agent()
+        await agent.process_alert(_signal_payload())
+        agent.notify_fill("POS-001", fill_price=1.08765, volume=0.19)
+        await agent.process_alert(_close_payload())
+
+        assert agent.position_symbol is None
+        assert agent.position_volume == 0.0
+
+    @pytest.mark.asyncio
+    async def test_cancel_resets_pending_symbol(self):
+        """After cancel, pending_symbol is cleared."""
+        agent = _make_agent()
+        await agent.process_alert(_signal_payload())
+        assert agent.state == AgentState.PENDING_LONG
+
+        result = await agent.process_alert(_cancel_payload())
+        assert result.success
+        assert agent.state == AgentState.FLAT
+        assert agent._pending_symbol is None
+
+    @pytest.mark.asyncio
+    async def test_force_flat_resets_all_tracking(self):
+        """force_flat clears all symbol and volume tracking."""
+        agent = _make_agent()
+        await agent.process_alert(_signal_payload())
+        agent.notify_fill("POS-001", fill_price=1.08765, volume=0.19)
+
+        agent.force_flat("test reconciliation")
+        assert agent.state == AgentState.FLAT
+        assert agent.position_symbol is None
+        assert agent.position_volume == 0.0
+        assert agent._pending_symbol is None
+
+    @pytest.mark.asyncio
+    async def test_broker_close_resets_tracking(self):
+        """notify_broker_close clears position tracking."""
+        agent = _make_agent()
+        await agent.process_alert(_signal_payload())
+        agent.notify_fill("POS-001", fill_price=1.08765, volume=0.19)
+        assert agent.position_symbol == "EURUSD.sim"
+
+        agent.notify_broker_close("POS-001", exit_reason="SL_HIT")
+        assert agent.state == AgentState.FLAT
+        assert agent.position_symbol is None
+        assert agent.position_volume == 0.0

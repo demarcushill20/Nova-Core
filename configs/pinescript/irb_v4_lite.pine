@@ -1,0 +1,182 @@
+//@version=6
+strategy("IRB v4 Lite", overlay=true, default_qty_type=strategy.fixed, default_qty_value=100000, initial_capital=100000.0, commission_type=strategy.commission.cash_per_order, commission_value=7.0)
+
+// === INPUTS (identical to v2) ===
+irb_threshold    = input.float(0.5306, "IRB Threshold", step=0.01)
+ema_period       = input.int(48, "EMA Period", minval=1)
+ema_fast_period  = input.int(6, "EMA Fast", minval=1)
+ema_slow_period  = input.int(89, "EMA Slow", minval=1)
+atr_period       = input.int(9, "ATR Period", minval=1)
+adx_period       = input.int(7, "ADX Period", minval=1)
+slope_thresh     = input.float(0.4104, "Trend Slope Threshold", step=0.01)
+adx_thresh       = input.float(16.28, "ADX Threshold", step=0.5)
+overext_thresh   = input.float(2.727, "Overextension Threshold", step=0.1)
+trail_ema_period = input.int(39, "Trail EMA Period", minval=1)
+confirm_bars     = input.int(2, "EMA Confirm Bars", minval=0)
+trigger_window   = input.int(10, "Trigger Window Bars", minval=1)
+time_stop        = input.int(35, "Time Stop Bars", minval=1)
+mtf_lookback     = input.int(50, "MTF Lookback (H4 bars)", minval=1)
+warmup_bars      = input.int(86, "Warmup Bars", minval=0)
+use_ema_stack    = input.bool(true, "Use EMA Stack Filter")
+pip_buffer       = input.float(0.0001, "Pip Buffer", step=0.0001)
+
+// v4 exit parameters (NEW)
+trail_mode       = input.string("atr", "Trail Mode", options=["atr", "ema"])
+trail_atr_mult   = input.float(2.0, "Trail ATR Multiplier", minval=1.0, maxval=3.0, step=0.1)
+breakeven_r      = input.float(1.0, "Breakeven R-Multiple", minval=0.0, maxval=3.0, step=0.1)
+trail_delay      = input.int(5, "Trail Delay Bars", minval=0, maxval=20)
+
+// === INDICATORS (identical to v2) ===
+ema_main  = ta.ema(close, ema_period)
+ema_f     = ta.ema(close, ema_fast_period)
+ema_s     = ta.ema(close, ema_slow_period)
+atr_val   = ta.atr(atr_period)
+trail_ema = ta.ema(close, trail_ema_period)
+[diplus, diminus, adx_val] = ta.dmi(adx_period, adx_period)
+
+// === H4 EMA (identical to v2) ===
+ema_h4 = request.security(syminfo.tickerid, "240", ta.ema(close, ema_period))
+
+// === TREND SLOPE (identical to v2) ===
+slope_lookback = math.min(20, bar_index)
+ema_slope = slope_lookback >= 1 and nz(atr_val) > 0 ? (ema_main - ema_main[slope_lookback]) / atr_val : 0.0
+
+// === IRB DETECTION (identical to v2) ===
+bar_range = high - low
+up_thresh_price = high - (irb_threshold * bar_range)
+dn_thresh_price = low  + (irb_threshold * bar_range)
+bullish_irb = bar_range > 0 and open <= up_thresh_price and close <= up_thresh_price
+bearish_irb = bar_range > 0 and open >= dn_thresh_price and close >= dn_thresh_price
+
+// === OVEREXTENSION (identical to v2) ===
+overext_ratio = nz(atr_val) > 0 ? bar_range / atr_val : 0.0
+overextended  = overext_ratio > overext_thresh
+
+// === EMA STACK (identical to v2) ===
+ema_stack_bull = not use_ema_stack or (ema_f > ema_main and ema_main > ema_s)
+ema_stack_bear = not use_ema_stack or (ema_f < ema_main and ema_main < ema_s)
+
+// === EMA CONFIRM (identical to v2) ===
+bars_above = 0
+bars_below = 0
+if confirm_bars > 0
+    for i = 0 to confirm_bars - 1
+        if close[i] > ema_f[i]
+            bars_above += 1
+        if close[i] < ema_f[i]
+            bars_below += 1
+ema_confirmed_bull = bars_above >= confirm_bars
+ema_confirmed_bear = bars_below >= confirm_bars
+
+// === TREND + ADX (identical to v2) ===
+trending      = adx_val >= adx_thresh
+bullish_trend = ema_slope >= slope_thresh and trending
+bearish_trend = ema_slope <= -slope_thresh and trending
+
+// === MTF ALIGNMENT (identical to v2) ===
+h4_rising  = not na(ema_h4) and ema_h4 > ema_h4[mtf_lookback]
+h4_falling = not na(ema_h4) and ema_h4 < ema_h4[mtf_lookback]
+
+// === WARMUP (identical to v2) ===
+past_warmup = bar_index >= warmup_bars
+
+// === SIGNAL (identical to v2 — single line) ===
+long_signal  = past_warmup and bullish_irb and bullish_trend and not overextended and ema_stack_bull and ema_confirmed_bull and h4_rising
+short_signal = past_warmup and bearish_irb and bearish_trend and not overextended and ema_stack_bear and ema_confirmed_bear and h4_falling
+
+// === PENDING ORDER STATE (identical to v2) ===
+var int   order_bar = na
+var float init_sl   = na
+
+if not na(order_bar) and strategy.position_size == 0 and (bar_index - order_bar) >= trigger_window
+    strategy.cancel_all()
+    order_bar := na
+    init_sl   := na
+
+// === ENTRY (identical to v2) ===
+if strategy.position_size == 0
+    if long_signal
+        strategy.entry("Long", strategy.long, stop=high + pip_buffer)
+        order_bar := bar_index
+        init_sl   := low - pip_buffer
+    else if short_signal
+        strategy.entry("Short", strategy.short, stop=low - pip_buffer)
+        order_bar := bar_index
+        init_sl   := high + pip_buffer
+
+// === v4 POSITION TRACKING ===
+var float trail_stop      = na
+var float entry_price_var = na
+var int   entry_bar_var   = na
+var bool  breakeven_hit   = false
+
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    trail_stop      := init_sl
+    entry_price_var := strategy.opentrades.entry_price(0)
+    entry_bar_var   := bar_index
+    breakeven_hit   := false
+    order_bar       := na
+
+// === v4 BREAKEVEN ===
+if strategy.position_size != 0 and breakeven_r > 0 and not breakeven_hit and not na(entry_price_var)
+    stop_distance = math.abs(entry_price_var - nz(init_sl, entry_price_var))
+    be_target = stop_distance * breakeven_r
+    if strategy.position_size > 0
+        if close - entry_price_var >= be_target
+            trail_stop    := math.max(nz(trail_stop, 0), entry_price_var + pip_buffer)
+            breakeven_hit := true
+    else
+        if entry_price_var - close >= be_target
+            trail_stop    := math.min(nz(trail_stop, 99999), entry_price_var - pip_buffer)
+            breakeven_hit := true
+
+// === v4 TRAILING STOP (ATR/EMA with delay) ===
+bars_in_trade = not na(entry_bar_var) ? bar_index - entry_bar_var : 0
+trail_active  = trail_delay == 0 or bars_in_trade >= trail_delay
+
+if strategy.position_size > 0
+    if trail_active
+        if trail_mode == "atr"
+            new_trail = close - trail_atr_mult * nz(atr_val)
+            if not na(atr_val) and new_trail > nz(trail_stop, 0)
+                trail_stop := new_trail
+        else
+            if not na(trail_ema) and trail_ema > nz(trail_stop, 0)
+                trail_stop := trail_ema
+    strategy.exit("Long Exit", "Long", stop=trail_stop)
+
+if strategy.position_size < 0
+    if trail_active
+        if trail_mode == "atr"
+            new_trail = close + trail_atr_mult * nz(atr_val)
+            if not na(atr_val) and new_trail < nz(trail_stop, 99999)
+                trail_stop := new_trail
+        else
+            if not na(trail_ema) and trail_ema < nz(trail_stop, 99999)
+                trail_stop := trail_ema
+    strategy.exit("Short Exit", "Short", stop=trail_stop)
+
+// === TIME STOP (identical to v2) ===
+if strategy.position_size != 0
+    int entry_bar = strategy.opentrades.entry_bar_index(0)
+    if not na(entry_bar) and (bar_index - entry_bar) >= time_stop
+        strategy.close_all(comment="Time Stop")
+        trail_stop := na
+
+// === CLEANUP (on position close) ===
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    trail_stop      := na
+    entry_price_var := na
+    entry_bar_var   := na
+    breakeven_hit   := false
+
+// === PLOTS ===
+plot(ema_main, title="EMA Main", color=color.yellow, linewidth=2)
+plot(ema_f, title="EMA Fast", color=color.green)
+plot(ema_s, title="EMA Slow", color=color.red)
+plot(trail_mode == "ema" ? trail_ema : na, title="Trail EMA", color=color.orange, style=plot.style_stepline)
+plot(strategy.position_size > 0 ? trail_stop : na, title="Long Stop", color=color.red, style=plot.style_circles, linewidth=2)
+plot(strategy.position_size < 0 ? trail_stop : na, title="Short Stop", color=color.red, style=plot.style_circles, linewidth=2)
+plotshape(long_signal, title="Long Signal", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small)
+plotshape(short_signal, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+plotshape(breakeven_hit and strategy.position_size != 0 ? true : false, title="BE Hit", style=shape.diamond, location=location.abovebar, color=color.blue, size=size.tiny)

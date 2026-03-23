@@ -19,9 +19,25 @@ def _gather_extended_state(checks: list) -> str:
 
     parts = []
 
-    # Deterministic check results
-    parts.append("## Deterministic Health Checks")
+    # Service status summary — prominent, unambiguous
+    service_checks = [c for c in checks if c["name"].startswith("service:")]
+    svc_pass = sum(1 for c in service_checks if c["ok"])
+    svc_fail = len(service_checks) - svc_pass
+    if svc_fail == 0:
+        parts.append(f"## SERVICE STATUS: ALL {svc_pass} SERVICES RUNNING ✓")
+        for c in service_checks:
+            parts.append(f"  ✓ {c['name']}: {c['detail']}")
+    else:
+        parts.append(f"## SERVICE STATUS: {svc_fail} FAILED, {svc_pass} OK")
+        for c in service_checks:
+            mark = "✓" if c["ok"] else "✗ FAILED"
+            parts.append(f"  {mark} {c['name']}: {c['detail']}")
+
+    # Deterministic check results (non-service)
+    parts.append("\n## Other Health Checks")
     for c in checks:
+        if c["name"].startswith("service:"):
+            continue  # already shown above
         mark = "PASS" if c["ok"] else "FAIL"
         parts.append(f"  [{mark}] {c['name']}: {c['detail']}")
 
@@ -88,12 +104,23 @@ def _gather_extended_state(checks: list) -> str:
             pass
 
     # Last heartbeat agent action (to avoid repeating)
+    # Filter out false service-down claims to prevent feedback loops
     if heartbeat.HEARTBEAT_AGENT_LOG.exists():
         try:
             lines = heartbeat.HEARTBEAT_AGENT_LOG.read_text().strip().splitlines()
             if lines:
-                parts.append("\n## Last Agent Action")
-                parts.append(f"  {lines[-1][:200]}")
+                last_line = lines[-1][:200]
+                # Suppress false service-down claims from feedback loop
+                _lower = last_line.lower()
+                _svc_phrases = ["service", "dead", "down", "failed"]
+                if sum(1 for p in _svc_phrases if p in _lower) >= 2 and svc_fail == 0:
+                    parts.append("\n## Last Agent Action")
+                    parts.append(
+                        "  (previous action contained false service-down claim — suppressed to break feedback loop)"
+                    )
+                else:
+                    parts.append("\n## Last Agent Action")
+                    parts.append(f"  {last_line}")
         except Exception:
             pass
 

@@ -46,13 +46,14 @@ class TestNormalizeFingerprint:
         fp2 = _normalize_fingerprint("Cost alert: daily spend $22.99 exceeds $20 threshold")
         assert fp1 == fp2
 
-    def test_different_dollar_integer_different_fingerprint(self):
-        """$22 and $35 should fingerprint differently."""
+    def test_different_dollar_integer_same_fingerprint(self):
+        """$22 and $35 should fingerprint the same — same alert *type*, different numbers."""
         from heartbeat import _normalize_fingerprint
 
         fp1 = _normalize_fingerprint("Cost alert: daily spend $22.50 exceeds threshold")
         fp2 = _normalize_fingerprint("Cost alert: daily spend $35.50 exceeds threshold")
-        assert fp1 != fp2
+        # All digits are stripped so alerts of the same type match regardless of amounts
+        assert fp1 == fp2
 
     def test_timestamp_stripped(self):
         """Different timestamps should produce same fingerprint."""
@@ -253,6 +254,33 @@ class TestHandleAgentActionsSpamControl:
         heartbeat._handle_agent_actions(response, checks=healthy_checks)
 
         assert len(sent) == 0  # grounding filter blocks it
+
+    def test_false_service_down_task_suppressed_in_handler(self, tmp_path, monkeypatch):
+        """Agent injects a task about dead services — grounding suppresses it too."""
+        _patch_cooldown_file(tmp_path, monkeypatch)
+        import heartbeat
+
+        injected = []
+        monkeypatch.setattr(heartbeat, "_inject_proactive_task", lambda t, b: injected.append((t, b)))
+
+        healthy_checks = [
+            {"name": "service:novacore-watcher", "ok": True, "detail": "active"},
+            {"name": "service:novacore-telegram", "ok": True, "detail": "active"},
+            {"name": "service:novacore-telegram-notifier", "ok": True, "detail": "active"},
+        ]
+
+        response = json.dumps(
+            [
+                {
+                    "type": "task",
+                    "title": "restart_dead_services",
+                    "body": "3 services are dead and need restart. Investigate.",
+                }
+            ]
+        )
+        heartbeat._handle_agent_actions(response, checks=healthy_checks)
+
+        assert len(injected) == 0  # grounding filter blocks task injection too
 
     def test_fallback_path_cooldown(self, tmp_path, monkeypatch):
         """Non-JSON agent response uses fallback path — also cooldown-gated."""

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260322_11_implementation_pm2_1774218880",
+  "workflow_id": "shift_20260322_11_implementation_pm2",
+  "task_summary": "Fixed Sortino formula (target=0 standard), added Tier 1 BBW regime gate (opt-in), completed pre-DST timezone audit (all safe) \u2014 526 tests passing, 15 new",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed Sortino formula (target=0 standard), added Tier 1 BBW regime gate (opt-in), completed pre-DST timezone audit (all safe) \u2014 526 tests passing, 15 new"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_11_implementation_pm2"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed Sortino formula (target=0 standard), added Tier 1 BBW regime gate (opt-in), completed pre-DST timezone audit (all safe) \u2014 526 tests passing, 15 new",
+  "created_at": "2026-03-22T22:34:40Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_11_implementation_pm2_1774220205"
+}

@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_shift_20260322_11_implementation_pm2_1774220205",
+  "workflow_id": "shift_20260322_11_implementation_pm2",
+  "task_summary": "Committed BBW regime gate + Sortino fix, built FTMO position sizer with pre-trade gate volume cross-check \u2014 3 commits pushed, 37 new tests, 360 related tests passing",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Committed BBW regime gate + Sortino fix, built FTMO position sizer with pre-trade gate volume cross-check \u2014 3 commits pushed, 37 new tests, 360 related tests passing"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_11_implementation_pm2"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Committed BBW regime gate + Sortino fix, built FTMO position sizer with pre-trade gate volume cross-check \u2014 3 commits pushed, 37 new tests, 360 related tests passing",
+  "created_at": "2026-03-22T22:56:45Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260322_11_implementation_pm2_1774214731"
+}

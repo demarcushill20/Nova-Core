@@ -243,6 +243,64 @@ def run_hygiene(apply: bool = False, verbose: bool = False) -> dict:
     else:
         results["skipped"].append("working_memory_archive.json")
 
+    # 4. Archive old terminal-state tasks
+    try:
+        from scripts.task_archive import archive_tasks, consolidate_completed
+
+        task_result = archive_tasks(max_age_days=3, apply=apply)
+        if task_result.archived > 0:
+            results["cleaned"].append(
+                CleanResult(
+                    target="TASKS/ → TASKS/archive/",
+                    files_removed=task_result.archived,
+                    bytes_saved=task_result.bytes_moved,
+                )
+            )
+            total_saved += task_result.bytes_moved
+            logger.info(
+                "%s TASKS/: %d files → archive/ (%s)",
+                "Archived" if apply else "Would archive",
+                task_result.archived,
+                _fmt_bytes(task_result.bytes_moved),
+            )
+        consolidated = consolidate_completed(apply=apply)
+        if consolidated:
+            logger.info(
+                "%s %d files from _completed/ → archive/",
+                "Moved" if apply else "Would move",
+                consolidated,
+            )
+    except ImportError:
+        logger.debug("task_archive module not available — skipping task archival")
+
+    # 5. Rotate NovaTrade evidence.jsonl (daily split)
+    try:
+        from novatrade.validation.evidence import EvidenceRecorder
+
+        recorder = EvidenceRecorder()
+        if recorder.path.exists() and recorder.path.stat().st_size > 0:
+            rot = recorder.rotate()
+            if rot.records_moved > 0:
+                results["cleaned"].append(
+                    CleanResult(
+                        target="evidence.jsonl → daily archives",
+                        files_removed=rot.records_moved,
+                        bytes_saved=rot.bytes_moved,
+                    )
+                )
+                total_saved += rot.bytes_moved
+                logger.info(
+                    "Evidence rotation: %d records → %d daily files (%s freed), %d kept",
+                    rot.records_moved,
+                    len(rot.dates_rotated),
+                    _fmt_bytes(rot.bytes_moved),
+                    rot.records_kept,
+                )
+            else:
+                logger.debug("Evidence rotation: nothing to rotate")
+    except ImportError:
+        logger.debug("novatrade.validation.evidence not available — skipping rotation")
+
     results["total_bytes_saved"] = total_saved
     results["mode"] = "applied" if apply else "dry-run"
     results["timestamp"] = datetime.now(timezone.utc).isoformat()

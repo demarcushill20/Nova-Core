@@ -358,7 +358,14 @@ class TestTranslateTradeResponse:
 
 class TestAdapterNotConnected:
     def test_operations_fail_before_connect(self, adapter):
-        # Auto-reconnect will try and fail (no real SDK), eventually raise
+        # Mock connect() so auto-reconnect fails fast without hitting real MetaApi SDK
+        async def _fake_connect():
+            from novatrade.adapter.metaapi_provider import HealthState, HealthStatus
+
+            adapter._connected = False
+            return HealthStatus(state=HealthState.DOWN, connected=False, latency_ms=0, message="test: no broker")
+
+        adapter.connect = _fake_connect
         with pytest.raises(ConnectionError, match="not connected"):
             asyncio.new_event_loop().run_until_complete(adapter.get_account())
 

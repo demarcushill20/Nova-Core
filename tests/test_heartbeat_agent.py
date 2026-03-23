@@ -144,13 +144,16 @@ class TestExtendedStateGathering(unittest.TestCase):
     def test_includes_check_results(self):
         checks = [{"name": "disk", "ok": True, "detail": "25% used"}]
         state = heartbeat._gather_extended_state(checks)
-        self.assertIn("Deterministic Health Checks", state)
+        self.assertIn("Other Health Checks", state)
         self.assertIn("[PASS] disk", state)
 
     def test_includes_failed_checks(self):
         checks = [{"name": "service:watcher", "ok": False, "detail": "NOT ACTIVE"}]
         state = heartbeat._gather_extended_state(checks)
-        self.assertIn("[FAIL] service:watcher", state)
+        # Service failures show in SERVICE STATUS section with ✗ FAILED prefix
+        self.assertIn("FAILED", state)
+        self.assertIn("service:watcher", state)
+        self.assertIn("NOT ACTIVE", state)
 
     def test_includes_pending_tasks(self):
         (heartbeat.TASKS_DIR / "0200_test_task.md").write_text("test")

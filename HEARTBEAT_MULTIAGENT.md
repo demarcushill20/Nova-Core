@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-22T22:47:53Z
+Generated: 2026-03-23T03:23:28Z
 
 ## Overall: HEALTHY
 
@@ -8,7 +8,7 @@ Generated: 2026-03-22T22:47:53Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 7 |
+| Completed workflows | 9 |
 | Failed workflows | 1 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
@@ -21,9 +21,9 @@ Generated: 2026-03-22T22:47:53Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 760 |
-| Contract failures | 196 |
-| Contract failure rate | 20.5% |
+| Contract successes | 810 |
+| Contract failures | 212 |
+| Contract failure rate | 20.7% |
 | Budget exhaustions | 0 |
 | Policy violations | 0 |
 | Orphaned agents | 0 |
@@ -41,6 +41,8 @@ Generated: 2026-03-22T22:47:53Z
 | hb_proactive_20260322_064953_investigate_drift_detection_failure | ? | completed | - |
 | shift_20260322_10_implementation_pm | ? | completed | - |
 | shift_20260322_13_research_pm | ? | completed | - |
+| shift_20260322_14_testing_pm | ? | completed | - |
+| shift_20260322_16_evening_wrap | ? | completed | - |
 | shift_20260322_1_system_health | ? | completed | - |
 | shift_20260322_4_deep_research | ? | completed | - |
 | shift_20260322_6_testing_quality | ? | failed | - |

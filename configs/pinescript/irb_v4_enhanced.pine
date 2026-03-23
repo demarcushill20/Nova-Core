@@ -1,5 +1,11 @@
 //@version=6
-strategy("IRB v4 Enhanced", overlay=true, default_qty_type=strategy.fixed, default_qty_value=100000, initial_capital=100000.0, commission_type=strategy.commission.cash_per_order, commission_value=7.0)
+strategy("IRB v4 Enhanced",
+  overlay=true,
+  default_qty_type=strategy.fixed,
+  default_qty_value=100000,
+  initial_capital=100000.0,
+  commission_type=strategy.commission.cash_per_order,
+  commission_value=7.0)
 
 // === INPUTS ===
 // Signal parameters
@@ -15,7 +21,7 @@ overext_thresh   = input.float(2.727, "Overextension Threshold", step=0.1)
 confirm_bars     = input.int(2, "EMA Confirm Bars", minval=0)
 trigger_window   = input.int(10, "Trigger Window Bars", minval=1)
 time_stop        = input.int(35, "Time Stop Bars", minval=1)
-mtf_lookback     = input.int(50, "MTF Lookback (H4 bars)", minval=1)
+mtf_lookback     = input.int(50, "MTF Lookback (chart bars)", minval=1)
 warmup_bars      = input.int(86, "Warmup Bars", minval=0)
 use_ema_stack    = input.bool(true, "Use EMA Stack Filter")
 pip_buffer       = input.float(0.0001, "Pip Buffer", step=0.0001)
@@ -35,18 +41,20 @@ session_hours    = input.session("0700-1600", "Session Hours (UTC)")
 max_consec_loss  = input.int(10, "Max Consecutive Losses (0=off)", minval=0)
 
 // === INDICATORS (H1 timeframe) ===
-ema_main  = ta.ema(close, ema_period)
-ema_f     = ta.ema(close, ema_fast_period)
-ema_s     = ta.ema(close, ema_slow_period)
-atr_val   = ta.atr(atr_period)
+ema_main      = ta.ema(close, ema_period)
+ema_f         = ta.ema(close, ema_fast_period)
+ema_s         = ta.ema(close, ema_slow_period)
+atr_val       = ta.atr(atr_period)
 trail_ema_val = ta.ema(close, trail_ema_period)
 [diplus, diminus, adx_val] = ta.dmi(adx_period, adx_period)
 
 // === H4 EMA (MTF alignment) ===
 ema_h4 = request.security(syminfo.tickerid, "240", ta.ema(close, ema_period))
 
-// === VOLATILITY FILTER: ATR > SMA(ATR) ===
+// === v4 ADDITIONAL INDICATORS ===
 atr_sma = ta.sma(atr_val, vol_atr_ma)
+
+// === VOLATILITY FILTER: ATR > SMA(ATR) ===
 vol_filter_ok = not use_vol_filter or (not na(atr_sma) and atr_val > atr_sma)
 
 // === SESSION FILTER ===
@@ -61,11 +69,13 @@ slope_lookback = math.min(20, bar_index)
 ema_slope = slope_lookback >= 1 and nz(atr_val) > 0 ? (ema_main - ema_main[slope_lookback]) / atr_val : 0.0
 
 // === IRB DETECTION (Python-matching geometry) ===
-bar_range = high - low
+// Bullish IRB = body in lower portion = long upper wick = institutional accumulation
+// Bearish IRB = body in upper portion = long lower wick = institutional distribution
+bar_range       = high - low
 up_thresh_price = high - (irb_threshold * bar_range)
 dn_thresh_price = low  + (irb_threshold * bar_range)
-bullish_irb = bar_range > 0 and open <= up_thresh_price and close <= up_thresh_price
-bearish_irb = bar_range > 0 and open >= dn_thresh_price and close >= dn_thresh_price
+bullish_irb     = bar_range > 0 and open <= up_thresh_price and close <= up_thresh_price
+bearish_irb     = bar_range > 0 and open >= dn_thresh_price and close >= dn_thresh_price
 
 // === OVEREXTENSION FILTER (bar_range / ATR) ===
 overext_ratio = nz(atr_val) > 0 ? bar_range / atr_val : 0.0
@@ -100,8 +110,12 @@ h4_falling = not na(ema_h4) and ema_h4 < ema_h4[mtf_lookback]
 past_warmup = bar_index >= warmup_bars
 
 // === SIGNAL ===
-long_signal  = past_warmup and in_session and vol_filter_ok and circuit_breaker_ok and bullish_irb and bullish_trend and not overextended and ema_stack_bull and ema_confirmed_bull and h4_rising
-short_signal = past_warmup and in_session and vol_filter_ok and circuit_breaker_ok and bearish_irb and bearish_trend and not overextended and ema_stack_bear and ema_confirmed_bear and h4_falling
+long_signal  = past_warmup and in_session and vol_filter_ok and
+  circuit_breaker_ok and bullish_irb and bullish_trend and
+  not overextended and ema_stack_bull and ema_confirmed_bull and h4_rising
+short_signal = past_warmup and in_session and vol_filter_ok and
+  circuit_breaker_ok and bearish_irb and bearish_trend and
+  not overextended and ema_stack_bear and ema_confirmed_bear and h4_falling
 
 // === PENDING ORDER STATE ===
 var int   order_bar = na
@@ -116,10 +130,12 @@ if not na(order_bar) and strategy.position_size == 0 and (bar_index - order_bar)
 // === ENTRY: PENDING STOP ORDERS ===
 if strategy.position_size == 0
     if long_signal
+        strategy.cancel_all()
         strategy.entry("Long", strategy.long, stop=high + pip_buffer)
         order_bar := bar_index
         init_sl   := low - pip_buffer
     else if short_signal
+        strategy.cancel_all()
         strategy.entry("Short", strategy.short, stop=low - pip_buffer)
         order_bar := bar_index
         init_sl   := high + pip_buffer
@@ -187,7 +203,6 @@ if strategy.position_size != 0
 
 // === TRACK CONSECUTIVE LOSSES (for circuit breaker) ===
 if strategy.position_size == 0 and strategy.position_size[1] != 0
-    // Position just closed — check if it was a loss
     last_pnl = strategy.netprofit - strategy.netprofit[1]
     if last_pnl < 0
         consec_losses += 1
@@ -197,6 +212,7 @@ if strategy.position_size == 0 and strategy.position_size[1] != 0
     entry_price_var := na
     entry_bar_var   := na
     breakeven_hit   := false
+    init_sl         := na
 
 // === PLOTS ===
 plot(ema_main, title="EMA Main", color=color.yellow, linewidth=2)

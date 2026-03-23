@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260322_11_implementation_pm2_1774217425",
+  "workflow_id": "shift_20260322_11_implementation_pm2",
+  "task_summary": "Implemented FTMO minimum trading days tracker (17 tests) and fixed heartbeat test isolation (ExitStack mocking)",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented FTMO minimum trading days tracker (17 tests) and fixed heartbeat test isolation (ExitStack mocking)"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260322_11_implementation_pm2"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented FTMO minimum trading days tracker (17 tests) and fixed heartbeat test isolation (ExitStack mocking)",
+  "created_at": "2026-03-22T22:10:25Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260322_11_implementation_pm2_1774220205"
+}

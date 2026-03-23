@@ -36,7 +36,7 @@ from zoneinfo import ZoneInfo
 # ── Paths ────────────────────────────────────────────────────────────────────
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
-TASKS_COMPLETED = TASKS / "_completed"
+TASKS_COMPLETED = TASKS / "archive"
 OUTPUT = ROOT / "OUTPUT"
 LOGS = ROOT / "LOGS"
 
@@ -655,7 +655,7 @@ def _extract_file_summary(text: str, filename: str) -> str:
 
 
 def cleanup_old_shifts(target_date: date | None = None) -> int:
-    """Move completed shift task files to TASKS/_completed/.
+    """Move completed shift task files to TASKS/archive/.
 
     Only moves .done files that match the shift_YYYYMMDD pattern.
     If target_date is given, only cleans shifts older than that date.
@@ -878,7 +878,7 @@ def send_telegram(text: str) -> None:
         log(f"Telegram send failed: {e}")
 
 
-def check_existing_shifts(
+def check_existing_shifts(  # noqa: C901
     shift_date: date,
     shift_name: str = "both",
 ) -> list[str]:
@@ -918,8 +918,16 @@ def check_existing_shifts(
             gen_patterns_all.add(pat.replace(".md", sfx) if sfx != ".md" else pat)
 
     existing = []
-    if TASKS.exists():
-        for p in TASKS.iterdir():
+    # Check TASKS/ and TASKS/archive/ to prevent re-creating archived shifts
+    search_dirs = [TASKS]
+    if TASKS_COMPLETED.exists():
+        search_dirs.append(TASKS_COMPLETED)
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for p in search_dir.iterdir():
+            if p.is_dir():
+                continue
             # Check generator tasks across all lifecycle states
             if p.name in gen_patterns_all:
                 existing.append(p.name)
