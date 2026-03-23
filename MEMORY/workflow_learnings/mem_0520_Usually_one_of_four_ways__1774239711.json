@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0520_Usually_one_of_four_ways__1774239711",
+  "workflow_id": "0520_Usually_one_of_four_ways_",
+  "task_summary": "Completed live trading data methods research, analyzing 4 approaches and recommending live candles for NovaTrade IRB strategy",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Completed live trading data methods research, analyzing 4 approaches and recommending live candles for NovaTrade IRB strategy"
+  ],
+  "successful_patterns": [
+    "task_completed: 0520_Usually_one_of_four_ways_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Completed live trading data methods research, analyzing 4 approaches and recommending live candles for NovaTrade IRB strategy",
+  "created_at": "2026-03-23T04:21:51Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0520_Usually_one_of_four_ways__1774241845"
+}

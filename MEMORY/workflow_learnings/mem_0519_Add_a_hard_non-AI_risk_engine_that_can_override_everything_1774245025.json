@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0519_Add_a_hard_non-AI_risk_engine_that_can_override_everything_1774245025",
+  "workflow_id": "0519_Add_a_hard_non-AI_risk_engine_that_can_override_everything",
+  "task_summary": "Verified existing HardRiskSupervisor (12 rules, 74 tests, wired into TradingAgent + webhook) and architecture diagram \u2014 all complete",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Verified existing HardRiskSupervisor (12 rules, 74 tests, wired into TradingAgent + webhook) and architecture diagram \u2014 all complete"
+  ],
+  "successful_patterns": [
+    "task_completed: 0519_Add_a_hard_non-AI_risk_engine_that_can_override_everything"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Verified existing HardRiskSupervisor (12 rules, 74 tests, wired into TradingAgent + webhook) and architecture diagram \u2014 all complete",
+  "created_at": "2026-03-23T05:50:25Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0519_Add_a_hard_non-AI_risk_engine_that_can_override_everything_1774250822"
+}

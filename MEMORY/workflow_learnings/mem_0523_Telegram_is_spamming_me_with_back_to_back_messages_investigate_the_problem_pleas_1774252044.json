@@ -1,6 +1,6 @@
 {
-  "artifact_id": "mem_shift_20260322_16_evening_wrap_1774227121",
-  "workflow_id": "shift_20260322_16_evening_wrap",
+  "artifact_id": "mem_0523_Telegram_is_spamming_me_with_back_to_back_messages_investigate_the_problem_pleas_1774252044",
+  "workflow_id": "0523_Telegram_is_spamming_me_with_back_to_back_messages_investigate_the_problem_pleas",
   "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
   "task_class": "unknown",
   "roles_involved": [
@@ -10,11 +10,11 @@
     "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
   ],
   "successful_patterns": [
-    "plan_created: plan plan_shift_20260322_16_evening_wrap_1774226710 (done)"
+    "plan_created: plan plan_0523_Telegram_is_spamming_me_with_back_to_back_messages_investigate_the_prob"
   ],
   "failure_patterns": [],
   "verification_outcome": "not_verified",
   "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
-  "created_at": "2026-03-23T00:52:01Z",
+  "created_at": "2026-03-23T07:47:24Z",
   "confidence": "high"
 }

@@ -44,6 +44,7 @@ from novatrade.config import NovaTradeCfg
 from novatrade.execution.trading_agent import TradingAgent
 from novatrade.models import AccountState
 from novatrade.monitor.ops_monitor import OpsMonitor
+from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor, HardLimits
 from novatrade.risk.risk_engine import RiskEngine
 from novatrade.runtime.dry_run import DryRunAdapter
 from novatrade.runtime.launch_gate import (
@@ -171,12 +172,21 @@ def build_stack(
     )
     risk_engine.initialize(initial_account)
 
+    # --- Hard Risk Supervisor ---
+    supervisor = HardRiskSupervisor(
+        limits=HardLimits(),
+        state_dir=cfg.data_dir / "supervisor",
+        kill_switch_dir=cfg.data_dir.parent / "STATE",
+    )
+    supervisor.initialize(initial_equity=initial_account.equity)
+
     # --- Trading Agent ---
     agent = TradingAgent(
         cfg=cfg,
         adapter=adapter,
         risk_engine=risk_engine,
         recorder=recorder,
+        supervisor=supervisor,
     )
 
     # --- OpsMonitor ---

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0527_There_is_another_idea_i_want_to_add_to_novatrade_to_make_sure_our_backtesting_is_1774275619",
+  "workflow_id": "0527_There_is_another_idea_i_want_to_add_to_novatrade_to_make_sure_our_backtesting_is",
+  "task_summary": "Built multi-engine backtesting cross-validation framework with Nova/Backtesting.py/vectorbt/NautilusTrader adapters, comparator, CLI, and 35 passing tests",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Built multi-engine backtesting cross-validation framework with Nova/Backtesting.py/vectorbt/NautilusTrader adapters, comparator, CLI, and 35 passing tests"
+  ],
+  "successful_patterns": [
+    "task_completed: 0527_There_is_another_idea_i_want_to_add_to_novatrade_to_make_sure_our_backtesting_i"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Built multi-engine backtesting cross-validation framework with Nova/Backtesting.py/vectorbt/NautilusTrader adapters, comparator, CLI, and 35 passing tests",
+  "created_at": "2026-03-23T14:20:19Z",
+  "confidence": "high"
+}

@@ -933,6 +933,17 @@ class TradingAgent:
             close_reason=payload.get("close_reason", ""),
         )
 
+        # Get current positions to extract P&L before closing
+        pnl_usd = 0.0
+        try:
+            positions = await self._adapter.get_positions()
+            for pos in positions:
+                if pos.position_id == self._position_id:
+                    pnl_usd = getattr(pos, 'unrealized_pnl', 0.0)
+                    break
+        except Exception as exc:
+            log.warning("Failed to get position P&L before close: %s", exc)
+
         old_position = self._position_id
         order_result = await self._adapter.close_position(old_position)
         elapsed = (time.monotonic() - t0) * 1000
@@ -963,14 +974,14 @@ class TradingAgent:
             symbol=broker_symbol,
             side=side.value,
             volume=self._position_volume,
-            pnl_usd=0.0,  # actual P&L resolved by ops_monitor from broker
+            pnl_usd=pnl_usd,  # actual P&L from position before close
             pnl_pips=0.0,
             exit_reason=payload.get("close_reason", "TIME_STOP"),
         )
 
-        # Notify supervisor (P&L resolved later by ops_monitor)
+        # Notify supervisor with actual P&L
         if self._supervisor is not None:
-            self._supervisor.on_trade_closed(0.0)
+            self._supervisor.on_trade_closed(pnl_usd)
 
         # State transition: LONG/SHORT -> FLAT
         self._state = AgentState.FLAT

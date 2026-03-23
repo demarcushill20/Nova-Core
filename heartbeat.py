@@ -1875,6 +1875,62 @@ def main() -> int:
     # Always send heartbeat pulse to Telegram
     send_telegram_heartbeat(checks)
 
+    # --- Self-Heal: Route warnings to investigation queue ---
+    try:
+        from utils.warning_router import (
+            collect_from_heartbeat,
+            collect_from_budget,
+            collect_from_drift,
+            collect_from_runaway,
+            collect_from_error_summary,
+            collect_from_memory,
+        )
+        from agents.self_heal_investigator import investigate_all_pending
+
+        # Collect warnings from all subsystems
+        _warnings_queued = 0
+        _warnings_queued += collect_from_heartbeat(checks)
+
+        if _budget_enforcer is not None:
+            _warnings_queued += collect_from_budget(_budget_enforcer.check_alerts())
+
+        try:
+            from utils.self_healing import get_error_summary, get_memory_snapshot
+            _warnings_queued += collect_from_error_summary(get_error_summary(minutes=30))
+            _mem_snap = get_memory_snapshot()
+            _warnings_queued += collect_from_memory(
+                {"rss_mb": _mem_snap.rss_mb, "warning": _mem_snap.warning, "critical": _mem_snap.critical}
+            )
+        except Exception:
+            pass
+
+        try:
+            from utils.drift_detector import detect_drift as _wr_detect_drift
+            from utils.max_plan_guard import detect_runaway as _wr_detect_runaway
+            from dataclasses import asdict as _wr_asdict
+
+            _wr_drift = _wr_detect_drift(window_hours=24.0)
+            if _wr_drift.drift_detected:
+                _warnings_queued += collect_from_drift(
+                    {"drift_detected": True, "signals": [_wr_asdict(s) for s in _wr_drift.signals]}
+                )
+
+            _wr_runaway = _wr_detect_runaway()
+            if _wr_runaway.detected:
+                _warnings_queued += collect_from_runaway(_wr_asdict(_wr_runaway))
+        except Exception:
+            pass
+
+        # Run investigation on all pending warnings
+        if _warnings_queued > 0 or not all_ok:
+            _inv_results = investigate_all_pending()
+            _auto_fixed = sum(1 for r in _inv_results if r.action_taken == "auto_fixed" and r.fix_successful)
+            _escalated = sum(1 for r in _inv_results if r.escalated)
+            if _inv_results:
+                print(f"[self-heal] Investigated {len(_inv_results)} warnings: {_auto_fixed} auto-fixed, {_escalated} escalated")
+    except Exception as e:
+        print(f"[self-heal] Warning investigation failed (non-fatal): {e}")
+
     fail_names = [c["name"] for c in checks if not c["ok"]]
     if all_ok:
         print("[heartbeat] All checks passed. HEALTHY.")

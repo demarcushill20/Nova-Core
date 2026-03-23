@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0521___more_accurate_than_naive_polling_1774248502",
+  "workflow_id": "0521___more_accurate_than_naive_polling",
+  "task_summary": "Produced concrete Python + MT5 live data architecture sketch with 9 modules, exact async loops, data flow, and integration points",
+  "task_class": "code_impl",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Produced concrete Python + MT5 live data architecture sketch with 9 modules, exact async loops, data flow, and integration points"
+  ],
+  "successful_patterns": [
+    "task_completed: 0521___more_accurate_than_naive_polling"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Produced concrete Python + MT5 live data architecture sketch with 9 modules, exact async loops, data flow, and integration points",
+  "created_at": "2026-03-23T06:48:22Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0521___more_accurate_than_naive_polling_1774250171"
+}

@@ -44,6 +44,11 @@ from utils.self_healing import DegradationTier as _DegradationTier
 from utils.self_healing import get_degradation_tier as _sh_get_tier
 from utils.self_healing import record_error as _sh_record_error
 from utils.self_healing import touch_dead_man_switch as _sh_touch
+try:
+    from utils.warning_router import emit as _wr_emit, WarningSeverity as _WarnSev
+except ImportError:
+    _wr_emit = None  # type: ignore[assignment]
+    _WarnSev = None  # type: ignore[assignment]
 from utils.structured_log import slog
 from utils.task_checkpoint import (
     TaskCheckpoint,
@@ -828,6 +833,8 @@ async def _execute_worker(
             end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
             logger.error("EXECUTION TIMEOUT: %s (exceeded %ds)", stem, TASK_TIMEOUT)
             _sh_record_error("watcher._execute_worker", f"timeout after {TASK_TIMEOUT}s", task_id=stem)
+            if _wr_emit is not None:
+                _wr_emit("watcher", "runaway", f"Task timeout: {stem} exceeded {TASK_TIMEOUT}s", severity=2, context={"task": stem, "timeout": TASK_TIMEOUT})
             await _async_write(
                 worker_log,
                 f"=== TIMEOUT after {TASK_TIMEOUT}s ===\n\n=== EXIT CODE: -1 (timeout) ===\n=== END: {end_utc} ===\n",
@@ -874,6 +881,8 @@ async def _execute_worker(
         end_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         logger.exception("EXECUTION ERROR: %s", stem)
         _sh_record_error("watcher._execute_worker", exc, task_id=stem)
+        if _wr_emit is not None:
+            _wr_emit("watcher", "error_spike", f"Task execution error: {stem} — {exc}", severity=1, context={"task": stem, "error": str(exc)})
         await _async_write(
             worker_log,
             f"\n=== EXCEPTION: {exc} ===\n=== EXIT CODE: -1 (error) ===\n=== END: {end_utc} ===\n",
