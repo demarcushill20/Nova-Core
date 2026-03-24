@@ -411,6 +411,41 @@ def run_live(
 
 
 # ---------------------------------------------------------------------------
+# shadow command (full dual-pipeline: Python live + TradingView webhook)
+# ---------------------------------------------------------------------------
+
+
+@app.command("shadow")
+def run_shadow(
+    report_interval: float = typer.Option(3600.0, help="Report generation interval (sec)"),
+    match_threshold: float = typer.Option(0.90, help="Match rate alert threshold"),
+    log_dir: Path = typer.Option(  # noqa: B008
+        Path("LOGS/shadow"),
+        help="Directory for shadow signal logs and reports",
+    ),
+) -> None:
+    """Run shadow mode — live Python pipeline + TradingView webhooks side by side.
+
+    Captures signals from both pipelines, compares them, and generates
+    periodic reports. Use this to validate the Python pipeline against
+    TradingView before cutting over.
+    """
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
+
+    from novatrade.runtime.shadow_mode import main as shadow_main
+
+    try:
+        shadow_main()
+    except KeyboardInterrupt:
+        typer.echo("\nShadow mode stopped.")
+
+
+# ---------------------------------------------------------------------------
 # sweep command
 # ---------------------------------------------------------------------------
 
