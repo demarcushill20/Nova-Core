@@ -1,0 +1,16 @@
+[Unit]
+Description=NovaTrade Shadow Mode — signal parity validation
+After=network.target
+Wants=novacore-watcher.service
+
+[Service]
+Type=simple
+User=nova
+WorkingDirectory=/home/nova/nova-core
+ExecStart=/usr/bin/python3 -m novatrade.runtime.shadow_mode
+Restart=on-failure
+RestartSec=30
+EnvironmentFile=/etc/novacore/novatrade.env
+
+[Install]
+WantedBy=multi-user.target
