@@ -34,6 +34,7 @@ from novatrade.models import (
     SymbolPrice,
 )
 from novatrade.risk.ftmo_compliance import (
+    FtmoDailyLossTracker,
     LotSizeConsistencyChecker,
     ServerRequestCounter,
     TradingDaysTracker,
@@ -82,6 +83,10 @@ class PreTradeGate:
         self._request_counter = ServerRequestCounter()
         # FTMO compliance: minimum trading days tracker
         self._days_tracker = TradingDaysTracker()
+        # FTMO compliance: daily loss tracker (FTMO Max Daily Loss rule)
+        self._daily_loss_tracker = FtmoDailyLossTracker(
+            daily_loss_pct=self._risk.max_daily_drawdown_pct,
+        )
         # FTMO compliance: position sizer for volume cross-check
         self._sizer = PositionSizer(
             min_lot=self._risk.min_volume_per_trade,
@@ -91,6 +96,7 @@ class PreTradeGate:
         self._lot_checker.load_state()
         self._request_counter.load_state()
         self._days_tracker.load_state()
+        self._daily_loss_tracker.load_state()
 
     # ------------------------------------------------------------------
     # Public API
@@ -130,6 +136,7 @@ class PreTradeGate:
         checks.append(self._check_cooldown(request, now))
         checks.append(self._check_duplicate_position(request, positions))
         checks.append(self._check_drawdown(account))
+        checks.append(self._daily_loss_tracker.check(account.balance, account.equity))
         checks.append(self._check_spread(price))
         checks.append(self._days_tracker.check())
 
@@ -170,6 +177,13 @@ class PreTradeGate:
 
         return decision
 
+    def initialize_daily_loss(self, balance: float, equity: float) -> None:
+        """Initialize the FTMO daily loss tracker with account state.
+
+        Call once at session start after fetching account balance from broker.
+        """
+        self._daily_loss_tracker.initialize(balance, equity)
+
     def record_trade(self, symbol: str, side_value: str, volume: float = 0.0) -> None:
         """Record a trade for cooldown, daily-count, and FTMO tracking.
 
@@ -191,6 +205,7 @@ class PreTradeGate:
         self._lot_checker.save_state()
         self._request_counter.save_state()
         self._days_tracker.save_state()
+        self._daily_loss_tracker.save_state()
 
     # ------------------------------------------------------------------
     # Individual checks

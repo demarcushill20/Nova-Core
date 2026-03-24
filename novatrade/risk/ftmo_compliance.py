@@ -1,6 +1,6 @@
 """FTMO compliance enforcement for NovaTrade.
 
-Implements two CRITICAL FTMO rules that are not covered by the generic
+Implements CRITICAL FTMO rules that are not covered by the generic
 pre-trade gate:
 
 1. **Lot-Size Consistency** — FTMO prohibits "substantially larger" position
@@ -15,6 +15,11 @@ pre-trade gate:
    unique calendar days during the challenge period (typically 4 days for
    FTMO Challenge/Verification).  We track unique trading dates and expose
    progress via an informational check.
+
+4. **Daily Loss Tracker** — FTMO Maximum Daily Loss rule: the daily loss
+   (measured from the higher of balance/equity at the start of the day)
+   must not reach 5% of the initial account size.  We enforce a configurable
+   buffer (default 80%) that blocks new orders before the hard limit.
 
 All components are stateful (in-memory with optional JSON persistence)
 and designed to integrate into the existing PreTradeGate pipeline.
@@ -411,4 +416,253 @@ class TradingDaysTracker:
             return True
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             log.warning("Failed to load trading days from %s: %s", path, exc)
+            return False
+
+
+# ---------------------------------------------------------------------------
+# FTMO Daily Loss Tracker
+# ---------------------------------------------------------------------------
+
+# FTMO Maximum Daily Loss = 5% of initial account balance.
+# We use a buffer (default 80% of that limit) to block new orders before
+# the hard breach, giving room for floating P&L to move.
+_DEFAULT_DAILY_LOSS_PCT = 5.0  # FTMO standard
+_DEFAULT_BUFFER_PCT = 80.0  # block new orders at 80% of daily limit
+
+
+@dataclass
+class FtmoDailyLossTracker:
+    """Tracks intraday loss against the FTMO Maximum Daily Loss rule.
+
+    FTMO rule: "The Maximum Daily Loss is 5% of the initial account balance.
+    All results plus commissions and swaps for the day must not reach this."
+
+    Reference point: the **higher** of (balance, equity) at the start of
+    each trading day (midnight Europe/Prague, DST-safe).
+
+    Formula::
+
+        daily_limit     = initial_account_size × (daily_loss_pct / 100)
+        day_reference   = max(balance_at_day_start, equity_at_day_start)
+        current_loss    = day_reference − current_equity
+        buffer_limit    = daily_limit × (buffer_pct / 100)
+
+        DENY if current_loss >= buffer_limit   (pre-trade gate)
+        HALT if current_loss >= daily_limit     (hard supervisor territory)
+
+    The pre-trade gate uses the buffer to block new orders before the hard
+    limit is breached, leaving margin for floating P&L movement.
+
+    Args:
+        initial_account_size: The nominal initial balance (e.g. 10_000, 100_000).
+        daily_loss_pct: Maximum daily loss as % of initial account (default 5.0).
+        buffer_pct: Percentage of daily limit at which to deny new orders
+            (default 80.0, i.e. deny at 80% of the 5% limit = 4% of account).
+    """
+
+    initial_account_size: float = 0.0
+    daily_loss_pct: float = _DEFAULT_DAILY_LOSS_PCT
+    buffer_pct: float = _DEFAULT_BUFFER_PCT
+    # Internal state
+    _day_key: str = field(default="", repr=False)
+    _day_reference: float = field(default=0.0, repr=False)
+    _peak_equity_today: float = field(default=0.0, repr=False)
+    _initialized: bool = field(default=False, repr=False)
+
+    # -- Derived limits ------------------------------------------------
+
+    @property
+    def daily_limit_usd(self) -> float:
+        """Absolute daily loss limit in USD."""
+        return self.initial_account_size * (self.daily_loss_pct / 100.0)
+
+    @property
+    def buffer_limit_usd(self) -> float:
+        """Pre-trade buffer: deny new orders above this loss amount."""
+        return self.daily_limit_usd * (self.buffer_pct / 100.0)
+
+    @property
+    def day_reference(self) -> float:
+        """The day's starting reference point (max of balance, equity)."""
+        return self._day_reference
+
+    @property
+    def peak_equity_today(self) -> float:
+        """Highest equity seen so far today."""
+        return self._peak_equity_today
+
+    # -- Initialization ------------------------------------------------
+
+    def initialize(self, balance: float, equity: float) -> None:
+        """Set the initial account size and first day reference.
+
+        Call once at session start (typically from build_stack / build_live_stack).
+        """
+        if self.initial_account_size <= 0:
+            self.initial_account_size = balance
+        self._set_day_reference(balance, equity)
+        self._initialized = True
+        log.info(
+            "FtmoDailyLossTracker initialized: account=$%.2f daily_limit=$%.2f buffer=$%.2f (%.0f%%) day_ref=$%.2f",
+            self.initial_account_size,
+            self.daily_limit_usd,
+            self.buffer_limit_usd,
+            self.buffer_pct,
+            self._day_reference,
+        )
+
+    def _set_day_reference(self, balance: float, equity: float) -> None:
+        """Set the day reference to the higher of balance and equity."""
+        self._day_reference = max(balance, equity)
+        self._peak_equity_today = max(balance, equity)
+        self._day_key = datetime.now(timezone.utc).astimezone(_FTMO_TZ).strftime("%Y-%m-%d")
+
+    # -- Day boundary management ---------------------------------------
+
+    def _maybe_new_day(self, balance: float, equity: float) -> None:
+        """Reset reference on day boundary (Europe/Prague)."""
+        today = datetime.now(timezone.utc).astimezone(_FTMO_TZ).strftime("%Y-%m-%d")
+        if today != self._day_key:
+            prev_ref = self._day_reference
+            self._set_day_reference(balance, equity)
+            log.info(
+                "FTMO daily loss tracker: new day %s — prev_ref=$%.2f new_ref=$%.2f",
+                today,
+                prev_ref,
+                self._day_reference,
+            )
+
+    # -- Equity updates ------------------------------------------------
+
+    def update_equity(self, equity: float) -> None:
+        """Track peak equity for the day.
+
+        Call on every tick or health check to maintain the high-water mark.
+        """
+        if equity > self._peak_equity_today:
+            self._peak_equity_today = equity
+
+    # -- Pre-trade check -----------------------------------------------
+
+    def check(self, balance: float, equity: float) -> RiskCheckResult:
+        """Check if the FTMO daily loss buffer has been reached.
+
+        Args:
+            balance: Current account balance (closed P&L only).
+            equity: Current account equity (balance + floating P&L).
+
+        Returns:
+            RiskCheckResult. Fails if current daily loss >= buffer_limit.
+        """
+        if not self._initialized:
+            if balance > 0:
+                self.initialize(balance, equity)
+            else:
+                return RiskCheckResult(
+                    name="ftmo_daily_loss",
+                    passed=True,
+                    detail="daily loss tracker not initialized — skipped",
+                )
+
+        self._maybe_new_day(balance, equity)
+        self.update_equity(equity)
+
+        current_loss = self._day_reference - equity
+        daily_limit = self.daily_limit_usd
+        buffer_limit = self.buffer_limit_usd
+        utilization_pct = (current_loss / daily_limit * 100.0) if daily_limit > 0 else 0.0
+
+        if current_loss >= daily_limit:
+            return RiskCheckResult(
+                name="ftmo_daily_loss",
+                passed=False,
+                detail=(
+                    f"FTMO DAILY LOSS BREACH: loss=${current_loss:.2f} >= "
+                    f"limit=${daily_limit:.2f} ({self.daily_loss_pct:.1f}% of "
+                    f"${self.initial_account_size:.0f}) — ref=${self._day_reference:.2f} "
+                    f"equity=${equity:.2f}"
+                ),
+            )
+
+        if current_loss >= buffer_limit:
+            return RiskCheckResult(
+                name="ftmo_daily_loss",
+                passed=False,
+                detail=(
+                    f"FTMO daily loss buffer reached: loss=${current_loss:.2f} >= "
+                    f"buffer=${buffer_limit:.2f} ({self.buffer_pct:.0f}% of "
+                    f"${daily_limit:.2f} limit) — {utilization_pct:.1f}% utilized — "
+                    f"blocking new orders to protect daily limit"
+                ),
+            )
+
+        return RiskCheckResult(
+            name="ftmo_daily_loss",
+            passed=True,
+            detail=(
+                f"daily_loss=${current_loss:.2f}, buffer=${buffer_limit:.2f}, "
+                f"limit=${daily_limit:.2f}, utilized={utilization_pct:.1f}%, "
+                f"ref=${self._day_reference:.2f}"
+            ),
+        )
+
+    # -- Snapshot -------------------------------------------------------
+
+    def snapshot(self) -> dict:
+        """Return a point-in-time snapshot of the tracker state."""
+        daily_limit = self.daily_limit_usd
+        return {
+            "initialized": self._initialized,
+            "initial_account_size": self.initial_account_size,
+            "daily_loss_pct": self.daily_loss_pct,
+            "buffer_pct": self.buffer_pct,
+            "daily_limit_usd": round(daily_limit, 2),
+            "buffer_limit_usd": round(self.buffer_limit_usd, 2),
+            "day_reference": round(self._day_reference, 2),
+            "peak_equity_today": round(self._peak_equity_today, 2),
+            "day_key": self._day_key,
+        }
+
+    # -- State persistence ---------------------------------------------
+
+    def save_state(self, path: Path | None = None) -> None:
+        """Persist daily loss tracker state for crash recovery."""
+        path = path or (_STATE_DIR / "daily_loss_tracker.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "initial_account_size": self.initial_account_size,
+            "daily_loss_pct": self.daily_loss_pct,
+            "buffer_pct": self.buffer_pct,
+            "day_key": self._day_key,
+            "day_reference": self._day_reference,
+            "peak_equity_today": self._peak_equity_today,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def load_state(self, path: Path | None = None) -> bool:
+        """Load daily loss tracker state. Returns True if loaded for today."""
+        path = path or (_STATE_DIR / "daily_loss_tracker.json")
+        if not path.exists():
+            return False
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            today = datetime.now(timezone.utc).astimezone(_FTMO_TZ).strftime("%Y-%m-%d")
+            if data.get("day_key") == today:
+                self._day_key = today
+                self._day_reference = data.get("day_reference", 0.0)
+                self._peak_equity_today = data.get("peak_equity_today", 0.0)
+                self.initial_account_size = data.get("initial_account_size", self.initial_account_size)
+                self._initialized = True
+                log.info(
+                    "Loaded daily loss tracker: day=%s ref=$%.2f peak=$%.2f",
+                    today,
+                    self._day_reference,
+                    self._peak_equity_today,
+                )
+                return True
+            # Different day — will re-initialize on next check
+            return False
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            log.warning("Failed to load daily loss tracker from %s: %s", path, exc)
             return False
