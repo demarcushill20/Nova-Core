@@ -1,31 +1,25 @@
-"""Runtime runner — Final Demo Launch Phase (Phase 9).
+"""Runtime runner — NovaTrade service entrypoint.
 
-Wires together:
-  TradingView webhook → Trading Agent → Risk Engine → Adapter → Evidence
-  + OpsMonitor loop → Reconciliation → Action execution → Alerts/Summary
+Supports two pipeline modes controlled by ``NOVATRADE_PIPELINE``:
 
-Supports three launch modes:
+  - **webhook** (default): TradingView webhook → TradingAgent → Risk → Adapter
+  - **live**: Full-Python pipeline — tick polling → bar aggregation →
+    strategy evaluation → signal queue → order execution (no TradingView)
+
+Launch modes (``NOVATRADE_LAUNCH_MODE``):
   - dry_run:      DryRunAdapter, safe simulated mode (default)
   - active_ready: MetaApiAdapter connected, launch gate pending operator confirmation
   - active_demo:  Full active FTMO demo routing after gate passes
 
 Usage::
 
-    # Dry-run mode (default, safe)
+    # Webhook pipeline (default, backward-compatible)
     python -m novatrade.runtime.runner
 
-    # Active-ready mode (requires MetaApi credentials)
+    # Live pipeline with strategy config
+    NOVATRADE_PIPELINE=live \\
+    NOVATRADE_STRATEGY_CONFIG=configs/strategies/irb_v2_seed9999.yaml \\
     NOVATRADE_LAUNCH_MODE=active_ready \\
-    METAAPI_TOKEN=... METAAPI_ACCOUNT_ID=... \\
-    NOVATRADE_WEBHOOK_SECRET=... \\
-    python -m novatrade.runtime.runner
-
-    # Active demo mode (requires all confirmations)
-    NOVATRADE_LAUNCH_MODE=active_demo \\
-    NOVATRADE_CONFIRM_PINE_COMPILED=true \\
-    NOVATRADE_CONFIRM_TV_BACKTEST=true \\
-    NOVATRADE_CONFIRM_WEBHOOK_URL=true \\
-    NOVATRADE_CONFIRM_ACTIVE_DEMO=true \\
     python -m novatrade.runtime.runner
 """
 
@@ -36,6 +30,8 @@ import logging
 import os
 import sys
 import time
+from pathlib import Path
+from typing import Any
 
 import uvicorn
 
@@ -276,6 +272,7 @@ async def build_live_stack(
     health_interval: float = 5.0,
     shadow: bool = False,
     dry_run: bool = False,
+    strategy_config_path: str | None = None,
 ) -> LiveLoop:
     """Build the full live trading stack.
 
@@ -289,6 +286,9 @@ async def build_live_stack(
         health_interval: Feed health check interval.
         shadow: If True, use shadow mode (log only, no orders).
         dry_run: If True, use DryRunAdapter.
+        strategy_config_path: Path to strategy YAML config. If None,
+            reads from ``NOVATRADE_STRATEGY_CONFIG`` env var. If neither
+            is set, uses default BacktestEnvironment parameters.
     """
     cfg = cfg or NovaTradeCfg.load()
     symbol = cfg.symbols[0]
@@ -365,8 +365,30 @@ async def build_live_stack(
         state_store=state_store,
     )
 
-    # --- Strategy Engine ---
-    env = BacktestEnvironment(symbol_display=symbol, initial_equity=account.balance)
+    # --- Strategy Engine (with optional YAML config) ---
+    env_kwargs: dict[str, Any] = {
+        "symbol_display": symbol,
+        "initial_equity": account.balance,
+    }
+    config_path = strategy_config_path or os.environ.get("NOVATRADE_STRATEGY_CONFIG")
+    if config_path:
+        from novatrade.cli.config_schema import StrategyConfig
+
+        sc = StrategyConfig.from_yaml(Path(config_path))
+        env_kwargs.update(sc.to_environment_kwargs())
+        log.info(
+            "build_live_stack: loaded strategy config '%s' v%s (%s)",
+            sc.name,
+            sc.version,
+            sc.description,
+        )
+    else:
+        log.warning(
+            "build_live_stack: no strategy config — using default parameters. "
+            "Set NOVATRADE_STRATEGY_CONFIG to a YAML path to load optimised params."
+        )
+
+    env = BacktestEnvironment(**env_kwargs)
     strategy = IRBStrategy(env)
     strategy_engine = LiveStrategyEngine(strategy, env)
 
@@ -516,12 +538,85 @@ async def run_server(
 
 
 # ---------------------------------------------------------------------------
+# Live pipeline runner
+# ---------------------------------------------------------------------------
+
+
+async def run_live(
+    live_loop: LiveLoop,
+    *,
+    host: str = "0.0.0.0",  # noqa: S104
+    port: int = 8877,
+) -> None:
+    """Run the live trading loop with a health/status HTTP server.
+
+    Starts both the LiveLoop (tick pipeline + strategy + execution) and a
+    lightweight FastAPI server exposing /health, /status, and /readiness
+    endpoints.  Webhook alerts are still accepted as a fallback.
+    """
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    started_at = time.time()
+
+    async def health(_request: Any) -> JSONResponse:
+        return JSONResponse(
+            {
+                "status": "ok" if live_loop.running else "starting",
+                "pipeline": "live",
+                "uptime_seconds": round(time.time() - started_at, 1),
+            }
+        )
+
+    async def status(_request: Any) -> JSONResponse:
+        snapshot = live_loop.snapshot()
+        snapshot["pipeline"] = "live"
+        snapshot["uptime_seconds"] = round(time.time() - started_at, 1)
+        return JSONResponse(snapshot)
+
+    app = Starlette(
+        routes=[
+            Route("/health", health),
+            Route("/status", status),
+        ]
+    )
+
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        access_log=False,
+    )
+    server = uvicorn.Server(config)
+
+    log.info(
+        "starting LIVE pipeline on %s:%d",
+        host,
+        port,
+    )
+
+    live_task = asyncio.create_task(live_loop.run())
+    try:
+        await server.serve()
+    finally:
+        live_loop.stop()
+        await live_task
+
+
+# ---------------------------------------------------------------------------
 # CLI entrypoint
 # ---------------------------------------------------------------------------
 
 
 def main() -> None:
-    """CLI entrypoint."""
+    """CLI entrypoint.
+
+    Pipeline selection via ``NOVATRADE_PIPELINE``:
+      - ``webhook`` (default): TradingView webhook-driven pipeline
+      - ``live``: Full-Python tick → strategy → execution pipeline
+    """
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -529,18 +624,34 @@ def main() -> None:
 
     port = int(os.environ.get("NOVATRADE_PORT", "8877"))
     host = os.environ.get("NOVATRADE_HOST", "0.0.0.0")  # noqa: S104
+    pipeline = os.environ.get("NOVATRADE_PIPELINE", "webhook").lower()
 
-    try:
-        ws, loop, readiness = build_stack()
-    except RuntimeError as exc:
-        log.error("STARTUP FAILED: %s", exc)
-        sys.exit(1)
+    if pipeline == "live":
+        log.info("selected pipeline: LIVE (full-Python)")
 
-    # Print readiness report
-    report = generate_readiness_report(readiness)
-    log.info("\n%s", report)
+        async def _start_live() -> None:
+            try:
+                live_loop = await build_live_stack()
+            except RuntimeError as exc:
+                log.error("LIVE STARTUP FAILED: %s", exc)
+                sys.exit(1)
+            await run_live(live_loop, host=host, port=port)
 
-    asyncio.run(run_server(ws, loop, host=host, port=port))
+        asyncio.run(_start_live())
+    else:
+        if pipeline != "webhook":
+            log.warning("unknown pipeline %r — falling back to webhook", pipeline)
+        log.info("selected pipeline: WEBHOOK")
+        try:
+            ws, loop, readiness = build_stack()
+        except RuntimeError as exc:
+            log.error("STARTUP FAILED: %s", exc)
+            sys.exit(1)
+
+        report = generate_readiness_report(readiness)
+        log.info("\n%s", report)
+
+        asyncio.run(run_server(ws, loop, host=host, port=port))
 
 
 if __name__ == "__main__":
