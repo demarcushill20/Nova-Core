@@ -134,6 +134,7 @@ class LiveSignal:
     new_stop: float = 0.0
     timestamp: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
+    _db_signal_id: int | None = field(default=None, repr=False)
 
     def to_alert_payload(self) -> dict[str, Any]:
         """Convert to a dict compatible with TradingAgent.process_alert."""
@@ -327,6 +328,11 @@ class LiveStrategyEngine:
             entry_sig = self._check_entry(i)
             if entry_sig is not None:
                 signals.append(entry_sig)
+
+        # Inject bar_close_time into all emitted signals for shadow-mode matching
+        for sig in signals:
+            if "bar_close_time" not in sig.metadata:
+                sig.metadata["bar_close_time"] = bar.timestamp
 
         return signals
 

@@ -35,7 +35,7 @@ from novatrade.data.bar_aggregator import BarAggregator
 from novatrade.data.price_feed import TickBatchPoller
 from novatrade.execution.live_trading_agent import LiveTradingAgent
 from novatrade.monitor.feed_health import FeedHealthSupervisor, FeedState
-from novatrade.strategy.live_engine import LiveStrategyEngine, SignalType
+from novatrade.strategy.live_engine import LiveSignal, LiveStrategyEngine, SignalType
 
 log = logging.getLogger("novatrade.runtime.live_loop")
 
@@ -125,6 +125,7 @@ class LiveLoop:
         *,
         health_interval: float = 5.0,
         queue_maxsize: int = 100,
+        state_store=None,
     ) -> None:
         self._poller = poller
         self._aggregator = aggregator
@@ -132,6 +133,7 @@ class LiveLoop:
         self._strategy_engine = strategy_engine
         self._live_agent = live_agent
         self._health_interval = health_interval
+        self._state_store = state_store
 
         self._signal_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_maxsize)
         self._metrics = LiveMetrics()
@@ -148,6 +150,8 @@ class LiveLoop:
         self._running = True
         self._stop_event = asyncio.Event()
         self._metrics = LiveMetrics()
+
+        self._restore_queued_signals()
 
         log.info(
             "LiveLoop starting: health_interval=%.1fs queue_maxsize=%d",
@@ -208,6 +212,47 @@ class LiveLoop:
             "aggregator": self._aggregator.stats,
             "queue_depth": self._signal_queue.qsize(),
         }
+
+    # -- Signal queue persistence -------------------------------------------
+
+    def _restore_queued_signals(self) -> None:
+        """Reload persisted signals from a previous crash into the queue."""
+        if self._state_store is None:
+            return
+        try:
+            persisted = self._state_store.load_queued_signals()
+            for signal_id, signal_dict in persisted:
+                signal = LiveSignal(
+                    signal_type=SignalType(signal_dict["signal_type"]),
+                    side=signal_dict["side"],
+                    symbol=signal_dict["symbol"],
+                    entry_price=signal_dict.get("entry_price", 0.0),
+                    stop_loss=signal_dict.get("stop_loss", 0.0),
+                    volume=signal_dict.get("volume", 0.0),
+                    exit_price=signal_dict.get("exit_price", 0.0),
+                    exit_reason=signal_dict.get("exit_reason", ""),
+                    new_stop=signal_dict.get("new_stop", 0.0),
+                    timestamp=signal_dict.get("timestamp", 0.0),
+                    metadata=signal_dict.get("metadata", {}),
+                )
+                # Attach the DB signal_id so we can remove it after processing
+                signal._db_signal_id = signal_id
+                try:
+                    self._signal_queue.put_nowait(signal)
+                    log.info(
+                        "restored persisted signal: %s %s %s (id=%d)",
+                        signal.signal_type.value,
+                        signal.side,
+                        signal.symbol,
+                        signal_id,
+                    )
+                except asyncio.QueueFull:
+                    log.warning("queue full during restore — signal %d lost", signal_id)
+                    self._state_store.remove_queued_signal(signal_id)
+            if persisted:
+                log.info("restored %d persisted signals from previous crash", len(persisted))
+        except Exception:
+            log.exception("failed to restore persisted signals")
 
     # -- Loop 1: Tick Pipeline ---------------------------------------------
 
@@ -305,6 +350,12 @@ class LiveLoop:
                                         signal.side,
                                     )
 
+                            # Persist critical signals for crash safety
+                            if _critical and self._state_store is not None:
+                                db_id = self._state_store.save_queued_signal(signal)
+                                if db_id is not None:
+                                    signal._db_signal_id = db_id
+
                 except Exception:
                     log.exception("tick pipeline error — continuing")
                     self._metrics.errors += 1
@@ -383,6 +434,10 @@ class LiveLoop:
                     log.exception("order execution error — continuing")
                     self._metrics.errors += 1
                 finally:
+                    # Remove from persistence after processing
+                    db_id = getattr(signal, "_db_signal_id", None)
+                    if db_id is not None and self._state_store is not None:
+                        self._state_store.remove_queued_signal(db_id)
                     self._signal_queue.task_done()
 
         finally:
@@ -418,6 +473,10 @@ class LiveLoop:
                 log.exception("drain execution error")
                 self._metrics.errors += 1
             finally:
+                # Remove from persistence after processing
+                db_id = getattr(signal, "_db_signal_id", None)
+                if db_id is not None and self._state_store is not None:
+                    self._state_store.remove_queued_signal(db_id)
                 self._signal_queue.task_done()
 
     # -- Loop 3: Health Monitor --------------------------------------------

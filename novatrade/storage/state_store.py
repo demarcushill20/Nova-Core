@@ -16,6 +16,7 @@ the trading pipeline.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -57,6 +58,22 @@ CREATE TABLE IF NOT EXISTS expected_positions (
     open_time   REAL NOT NULL DEFAULT 0.0,
     strategy_id TEXT NOT NULL DEFAULT '',
     comment     TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS signal_queue (
+    signal_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_type TEXT NOT NULL,
+    side        TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    entry_price REAL NOT NULL DEFAULT 0.0,
+    stop_loss   REAL NOT NULL DEFAULT 0.0,
+    volume      REAL NOT NULL DEFAULT 0.0,
+    exit_price  REAL NOT NULL DEFAULT 0.0,
+    exit_reason TEXT NOT NULL DEFAULT '',
+    new_stop    REAL NOT NULL DEFAULT 0.0,
+    timestamp   REAL NOT NULL,
+    metadata    TEXT NOT NULL DEFAULT '{}',
+    created_at  REAL NOT NULL
 );
 """
 
@@ -312,3 +329,95 @@ class StateStore:
             conn.close()
         except Exception:
             log.exception("state_store: failed to clear expected positions")
+
+    # -----------------------------------------------------------------
+    # Signal queue persistence
+    # -----------------------------------------------------------------
+
+    def save_queued_signal(self, signal) -> int | None:
+        """Persist a signal to the queue. Returns the signal_id or None on failure."""
+        try:
+            conn = self._connect()
+            metadata = signal.metadata if isinstance(signal.metadata, dict) else {}
+            cursor = conn.execute(
+                """INSERT INTO signal_queue
+                   (signal_type, side, symbol, entry_price, stop_loss, volume,
+                    exit_price, exit_reason, new_stop, timestamp, metadata, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    signal.signal_type.value,
+                    signal.side,
+                    signal.symbol,
+                    signal.entry_price,
+                    signal.stop_loss,
+                    signal.volume,
+                    signal.exit_price,
+                    signal.exit_reason,
+                    signal.new_stop,
+                    signal.timestamp,
+                    json.dumps(metadata),
+                    time.time(),
+                ),
+            )
+            signal_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return signal_id
+        except Exception:
+            log.exception("state_store: failed to save queued signal")
+            return None
+
+    def remove_queued_signal(self, signal_id: int) -> None:
+        """Remove a processed signal from the queue."""
+        try:
+            conn = self._connect()
+            conn.execute(
+                "DELETE FROM signal_queue WHERE signal_id = ?",
+                (signal_id,),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            log.exception("state_store: failed to remove queued signal")
+
+    def load_queued_signals(self) -> list[tuple[int, dict]]:
+        """Load all pending signals ordered by signal_id.
+
+        Returns a list of (signal_id, signal_dict) pairs.
+        """
+        try:
+            conn = self._connect()
+            rows = conn.execute(
+                "SELECT * FROM signal_queue ORDER BY signal_id ASC",
+            ).fetchall()
+            conn.close()
+            result: list[tuple[int, dict]] = []
+            for row in rows:
+                signal_dict = {
+                    "signal_type": row["signal_type"],
+                    "side": row["side"],
+                    "symbol": row["symbol"],
+                    "entry_price": row["entry_price"],
+                    "stop_loss": row["stop_loss"],
+                    "volume": row["volume"],
+                    "exit_price": row["exit_price"],
+                    "exit_reason": row["exit_reason"],
+                    "new_stop": row["new_stop"],
+                    "timestamp": row["timestamp"],
+                    "metadata": json.loads(row["metadata"]),
+                }
+                result.append((row["signal_id"], signal_dict))
+            return result
+        except Exception:
+            log.exception("state_store: failed to load queued signals")
+            return []
+
+    def clear_signal_queue(self) -> None:
+        """Remove all queued signals."""
+        try:
+            conn = self._connect()
+            conn.execute("DELETE FROM signal_queue")
+            conn.commit()
+            conn.close()
+        except Exception:
+            log.exception("state_store: failed to clear signal queue")
