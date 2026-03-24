@@ -411,6 +411,7 @@ async def build_live_stack(
         strategy_engine=strategy_engine,
         live_agent=live_agent,
         health_interval=health_interval,
+        state_store=state_store,
     )
 
     log.info(
