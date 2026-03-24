@@ -35,9 +35,12 @@ from novatrade.models import (
 )
 from novatrade.risk.ftmo_compliance import (
     FtmoDailyLossTracker,
+    GapTradingPreventer,
     LotSizeConsistencyChecker,
+    NewsCalendarBlocker,
     ServerRequestCounter,
     TradingDaysTracker,
+    WeekendAutoCloser,
 )
 from novatrade.risk.position_sizer import PositionSizer
 
@@ -87,6 +90,12 @@ class PreTradeGate:
         self._daily_loss_tracker = FtmoDailyLossTracker(
             daily_loss_pct=self._risk.max_daily_drawdown_pct,
         )
+        # FTMO compliance: weekend auto-closer
+        self._weekend_closer = WeekendAutoCloser()
+        # FTMO compliance: news calendar blocker
+        self._news_blocker = NewsCalendarBlocker()
+        # FTMO compliance: gap trading preventer
+        self._gap_preventer = GapTradingPreventer()
         # FTMO compliance: position sizer for volume cross-check
         self._sizer = PositionSizer(
             min_lot=self._risk.min_volume_per_trade,
@@ -138,6 +147,9 @@ class PreTradeGate:
         checks.append(self._check_drawdown(account))
         checks.append(self._daily_loss_tracker.check(account.balance, account.equity))
         checks.append(self._check_spread(price))
+        checks.append(self._check_weekend(now))
+        checks.append(self._check_news(request.symbol, now))
+        checks.append(self._check_gap_spread(price))
         checks.append(self._days_tracker.check())
 
         failed = [c for c in checks if not c.passed]
@@ -590,6 +602,70 @@ class PreTradeGate:
             passed=True,
             detail=f"spread={spread_points:.1f}pts, ceiling={ceiling:.1f}",
         )
+
+    def _check_weekend(self, now: float) -> RiskCheckResult:
+        """Deny if within the weekend auto-close window."""
+        if self._weekend_closer.should_close_positions(now):
+            return RiskCheckResult(
+                name="weekend_close",
+                passed=False,
+                detail="Weekend auto-close window",
+            )
+        return RiskCheckResult(
+            name="weekend_close",
+            passed=True,
+            detail="not in weekend close window",
+        )
+
+    def _check_news(self, symbol: str, now: float) -> RiskCheckResult:
+        """Deny if a high-impact news event is within the blackout window."""
+        blocked, reason = self._news_blocker.is_blocked(now, symbol, blackout_minutes=self._risk.news_blackout_minutes)
+        if blocked:
+            return RiskCheckResult(
+                name="news_blackout",
+                passed=False,
+                detail=reason,
+            )
+        return RiskCheckResult(
+            name="news_blackout",
+            passed=True,
+            detail="no news blackout active",
+        )
+
+    def _check_gap_spread(self, price: SymbolPrice | None) -> RiskCheckResult:
+        """Deny if spread is abnormally wide relative to session average.
+
+        Uses the FeedHealthSupervisor's average spread when available.
+        Falls back to passing if no feed data is available.
+        """
+        if price is None or self._feed_health is None:
+            return RiskCheckResult(
+                name="gap_spread",
+                passed=True,
+                detail="no price or feed data — skipped",
+            )
+        try:
+            snap = self._feed_health.get_snapshot(price.symbol)
+            avg_spread = snap.avg_spread_pips
+            current_spread = snap.current_spread_pips
+            if avg_spread <= 0:
+                return RiskCheckResult(
+                    name="gap_spread",
+                    passed=True,
+                    detail="no avg spread data — skipped",
+                )
+            allowed, reason = self._gap_preventer.check(current_spread, avg_spread)
+            return RiskCheckResult(
+                name="gap_spread",
+                passed=allowed,
+                detail=reason,
+            )
+        except Exception as exc:
+            return RiskCheckResult(
+                name="gap_spread",
+                passed=False,
+                detail=f"gap spread check error — blocked for safety: {exc}",
+            )
 
 
 # ---------------------------------------------------------------------------

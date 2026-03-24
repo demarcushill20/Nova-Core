@@ -21,18 +21,31 @@ pre-trade gate:
    must not reach 5% of the initial account size.  We enforce a configurable
    buffer (default 80%) that blocks new orders before the hard limit.
 
+5. **Weekend Auto-Closer** — Signals position closure before Friday 22:00 UTC
+   market close to avoid weekend gap risk.  Close buffer defaults to 5 min.
+
+6. **News Calendar Blocker** — Blocks trading around high-impact news events
+   (NFP, FOMC, ECB).  Uses a static 2026 calendar (MVP — API-based later).
+
+7. **Gap Trading Preventer** — Blocks orders when spread is abnormally wide
+   relative to session average (gap/spike detection).
+
+8. **Best Day Rule Tracker** — Monitors whether any single day's profit
+   exceeds a percentage of total profit (FTMO best-day rule, monitoring only).
+
 All components are stateful (in-memory with optional JSON persistence)
 and designed to integrate into the existing PreTradeGate pipeline.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import median
 from typing import NamedTuple
@@ -666,3 +679,399 @@ class FtmoDailyLossTracker:
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             log.warning("Failed to load daily loss tracker from %s: %s", path, exc)
             return False
+
+
+# ---------------------------------------------------------------------------
+# Weekend Auto-Closer
+# ---------------------------------------------------------------------------
+
+_FRIDAY = 4  # datetime.weekday(): Mon=0 .. Sun=6
+_SATURDAY = 5
+_SUNDAY = 6
+_NY_TZ = ZoneInfo("America/New_York")
+
+
+@dataclass
+class WeekendAutoCloser:
+    """Signals position closure before the Friday market close.
+
+    Forex markets close at NY 5:00 PM (17:00 ET), which is:
+    - 21:00 UTC during EDT (Mar-Nov)
+    - 22:00 UTC during EST (Nov-Mar)
+
+    Markets reopen Sunday at the same NY 5:00 PM local time.
+
+    This class provides a configurable buffer (default 5 min) before close
+    to allow orderly position flattening before the weekend gap.
+
+    Usage::
+
+        closer = WeekendAutoCloser()
+        if closer.should_close_positions(time.time()):
+            # close all open positions
+        if closer.is_weekend(time.time()):
+            # do not open new positions
+    """
+
+    CLOSE_BUFFER_MINUTES: int = 5
+    last_close_attempt_ts: float = field(default=0.0, repr=False)
+
+    @staticmethod
+    def _market_close_hour_utc(ts: float) -> int:
+        """Return the forex market close hour in UTC for the given timestamp.
+
+        NY 5:00 PM is the forex market close/open boundary:
+        - During EDT (US daylight saving, ~Mar-Nov): 21:00 UTC
+        - During EST (US standard time, ~Nov-Mar): 22:00 UTC
+        """
+        dt_ny = datetime.fromtimestamp(ts, tz=_NY_TZ)
+        is_dst = dt_ny.dst() != timedelta(0)
+        return 21 if is_dst else 22
+
+    def should_close_positions(self, timestamp: float) -> bool:
+        """Return True if it's Friday and within the close buffer window.
+
+        The window starts at (market_close - CLOSE_BUFFER_MINUTES) on Friday
+        and extends through the entire weekend.
+        """
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        weekday = dt.weekday()
+        hour = dt.hour
+        minute = dt.minute
+
+        # During the weekend proper — should already be closed
+        if self.is_weekend(timestamp):
+            return True
+
+        # Friday close buffer: close_hour - buffer_minutes through close_hour
+        if weekday == _FRIDAY:
+            close_hour = self._market_close_hour_utc(timestamp)
+            close_threshold_minutes = close_hour * 60 - self.CLOSE_BUFFER_MINUTES
+            current_minutes = hour * 60 + minute
+            if current_minutes >= close_threshold_minutes:
+                return True
+
+        return False
+
+    def is_weekend(self, timestamp: float) -> bool:
+        """Return True during the weekend gap (Friday close - Sunday open UTC).
+
+        Close/open hour varies with US DST: 21:00 UTC (EDT) or 22:00 UTC (EST).
+        """
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        weekday = dt.weekday()
+        hour = dt.hour
+        close_hour = self._market_close_hour_utc(timestamp)
+
+        # Friday at/after close → weekend
+        if weekday == _FRIDAY and hour >= close_hour:
+            return True
+        # Saturday → weekend
+        if weekday == _SATURDAY:
+            return True
+        # Sunday before open → weekend (open hour == close hour)
+        return weekday == _SUNDAY and hour < close_hour
+
+    def record_close_attempt(self, timestamp: float) -> None:
+        """Record that a close attempt was made to prevent duplicates."""
+        self.last_close_attempt_ts = timestamp
+
+
+# ---------------------------------------------------------------------------
+# News Calendar Blocker
+# ---------------------------------------------------------------------------
+
+# 2026 high-impact event calendar (MVP — hardcoded dates).
+# NFP: first Friday of each month, 13:30 UTC
+# FOMC: 8 meetings per year, 19:00 UTC (rate decision)
+# ECB: 6 meetings per year, 13:15 UTC (rate decision)
+
+_HIGH_IMPACT_EVENTS: list[dict] = [
+    {
+        "name": "NFP",
+        "time_utc": "13:30",
+        "currency": "USD",
+        "dates": [
+            "2026-01-02",  # Jan
+            "2026-02-06",  # Feb
+            "2026-03-06",  # Mar
+            "2026-04-03",  # Apr
+            "2026-05-01",  # May
+            "2026-06-05",  # Jun
+            "2026-07-03",  # Jul
+            "2026-08-07",  # Aug
+            "2026-09-04",  # Sep
+            "2026-10-02",  # Oct
+            "2026-11-06",  # Nov
+            "2026-12-04",  # Dec
+        ],
+    },
+    {
+        "name": "FOMC",
+        "time_utc": "19:00",
+        "currency": "USD",
+        "dates": [
+            "2026-01-28",
+            "2026-03-18",
+            "2026-05-06",
+            "2026-06-17",
+            "2026-07-29",
+            "2026-09-16",
+            "2026-11-04",
+            "2026-12-16",
+        ],
+    },
+    {
+        "name": "ECB",
+        "time_utc": "13:15",
+        "currency": "EUR",
+        "dates": [
+            "2026-01-22",
+            "2026-03-05",
+            "2026-04-16",
+            "2026-06-04",
+            "2026-09-10",
+            "2026-10-29",
+        ],
+    },
+]
+
+
+@dataclass
+class NewsCalendarBlocker:
+    """Blocks trading around high-impact macroeconomic news events.
+
+    MVP implementation with a static 2026 calendar.  Checks whether the
+    current timestamp falls within the blackout window (default 15 min
+    before and after the scheduled event time) for any event whose
+    currency matches the trade symbol.
+
+    Usage::
+
+        blocker = NewsCalendarBlocker()
+        blocked, reason = blocker.is_blocked(ts, "EURUSD", blackout_minutes=15)
+        if blocked:
+            log.warning("Trade blocked: %s", reason)
+    """
+
+    events: list[dict] = field(default_factory=lambda: copy.deepcopy(_HIGH_IMPACT_EVENTS))
+
+    def __post_init__(self) -> None:
+        year = datetime.now(timezone.utc).year
+        if year != 2026:
+            log.warning(
+                "NewsCalendarBlocker: static calendar is for 2026, current year is %d — events may be stale",
+                year,
+            )
+
+    @staticmethod
+    def _symbol_has_currency(symbol: str, currency: str) -> bool:
+        """Check if a forex symbol contains the given currency code.
+
+        E.g., "EURUSD" contains both "EUR" and "USD".
+        """
+        symbol_upper = symbol.upper()
+        return currency.upper() in symbol_upper
+
+    def is_blocked(
+        self,
+        timestamp: float,
+        symbol: str,
+        blackout_minutes: int = 15,
+    ) -> tuple[bool, str]:
+        """Check if trading is blocked due to an upcoming or recent news event.
+
+        Args:
+            timestamp: Current Unix timestamp.
+            symbol: Trading symbol (e.g., "EURUSD").
+            blackout_minutes: Minutes before AND after the event to block.
+
+        Returns:
+            (blocked, reason) — blocked is True if within a blackout window.
+        """
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        date_str = dt.strftime("%Y-%m-%d")
+
+        for event in self.events:
+            if date_str not in event["dates"]:
+                continue
+
+            if not self._symbol_has_currency(symbol, event["currency"]):
+                continue
+
+            # Parse event time
+            hour, minute = (int(x) for x in event["time_utc"].split(":"))
+            event_dt = datetime(dt.year, dt.month, dt.day, hour, minute, tzinfo=timezone.utc)
+
+            diff_seconds = (dt - event_dt).total_seconds()
+            diff_minutes = diff_seconds / 60.0
+
+            if -blackout_minutes <= diff_minutes <= blackout_minutes:
+                if diff_minutes < 0:
+                    reason = f"{event['name']} in {abs(diff_minutes):.0f} minutes"
+                elif diff_minutes == 0:
+                    reason = f"{event['name']} right now"
+                else:
+                    reason = f"{event['name']} was {diff_minutes:.0f} minutes ago"
+                return True, reason
+
+        return False, ""
+
+
+# ---------------------------------------------------------------------------
+# Gap Trading Preventer
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class GapTradingPreventer:
+    """Blocks orders when the current spread is abnormally wide.
+
+    A simple stateless check that compares the current spread to the
+    session average.  If the current spread exceeds ``multiplier`` times
+    the average, trading is blocked (gap / spike protection).
+
+    Usage::
+
+        preventer = GapTradingPreventer()
+        allowed, reason = preventer.check(current_spread_pips=3.0, session_avg_spread_pips=0.8)
+        if not allowed:
+            log.warning("Gap detected: %s", reason)
+    """
+
+    def check(
+        self,
+        current_spread_pips: float,
+        session_avg_spread_pips: float,
+        multiplier: float = 3.0,
+    ) -> tuple[bool, str]:
+        """Check if the current spread is acceptable.
+
+        Args:
+            current_spread_pips: Current spread in pips.
+            session_avg_spread_pips: Session average spread in pips.
+            multiplier: Maximum acceptable ratio of current to average.
+
+        Returns:
+            (allowed, reason) — allowed is False if spread is too wide.
+        """
+        if session_avg_spread_pips <= 0:
+            return True, "session_avg_spread=0 — skipped"
+
+        ratio = current_spread_pips / session_avg_spread_pips
+
+        if ratio > multiplier:
+            return False, (
+                f"spread {current_spread_pips:.1f} pips is {ratio:.2f}x "
+                f"session avg {session_avg_spread_pips:.1f} pips "
+                f"(limit: {multiplier:.1f}x)"
+            )
+
+        return True, (
+            f"spread={current_spread_pips:.1f}, avg={session_avg_spread_pips:.1f}, "
+            f"ratio={ratio:.2f}x (limit={multiplier:.1f}x)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Best Day Rule Tracker
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BestDayRuleTracker:
+    """Monitors the FTMO Best Day Rule (informational / monitoring only).
+
+    FTMO rule (funded accounts): no single trading day's profit may account
+    for more than a percentage (typically 30%) of total lifetime profit.
+    This tracker is MONITORING ONLY — it warns but does not block trades.
+
+    Usage::
+
+        tracker = BestDayRuleTracker()
+        tracker.record_daily_pnl("2026-03-24", 150.0)
+        tracker.record_daily_pnl("2026-03-25", 80.0)
+        ok, reason = tracker.check(max_pct=0.30)
+    """
+
+    _daily_pnl: dict[str, float] = field(default_factory=dict)
+
+    def record_daily_pnl(self, date: str, pnl: float) -> None:
+        """Add to a day's running P&L total.
+
+        Args:
+            date: ISO date string (YYYY-MM-DD).
+            pnl: P&L amount to add (can be positive or negative).
+        """
+        self._daily_pnl[date] = self._daily_pnl.get(date, 0.0) + pnl
+
+    def check(self, max_pct: float = 0.30) -> tuple[bool, str]:
+        """Check if any single day's profit dominates total profit.
+
+        Args:
+            max_pct: Maximum allowable fraction of total profit from one day
+                (default 0.30 = 30%).
+
+        Returns:
+            (ok, reason) — ok is False if a single day exceeds the threshold.
+            Negative-P&L days are excluded from total profit calculation.
+        """
+        if not self._daily_pnl:
+            return True, "no trades recorded"
+
+        # Total profit = sum of only profitable days
+        total_profit = sum(v for v in self._daily_pnl.values() if v > 0)
+
+        if total_profit <= 0:
+            return True, "no profitable days yet"
+
+        # Find the best (most profitable) day
+        best_date = max(
+            (d for d, v in self._daily_pnl.items() if v > 0),
+            key=lambda d: self._daily_pnl[d],
+        )
+        best_pnl = self._daily_pnl[best_date]
+        best_pct = best_pnl / total_profit
+
+        if best_pct > max_pct:
+            return False, (
+                f"best day {best_date} profit ${best_pnl:.2f} is "
+                f"{best_pct:.1%} of total profit ${total_profit:.2f} "
+                f"(limit: {max_pct:.0%})"
+            )
+
+        return True, (
+            f"best_day={best_date} ${best_pnl:.2f} ({best_pct:.1%} of ${total_profit:.2f} total, limit={max_pct:.0%})"
+        )
+
+    def get_stats(self) -> dict:
+        """Return summary statistics for the best-day rule.
+
+        Returns:
+            Dict with best_day_pnl, total_profit, best_day_pct, best_day_date,
+            days_traded, and daily_breakdown.
+        """
+        total_profit = sum(v for v in self._daily_pnl.values() if v > 0)
+
+        if total_profit <= 0 or not self._daily_pnl:
+            return {
+                "best_day_pnl": 0.0,
+                "total_profit": 0.0,
+                "best_day_pct": 0.0,
+                "best_day_date": "",
+                "days_traded": len(self._daily_pnl),
+                "daily_breakdown": dict(self._daily_pnl),
+            }
+
+        profitable_days = {d: v for d, v in self._daily_pnl.items() if v > 0}
+        best_date = max(profitable_days, key=profitable_days.get)  # type: ignore[arg-type]
+        best_pnl = profitable_days[best_date]
+
+        return {
+            "best_day_pnl": round(best_pnl, 2),
+            "total_profit": round(total_profit, 2),
+            "best_day_pct": round(best_pnl / total_profit, 4),
+            "best_day_date": best_date,
+            "days_traded": len(self._daily_pnl),
+            "daily_breakdown": dict(self._daily_pnl),
+        }
