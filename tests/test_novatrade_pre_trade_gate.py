@@ -86,9 +86,11 @@ class TestHappyPath:
         assert "kill_switch" in check_names
         assert "dry_run" in check_names
         assert "account_mode" in check_names
+        assert "feed_health" in check_names
         assert "symbol_allowed" in check_names
         assert "volume_bounds" in check_names
         assert "stop_loss" in check_names
+        assert "sl_distance" in check_names
         assert "max_positions" in check_names
         assert "daily_trade_count" in check_names
         assert "cooldown" in check_names
@@ -574,3 +576,194 @@ class TestRecordTrade:
         )
         failed = {c.name for c in decision.failed_checks}
         assert "cooldown" in failed
+
+
+# ---------------------------------------------------------------------------
+# Feed health
+# ---------------------------------------------------------------------------
+
+
+class TestFeedHealth:
+    def test_no_supervisor_passes(self):
+        """No feed supervisor → check skipped (backward compat)."""
+        gate = PreTradeGate(_cfg())
+        decision = gate.evaluate(_order(), _account(), [])
+        fh = next(c for c in decision.checks if c.name == "feed_health")
+        assert fh.passed
+        assert "skipped" in fh.detail
+
+    def test_healthy_feed_passes(self):
+        """Healthy feed → check passes."""
+        from novatrade.data.tick import Tick
+        from novatrade.monitor.feed_health import FeedHealthConfig, FeedHealthSupervisor
+
+        supervisor = FeedHealthSupervisor(FeedHealthConfig(max_stale_seconds=60.0))
+        # Feed a tick to make EURUSD healthy
+        supervisor.on_tick(Tick(symbol="EURUSD", bid=1.1000, ask=1.1002, timestamp=time.time()))
+
+        gate = PreTradeGate(_cfg(), feed_health=supervisor)
+        decision = gate.evaluate(_order(symbol="EURUSD"), _account(), [])
+        fh = next(c for c in decision.checks if c.name == "feed_health")
+        assert fh.passed
+        assert "HEALTHY" in fh.detail
+
+    def test_stale_feed_denies(self):
+        """Stale feed → check denies order."""
+        from novatrade.data.tick import Tick
+        from novatrade.monitor.feed_health import FeedHealthConfig, FeedHealthSupervisor
+
+        clock_time = [time.time()]
+        supervisor = FeedHealthSupervisor(
+            FeedHealthConfig(max_stale_seconds=5.0),
+            clock=lambda: clock_time[0],
+        )
+        # Feed a tick, then advance time past staleness threshold
+        supervisor.on_tick(Tick(symbol="EURUSD", bid=1.1000, ask=1.1002, timestamp=clock_time[0]))
+        clock_time[0] += 60  # 60 seconds later — well past 5s threshold
+
+        gate = PreTradeGate(_cfg(), feed_health=supervisor)
+        decision = gate.evaluate(_order(symbol="EURUSD"), _account(), [])
+        fh = next(c for c in decision.checks if c.name == "feed_health")
+        assert not fh.passed
+        assert "STALE" in fh.detail
+
+    def test_not_subscribed_denies(self):
+        """Symbol never seen → NOT_SUBSCRIBED → denies."""
+        from novatrade.monitor.feed_health import FeedHealthSupervisor
+
+        supervisor = FeedHealthSupervisor()
+        gate = PreTradeGate(_cfg(), feed_health=supervisor)
+        decision = gate.evaluate(_order(symbol="EURUSD"), _account(), [])
+        fh = next(c for c in decision.checks if c.name == "feed_health")
+        assert not fh.passed
+        assert "NOT_SUBSCRIBED" in fh.detail
+
+    def test_wide_spread_denies(self):
+        """Wide spread → SPREAD_WIDE → denies."""
+        from novatrade.data.tick import Tick
+        from novatrade.monitor.feed_health import FeedHealthConfig, FeedHealthSupervisor
+
+        supervisor = FeedHealthSupervisor(FeedHealthConfig(max_spread_pips=3.0))
+        # Tick with 8 pip spread (> 3.0 max)
+        supervisor.on_tick(Tick(symbol="EURUSD", bid=1.1000, ask=1.1008, timestamp=time.time()))
+
+        gate = PreTradeGate(_cfg(), feed_health=supervisor)
+        decision = gate.evaluate(_order(symbol="EURUSD"), _account(), [])
+        fh = next(c for c in decision.checks if c.name == "feed_health")
+        assert not fh.passed
+        assert "SPREAD_WIDE" in fh.detail
+
+    def test_disconnected_denies(self):
+        """Disconnected symbol → denies."""
+        from novatrade.monitor.feed_health import FeedHealthSupervisor
+
+        supervisor = FeedHealthSupervisor()
+        supervisor.mark_disconnected("EURUSD")
+
+        gate = PreTradeGate(_cfg(), feed_health=supervisor)
+        decision = gate.evaluate(_order(symbol="EURUSD"), _account(), [])
+        fh = next(c for c in decision.checks if c.name == "feed_health")
+        assert not fh.passed
+        assert "DISCONNECTED" in fh.detail
+
+
+# ---------------------------------------------------------------------------
+# SL distance validation
+# ---------------------------------------------------------------------------
+
+
+class TestSLDistance:
+    def test_no_price_or_sl_skips(self):
+        """Missing price or SL → check skipped."""
+        gate = PreTradeGate(_cfg())
+        decision = gate.evaluate(_order(stop_loss=None), _account(), [])
+        sl = next(c for c in decision.checks if c.name == "sl_distance")
+        assert sl.passed
+        assert "skipped" in sl.detail
+
+    def test_buy_sl_below_entry_valid(self):
+        """BUY with SL below entry at sufficient distance → passes."""
+        gate = PreTradeGate(_cfg())
+        # Entry 1.1000, SL 1.0980 → 20 pips (>= 10 min)
+        decision = gate.evaluate(
+            _order(side=OrderSide.BUY, price=1.1000, stop_loss=1.0980),
+            _account(),
+            [],
+        )
+        sl = next(c for c in decision.checks if c.name == "sl_distance")
+        assert sl.passed
+        assert "20.0" in sl.detail
+
+    def test_buy_sl_above_entry_denied(self):
+        """BUY with SL above entry → denied (inverted SL)."""
+        gate = PreTradeGate(_cfg())
+        decision = gate.evaluate(
+            _order(side=OrderSide.BUY, price=1.1000, stop_loss=1.1050),
+            _account(),
+            [],
+        )
+        sl = next(c for c in decision.checks if c.name == "sl_distance")
+        assert not sl.passed
+        assert "must be below" in sl.detail
+
+    def test_sell_sl_above_entry_valid(self):
+        """SELL with SL above entry at sufficient distance → passes."""
+        gate = PreTradeGate(_cfg())
+        # Entry 1.1000, SL 1.1020 → 20 pips
+        decision = gate.evaluate(
+            _order(side=OrderSide.SELL, price=1.1000, stop_loss=1.1020),
+            _account(),
+            [],
+        )
+        sl = next(c for c in decision.checks if c.name == "sl_distance")
+        assert sl.passed
+
+    def test_sell_sl_below_entry_denied(self):
+        """SELL with SL below entry → denied (inverted SL)."""
+        gate = PreTradeGate(_cfg())
+        decision = gate.evaluate(
+            _order(side=OrderSide.SELL, price=1.1000, stop_loss=1.0950),
+            _account(),
+            [],
+        )
+        sl = next(c for c in decision.checks if c.name == "sl_distance")
+        assert not sl.passed
+        assert "must be above" in sl.detail
+
+    def test_micro_stop_denied(self):
+        """SL distance < 10 pips → denied."""
+        gate = PreTradeGate(_cfg())
+        # Entry 1.1000, SL 1.0995 → 5 pips (< 10 min)
+        decision = gate.evaluate(
+            _order(side=OrderSide.BUY, price=1.1000, stop_loss=1.0995),
+            _account(),
+            [],
+        )
+        sl = next(c for c in decision.checks if c.name == "sl_distance")
+        assert not sl.passed
+        assert "5.0 pips" in sl.detail
+        assert "minimum 10" in sl.detail
+
+    def test_exact_minimum_passes(self):
+        """SL distance == 10 pips → passes."""
+        gate = PreTradeGate(_cfg())
+        # Entry 1.1000, SL 1.0990 → exactly 10 pips
+        decision = gate.evaluate(
+            _order(side=OrderSide.BUY, price=1.1000, stop_loss=1.0990),
+            _account(),
+            [],
+        )
+        sl = next(c for c in decision.checks if c.name == "sl_distance")
+        assert sl.passed
+
+    def test_market_order_no_price_skips(self):
+        """MARKET order with no price → skipped."""
+        gate = PreTradeGate(_cfg())
+        decision = gate.evaluate(
+            _order(order_type=OrderType.MARKET, price=None, stop_loss=1.0950),
+            _account(),
+            [],
+        )
+        sl = next(c for c in decision.checks if c.name == "sl_distance")
+        assert sl.passed
+        assert "skipped" in sl.detail

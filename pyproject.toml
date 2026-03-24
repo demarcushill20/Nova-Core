@@ -180,6 +180,9 @@ module = [
     "tests.test_git_repo",
     "tests.test_contract_retry",
     "tests.test_property_schemas",
+    "tests.test_novatrade_live_trading_agent",
+    "tests.test_novatrade_live_loop",
+    "tests.test_novatrade_live_e2e",
     "scripts.complexity_gate",
     "utils.quality_scorer",
 ]

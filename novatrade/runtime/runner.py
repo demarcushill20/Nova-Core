@@ -40,11 +40,16 @@ import time
 import uvicorn
 
 from novatrade.adapter.base import MT5Adapter
+from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.config import NovaTradeCfg
+from novatrade.data.bar_aggregator import BarAggregator
+from novatrade.data.price_feed import TickBatchPoller
+from novatrade.execution.live_trading_agent import LiveTradingAgent
 from novatrade.execution.trading_agent import TradingAgent
 from novatrade.models import AccountState
+from novatrade.monitor.feed_health import FeedHealthSupervisor
 from novatrade.monitor.ops_monitor import OpsMonitor
-from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor, HardLimits
+from novatrade.risk.hard_risk_supervisor import HardLimits, HardRiskSupervisor
 from novatrade.risk.risk_engine import RiskEngine
 from novatrade.runtime.dry_run import DryRunAdapter
 from novatrade.runtime.launch_gate import (
@@ -57,8 +62,11 @@ from novatrade.runtime.launch_gate import (
     resolve_launch_mode,
     validate_startup,
 )
+from novatrade.runtime.live_loop import LiveLoop
 from novatrade.runtime.monitor_loop import MonitorLoop
 from novatrade.runtime.webhook_server import WebhookState, create_app
+from novatrade.strategies.irb import IRBStrategy
+from novatrade.strategy.live_engine import LiveStrategyEngine
 from novatrade.validation.evidence import EvidenceRecorder
 
 log = logging.getLogger("novatrade.runtime.runner")
@@ -249,6 +257,161 @@ def build_stack(
         )
 
     return ws, loop, readiness
+
+
+# ---------------------------------------------------------------------------
+# Live stack builder (full-Python pipeline, no TradingView)
+# ---------------------------------------------------------------------------
+
+
+async def build_live_stack(
+    cfg: NovaTradeCfg | None = None,
+    *,
+    poll_interval: float = 0.5,
+    health_interval: float = 5.0,
+    shadow: bool = False,
+    dry_run: bool = False,
+) -> LiveLoop:
+    """Build the full live trading stack.
+
+    Creates all components, fetches real account balance from broker,
+    pre-seeds strategy engine with historical data, and returns a
+    ready-to-run LiveLoop.
+
+    Args:
+        cfg: NovaTrade config. Loaded from env if None.
+        poll_interval: Tick polling interval in seconds.
+        health_interval: Feed health check interval.
+        shadow: If True, use shadow mode (log only, no orders).
+        dry_run: If True, use DryRunAdapter.
+    """
+    cfg = cfg or NovaTradeCfg.load()
+    symbol = cfg.symbols[0]
+
+    if len(cfg.symbols) > 1:
+        log.warning(
+            "build_live_stack: multiple symbols configured %s but only the first "
+            "symbol (%s) will be used for the strategy engine. Additional symbols "
+            "are polled for ticks but will NOT generate trading signals.",
+            cfg.symbols,
+            symbol,
+        )
+
+    # --- Adapter ---
+    if dry_run or shadow:
+        adapter: MT5Adapter = DryRunAdapter(inner=None)
+        log.info("build_live_stack: using DryRunAdapter (dry_run=%s shadow=%s)", dry_run, shadow)
+    else:
+        meta_errors = cfg.metaapi.validate()
+        if meta_errors:
+            raise RuntimeError(
+                f"Cannot create MetaApiAdapter — missing credentials: {'; '.join(meta_errors)}. "
+                "Use --dry-run or --shadow, or set METAAPI_TOKEN and METAAPI_ACCOUNT_ID."
+            )
+        from novatrade.adapter.metaapi_provider import MetaApiAdapter
+
+        adapter = MetaApiAdapter(config=cfg.metaapi)
+        log.info("build_live_stack: using MetaApiAdapter")
+        status = await adapter.connect()
+        if not status.connected:
+            raise RuntimeError(f"MetaApiAdapter connection failed: {status.message}")
+        log.info("build_live_stack: adapter connected")
+
+    # --- Account balance (CRITICAL: must succeed) ---
+    try:
+        account = await adapter.get_account()
+    except Exception as exc:
+        raise RuntimeError(f"Failed to fetch account state — refusing to trade with unknown balance: {exc}") from exc
+    log.info(
+        "build_live_stack: account balance=%.2f equity=%.2f mode=%s",
+        account.balance,
+        account.equity,
+        account.mode.value,
+    )
+
+    # --- Evidence ---
+    recorder = EvidenceRecorder(
+        path=cfg.data_dir / "live_evidence.jsonl",
+        campaign="irb-live",
+    )
+
+    # --- Risk Engine ---
+    risk_engine = RiskEngine(cfg)
+    risk_engine.initialize(account)
+
+    # --- Hard Risk Supervisor ---
+    supervisor = HardRiskSupervisor(
+        limits=HardLimits(),
+        state_dir=cfg.data_dir / "supervisor",
+        kill_switch_dir=cfg.data_dir.parent / "STATE",
+    )
+    supervisor.initialize(initial_equity=account.equity)
+
+    # --- Trading Agent ---
+    agent = TradingAgent(
+        cfg=cfg,
+        adapter=adapter,
+        risk_engine=risk_engine,
+        recorder=recorder,
+        supervisor=supervisor,
+    )
+
+    # --- Strategy Engine ---
+    env = BacktestEnvironment(symbol_display=symbol, initial_equity=account.balance)
+    strategy = IRBStrategy(env)
+    strategy_engine = LiveStrategyEngine(strategy, env)
+
+    # --- Warmup: pre-seed historical candles ---
+    try:
+        h1_candles = await adapter.get_candles(symbol, "H1", 500)
+        h4_candles = await adapter.get_candles(symbol, "H4", 200)
+        strategy_engine.seed_history(h1_candles, h4_candles)
+        log.info(
+            "build_live_stack: seeded %d H1 + %d H4 candles",
+            len(h1_candles),
+            len(h4_candles),
+        )
+    except Exception:
+        log.error(
+            "build_live_stack: WARMUP FAILED — could not fetch historical candles. "
+            "Strategy engine has NO historical context and must warm up entirely "
+            "from live data. Signals will be unreliable until enough bars accumulate.",
+            exc_info=True,
+        )
+
+    # --- Live Trading Agent ---
+    live_agent = LiveTradingAgent(agent, strategy_engine, cfg, campaign="irb-live")
+
+    # --- Tick Pipeline ---
+    poller = TickBatchPoller(adapter, cfg.symbols, interval=poll_interval)
+
+    # --- Bar Aggregator (ensure H4 is included) ---
+    timeframes = list(cfg.timeframes)
+    if "H4" not in timeframes:
+        timeframes.append("H4")
+    aggregator = BarAggregator(timeframes=timeframes)
+
+    # --- Feed Health ---
+    feed_supervisor = FeedHealthSupervisor()
+
+    # --- LiveLoop ---
+    live_loop = LiveLoop(
+        poller=poller,
+        aggregator=aggregator,
+        supervisor=feed_supervisor,
+        strategy_engine=strategy_engine,
+        live_agent=live_agent,
+        health_interval=health_interval,
+    )
+
+    log.info(
+        "build_live_stack: ready — symbol=%s timeframes=%s poll=%.1fs health=%.1fs",
+        symbol,
+        timeframes,
+        poll_interval,
+        health_interval,
+    )
+    return live_loop
 
 
 # ---------------------------------------------------------------------------

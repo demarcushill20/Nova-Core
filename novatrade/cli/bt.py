@@ -19,8 +19,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
+
+if TYPE_CHECKING:
+    from novatrade.config import NovaTradeCfg
 
 from novatrade.cli.commands.data import (
     CANDLE_DIR,
@@ -338,6 +342,72 @@ def run_backtest(
     # Exit code reflects status
     if result.status == "crashed":
         raise typer.Exit(code=2)
+
+
+# ---------------------------------------------------------------------------
+# live command (full-Python pipeline, no TradingView)
+# ---------------------------------------------------------------------------
+
+
+async def _run_live(
+    cfg: NovaTradeCfg,
+    poll_interval: float,
+    shadow: bool,
+    dry_run: bool,
+) -> None:
+    from novatrade.runtime.runner import build_live_stack
+
+    live_loop = await build_live_stack(
+        cfg=cfg,
+        poll_interval=poll_interval,
+        shadow=shadow,
+        dry_run=dry_run,
+    )
+
+    typer.echo(f"Live loop ready — symbols={cfg.symbols} timeframe={cfg.timeframes[0]} shadow={shadow}")
+    typer.echo("Starting... (Ctrl+C to stop)")
+
+    try:
+        await live_loop.run()
+    except KeyboardInterrupt:
+        live_loop.stop()
+
+
+@app.command("live")
+def run_live(
+    symbols: str = typer.Option("EURUSD", help="Comma-separated symbols"),
+    timeframe: str = typer.Option("H1", help="Primary timeframe"),
+    poll_interval: float = typer.Option(0.5, help="Tick poll interval in seconds"),
+    shadow: bool = typer.Option(False, help="Shadow mode — log signals, no orders"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Use DryRunAdapter"),
+) -> None:
+    """Start the live trading loop (full Python pipeline, no TradingView).
+
+    Connects to MetaApi, pre-seeds historical data, and runs the
+    three-loop async orchestrator: tick pipeline, order execution,
+    and health monitoring.
+    """
+    import asyncio
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
+
+    from novatrade.config import NovaTradeCfg
+
+    cfg = NovaTradeCfg.load()
+    cfg.symbols = [s.strip() for s in symbols.split(",")]
+    cfg.timeframes = [timeframe]
+
+    try:
+        asyncio.run(_run_live(cfg, poll_interval, shadow, dry_run))
+    except RuntimeError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except KeyboardInterrupt:
+        typer.echo("\nShutdown requested.")
 
 
 # ---------------------------------------------------------------------------

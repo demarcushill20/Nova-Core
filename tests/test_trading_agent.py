@@ -349,7 +349,13 @@ class TestFSMTransitions:
     async def test_flat_to_pending_short(self):
         agent = _make_agent()
         result = await agent.process_alert(
-            _signal_payload(side="SELL", order_type="SELL_STOP", signal_type="SHORT_IRB")
+            _signal_payload(
+                side="SELL",
+                order_type="SELL_STOP",
+                signal_type="SHORT_IRB",
+                entry_price=1.08234,
+                stop_loss=1.08765,
+            )
         )
         assert result.success
         assert agent.state == AgentState.PENDING_SHORT
@@ -855,6 +861,8 @@ class TestPositionTracking:
             side="SELL",
             order_type="SELL_STOP",
             action="PLACE_STOP_ORDER",
+            entry_price=1.08234,
+            stop_loss=1.08765,
         )
         result = await agent.process_alert(payload)
         assert result.success

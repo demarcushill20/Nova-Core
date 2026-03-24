@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from novatrade.monitor.feed_health import FeedHealthSupervisor
 
 from novatrade.config import NovaTradeCfg
 from novatrade.models import (
@@ -38,6 +42,10 @@ from novatrade.risk.position_sizer import PositionSizer
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
+# Minimum stop-loss distance in pips — prevents micro-stops that get
+# stopped out by spread noise alone.
+_MIN_SL_DISTANCE_PIPS = 10.0
+
 # Modes that the MVP is allowed to trade in.
 _MVP_ALLOWED_MODES = frozenset({AccountMode.DEMO})
 
@@ -55,9 +63,15 @@ class PreTradeGate:
             # safe to forward to adapter
     """
 
-    def __init__(self, cfg: NovaTradeCfg) -> None:
+    def __init__(
+        self,
+        cfg: NovaTradeCfg,
+        *,
+        feed_health: FeedHealthSupervisor | None = None,
+    ) -> None:
         self._cfg = cfg
         self._risk = cfg.risk
+        self._feed_health = feed_health
         # Rolling trade log: list of (timestamp, symbol, side_value) for
         # cooldown and daily-count tracking.  Kept in-memory — resets on
         # process restart, which is acceptable for MVP.
@@ -103,11 +117,13 @@ class PreTradeGate:
         checks.append(self._check_dry_run())
         checks.append(self._check_account_mode(account))
         checks.append(self._check_health(health))
+        checks.append(self._check_feed_health(request.symbol))
         checks.append(self._check_symbol(request))
         checks.append(self._check_volume(request))
         checks.append(self._lot_checker.check(request.volume))
         checks.append(self._request_counter.check())
         checks.append(self._check_stop_loss(request))
+        checks.append(self._check_sl_distance(request))
         checks.append(self._check_volume_sizing(request, account))
         checks.append(self._check_max_positions(positions))
         checks.append(self._check_daily_trade_count(now))
@@ -243,6 +259,97 @@ class PreTradeGate:
             name="health",
             passed=True,
             detail=f"state={health.state.value}",
+        )
+
+    def _check_feed_health(self, symbol: str) -> RiskCheckResult:
+        """Deny if the data feed for this symbol is unhealthy.
+
+        Uses FeedHealthSupervisor.is_tradeable() which checks staleness,
+        clock drift, spread widening, disconnection, and market closure.
+        Fail-open if no feed supervisor is configured (preserves backward
+        compat for dry-run / test scenarios).
+        """
+        if self._feed_health is None:
+            return RiskCheckResult(
+                name="feed_health",
+                passed=True,
+                detail="no feed health supervisor — skipped",
+            )
+        try:
+            if self._feed_health.is_tradeable(symbol):
+                snap = self._feed_health.get_snapshot(symbol)
+                return RiskCheckResult(
+                    name="feed_health",
+                    passed=True,
+                    detail=(
+                        f"state={snap.state.value} age={snap.last_tick_age:.1f}s"
+                        f" spread={snap.current_spread_pips:.1f}pips"
+                    ),
+                )
+            snap = self._feed_health.get_snapshot(symbol)
+            return RiskCheckResult(
+                name="feed_health",
+                passed=False,
+                detail=(
+                    f"feed unhealthy: state={snap.state.value}"
+                    f" age={snap.last_tick_age:.1f}s"
+                    f" spread={snap.current_spread_pips:.1f}pips"
+                ),
+            )
+        except Exception as exc:
+            # Fail-closed on errors
+            return RiskCheckResult(
+                name="feed_health",
+                passed=False,
+                detail=f"feed health check error: {exc}",
+            )
+
+    def _check_sl_distance(self, request: OrderRequest) -> RiskCheckResult:
+        """Validate stop-loss is on the correct side and meets minimum distance.
+
+        - BUY orders: SL must be below entry price
+        - SELL orders: SL must be above entry price
+        - Distance must be >= _MIN_SL_DISTANCE_PIPS (prevents micro-stops)
+        """
+        if request.price is None or request.stop_loss is None:
+            return RiskCheckResult(
+                name="sl_distance",
+                passed=True,
+                detail="price or stop_loss not set — skipped",
+            )
+
+        from novatrade.models import OrderSide
+
+        sl_distance = abs(request.price - request.stop_loss)
+        # Convert to pips (assume 5-digit pricing for forex pairs)
+        sl_pips = sl_distance * 10_000
+
+        # Check SL direction
+        if request.side == OrderSide.BUY and request.stop_loss >= request.price:
+            return RiskCheckResult(
+                name="sl_distance",
+                passed=False,
+                detail=f"BUY order SL ({request.stop_loss}) must be below entry ({request.price})",
+            )
+        if request.side == OrderSide.SELL and request.stop_loss <= request.price:
+            return RiskCheckResult(
+                name="sl_distance",
+                passed=False,
+                detail=f"SELL order SL ({request.stop_loss}) must be above entry ({request.price})",
+            )
+
+        # Check minimum distance
+        if sl_pips < _MIN_SL_DISTANCE_PIPS:
+            return RiskCheckResult(
+                name="sl_distance",
+                passed=False,
+                detail=f"SL distance {sl_pips:.1f} pips < minimum {_MIN_SL_DISTANCE_PIPS} pips",
+            )
+
+        return RiskCheckResult(
+            name="sl_distance",
+            passed=True,
+            detail=f"sl_pips={sl_pips:.1f}, side={request.side.value}",
         )
 
     def _check_symbol(self, request: OrderRequest) -> RiskCheckResult:
