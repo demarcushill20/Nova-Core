@@ -40,6 +40,7 @@ from novatrade.models import (
 )
 from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor
 from novatrade.risk.risk_engine import RiskEngine
+from novatrade.storage.state_store import StateStore
 from novatrade.validation.evidence import EvidenceRecorder
 
 log = logging.getLogger("novatrade.execution.trading_agent")
@@ -361,12 +362,14 @@ class TradingAgent:
         risk_engine: RiskEngine,
         recorder: EvidenceRecorder | None = None,
         supervisor: HardRiskSupervisor | None = None,
+        state_store: StateStore | None = None,
     ) -> None:
         self._cfg = cfg
         self._adapter = adapter
         self._risk = risk_engine
         self._recorder = recorder
         self._supervisor = supervisor
+        self._state_store = state_store
 
         # FSM state
         self._state = AgentState.FLAT
@@ -381,6 +384,9 @@ class TradingAgent:
         # Idempotency — bounded set of seen keys
         self._seen_keys: set[str] = set()
         self._max_seen_keys = 1000
+
+        # Restore persisted state if available
+        self._load_persisted_state()
 
     # -- Properties --------------------------------------------------------
 
@@ -500,6 +506,12 @@ class TradingAgent:
         if result.success:
             self._seen_keys.add(idem_key)
             self._prune_seen_keys()
+            if self._state_store is not None:
+                try:
+                    self._state_store.add_idempotency_key(idem_key)
+                    self._state_store.prune_idempotency_keys(self._max_seen_keys)
+                except Exception:
+                    log.exception("state_store: failed to persist idempotency key")
 
         return result
 
@@ -693,6 +705,7 @@ class TradingAgent:
         self._pending_order_id = order_result.order_id
         self._pending_side = side
         self._pending_symbol = broker_symbol
+        self._persist()
 
         log.info(
             "%s -> %s order_id=%s entry=%.5f sl=%.5f vol=%.2f",
@@ -873,6 +886,7 @@ class TradingAgent:
         self._pending_order_id = None
         self._pending_side = None
         self._pending_symbol = None
+        self._persist()
 
         log.info(
             "order cancelled: %s reason=%s -> FLAT",
@@ -939,7 +953,7 @@ class TradingAgent:
             positions = await self._adapter.get_positions()
             for pos in positions:
                 if pos.position_id == self._position_id:
-                    pnl_usd = getattr(pos, 'unrealized_pnl', 0.0)
+                    pnl_usd = getattr(pos, "unrealized_pnl", 0.0)
                     break
         except Exception as exc:
             log.warning("Failed to get position P&L before close: %s", exc)
@@ -989,6 +1003,7 @@ class TradingAgent:
         self._position_side = None
         self._position_symbol = None
         self._position_volume = 0.0
+        self._persist()
 
         log.info(
             "position closed: %s reason=%s -> FLAT",
@@ -1043,6 +1058,7 @@ class TradingAgent:
         self._pending_order_id = None
         self._pending_side = None
         self._pending_symbol = None
+        self._persist()
 
         # Inform risk engine — use tracked symbol, not hardcoded
         symbol = self._position_symbol or self._cfg.symbols[0]
@@ -1097,6 +1113,7 @@ class TradingAgent:
         self._position_side = None
         self._position_symbol = None
         self._position_volume = 0.0
+        self._persist()
 
         log.info("broker close: %s -> FLAT reason=%s", old_state.value, exit_reason)
         self._record_event(
@@ -1125,6 +1142,7 @@ class TradingAgent:
         self._position_side = None
         self._position_symbol = None
         self._position_volume = 0.0
+        self._persist()
 
         log.info("force_flat: %s -> FLAT reason=%s", old_state.value, reason)
         self._record_event(
@@ -1180,6 +1198,64 @@ class TradingAgent:
             excess = len(self._seen_keys) - (self._max_seen_keys // 2)
             keys = list(self._seen_keys)
             self._seen_keys = set(keys[excess:])
+
+    # -- State persistence -------------------------------------------------
+
+    def _load_persisted_state(self) -> None:
+        """Restore FSM state and idempotency keys from persistent storage.
+
+        Called once during __init__.  If no store is configured or the DB is
+        empty/corrupted, the agent starts fresh in FLAT state (backward compat).
+        """
+        if self._state_store is None:
+            return
+        try:
+            row = self._state_store.load_agent_state()
+            if row is not None:
+                self._state = AgentState(row["state"])
+                self._pending_order_id = row.get("pending_order_id")
+                self._pending_side = OrderSide(row["pending_side"]) if row.get("pending_side") else None
+                self._pending_symbol = row.get("pending_symbol")
+                self._position_id = row.get("position_id")
+                self._position_side = OrderSide(row["position_side"]) if row.get("position_side") else None
+                self._position_symbol = row.get("position_symbol")
+                self._position_volume = row.get("position_volume", 0.0)
+                log.info(
+                    "state_store: restored state=%s pending=%s position=%s",
+                    self._state.value,
+                    self._pending_order_id,
+                    self._position_id,
+                )
+
+            keys = self._state_store.load_idempotency_keys(self._max_seen_keys)
+            if keys:
+                self._seen_keys = keys
+                log.info("state_store: restored %d idempotency keys", len(keys))
+        except Exception:
+            log.exception("state_store: failed to load persisted state — starting fresh")
+            self._state = AgentState.FLAT
+
+    def _persist(self) -> None:
+        """Save current FSM state and any new idempotency keys to the store.
+
+        Called after every state transition.  Wrapped in try/except so a
+        persistence failure never blocks trading.
+        """
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_agent_state(
+                state=self._state.value,
+                pending_order_id=self._pending_order_id,
+                pending_side=self._pending_side.value if self._pending_side else None,
+                pending_symbol=self._pending_symbol,
+                position_id=self._position_id,
+                position_side=self._position_side.value if self._position_side else None,
+                position_symbol=self._position_symbol,
+                position_volume=self._position_volume,
+            )
+        except Exception:
+            log.exception("state_store: failed to persist agent state")
 
 
 def _safe_payload(payload: dict) -> dict:

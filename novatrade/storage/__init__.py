@@ -23,6 +23,7 @@ from novatrade.storage.experiment_identity import (
     compute_experiment_id_v2,
     get_engine_sha,
 )
+from novatrade.storage.state_store import StateStore
 
 __all__ = [
     # data_snapshot
@@ -30,6 +31,8 @@ __all__ = [
     # experiment_db
     "ExperimentDB",
     "ExperimentRecord",
+    # state_store
+    "StateStore",
     # experiment_identity
     "compute_config_hash",
     "compute_doctrine_hash",

@@ -65,6 +65,7 @@ from novatrade.runtime.launch_gate import (
 from novatrade.runtime.live_loop import LiveLoop
 from novatrade.runtime.monitor_loop import MonitorLoop
 from novatrade.runtime.webhook_server import WebhookState, create_app
+from novatrade.storage.state_store import StateStore
 from novatrade.strategies.irb import IRBStrategy
 from novatrade.strategy.live_engine import LiveStrategyEngine
 from novatrade.validation.evidence import EvidenceRecorder
@@ -188,6 +189,9 @@ def build_stack(
     )
     supervisor.initialize(initial_equity=initial_account.equity)
 
+    # --- State Store (persistent FSM + idempotency) ---
+    state_store = StateStore(cfg.data_dir / "state.db")
+
     # --- Trading Agent ---
     agent = TradingAgent(
         cfg=cfg,
@@ -195,6 +199,7 @@ def build_stack(
         risk_engine=risk_engine,
         recorder=recorder,
         supervisor=supervisor,
+        state_store=state_store,
     )
 
     # --- OpsMonitor ---
@@ -347,6 +352,9 @@ async def build_live_stack(
     )
     supervisor.initialize(initial_equity=account.equity)
 
+    # --- State Store (persistent FSM + idempotency) ---
+    state_store = StateStore(cfg.data_dir / "live_state.db")
+
     # --- Trading Agent ---
     agent = TradingAgent(
         cfg=cfg,
@@ -354,6 +362,7 @@ async def build_live_stack(
         risk_engine=risk_engine,
         recorder=recorder,
         supervisor=supervisor,
+        state_store=state_store,
     )
 
     # --- Strategy Engine ---
