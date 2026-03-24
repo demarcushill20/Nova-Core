@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260324_9_novatrade_status_1774380937",
+  "workflow_id": "shift_20260324_9_novatrade_status",
+  "task_summary": "NovaTrade afternoon status check \u2014 service healthy (3440 cycles, FLAT, $100K), shadow mode not deployed, 0 signals/trades today, MetaApi instance 1 has non-critical subscribe failures",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "NovaTrade afternoon status check \u2014 service healthy (3440 cycles, FLAT, $100K), shadow mode not deployed, 0 signals/trades today, MetaApi instance 1 has non-critical subscribe failures"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260324_9_novatrade_status"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "NovaTrade afternoon status check \u2014 service healthy (3440 cycles, FLAT, $100K), shadow mode not deployed, 0 signals/trades today, MetaApi instance 1 has non-critical subscribe failures",
+  "created_at": "2026-03-24T19:35:37Z",
+  "confidence": "high"
+}
