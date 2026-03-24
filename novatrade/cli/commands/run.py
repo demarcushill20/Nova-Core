@@ -32,6 +32,7 @@ from novatrade.backtest.metrics import (
 from novatrade.cli.config_schema import StrategyConfig
 from novatrade.evaluation.fitness import compute_scout_score
 from novatrade.evaluation.gates import (
+    GateConfig,
     GateResults,
     evaluate_stage_a,
     evaluate_stage_b,
@@ -79,6 +80,7 @@ def execute_backtest(
     doctrine_hash: str = "",
     campaign_dir: Path | None = None,
     db: ExperimentDB | None = None,
+    gate_config: GateConfig | None = None,
 ) -> BacktestRunResult:
     """Run a single backtest with gated evaluation and optional artifact capture.
 
@@ -182,7 +184,7 @@ def execute_backtest(
     )
 
     # --- Step 6: Stage A gates ---
-    stage_a_results = evaluate_stage_a(metrics)
+    stage_a_results = evaluate_stage_a(metrics, config=gate_config)
     for r in stage_a_results:
         gate_results.results.append(r)
 
@@ -195,7 +197,7 @@ def execute_backtest(
         notes_parts.append(f"Stage A failed at: {gate_results.failed_at}")
     else:
         # --- Step 8: Stage B gates ---
-        stage_b_results = evaluate_stage_b(environment)
+        stage_b_results = evaluate_stage_b(environment, config=gate_config)
         for r in stage_b_results:
             gate_results.results.append(r)
 

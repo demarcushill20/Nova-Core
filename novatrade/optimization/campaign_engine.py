@@ -25,6 +25,7 @@ from pathlib import Path
 from novatrade.cli.commands.run import BacktestRunResult, execute_backtest
 from novatrade.cli.config_schema import StrategyConfig
 from novatrade.doctrine.schema import StrategyDoctrine
+from novatrade.evaluation.gates import GateConfig
 from novatrade.optimization.mutations import (
     AncestryTracker,
     MutationBudget,
@@ -75,6 +76,7 @@ class CampaignConfig:
     mutation_budget: MutationBudget | None = None
     doctrine: StrategyDoctrine | None = None
     enable_mutations: bool = False  # opt-in: set True to use L2/L3 mutations
+    gate_config: GateConfig | None = None  # override default gate thresholds
 
     def __post_init__(self) -> None:
         if not self.campaign_id:
@@ -295,6 +297,7 @@ def run_campaign(
             doctrine_hash=doctrine_hash,
             campaign_dir=campaign_dir,
             db=db,
+            gate_config=cfg.gate_config,
         )
         status_counts[result.status] = status_counts.get(result.status, 0) + 1
 

@@ -17,6 +17,7 @@ Known limitations:
 from __future__ import annotations
 
 import os
+import sys
 import time
 
 # Prevent SIGABRT from OpenBLAS multi-threaded allocation on constrained VPS.
@@ -35,6 +36,35 @@ from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
 
 
+def _import_vectorbt():
+    """Import vectorbt with sys.path sanitized to avoid telegram module shadowing.
+
+    nova-core's ``telegram/`` package shadows ``python-telegram-bot`` which
+    vectorbt.messaging.telegram tries to import.  We temporarily remove any
+    path entry whose resolved directory contains a local ``telegram/__init__.py``
+    (i.e. not from site-packages).
+    """
+    from pathlib import Path
+
+    poison: list[tuple[int, str]] = []
+    for i, p in enumerate(sys.path):
+        resolved = Path(p).resolve() if p else Path.cwd()
+        candidate = resolved / "telegram" / "__init__.py"
+        if candidate.exists() and "site-packages" not in str(resolved):
+            poison.append((i, p))
+
+    for _, p in reversed(poison):
+        sys.path.remove(p)
+    try:
+        import vectorbt as vbt
+
+        return vbt
+    finally:
+        for idx, p in poison:
+            if p not in sys.path:
+                sys.path.insert(idx, p)
+
+
 class VectorbtAdapter(BaseEngineAdapter):
     """Adapter for vectorbt."""
 
@@ -45,16 +75,14 @@ class VectorbtAdapter(BaseEngineAdapter):
     @property
     def engine_version(self) -> str:
         try:
-            import vectorbt as vbt
-
+            vbt = _import_vectorbt()
             return f"vectorbt {vbt.__version__}"
         except Exception:
             return "vectorbt (unknown)"
 
     def is_available(self) -> bool:
         try:
-            import vectorbt  # noqa: F401
-
+            _import_vectorbt()
             return True
         except ImportError:
             return False
@@ -69,8 +97,8 @@ class VectorbtAdapter(BaseEngineAdapter):
         try:
             import numpy as np
             import pandas as pd
-            import vectorbt as vbt
 
+            vbt = _import_vectorbt()
             from novatrade.backtest.engine import compute_atr, compute_ema
 
             df = self._candles_to_dataframe(h1_candles)

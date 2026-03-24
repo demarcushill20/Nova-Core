@@ -20,6 +20,8 @@ Public API:
 """
 
 from novatrade.data.bar_aggregator import TIMEFRAME_SECONDS, BarAggregator
+from novatrade.data.dukascopy_fetcher import DukascopyFetcher
+from novatrade.data.dukascopy_fetcher import ticks_to_candles as dukascopy_ticks_to_candles
 from novatrade.data.loader import CandleFormat, detect_format, load_candles
 from novatrade.data.ohlcv_provider import (
     CachedOHLCVProvider,
@@ -40,6 +42,7 @@ __all__ = [
     "CachedOHLCVProvider",
     "CandleFormat",
     "DataQualityReport",
+    "DukascopyFetcher",
     "MetaApiOHLCVProvider",
     "OHLCVProvider",
     "Tick",
@@ -48,6 +51,7 @@ __all__ = [
     "auto_fix_candles",
     "derive_timeframe",
     "detect_format",
+    "dukascopy_ticks_to_candles",
     "load_candles",
     "validate_candles",
 ]

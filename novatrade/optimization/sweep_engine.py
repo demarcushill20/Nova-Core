@@ -29,6 +29,9 @@ INT_PARAMS = {
     "warmup_bars",
     "trail_ema_period",
     "ema_confirm_bars",
+    "trail_delay_bars",
+    "volatility_atr_ma_period",
+    "max_consecutive_losses",
 }
 
 

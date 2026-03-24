@@ -251,147 +251,157 @@ AFTERNOON_SHIFT_BLOCKS: list[dict] = [
         "block": 9,
         "hour": 14,
         "minute": 30,
-        "slug": "afternoon_review",
-        "title": "Afternoon Review & Continuity",
-        "focus": "Review",
+        "slug": "novatrade_status",
+        "title": "NovaTrade Status Check",
+        "focus": "NovaTrade",
         "instructions": """\
-1. Review morning shift outputs:
-   - Check OUTPUT/shift_*_[1-8]_*.md files from today
-   - Identify what was completed and what remains
-   - Note any issues or blockers discovered in the morning
+1. Shadow mode health check:
+   - Check if novacore-shadow.service is running: `systemctl status novacore-shadow`
+   - Review shadow mode logs for errors or warnings
+   - Check MetaApi connection status and feed health
 
-2. Pick up unfinished work:
-   - Identify gaps or incomplete items from morning blocks
-   - Prioritize carrying forward any critical unfinished work
-   - Check for any new tasks that arrived since morning wrap
+2. Signal match rate:
+   - Compare Python pipeline signals vs TV webhook signals from last period
+   - Calculate match rate (target: 95%+)
+   - Log any divergences with timestamps and details
 
-3. System health check:
-   - Quick verification that all services are still running
-   - Query Fusion Memory for morning session state
-   - Review any alerts or issues that occurred during midday""",
-        "output_suffix": "afternoon_review",
+3. Service and system health:
+   - Verify novacore-novatrade.service is running
+   - Check FTMO daily loss tracker state
+   - Review morning shift NovaTrade outputs for continuity
+   - Quick check on all NovaCore services (watcher, telegram)""",
+        "output_suffix": "novatrade_status",
     },
     {
         "block": 10,
         "hour": 15,
         "minute": 15,
-        "slug": "implementation_pm",
-        "title": "Implementation (Primary Coding)",
-        "focus": "Implementation",
+        "slug": "novatrade_impl",
+        "title": "NovaTrade Implementation",
+        "focus": "NovaTrade",
         "instructions": """\
-1. Select highest-impact work:
-   - Pick the most impactful implementation task
-   - Focus on NovaTrade or NovaCore advancement
-   - This is the longest uninterrupted focus block — use it wisely
+1. Identify current sprint item:
+   - Check NovaTrade Operational Sprint status (S1-S8)
+   - Pick the highest-priority incomplete item
+   - If sprint is complete, work on FTMO compliance gaps or strategy tuning
 
 2. Implement:
-   - Write clean, tested code
-   - Follow existing patterns and conventions
-   - Create tests alongside implementation
-   - Aim for meaningful progress on a single focused task
+   - Focus exclusively on NovaTrade code (novatrade/ directory)
+   - Write clean, tested code following existing patterns
+   - Priority order: FTMO compliance > execution reliability > strategy refinement
+   - Ensure IRB champion strategy parameters are correctly wired
 
 3. Validate:
-   - Run affected test suites
-   - Verify no regressions with: `python -m pytest tests/ -q --tb=short`""",
-        "output_suffix": "implementation_pm",
+   - Run NovaTrade tests: `python -m pytest tests/ -k novatrade -q --tb=short`
+   - Verify no regressions in trade execution paths
+   - Check that live stack builds correctly""",
+        "output_suffix": "novatrade_impl",
     },
     {
         "block": 11,
         "hour": 16,
         "minute": 0,
-        "slug": "implementation_pm2",
-        "title": "Implementation (Continued)",
-        "focus": "Implementation",
+        "slug": "novatrade_impl2",
+        "title": "NovaTrade Implementation (Continued)",
+        "focus": "NovaTrade",
         "instructions": """\
-1. Continue implementation:
-   - Continue work from the previous block if not yet complete
-   - If previous work is done, pick next highest priority item
-   - Maintain focus and momentum
+1. Continue NovaTrade implementation:
+   - Continue work from block 10 if not yet complete
+   - If previous work is done, pick next NovaTrade priority
+   - Maintain focus — no context-switching to NovaCore infra
 
-2. Test completed work:
-   - Run tests on all code written during this and the previous block
+2. Test and commit:
+   - Run full NovaTrade test suite
    - Ensure adequate test coverage for new code
    - Fix any test failures immediately
-
-3. Commit and push:
    - Commit clean, well-described changes
-   - Push to remote to preserve work
-   - Update any relevant documentation""",
-        "output_suffix": "implementation_pm2",
+
+3. Shadow mode impact check:
+   - If shadow mode is running, verify changes don't disrupt it
+   - Check that any new code paths are shadow-mode compatible
+   - Log any configuration changes that affect live behavior""",
+        "output_suffix": "novatrade_impl2",
     },
     {
         "block": 12,
         "hour": 16,
         "minute": 45,
-        "slug": "novatrade_pm",
-        "title": "NovaTrade Advancement",
+        "slug": "novatrade_testing",
+        "title": "NovaTrade Testing & Validation",
         "focus": "NovaTrade",
         "instructions": """\
-1. NovaTrade status check:
-   - Check if novacore-novatrade.service is running
-   - Review novatrade/ directory for current state
-   - Identify the highest-impact NovaTrade item to advance
+1. Full NovaTrade test suite:
+   - Run: `python -m pytest tests/ -k novatrade --cov=novatrade --cov-report=term-missing -q`
+   - Fix any failures from today's implementation blocks
+   - Identify and fix flaky tests in trading paths
 
-2. Push toward live readiness:
-   - Fix execution gaps
-   - Expand test coverage for trading paths
-   - Implement next steps toward live trading
-   - Focus on production reliability
+2. Shadow mode divergence analysis:
+   - Review shadow mode signal log for any mismatches
+   - For each divergence: identify root cause (timing, data, logic)
+   - Prioritize fixes for divergences that would affect live trading
 
-3. Test and verify:
-   - Run NovaTrade-specific tests: `python -m pytest tests/ -k novatrade -q`
-   - Verify any changes don't break existing functionality
-   - Check trade execution paths end-to-end""",
-        "output_suffix": "novatrade_pm",
+3. FTMO compliance validation:
+   - Verify all 8 FTMO compliance checks pass
+   - Test daily loss limit calculations against expected values
+   - Validate weekend auto-close timing logic
+   - Check lot-size consistency rules""",
+        "output_suffix": "novatrade_testing",
     },
     {
         "block": 13,
         "hour": 17,
         "minute": 30,
-        "slug": "research_pm",
-        "title": "Deep Research",
-        "focus": "Research",
+        "slug": "novatrade_research",
+        "title": "NovaTrade Research",
+        "focus": "NovaTrade",
         "instructions": """\
-1. Choose a research topic:
-   - Pick something that advances NovaCore or NovaTrade capabilities
-   - Consider: new libraries, architectural patterns, trading strategies,
-     AI techniques, infrastructure improvements
-   - Prefer topics that can translate into actionable improvements
+1. Choose a NovaTrade-relevant research topic:
+   - Market microstructure (spread behavior, liquidity windows, session overlaps)
+   - FTMO rules and edge cases (challenge mechanics, scaling plan, rule changes)
+   - IRB strategy refinement (parameter sensitivity, regime detection, filters)
+   - Execution optimization (fill rates, slippage reduction, order timing)
+   - Prop firm landscape (alternative firms, rule comparisons, best practices)
 
 2. Research deeply:
-   - Use web search and documentation to gather information
-   - Analyze trade-offs, compare approaches
-   - Look for real-world production examples
+   - Use web search for current FTMO rules and prop firm community insights
+   - Analyze trade-offs specific to funded trading
+   - Look for real-world prop firm trader experiences and common pitfalls
 
 3. Document and store findings:
-   - Store key insights in Fusion Memory with category: research
+   - Store key insights in Fusion Memory with category: research, project: novatrade
    - Write a concise summary with actionable recommendations
-   - Note any items that should become implementation tasks""",
-        "output_suffix": "research_pm",
+   - Flag any findings that require code changes or strategy adjustments""",
+        "output_suffix": "novatrade_research",
     },
     {
         "block": 14,
         "hour": 18,
         "minute": 15,
-        "slug": "testing_pm",
-        "title": "Testing & Hardening",
-        "focus": "Quality",
+        "slug": "novatrade_monitoring",
+        "title": "NovaTrade Monitoring & Analysis",
+        "focus": "NovaTrade",
         "instructions": """\
-1. Full test suite:
-   - Run: `python -m pytest tests/ --cov=. --cov-report=term-missing -q`
-   - Fix any failures from today's work (both shifts)
-   - Identify and fix flaky tests
+1. Shadow signal analysis:
+   - Review all shadow mode signals generated today
+   - Compare entry/exit timing, direction, and sizing
+   - Calculate running match rate and trend (improving or degrading?)
 
-2. Edge case coverage:
-   - Add tests for edge cases discovered during implementation
-   - Focus on error handling and boundary conditions
-   - Add property-based tests (Hypothesis) where appropriate
+2. Feed health review:
+   - Check MetaApi connection uptime for the day
+   - Review feed health supervisor false-positive rate
+   - Verify price data quality (gaps, stale quotes, anomalies)
 
-3. Security and hardening:
-   - Run security scans on changed files
-   - Check for any new dependencies that need vetting
-   - Focus on production readiness of today's changes""",
-        "output_suffix": "testing_pm",
+3. Daily P&L and risk tracking:
+   - Check FTMO daily loss tracker values against FTMO dashboard
+   - Verify position sizing stays within risk limits (1% per trade)
+   - Review any trades that approached daily loss threshold
+   - Log daily monitoring summary to Fusion Memory
+
+4. Cutover readiness assessment:
+   - Update running tally: days of shadow validation completed
+   - Note any issues that would block cutover
+   - If 7 days complete with 95%+ match: flag ready for S8""",
+        "output_suffix": "novatrade_monitoring",
     },
     {
         "block": 15,

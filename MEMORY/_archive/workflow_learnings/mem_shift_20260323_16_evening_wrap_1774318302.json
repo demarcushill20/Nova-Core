@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
   "created_at": "2026-03-24T02:11:42Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0534_Can_you_investigate_this_heads_up__Heads_up___1_issue_at_14_00_UTC__1774363283"
 }
