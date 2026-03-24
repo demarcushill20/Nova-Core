@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from novatrade.monitor.feed_health import FeedHealthSupervisor
@@ -218,6 +219,20 @@ class PreTradeGate:
         self._request_counter.save_state()
         self._days_tracker.save_state()
         self._daily_loss_tracker.save_state()
+
+    def _day_start_prague_tz(self, ts: float) -> float:
+        """Return midnight Prague timezone timestamp for the day containing *ts*.
+
+        Uses FTMO's daily reset timezone (Europe/Prague) for consistent daily boundaries.
+        This correctly handles CET↔CEST DST transitions, unlike UTC-based calculations.
+        """
+        from datetime import datetime, timezone
+
+        prague_tz = ZoneInfo(self._cfg.risk.daily_reset_tz)
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(prague_tz)
+        # Get date in Prague timezone, then convert back to midnight Prague time as UTC timestamp
+        midnight_prague = datetime(dt.year, dt.month, dt.day, tzinfo=prague_tz)
+        return midnight_prague.timestamp()
 
     # ------------------------------------------------------------------
     # Individual checks
@@ -510,7 +525,7 @@ class PreTradeGate:
     def _check_daily_trade_count(self, now: float) -> RiskCheckResult:
         """Deny if daily trade count has been reached."""
         limit = self._risk.max_trades_per_day
-        day_start = _day_start(now)
+        day_start = self._day_start_prague_tz(now)
         today_count = sum(1 for ts, _, _ in self._trade_log if ts >= day_start)
         if today_count >= limit:
             return RiskCheckResult(
@@ -671,11 +686,3 @@ class PreTradeGate:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _day_start(ts: float) -> float:
-    """Return midnight-UTC timestamp for the day containing *ts*."""
-    import datetime as _dt
-
-    d = _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc).date()
-    return _dt.datetime(d.year, d.month, d.day, tzinfo=_dt.timezone.utc).timestamp()
