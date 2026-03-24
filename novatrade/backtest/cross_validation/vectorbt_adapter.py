@@ -16,7 +16,12 @@ Known limitations:
 
 from __future__ import annotations
 
+import os
 import time
+
+# Prevent SIGABRT from OpenBLAS multi-threaded allocation on constrained VPS.
+# Must be set before numpy is imported (numpy reads this at import time).
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 from novatrade.backtest.cross_validation.base_adapter import BaseEngineAdapter
 from novatrade.backtest.cross_validation.types import (
@@ -62,9 +67,9 @@ class VectorbtAdapter(BaseEngineAdapter):
     ) -> EngineResult:
         t0 = time.monotonic()
         try:
-            import vectorbt as vbt
             import numpy as np
             import pandas as pd
+            import vectorbt as vbt
 
             from novatrade.backtest.engine import compute_atr, compute_ema
 
@@ -102,13 +107,13 @@ class VectorbtAdapter(BaseEngineAdapter):
             # Run portfolio simulation
             close_series = pd.Series(closes, index=df.index)
 
-            # Combine into single direction for from_signals
-            entries = long_entries | short_entries
             # For simplicity, treat all as long signals (vectorbt limitation)
             # A more accurate approach would use from_orders()
 
             sl_pct = float(np.nanmean(atr_arr[~np.isnan(atr_arr)])) / float(np.mean(closes)) * 2
-            trail_pct = float(np.nanmean(atr_arr[~np.isnan(atr_arr)])) / float(np.mean(closes)) * env.trail_atr_multiplier
+            trail_pct = (
+                float(np.nanmean(atr_arr[~np.isnan(atr_arr)])) / float(np.mean(closes)) * env.trail_atr_multiplier
+            )
 
             pf = vbt.Portfolio.from_signals(
                 close=close_series,
@@ -176,7 +181,7 @@ class VectorbtAdapter(BaseEngineAdapter):
                         exit_reason="trailing_stop",
                     )
                 )
-        except Exception:
+        except Exception:  # noqa: S110
             pass
         return trades
 
