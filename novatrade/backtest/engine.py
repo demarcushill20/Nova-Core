@@ -353,6 +353,17 @@ class IRBBacktester:
         atr_sma: list[float] | None = None,
     ) -> None:
         """Process a single H1 bar."""
+        self._detect_day_boundary(i, bar)
+
+        # v5: re-validate pending orders against current conditions (BEFORE fill check —
+        # Pine cancels invalid orders before they can fill on the same bar)
+        if (
+            self.env.revalidate_pending
+            and self._pending is not None
+            and self._state in (StrategyState.PENDING_LONG, StrategyState.PENDING_SHORT)
+        ):
+            self._revalidate_pending(i, bar, ema_h1, ema_fast, ema_slow, ema_h4, h4_map)
+
         # 1. Check if pending order fills on this bar
         if self._pending is not None and self._state in (StrategyState.PENDING_LONG, StrategyState.PENDING_SHORT):
             self._check_pending_fill(i, bar)
@@ -409,6 +420,16 @@ class IRBBacktester:
         if atr_h1[i] <= 0:
             return
 
+        # --- v5: Daily trade limit ---
+        if e.max_trades_per_day > 0 and self._trades_today >= e.max_trades_per_day:
+            self._rejections.circuit_breaker += 1
+            return
+
+        # --- v5: Cooldown bars ---
+        if e.cooldown_bars > 0 and (i - self._last_flat_bar) <= e.cooldown_bars:
+            self._rejections.circuit_breaker += 1
+            return
+
         # --- Session filter [v4] ---
         if e.session_filter is not None and bar.timestamp > 0:
             from datetime import datetime, timezone
@@ -448,57 +469,85 @@ class IRBBacktester:
             return
 
         # --- Trend filter [A7][U1] ---
-        lookback = min(20, i)
-        if lookback < 1:
-            self._rejections.trend_filter += 1
-            return
-        ema_slope = (ema_h1[i] - ema_h1[i - lookback]) / atr_h1[i]
-
-        trend_up = ema_slope >= e.trend_slope_threshold
-        trend_dn = ema_slope <= -e.trend_slope_threshold
-
-        # Determine signal direction
         side: TradeSide | None = None
-        if is_uptrend_irb and trend_up:
-            side = TradeSide.LONG
-        elif is_downtrend_irb and trend_dn:
-            side = TradeSide.SHORT
-        else:
-            self._rejections.trend_filter += 1
-            return
+        ema_slope: float = 0.0
 
-        # --- EMA stack filter (EMA fast > EMA mid > EMA slow for longs) ---
-        if e.use_ema_stack_filter and ema_fast is not None and ema_slow is not None:
+        if e.use_simple_trend_filter:
+            # v5 simple trend: ema_fast > ema_slow + ema_fast rising
+            if ema_fast is None or ema_slow is None:
+                self._rejections.trend_filter += 1
+                return
             ef = ema_fast[i] if i < len(ema_fast) else float("nan")
-            em = ema_h1[i]
             es = ema_slow[i] if i < len(ema_slow) else float("nan")
-            if math.isnan(ef) or math.isnan(es):
-                self._rejections.trend_filter += 1
-                return
-            if side == TradeSide.LONG and not (ef > em > es):
-                self._rejections.trend_filter += 1
-                return
-            if side == TradeSide.SHORT and not (ef < em < es):
+            lb = min(e.ema_slope_lookback, i)
+            ef_prev = ema_fast[i - lb] if lb > 0 and (i - lb) < len(ema_fast) else float("nan")
+            if math.isnan(ef) or math.isnan(es) or math.isnan(ef_prev):
                 self._rejections.trend_filter += 1
                 return
 
-        # --- EMA close confirmation (N bars closing above/below EMA fast) ---
-        if e.ema_confirm_bars > 0 and ema_fast is not None:
-            confirm_ok = True
-            for j in range(e.ema_confirm_bars):
-                idx = i - j
-                if idx < 0 or idx >= len(ema_fast) or math.isnan(ema_fast[idx]):
-                    confirm_ok = False
-                    break
-                if side == TradeSide.LONG and all_bars[idx].close <= ema_fast[idx]:
-                    confirm_ok = False
-                    break
-                if side == TradeSide.SHORT and all_bars[idx].close >= ema_fast[idx]:
-                    confirm_ok = False
-                    break
-            if not confirm_ok:
+            bull_trend = ef > es and ef > ef_prev
+            bear_trend = ef < es and ef < ef_prev
+
+            if is_uptrend_irb and bull_trend:
+                side = TradeSide.LONG
+            elif is_downtrend_irb and bear_trend:
+                side = TradeSide.SHORT
+            else:
                 self._rejections.trend_filter += 1
                 return
+        else:
+            # Original normalized slope trend filter
+            lookback = min(20, i)
+            if lookback < 1:
+                self._rejections.trend_filter += 1
+                return
+            ema_slope = (ema_h1[i] - ema_h1[i - lookback]) / atr_h1[i]
+
+            trend_up = ema_slope >= e.trend_slope_threshold
+            trend_dn = ema_slope <= -e.trend_slope_threshold
+
+            if is_uptrend_irb and trend_up:
+                side = TradeSide.LONG
+            elif is_downtrend_irb and trend_dn:
+                side = TradeSide.SHORT
+            else:
+                self._rejections.trend_filter += 1
+                return
+
+        # v5 simple trend mode skips EMA stack and ADX filters
+        if not e.use_simple_trend_filter:
+            # --- EMA stack filter (EMA fast > EMA mid > EMA slow for longs) ---
+            if e.use_ema_stack_filter and ema_fast is not None and ema_slow is not None:
+                ef = ema_fast[i] if i < len(ema_fast) else float("nan")
+                em = ema_h1[i]
+                es = ema_slow[i] if i < len(ema_slow) else float("nan")
+                if math.isnan(ef) or math.isnan(es):
+                    self._rejections.trend_filter += 1
+                    return
+                if side == TradeSide.LONG and not (ef > em > es):
+                    self._rejections.trend_filter += 1
+                    return
+                if side == TradeSide.SHORT and not (ef < em < es):
+                    self._rejections.trend_filter += 1
+                    return
+
+            # --- EMA close confirmation (N bars closing above/below EMA fast) ---
+            if e.ema_confirm_bars > 0 and ema_fast is not None:
+                confirm_ok = True
+                for j in range(e.ema_confirm_bars):
+                    idx = i - j
+                    if idx < 0 or idx >= len(ema_fast) or math.isnan(ema_fast[idx]):
+                        confirm_ok = False
+                        break
+                    if side == TradeSide.LONG and all_bars[idx].close <= ema_fast[idx]:
+                        confirm_ok = False
+                        break
+                    if side == TradeSide.SHORT and all_bars[idx].close >= ema_fast[idx]:
+                        confirm_ok = False
+                        break
+                if not confirm_ok:
+                    self._rejections.trend_filter += 1
+                    return
 
         # --- MTF alignment [A8] ---
         h4_idx = h4_map[i] if i < len(h4_map) else -1
@@ -532,6 +581,11 @@ class IRBBacktester:
         # --- Overextension filter [A10][U2] ---
         overext_ratio = rng / atr_h1[i]
         if overext_ratio > e.overextension_threshold:
+            self._rejections.overextension_filter += 1
+            return
+
+        # --- Minimum signal size filter [v5] ---
+        if e.min_signal_atr_mult > 0 and overext_ratio < e.min_signal_atr_mult:
             self._rejections.overextension_filter += 1
             return
 
@@ -659,6 +713,7 @@ class IRBBacktester:
             )
             self._state = StrategyState.LONG if p.side == TradeSide.LONG else StrategyState.SHORT
             self._pending = None
+            self._trades_today += 1
 
             log.debug("bar %d: %s fill at %.5f", i, p.side.value, fill_price)
 
@@ -676,6 +731,54 @@ class IRBBacktester:
         self._pending = None
         self._state = StrategyState.FLAT
         log.debug("bar %d: pending cancelled — %s", i, reason.value)
+
+    def _revalidate_pending(
+        self,
+        i: int,
+        bar: Candle,
+        ema_h1: list[float],
+        ema_fast: list[float] | None,
+        ema_slow: list[float] | None,
+        ema_h4: list[float],
+        h4_map: list[int],
+    ) -> None:
+        """v5: Cancel pending order if trend or HTF conditions have changed."""
+        if self._pending is None:
+            return
+        e = self.env
+
+        # Check simple trend (v5 style)
+        if e.use_simple_trend_filter and ema_fast is not None and ema_slow is not None:
+            ef = ema_fast[i] if i < len(ema_fast) else float("nan")
+            es = ema_slow[i] if i < len(ema_slow) else float("nan")
+            lb = min(e.ema_slope_lookback, i)
+            ef_prev = ema_fast[i - lb] if lb > 0 and (i - lb) < len(ema_fast) else float("nan")
+
+            if not math.isnan(ef) and not math.isnan(es) and not math.isnan(ef_prev):
+                if self._pending.side == TradeSide.LONG:
+                    if not (ef > es and ef > ef_prev):
+                        self._cancel_pending(i, OrderCancelReason.TRIGGER_WINDOW_EXPIRED)
+                        return
+                else:
+                    if not (ef < es and ef < ef_prev):
+                        self._cancel_pending(i, OrderCancelReason.TRIGGER_WINDOW_EXPIRED)
+                        return
+
+        # Check HTF alignment (use same lookback as signal path)
+        h4_idx = h4_map[i] if i < len(h4_map) else -1
+        if h4_idx >= 1 and h4_idx < len(ema_h4):
+            h4_lookback = min(self.env.mtf_lookback, h4_idx)
+            if h4_lookback < 1:
+                return  # not enough data
+            h4_ema_current = ema_h4[h4_idx]
+            h4_ema_prev = ema_h4[h4_idx - h4_lookback]
+            if not math.isnan(h4_ema_current) and not math.isnan(h4_ema_prev):
+                if self._pending.side == TradeSide.LONG and not (h4_ema_current > h4_ema_prev):
+                    self._cancel_pending(i, OrderCancelReason.TRIGGER_WINDOW_EXPIRED)
+                    return
+                if self._pending.side == TradeSide.SHORT and not (h4_ema_current < h4_ema_prev):
+                    self._cancel_pending(i, OrderCancelReason.TRIGGER_WINDOW_EXPIRED)
+                    return
 
     # ------------------------------------------------------------------
     # Position management
@@ -704,6 +807,22 @@ class IRBBacktester:
             if bar.high >= pos.current_stop:
                 self._close_position(i, pos.current_stop, ExitReason.STOP_LOSS)
                 return
+
+        # --- Partial exit [v5] ---
+        if self.env.partial_exit_enabled and not pos.partial_taken:
+            stop_distance = abs(pos.entry_price - pos.initial_stop)
+            if stop_distance > 0:
+                target_distance = stop_distance * self.env.partial_r_target
+                if pos.side == TradeSide.LONG:
+                    # For longs: check if bar HIGH reached the partial target
+                    partial_target_price = pos.entry_price + target_distance
+                    if bar.high >= partial_target_price:
+                        self._partial_close_position(i, partial_target_price)
+                else:
+                    # For shorts: check if bar LOW reached the partial target
+                    partial_target_price = pos.entry_price - target_distance
+                    if bar.low <= partial_target_price:
+                        self._partial_close_position(i, partial_target_price)
 
         # --- Time stop [U3] ---
         if pos.bars_held >= self.env.time_stop_bars:
@@ -786,6 +905,72 @@ class IRBBacktester:
                         self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
                         return
 
+    def _partial_close_position(self, bar_idx: int, exit_price: float) -> None:
+        """Close a portion of the position and record as a partial trade."""
+        pos = self._position
+        if pos is None or pos.partial_taken:
+            return
+
+        pip = self.env.pip_value
+        lot_val = self.env.pip_value_per_standard_lot
+        partial_pct = self.env.partial_exit_pct / 100.0
+        partial_volume = round(pos.initial_volume * partial_pct, 2)
+        remaining_volume = round(pos.initial_volume - partial_volume, 2)
+
+        if partial_volume <= 0 or remaining_volume <= 0:
+            return
+
+        if pos.side == TradeSide.LONG:
+            pnl_pips = (exit_price - pos.entry_price) / pip
+        else:
+            pnl_pips = (pos.entry_price - exit_price) / pip
+
+        pnl_pips -= self.env.spread.total_cost_pips
+        pnl_usd = pnl_pips * partial_volume * lot_val
+        pnl_usd -= self.env.spread.commission_per_lot_usd * partial_volume
+
+        stop_distance_pips = abs(pos.entry_price - pos.initial_stop) / pip
+        risk_r = pnl_pips / stop_distance_pips if stop_distance_pips > 0 else 0.0
+
+        self._trade_counter += 1
+        trade = CompletedTrade(
+            trade_id=self._trade_counter,
+            side=pos.side,
+            entry_bar=pos.entry_bar,
+            exit_bar=bar_idx,
+            entry_price=pos.entry_price,
+            exit_price=exit_price,
+            stop_loss=pos.initial_stop,
+            volume=partial_volume,
+            exit_reason=ExitReason.TRAILING_STOP,  # closest match for partial TP
+            pnl_pips=pnl_pips,
+            pnl_usd=pnl_usd,
+            risk_r=risk_r,
+        )
+        self._trades.append(trade)
+        self._equity += pnl_usd
+
+        # Update position
+        pos.partial_taken = True
+        pos.volume = remaining_volume
+        # Move stop to breakeven after partial
+        if pos.side == TradeSide.LONG:
+            pos.current_stop = max(pos.current_stop, pos.entry_price + pip)
+        else:
+            pos.current_stop = min(pos.current_stop, pos.entry_price - pip)
+        pos.breakeven_hit = True  # breakeven is implicit after partial
+
+        log.debug(
+            "bar %d: PARTIAL %s closed %.2f lots at %.5f, pnl=%.1f pips $%.2f, runner=%.2f lots",
+            bar_idx,
+            pos.side.value,
+            partial_volume,
+            exit_price,
+            pnl_pips,
+            pnl_usd,
+            remaining_volume,
+        )
+
     def _close_position(self, bar_idx: int, exit_price: float, reason: ExitReason) -> None:
         """Close the current position and record the trade."""
         pos = self._position
@@ -849,6 +1034,7 @@ class IRBBacktester:
 
         self._position = None
         self._state = StrategyState.FLAT
+        self._last_flat_bar = bar_idx
 
     # ------------------------------------------------------------------
     # Helpers
@@ -880,6 +1066,20 @@ class IRBBacktester:
             # Ratio mapping using env-configured ratio (default 4 for H1:H4)
             ratio = self.env.h1_to_h4_ratio
             return [min(i // ratio, len(h4_candles) - 1) for i in range(n)]
+
+    def _detect_day_boundary(self, i: int, bar: Candle) -> bool:
+        """Detect if bar i starts a new trading day. Resets daily counters."""
+        if bar.timestamp > 0:
+            from datetime import datetime, timezone
+
+            day_key = int(datetime.fromtimestamp(bar.timestamp, tz=timezone.utc).toordinal())
+        else:
+            day_key = i // self.env.h1_bars_per_day
+        if day_key != self._current_day_key:
+            self._current_day_key = day_key
+            self._trades_today = 0
+            return True
+        return False
 
 
 # ---------------------------------------------------------------------------

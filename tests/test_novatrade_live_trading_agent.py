@@ -117,7 +117,7 @@ class TestEntrySignal:
         payload = agent.process_alert.call_args[0][0]
         assert payload["action"] == "PLACE_STOP_ORDER"
         assert payload["strategy_name"] == "Rob Hoffman IRB"
-        assert payload["strategy_version"] == "2.0.0"
+        assert payload["strategy_version"] == "5.0.0"
         assert payload["signal_type"] == "signal_alert"
         assert payload["side"] == "BUY"
         assert payload["order_type"] == "BUY_STOP"

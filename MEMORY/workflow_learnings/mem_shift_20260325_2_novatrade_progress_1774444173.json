@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Added trade_allowed broker safety check and configurable timeframe support for M5 live readiness",
   "created_at": "2026-03-25T13:09:33Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260325_2_novatrade_progress_1774445452"
 }

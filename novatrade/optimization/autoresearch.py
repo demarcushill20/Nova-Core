@@ -52,6 +52,10 @@ INT_PARAMS = {
     "trail_delay_bars",
     "volatility_atr_ma_period",
     "max_consecutive_losses",
+    # v5 params
+    "ema_slope_lookback",
+    "max_trades_per_day",
+    "cooldown_bars",
 }
 
 

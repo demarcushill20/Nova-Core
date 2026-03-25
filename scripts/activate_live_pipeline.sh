@@ -61,9 +61,26 @@ else
     echo "NOVATRADE_STRATEGY_CONFIG=$STRATEGY_CONFIG" >> "$ENV_FILE"
 fi
 
+# --- Extract primary_timeframe from strategy YAML and set NOVATRADE_TIMEFRAMES ---
+PRIMARY_TF=$(grep "^primary_timeframe:" "$STRATEGY_CONFIG" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+PRIMARY_TF="${PRIMARY_TF:-H1}"
+echo "Detected primary_timeframe: $PRIMARY_TF"
+
+if grep -q "^NOVATRADE_TIMEFRAMES=" "$ENV_FILE" 2>/dev/null; then
+    echo "WARNING: NOVATRADE_TIMEFRAMES already set in $ENV_FILE"
+    grep "^NOVATRADE_TIMEFRAMES=" "$ENV_FILE"
+    echo "Updating to $PRIMARY_TF..."
+    sed -i "s|^NOVATRADE_TIMEFRAMES=.*|NOVATRADE_TIMEFRAMES=$PRIMARY_TF|" "$ENV_FILE"
+else
+    echo "Adding NOVATRADE_TIMEFRAMES=$PRIMARY_TF"
+    echo "" >> "$ENV_FILE"
+    echo "# --- Timeframes (set from strategy config primary_timeframe) ---" >> "$ENV_FILE"
+    echo "NOVATRADE_TIMEFRAMES=$PRIMARY_TF" >> "$ENV_FILE"
+fi
+
 echo ""
 echo "Updated env file:"
-grep -E "^NOVATRADE_(PIPELINE|STRATEGY)" "$ENV_FILE"
+grep -E "^NOVATRADE_(PIPELINE|STRATEGY|TIMEFRAMES)" "$ENV_FILE"
 echo ""
 
 # Show current service status

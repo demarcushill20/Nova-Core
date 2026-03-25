@@ -16,5 +16,6 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "NovaTrade progress check \u2014 identified critical webhook\u2192live pipeline gap, verified 962 tests passing, monitored M5 autoresearch (gen 17/50), created activation script",
   "created_at": "2026-03-25T13:30:52Z",
-  "confidence": "high"
+  "confidence": "high",
+  "supersedes": "mem_shift_20260325_2_novatrade_progress_1774444173"
 }

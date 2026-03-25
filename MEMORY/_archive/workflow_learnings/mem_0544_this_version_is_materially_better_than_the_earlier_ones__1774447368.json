@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0544_this_version_is_materially_better_than_the_earlier_ones__1774447368",
+  "workflow_id": "0544_this_version_is_materially_better_than_the_earlier_ones_",
+  "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0544_this_version_is_materially_better_than_the_earlier_ones__1774446080 (do"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-03-25T14:02:48Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0545___Here_s_the_full_output__1774450800"
+}

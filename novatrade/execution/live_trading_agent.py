@@ -43,7 +43,7 @@ _ORDER_TYPE_MAP: dict[str, str] = {
 }
 
 _STRATEGY_NAME = "Rob Hoffman IRB"
-_STRATEGY_VERSION = "2.0.0"
+_STRATEGY_VERSION = "5.0.0"
 
 
 # ---------------------------------------------------------------------------
