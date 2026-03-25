@@ -410,10 +410,23 @@ async def build_live_stack(
     strategy = IRBStrategy(env)
     strategy_engine = LiveStrategyEngine(strategy, env, config=live_config)
 
+    # --- Broker symbol resolution ---
+    # OANDA and some FTMO MT5 brokers use suffixed symbol names (e.g. "EURUSD.sim").
+    # Resolve display symbols → broker symbols for all data-layer calls.
+    broker_symbol = cfg.ftmo.resolve_symbol(symbol)
+    broker_map = {s: cfg.ftmo.resolve_symbol(s) for s in cfg.symbols}
+    if broker_symbol != symbol:
+        log.info(
+            "build_live_stack: symbol mapping: %s → %s (suffix=%r)",
+            symbol,
+            broker_symbol,
+            cfg.ftmo.symbol_suffix,
+        )
+
     # --- Warmup: pre-seed historical candles ---
     try:
-        primary_candles = await adapter.get_candles(symbol, primary_tf, 500)
-        higher_candles = await adapter.get_candles(symbol, higher_tf, 200)
+        primary_candles = await adapter.get_candles(broker_symbol, primary_tf, 500)
+        higher_candles = await adapter.get_candles(broker_symbol, higher_tf, 200)
         strategy_engine.seed_history(primary_candles, higher_candles)
         log.info(
             "build_live_stack: seeded %d %s + %d %s candles",
@@ -434,7 +447,7 @@ async def build_live_stack(
     live_agent = LiveTradingAgent(agent, strategy_engine, cfg, campaign="irb-live")
 
     # --- Tick Pipeline ---
-    poller = TickBatchPoller(adapter, cfg.symbols, interval=poll_interval)
+    poller = TickBatchPoller(adapter, cfg.symbols, interval=poll_interval, broker_map=broker_map)
 
     # --- Bar Aggregator (ensure higher timeframe is included) ---
     timeframes = list(cfg.timeframes)

@@ -18,6 +18,7 @@ from novatrade.models import AccountMode
 # ---------------------------------------------------------------------------
 
 _DEFAULT_ENV_FILE = Path("/etc/novacore/novatrade.env")
+_OVERRIDE_ENV_FILE = Path("configs/novatrade.override.env")
 _DEFAULT_MAX_DAILY_DRAWDOWN_PCT = 5.0  # typical prop-firm limit
 _DEFAULT_MAX_TOTAL_DRAWDOWN_PCT = 10.0
 _DEFAULT_MAX_POSITIONS = 5
@@ -201,6 +202,10 @@ class NovaTradeCfg:
         env_path = env_file or _DEFAULT_ENV_FILE
         if env_path.is_file():
             _load_env_file(env_path)
+        # Local override file (in working directory) — values here OVERRIDE
+        # the main env file. Useful when /etc is read-only.
+        if _OVERRIDE_ENV_FILE.is_file():
+            _load_env_override(_OVERRIDE_ENV_FILE)
 
         mode_str = os.environ.get("NOVATRADE_MODE", "DEMO").upper()
         try:
@@ -255,3 +260,18 @@ def _load_env_file(path: Path) -> None:
         value = value.strip().strip("'\"")
         if key:
             os.environ.setdefault(key, value)
+
+
+def _load_env_override(path: Path) -> None:
+    """Parse override env file — values here OVERRIDE existing env vars."""
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key:
+            os.environ[key] = value

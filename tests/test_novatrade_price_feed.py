@@ -340,3 +340,93 @@ class TestTickFromPoller:
         assert tick.ask == 1.10020
         assert tick.timestamp == 1234567890.0
         assert tick.is_valid()
+
+
+# ---------------------------------------------------------------------------
+# Broker symbol mapping tests
+# ---------------------------------------------------------------------------
+
+
+class TestBrokerSymbolMap:
+    def test_broker_map_default_none(self):
+        """Without broker_map, symbols pass through unchanged."""
+        adapter = MockAdapter()
+        poller = TickBatchPoller(adapter, ["EURUSD"], interval=1.0)
+        assert poller._broker_map == {}
+
+    @pytest.mark.asyncio
+    async def test_broker_map_resolves_symbol(self):
+        """Poller calls adapter with broker symbol but yields display symbol."""
+        call_log: list[str] = []
+
+        async def mock_price(symbol: str) -> SymbolPrice:
+            call_log.append(symbol)
+            return SymbolPrice(symbol=symbol, bid=1.10000, ask=1.10020, timestamp=1000.0 + len(call_log))
+
+        adapter = MockAdapter()
+        adapter.get_symbol_price = mock_price
+
+        poller = TickBatchPoller(
+            adapter,
+            ["EURUSD"],
+            interval=0.01,
+            broker_map={"EURUSD": "EURUSD.sim"},
+        )
+
+        ticks: list[Tick] = []
+
+        async def collect():
+            async for tick in poller.stream():
+                ticks.append(tick)
+                if len(ticks) >= 1:
+                    poller.stop()
+
+        await asyncio.wait_for(collect(), timeout=5.0)
+
+        # Adapter was called with broker symbol
+        assert call_log[0] == "EURUSD.sim"
+        # But tick has display symbol
+        assert ticks[0].symbol == "EURUSD"
+
+    @pytest.mark.asyncio
+    async def test_broker_map_multi_symbol(self):
+        """Broker map works with multiple symbols."""
+        call_log: list[str] = []
+
+        async def mock_price(symbol: str) -> SymbolPrice:
+            call_log.append(symbol)
+            bid = 1.10000 if "EUR" in symbol else 1.27000
+            return SymbolPrice(
+                symbol=symbol,
+                bid=bid + len(call_log) * 0.0001,
+                ask=bid + 0.0002 + len(call_log) * 0.0001,
+                timestamp=1000.0 + len(call_log),
+            )
+
+        adapter = MockAdapter()
+        adapter.get_symbol_price = mock_price
+
+        poller = TickBatchPoller(
+            adapter,
+            ["EURUSD", "GBPUSD"],
+            interval=0.01,
+            broker_map={"EURUSD": "EURUSD.sim", "GBPUSD": "GBPUSD.sim"},
+        )
+
+        ticks: list[Tick] = []
+
+        async def collect():
+            async for tick in poller.stream():
+                ticks.append(tick)
+                if len(ticks) >= 2:
+                    poller.stop()
+
+        await asyncio.wait_for(collect(), timeout=5.0)
+
+        # Adapter calls used broker symbols
+        assert "EURUSD.sim" in call_log
+        assert "GBPUSD.sim" in call_log
+        # Ticks have display symbols
+        tick_symbols = {t.symbol for t in ticks}
+        assert "EURUSD" in tick_symbols
+        assert "GBPUSD" in tick_symbols

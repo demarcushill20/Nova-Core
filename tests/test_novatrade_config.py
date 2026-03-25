@@ -4,7 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from novatrade.config import MetaApiConfig, NovaTradeCfg, RiskConfig, _load_env_file
+from novatrade.config import FtmoProfile, MetaApiConfig, NovaTradeCfg, RiskConfig, _load_env_file, _load_env_override
 from novatrade.models import AccountMode
 
 # ---------------------------------------------------------------------------
@@ -163,3 +163,65 @@ class TestLoadEnvFile:
 
         assert os.environ["TEST_NOVATRADE_EXISTING"] == "original"
         os.unlink(f.name)
+
+
+# ---------------------------------------------------------------------------
+# _load_env_override
+# ---------------------------------------------------------------------------
+
+
+class TestLoadEnvOverride:
+    def test_overrides_existing_env(self, monkeypatch):
+        monkeypatch.setenv("TEST_NOVATRADE_OVERRIDE", "original")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("TEST_NOVATRADE_OVERRIDE=overridden\n")
+            f.flush()
+            _load_env_override(Path(f.name))
+
+        assert os.environ["TEST_NOVATRADE_OVERRIDE"] == "overridden"
+        os.unlink(f.name)
+        os.environ.pop("TEST_NOVATRADE_OVERRIDE", None)
+
+    def test_sets_new_env(self, monkeypatch):
+        monkeypatch.delenv("TEST_NOVATRADE_NEW_KEY", raising=False)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("TEST_NOVATRADE_NEW_KEY=new_value\n")
+            f.flush()
+            _load_env_override(Path(f.name))
+
+        assert os.environ.get("TEST_NOVATRADE_NEW_KEY") == "new_value"
+        os.unlink(f.name)
+        os.environ.pop("TEST_NOVATRADE_NEW_KEY", None)
+
+
+# ---------------------------------------------------------------------------
+# FtmoProfile symbol resolution
+# ---------------------------------------------------------------------------
+
+
+class TestFtmoProfileSymbolResolution:
+    def test_passthrough_no_suffix_no_map(self):
+        profile = FtmoProfile(enabled=True)
+        assert profile.resolve_symbol("EURUSD") == "EURUSD"
+
+    def test_suffix_applied(self):
+        profile = FtmoProfile(enabled=True, symbol_suffix=".sim")
+        assert profile.resolve_symbol("EURUSD") == "EURUSD.sim"
+        assert profile.resolve_symbol("GBPUSD") == "GBPUSD.sim"
+
+    def test_explicit_map_takes_priority(self):
+        profile = FtmoProfile(
+            enabled=True,
+            symbol_suffix=".sim",
+            symbol_map={"EURUSD": "EUR_USD_CUSTOM"},
+        )
+        assert profile.resolve_symbol("EURUSD") == "EUR_USD_CUSTOM"
+        assert profile.resolve_symbol("GBPUSD") == "GBPUSD.sim"
+
+    def test_from_env_loads_suffix(self, monkeypatch):
+        monkeypatch.setenv("FTMO_ENABLED", "true")
+        monkeypatch.setenv("FTMO_SYMBOL_SUFFIX", ".sim")
+        monkeypatch.delenv("FTMO_SYMBOL_MAP", raising=False)
+        profile = FtmoProfile.from_env()
+        assert profile.symbol_suffix == ".sim"
+        assert profile.resolve_symbol("EURUSD") == "EURUSD.sim"

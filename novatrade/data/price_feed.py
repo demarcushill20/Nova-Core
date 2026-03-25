@@ -46,6 +46,7 @@ class TickBatchPoller:
         adapter: MT5Adapter,
         symbols: list[str],
         interval: float = 0.5,
+        broker_map: dict[str, str] | None = None,
     ) -> None:
         if interval <= 0:
             raise ValueError(f"interval must be > 0, got {interval}")
@@ -55,6 +56,7 @@ class TickBatchPoller:
         self._adapter = adapter
         self._symbols = list(symbols)
         self._interval = interval
+        self._broker_map = broker_map or {}  # display_symbol → broker_symbol
         self._running = False
         self._last_prices: dict[str, tuple[float, float]] = {}  # symbol -> (bid, ask)
         self.ticks_yielded: int = 0
@@ -103,7 +105,8 @@ class TickBatchPoller:
 
                     try:
                         self.polls += 1
-                        price = await self._adapter.get_symbol_price(symbol)
+                        broker_sym = self._broker_map.get(symbol, symbol)
+                        price = await self._adapter.get_symbol_price(broker_sym)
 
                         # Zero-price guard
                         if price.bid <= 0 or price.ask <= 0:
