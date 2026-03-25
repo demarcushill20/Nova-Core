@@ -70,14 +70,14 @@ class StrategyConfig(BaseModel):
     trail_ema_period: int = Field(default=0, ge=0, le=100)
     ema_confirm_bars: int = Field(default=0, ge=0, le=10)
     use_ema_stack_filter: bool = Field(default=False)
-    trigger_window_bars: int = Field(default=20, ge=10, le=40)
-    time_stop_bars: int = Field(default=40, ge=20, le=80)
+    trigger_window_bars: int = Field(default=20, ge=10, le=240)  # le=240 for M5 (6x H1)
+    time_stop_bars: int = Field(default=40, ge=20, le=480)  # le=480 for M5 (6x H1)
     mtf_lookback: int = Field(default=5, ge=1, le=50)
-    warmup_bars: int = Field(default=34, ge=20, le=100)
+    warmup_bars: int = Field(default=34, ge=20, le=600)  # le=600 for M5 (6x H1)
 
     # --- Enhanced exit parameters (v4) ----------------------------------
     breakeven_r: float = Field(default=0.0, ge=0.0, le=3.0)
-    trail_delay_bars: int = Field(default=0, ge=0, le=20)
+    trail_delay_bars: int = Field(default=0, ge=0, le=120)  # le=120 for M5 (6x H1)
 
     # --- Enhanced filter parameters (v4) --------------------------------
     use_volatility_filter: bool = Field(default=False)
@@ -86,9 +86,30 @@ class StrategyConfig(BaseModel):
     # --- Risk management (v4) -------------------------------------------
     max_consecutive_losses: int = Field(default=0, ge=0, le=20)
 
+    # --- v5 features -----------------------------------------------------
+    use_simple_trend_filter: bool = Field(default=False)
+    ema_slope_lookback: int = Field(default=5, ge=1, le=20)
+    partial_exit_enabled: bool = Field(default=False)
+    partial_exit_pct: float = Field(default=50.0, ge=10.0, le=90.0)
+    partial_r_target: float = Field(default=1.0, ge=0.5, le=3.0)
+    max_trades_per_day: int = Field(default=0, ge=0, le=20)
+    cooldown_bars: int = Field(default=0, ge=0, le=50)
+    revalidate_pending: bool = Field(default=False)
+    min_signal_atr_mult: float = Field(default=0.0, ge=0.0, le=2.0)
+
     # --- Level 2: filter toggles ----------------------------------------
     filters_enabled: list[str] = Field(default_factory=list)
     session_filter: str | None = None
+
+    # --- Timeframe configuration -----------------------------------------
+    primary_timeframe: str = Field(
+        default="H1",
+        description="Primary bar timeframe for signal generation (e.g. H1, M5).",
+    )
+    higher_timeframe: str = Field(
+        default="H4",
+        description="Higher timeframe for multi-timeframe analysis (e.g. H4 for H1, H1 for M5).",
+    )
 
     # --- Metadata -------------------------------------------------------
     name: str = "irb_baseline"
@@ -119,6 +140,52 @@ class StrategyConfig(BaseModel):
         "trail_delay_bars": ParameterBounds(min_val=1, max_val=20, step=1),
         "volatility_atr_ma_period": ParameterBounds(min_val=20, max_val=100, step=5),
         "max_consecutive_losses": ParameterBounds(min_val=3, max_val=20, step=1),
+        # v5 params
+        "ema_slope_lookback": ParameterBounds(min_val=1, max_val=20, step=1),
+        "partial_exit_pct": ParameterBounds(min_val=10.0, max_val=90.0, step=5.0),
+        "partial_r_target": ParameterBounds(min_val=0.5, max_val=3.0, step=0.1),
+        "max_trades_per_day": ParameterBounds(min_val=1, max_val=20, step=1),
+        "cooldown_bars": ParameterBounds(min_val=0, max_val=50, step=1),
+        "min_signal_atr_mult": ParameterBounds(min_val=0.0, max_val=2.0, step=0.1),
+    }
+
+    # M5-specific parameter bounds for bar-based params.
+    # Bar-count params (trigger_window, time_stop, warmup) scaled ~6x from H1
+    # to cover approximately half the calendar-time range, allowing tighter
+    # scalping configs on the faster timeframe.  trail_delay_bars uses 1-120
+    # (min_val=1 consistent with H1).
+    # Non-bar-based params (EMA periods, ATR periods, thresholds) stay the same.
+    M5_PARAMETER_BOUNDS: ClassVar[dict[str, ParameterBounds]] = {
+        "irb_threshold": ParameterBounds(min_val=0.30, max_val=0.60, step=0.01),
+        "ema_period": ParameterBounds(min_val=10, max_val=50, step=1),
+        "ema_fast_period": ParameterBounds(min_val=5, max_val=20, step=1),
+        "ema_slow_period": ParameterBounds(min_val=30, max_val=100, step=1),
+        "atr_period": ParameterBounds(min_val=7, max_val=21, step=1),
+        "adx_period": ParameterBounds(min_val=7, max_val=21, step=1),
+        "trend_slope_threshold": ParameterBounds(min_val=0.1, max_val=1.0, step=0.05),
+        "adx_threshold": ParameterBounds(min_val=15.0, max_val=30.0, step=0.5),
+        "overextension_threshold": ParameterBounds(min_val=1.5, max_val=3.0, step=0.1),
+        "trail_atr_multiplier": ParameterBounds(min_val=1.0, max_val=3.0, step=0.1),
+        "trail_ema_period": ParameterBounds(min_val=10, max_val=60, step=1),
+        "ema_confirm_bars": ParameterBounds(min_val=1, max_val=5, step=1),
+        # Bar-based params: ~6x scaling from H1 (half the calendar-time range
+        # to allow tighter scalping configurations on M5)
+        "trigger_window_bars": ParameterBounds(min_val=60, max_val=240, step=1),
+        "time_stop_bars": ParameterBounds(min_val=120, max_val=480, step=1),
+        "mtf_lookback": ParameterBounds(min_val=1, max_val=50, step=1),
+        "warmup_bars": ParameterBounds(min_val=120, max_val=600, step=1),
+        "breakeven_r": ParameterBounds(min_val=0.5, max_val=3.0, step=0.1),
+        # trail_delay_bars: min_val=1 consistent with H1 bounds
+        "trail_delay_bars": ParameterBounds(min_val=1, max_val=120, step=1),
+        "volatility_atr_ma_period": ParameterBounds(min_val=20, max_val=100, step=5),
+        "max_consecutive_losses": ParameterBounds(min_val=3, max_val=20, step=1),
+        # v5 params
+        "ema_slope_lookback": ParameterBounds(min_val=1, max_val=20, step=1),
+        "partial_exit_pct": ParameterBounds(min_val=10.0, max_val=90.0, step=5.0),
+        "partial_r_target": ParameterBounds(min_val=0.5, max_val=3.0, step=0.1),
+        "max_trades_per_day": ParameterBounds(min_val=1, max_val=20, step=1),
+        "cooldown_bars": ParameterBounds(min_val=0, max_val=50, step=1),
+        "min_signal_atr_mult": ParameterBounds(min_val=0.0, max_val=2.0, step=0.1),
     }
 
     OPTIMIZABLE_PARAMS: ClassVar[list[str]] = [
@@ -142,7 +209,17 @@ class StrategyConfig(BaseModel):
         "trail_delay_bars",
         "volatility_atr_ma_period",
         "max_consecutive_losses",
+        # v5 params
+        "ema_slope_lookback",
+        "partial_exit_pct",
+        "partial_r_target",
+        "max_trades_per_day",
+        "cooldown_bars",
+        "min_signal_atr_mult",
     ]
+
+    # M5-specific optimizable params — same list, uses M5_PARAMETER_BOUNDS
+    OPTIMIZABLE_PARAMS_M5: ClassVar[list[str]] = OPTIMIZABLE_PARAMS.copy()
 
     # --- Conversion methods ---------------------------------------------
 
@@ -175,6 +252,16 @@ class StrategyConfig(BaseModel):
             "use_volatility_filter": self.use_volatility_filter,
             "volatility_atr_ma_period": self.volatility_atr_ma_period,
             "max_consecutive_losses": self.max_consecutive_losses,
+            # v5 params
+            "use_simple_trend_filter": self.use_simple_trend_filter,
+            "ema_slope_lookback": self.ema_slope_lookback,
+            "partial_exit_enabled": self.partial_exit_enabled,
+            "partial_exit_pct": self.partial_exit_pct,
+            "partial_r_target": self.partial_r_target,
+            "max_trades_per_day": self.max_trades_per_day,
+            "cooldown_bars": self.cooldown_bars,
+            "revalidate_pending": self.revalidate_pending,
+            "min_signal_atr_mult": self.min_signal_atr_mult,
         }
 
     def content_hash(self) -> str:

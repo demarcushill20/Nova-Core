@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0540_It_looks_like_i_have_to_delete_it_then_make_a_new_account_on_metaapi_1774422991",
+  "workflow_id": "0540_It_looks_like_i_have_to_delete_it_then_make_a_new_account_on_metaapi",
+  "task_summary": "Created MetaApi account deletion script and step-by-step runbook for delete/recreate cycle",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Created MetaApi account deletion script and step-by-step runbook for delete/recreate cycle"
+  ],
+  "successful_patterns": [
+    "task_completed: 0540_It_looks_like_i_have_to_delete_it_then_make_a_new_account_on_metaapi"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Created MetaApi account deletion script and step-by-step runbook for delete/recreate cycle",
+  "created_at": "2026-03-25T07:16:31Z",
+  "confidence": "high"
+}

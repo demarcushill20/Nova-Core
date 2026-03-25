@@ -25,8 +25,20 @@ filters_enabled: []
 session_filter: null
 primary_timeframe: H1
 higher_timeframe: H4
-name: irb_v4_enhanced
+name: irb_v4_enhanced_baseline
 version: 4.2.0
-description: 'IRB v4.2: same entries as v3 (no EMA stack/vol filter), improved exits
-  (ATR trail, breakeven, trail delay, circuit breaker)'
+description: 'FROZEN BASELINE 2026-03-25. IRB v4.2: EMA stack filter, ATR trailing
+  stops, breakeven, trail delay, circuit breaker. First version with balanced L/S
+  and strong recent-period performance.'
 parent_config: irb_v2_seed9999
+frozen: true
+frozen_date: '2026-03-25'
+performance:
+  total_net_profit: 11910000
+  last_10y_net_profit: 1810000
+  last_10y_profit_factor: 1.15
+  last_10y_profitable_months_pct: 63.6
+  profitable_years_since_2016: 11_of_11
+  max_drawdown: 231800
+  last_10y_longs_profit: 849000
+  last_10y_shorts_profit: 961000

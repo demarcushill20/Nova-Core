@@ -17,7 +17,9 @@ This adapter builds correct payloads from scratch rather than using
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from typing import Any
 
 from novatrade.config import NovaTradeCfg
@@ -135,6 +137,16 @@ class LiveTradingAgent:
             signal.side,
         )
         log.debug("Payload: %s", payload)
+
+        # Anti-EA-detection: randomize order timing so entries don't land
+        # at exact bar-close intervals (a strong EA fingerprint).
+        if signal.signal_type == SignalType.ENTRY and self._cfg.risk.entry_jitter_enabled:
+            jitter = random.uniform(  # noqa: S311 — non-crypto jitter
+                self._cfg.risk.entry_jitter_min_seconds,
+                self._cfg.risk.entry_jitter_max_seconds,
+            )
+            log.info("entry jitter: sleeping %.2fs before order placement", jitter)
+            await asyncio.sleep(jitter)
 
         result = await self._trading_agent.process_alert(payload)
 

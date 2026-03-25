@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -40,6 +41,7 @@ from novatrade.risk.ftmo_compliance import (
     LotSizeConsistencyChecker,
     NewsCalendarBlocker,
     ServerRequestCounter,
+    SlModificationCounter,
     TradingDaysTracker,
     WeekendAutoCloser,
 )
@@ -97,16 +99,21 @@ class PreTradeGate:
         self._news_blocker = NewsCalendarBlocker()
         # FTMO compliance: gap trading preventer
         self._gap_preventer = GapTradingPreventer()
+        # FTMO compliance: SL modification counter per trade
+        self._sl_mod_counter = SlModificationCounter()
         # FTMO compliance: position sizer for volume cross-check
         self._sizer = PositionSizer(
             min_lot=self._risk.min_volume_per_trade,
             max_lot=self._risk.max_volume_per_trade,
+            micro_variation_enabled=self._risk.lot_micro_variation_enabled,
+            micro_variation_step=self._risk.lot_micro_variation_step,
         )
         # Attempt to restore persisted state from prior session
         self._lot_checker.load_state()
         self._request_counter.load_state()
         self._days_tracker.load_state()
         self._daily_loss_tracker.load_state()
+        self._sl_mod_counter.load_state()
 
     # ------------------------------------------------------------------
     # Public API
@@ -132,6 +139,7 @@ class PreTradeGate:
         checks.append(self._check_kill_switch())
         checks.append(self._check_dry_run())
         checks.append(self._check_account_mode(account))
+        checks.append(self._check_trade_allowed(account))
         checks.append(self._check_health(health))
         checks.append(self._check_feed_health(request.symbol))
         checks.append(self._check_symbol(request))
@@ -151,6 +159,8 @@ class PreTradeGate:
         checks.append(self._check_weekend(now))
         checks.append(self._check_news(request.symbol, now))
         checks.append(self._check_gap_spread(price))
+        checks.append(self._check_rollover_dead_zone(now))
+        checks.append(self._check_london_fix(now))
         checks.append(self._days_tracker.check())
 
         failed = [c for c in checks if not c.passed]
@@ -213,12 +223,21 @@ class PreTradeGate:
         """Record a non-trade server request (modify SL/TP, close, etc.)."""
         self._request_counter.record(operation)
 
+    def record_sl_modification(self, position_id: str) -> None:
+        """Record a stop-loss modification for FTMO EA compliance tracking."""
+        self._sl_mod_counter.record(position_id)
+
+    def check_sl_mod_limit(self, position_id: str = "") -> RiskCheckResult:
+        """Check if SL modification limits allow further modifications."""
+        return self._sl_mod_counter.check(position_id)
+
     def save_ftmo_state(self) -> None:
         """Persist FTMO compliance state for crash recovery."""
         self._lot_checker.save_state()
         self._request_counter.save_state()
         self._days_tracker.save_state()
         self._daily_loss_tracker.save_state()
+        self._sl_mod_counter.save_state()
 
     def _day_start_prague_tz(self, ts: float) -> float:
         """Return midnight Prague timezone timestamp for the day containing *ts*.
@@ -226,8 +245,6 @@ class PreTradeGate:
         Uses FTMO's daily reset timezone (Europe/Prague) for consistent daily boundaries.
         This correctly handles CET↔CEST DST transitions, unlike UTC-based calculations.
         """
-        from datetime import datetime, timezone
-
         prague_tz = ZoneInfo(self._cfg.risk.daily_reset_tz)
         dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(prague_tz)
         # Get date in Prague timezone, then convert back to midnight Prague time as UTC timestamp
@@ -281,6 +298,24 @@ class PreTradeGate:
             passed=False,
             detail=f"account mode {account.mode.value} not allowed in MVP "
             f"(allowed: {', '.join(m.value for m in _MVP_ALLOWED_MODES)})",
+        )
+
+    def _check_trade_allowed(self, account: AccountState) -> RiskCheckResult:
+        """Deny if the broker reports trading is disabled on this account.
+
+        This catches cases where the prop firm or broker has suspended trading
+        permissions (e.g. account under review, tradeAllowed=false).
+        """
+        if not account.trade_allowed:
+            return RiskCheckResult(
+                name="trade_allowed",
+                passed=False,
+                detail="broker reports tradeAllowed=false — trading disabled on this account",
+            )
+        return RiskCheckResult(
+            name="trade_allowed",
+            passed=True,
+            detail="tradeAllowed=true",
         )
 
     def _check_health(self, health: HealthStatus | None) -> RiskCheckResult:
@@ -645,6 +680,93 @@ class PreTradeGate:
             name="news_blackout",
             passed=True,
             detail="no news blackout active",
+        )
+
+    def _check_rollover_dead_zone(self, now: float) -> RiskCheckResult:
+        """Deny trading during the daily FX rollover window.
+
+        Between 21:00-23:00 UTC, spreads widen significantly, liquidity drops,
+        and fill quality degrades.  Blocking new entries during this window
+        avoids adverse fills and also makes the bot's trading pattern less
+        detectable as an EA (no trades during the most volatile overnight
+        transition period).
+        """
+        if not self._risk.rollover_dead_zone_enabled:
+            return RiskCheckResult(
+                name="rollover_dead_zone",
+                passed=True,
+                detail="rollover dead zone disabled",
+            )
+
+        utc_dt = datetime.fromtimestamp(now, tz=timezone.utc)
+        hour = utc_dt.hour
+
+        start = self._risk.rollover_start_hour_utc
+        end = self._risk.rollover_end_hour_utc
+
+        if start <= end:
+            in_zone = start <= hour < end
+        else:
+            # Wraps midnight (e.g. 23:00-01:00)
+            in_zone = hour >= start or hour < end
+
+        if in_zone:
+            return RiskCheckResult(
+                name="rollover_dead_zone",
+                passed=False,
+                detail=(
+                    f"in rollover dead zone ({start:02d}:00-{end:02d}:00 UTC), "
+                    f"current={hour:02d}:{utc_dt.minute:02d} UTC"
+                ),
+            )
+        return RiskCheckResult(
+            name="rollover_dead_zone",
+            passed=True,
+            detail=(
+                f"outside rollover window ({start:02d}:00-{end:02d}:00 UTC), current={hour:02d}:{utc_dt.minute:02d} UTC"
+            ),
+        )
+
+    def _check_london_fix(self, now: float) -> RiskCheckResult:
+        """Deny trading during the London 4PM Fix window.
+
+        The London Fix (15:45-16:15 UTC) is when benchmark FX rates are set.
+        Spreads widen, volatility spikes, and FTMO may flag trading during
+        this period as suspicious EA behavior targeting fix-related price
+        movements.
+        """
+        if not self._risk.london_fix_avoidance_enabled:
+            return RiskCheckResult(
+                name="london_fix",
+                passed=True,
+                detail="London Fix avoidance disabled",
+            )
+
+        utc_dt = datetime.fromtimestamp(now, tz=timezone.utc)
+        current_minutes = utc_dt.hour * 60 + utc_dt.minute
+        start_minutes = self._risk.london_fix_start_hour_utc * 60 + self._risk.london_fix_start_minute_utc
+        end_minutes = self._risk.london_fix_end_hour_utc * 60 + self._risk.london_fix_end_minute_utc
+
+        if start_minutes <= current_minutes < end_minutes:
+            return RiskCheckResult(
+                name="london_fix",
+                passed=False,
+                detail=(
+                    f"in London Fix window "
+                    f"({self._risk.london_fix_start_hour_utc:02d}:{self._risk.london_fix_start_minute_utc:02d}"
+                    f"-{self._risk.london_fix_end_hour_utc:02d}:{self._risk.london_fix_end_minute_utc:02d} UTC), "
+                    f"current={utc_dt.hour:02d}:{utc_dt.minute:02d} UTC"
+                ),
+            )
+        return RiskCheckResult(
+            name="london_fix",
+            passed=True,
+            detail=(
+                f"outside London Fix window "
+                f"({self._risk.london_fix_start_hour_utc:02d}:{self._risk.london_fix_start_minute_utc:02d}"
+                f"-{self._risk.london_fix_end_hour_utc:02d}:{self._risk.london_fix_end_minute_utc:02d} UTC), "
+                f"current={utc_dt.hour:02d}:{utc_dt.minute:02d} UTC"
+            ),
         )
 
     def _check_gap_spread(self, price: SymbolPrice | None) -> RiskCheckResult:

@@ -89,6 +89,23 @@ class RiskConfig:
     daily_reset_tz: str = "Europe/Prague"
     # Slippage control (Phase: Execution Gaps)
     max_slippage_pips: float = 3.0  # max acceptable slippage in pips (0 = disabled)
+    # Anti-EA-detection: rollover dead zone (spreads widen, fills degrade)
+    rollover_dead_zone_enabled: bool = True
+    rollover_start_hour_utc: int = 21  # 21:00 UTC = daily FX rollover start
+    rollover_end_hour_utc: int = 23  # 23:00 UTC = rollover window end
+    # Anti-EA-detection: entry timing jitter (randomizes order timing)
+    entry_jitter_min_seconds: float = 1.0
+    entry_jitter_max_seconds: float = 5.0
+    entry_jitter_enabled: bool = True
+    # Anti-EA-detection: lot-size micro-variation (prevents exact repetition)
+    lot_micro_variation_enabled: bool = True
+    lot_micro_variation_step: float = 0.01  # ±0.01 lot random offset
+    # Anti-EA-detection: London Fix avoidance (benchmark FX rate setting)
+    london_fix_avoidance_enabled: bool = True
+    london_fix_start_hour_utc: int = 15
+    london_fix_start_minute_utc: int = 45
+    london_fix_end_hour_utc: int = 16
+    london_fix_end_minute_utc: int = 15
 
     def validate(self) -> list[str]:
         errors: list[str] = []

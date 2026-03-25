@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import ClassVar
 
 
 class EngineType(Enum):
@@ -190,6 +191,17 @@ class BacktestEnvironment:
     # --- Risk management (v4) ---
     max_consecutive_losses: int = 0  # 0 = disabled; >0 = pause trading after N consecutive losses
 
+    # --- v5 features ---
+    use_simple_trend_filter: bool = False  # v5: ema20>ema50 + direction vs normalized slope
+    ema_slope_lookback: int = 5  # v5: bars to look back for EMA direction
+    partial_exit_enabled: bool = False  # v5: close partial at R target
+    partial_exit_pct: float = 50.0  # v5: percent of position to close at target
+    partial_r_target: float = 1.0  # v5: R-multiple for partial profit target
+    max_trades_per_day: int = 0  # v5: daily trade limit (0=disabled)
+    cooldown_bars: int = 0  # v5: bars to wait after going flat (0=disabled)
+    revalidate_pending: bool = False  # v5: re-check trend/HTF each bar for pending orders
+    min_signal_atr_mult: float = 0.0  # v5: min signal range / ATR (0=disabled)
+
     # --- Measurement vs inference ---
     directly_measured: tuple[str, ...] = (
         "Pine syntax/compile readiness (Phase 3 static analysis, 45 checks)",
@@ -210,6 +222,128 @@ class BacktestEnvironment:
         "Exact P&L figures (requires live data)",
         "Sensitivity to parameter changes (requires parameter sweep)",
     )
+
+    # --- Timeframe constants for factory methods ---
+    _TIMEFRAME_MINUTES: ClassVar[dict[str, int]] = {
+        "M1": 1,
+        "M5": 5,
+        "M15": 15,
+        "M30": 30,
+        "H1": 60,
+        "H4": 240,
+        "D1": 1440,
+    }
+
+    @classmethod
+    def for_m5(cls, **overrides: object) -> BacktestEnvironment:
+        """Factory for M5-primary / H1-higher backtest environment.
+
+        Sets timeframe fields for M5:H1 pair (ratio=12, 288 bars/day on M5,
+        24 bars/day on H1).  All other fields default or can be overridden.
+        """
+        defaults = {
+            "primary_timeframe": "M5",
+            "higher_timeframe": "H1",
+            "h1_to_h4_ratio": 12,
+            "h1_bars_per_day": 288,
+            "h4_bars_per_day": 24,
+        }
+        defaults.update(overrides)  # type: ignore[arg-type]
+        return cls(**defaults)  # type: ignore[arg-type]
+
+    @classmethod
+    def for_timeframe(
+        cls,
+        primary_tf: str,
+        higher_tf: str,
+        **overrides: object,
+    ) -> BacktestEnvironment:
+        """Generic factory that auto-computes ratio and bars/day from timeframe strings.
+
+        Supported timeframe strings: M1, M5, M15, M30, H1, H4, D1.
+
+        Args:
+            primary_tf: Primary (lower) timeframe string, e.g. "M5".
+            higher_tf:  Higher timeframe string, e.g. "H1".
+            **overrides: Additional field overrides.
+
+        Returns:
+            BacktestEnvironment configured for the given timeframe pair.
+
+        Raises:
+            ValueError: If timeframe strings are unrecognised or ratio is invalid.
+        """
+        tf_map = cls._TIMEFRAME_MINUTES
+        primary_minutes = tf_map.get(primary_tf)
+        higher_minutes = tf_map.get(higher_tf)
+
+        if primary_minutes is None:
+            raise ValueError(f"Unknown primary timeframe: {primary_tf!r}")
+        if higher_minutes is None:
+            raise ValueError(f"Unknown higher timeframe: {higher_tf!r}")
+        if higher_minutes <= primary_minutes:
+            raise ValueError(
+                f"Higher timeframe ({higher_tf}={higher_minutes}m) must be larger "
+                f"than primary ({primary_tf}={primary_minutes}m)"
+            )
+        if higher_minutes % primary_minutes != 0:
+            raise ValueError(
+                f"Higher timeframe ({higher_tf}={higher_minutes}m) must be evenly "
+                f"divisible by primary ({primary_tf}={primary_minutes}m)"
+            )
+
+        ratio = higher_minutes // primary_minutes
+        primary_bars_per_day = (24 * 60) // primary_minutes
+        higher_bars_per_day = (24 * 60) // higher_minutes
+
+        defaults = {
+            "primary_timeframe": primary_tf,
+            "higher_timeframe": higher_tf,
+            "h1_to_h4_ratio": ratio,
+            "h1_bars_per_day": primary_bars_per_day,
+            "h4_bars_per_day": higher_bars_per_day,
+        }
+        defaults.update(overrides)  # type: ignore[arg-type]
+        return cls(**defaults)  # type: ignore[arg-type]
+
+    @classmethod
+    def for_v5_m5(cls, **overrides: object) -> BacktestEnvironment:
+        """Factory for IRB v5 Relaxed Reliable Build on M5:H1."""
+        defaults = {
+            "primary_timeframe": "M5",
+            "higher_timeframe": "H1",
+            "h1_to_h4_ratio": 12,
+            "h1_bars_per_day": 288,
+            "h4_bars_per_day": 24,
+            # v5 strategy parameters
+            "irb_threshold": 0.45,
+            "ema_period": 20,
+            "ema_fast_period": 20,
+            "ema_slow_period": 50,
+            "atr_period": 14,
+            "adx_period": 14,
+            "trend_slope_threshold": 0.0,  # not used in simple mode
+            "adx_threshold": 0.0,  # v5 doesn't use ADX
+            "overextension_threshold": 2.5,
+            "trigger_window_bars": 12,
+            "time_stop_bars": 20,
+            "trail_atr_multiplier": 2.0,
+            "warmup_bars": 60,
+            "breakeven_r": 1.0,
+            "use_ema_stack_filter": False,
+            "use_simple_trend_filter": True,
+            "ema_slope_lookback": 5,
+            "partial_exit_enabled": True,
+            "partial_exit_pct": 50.0,
+            "partial_r_target": 1.0,
+            "max_trades_per_day": 3,
+            "cooldown_bars": 1,
+            "revalidate_pending": True,
+            "min_signal_atr_mult": 0.0,
+            "max_consecutive_losses": 0,
+        }
+        defaults.update(overrides)  # type: ignore[arg-type]
+        return cls(**defaults)  # type: ignore[arg-type]
 
     def to_dict(self) -> dict:
         """Serialise environment spec to a flat dictionary."""
@@ -242,6 +376,13 @@ class BacktestEnvironment:
             "overextension_threshold": self.overextension_threshold,
             "trigger_window_bars": self.trigger_window_bars,
             "time_stop_bars": self.time_stop_bars,
+            "use_simple_trend_filter": self.use_simple_trend_filter,
+            "partial_exit_enabled": self.partial_exit_enabled,
+            "partial_exit_pct": self.partial_exit_pct,
+            "partial_r_target": self.partial_r_target,
+            "max_trades_per_day": self.max_trades_per_day,
+            "cooldown_bars": self.cooldown_bars,
+            "revalidate_pending": self.revalidate_pending,
             "directly_measured": list(self.directly_measured),
             "inferred_or_estimated": list(self.inferred_or_estimated),
             "not_measured": list(self.not_measured),

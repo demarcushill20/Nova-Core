@@ -148,6 +148,7 @@ class AccountState:
     open_positions: int = 0
     server: str = ""
     broker: str = ""
+    trade_allowed: bool = True  # broker-level trading permission flag
     timestamp: float = field(default_factory=time.time)
 
 

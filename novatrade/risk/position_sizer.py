@@ -19,6 +19,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import random
 
 log = logging.getLogger("novatrade.risk.position_sizer")
 
@@ -35,9 +36,14 @@ class PositionSizer:
         self,
         min_lot: float = 0.01,
         max_lot: float = 1.00,
+        *,
+        micro_variation_enabled: bool = False,
+        micro_variation_step: float = 0.01,
     ) -> None:
         self._min_lot = min_lot
         self._max_lot = max_lot
+        self._micro_variation_enabled = micro_variation_enabled
+        self._micro_variation_step = micro_variation_step
 
     def calculate(
         self,
@@ -83,6 +89,14 @@ class PositionSizer:
 
         # Clamp and round
         volume = max(self._min_lot, min(self._max_lot, round(volume, 2)))
+
+        # Anti-EA-detection: add micro-variation so consecutive trades don't
+        # use identical lot sizes (a strong EA fingerprint for FTMO detection).
+        if self._micro_variation_enabled and self._micro_variation_step > 0:
+            offset = random.choice([-1, 0, 1]) * self._micro_variation_step  # noqa: S311
+            volume = round(volume + offset, 2)
+            volume = max(self._min_lot, min(self._max_lot, volume))
+
         return volume
 
     def validate(

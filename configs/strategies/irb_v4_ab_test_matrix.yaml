@@ -1,0 +1,110 @@
+## IRB v4 Enhanced — A/B Test Matrix
+## Baseline: irb_v4_enhanced_baseline_20260325 (FROZEN)
+## Rule: change ONE variable per test, keep everything else at baseline defaults
+## Script: use irb_v4_ab_harness.pine (adds trade_direction toggle)
+
+baseline:
+  script: irb_v4_ab_harness.pine
+  total_net_profit: 11910000
+  last_10y_net_profit: 1810000
+  last_10y_profit_factor: 1.15
+  last_10y_profitable_months_pct: 63.6
+  max_drawdown: 231800
+  last_10y_longs: 849000
+  last_10y_shorts: 961000
+  settings:
+    use_session: false
+    trigger_window: 10
+    trail_atr_mult: 2.0
+    breakeven_r: 1.0
+    trade_direction: both
+
+tests:
+  - id: AB-01
+    name: Session filter ON
+    variable: use_session
+    baseline_value: false
+    test_value: true
+    hypothesis: Filtering to London+NY session (0700-1600 UTC) may reduce
+      noise trades in Asia session and improve profit factor
+    status: pending
+    result: null
+
+  - id: AB-02
+    name: Signal expiry 12 bars
+    variable: trigger_window
+    baseline_value: 10
+    test_value: 12
+    hypothesis: Slightly wider expiry window may catch more valid breakouts
+      that take longer to trigger
+    status: pending
+    result: null
+
+  - id: AB-03
+    name: Signal expiry 20 bars
+    variable: trigger_window
+    baseline_value: 10
+    test_value: 20
+    hypothesis: Much wider expiry may let slow setups trigger but risks
+      stale signals entering at worse prices
+    status: pending
+    result: null
+
+  - id: AB-04
+    name: ATR runner 2.5x
+    variable: trail_atr_mult
+    baseline_value: 2.0
+    test_value: 2.5
+    hypothesis: Wider trailing stop may let winners run longer but risks
+      giving back more profit on reversals
+    status: pending
+    result: null
+
+  - id: AB-05
+    name: Partial at 1.5R
+    variable: breakeven_r
+    baseline_value: 1.0
+    test_value: 1.5
+    hypothesis: Later breakeven trigger may let trades breathe more before
+      moving stop to entry, reducing premature BE-stops
+    status: pending
+    result: null
+
+  - id: AB-06
+    name: Longs only
+    variable: trade_direction
+    baseline_value: both
+    test_value: longs
+    hypothesis: Isolate long-side contribution to verify it stands alone
+      and is not masking short-side drag
+    status: pending
+    result: null
+
+  - id: AB-07
+    name: Shorts only
+    variable: trade_direction
+    baseline_value: both
+    test_value: shorts
+    hypothesis: Isolate short-side contribution to verify it stands alone
+      and is not masking long-side drag
+    status: pending
+    result: null
+
+scoring:
+  primary: last_10y_net_profit
+  secondary:
+    - last_10y_profit_factor
+    - last_10y_profitable_months_pct
+    - max_drawdown
+  reject_if:
+    - last_10y_profit_factor < 1.0
+    - max_drawdown > 350000
+
+notes: |
+  HOW TO RUN:
+  1. Paste irb_v4_ab_harness.pine into TradingView
+  2. Apply to EURUSD H1 chart
+  3. For each test, change ONLY the listed variable in Settings
+  4. Record: total net profit, last 10y profit, PF, % months, max DD, L/S split
+  5. Update this file with results
+  6. Compare each test to baseline — only adopt changes that beat baseline on primary+secondary

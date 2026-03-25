@@ -19,7 +19,7 @@ import statistics
 from dataclasses import dataclass, field, replace
 
 from novatrade.backtest.engine import IRBBacktester
-from novatrade.backtest.environment import DEFAULT_ENVIRONMENT
+from novatrade.backtest.environment import DEFAULT_ENVIRONMENT, BacktestEnvironment
 from novatrade.backtest.metrics import EVAL_WINDOWS, compute_metrics
 from novatrade.cli.config_schema import StrategyConfig
 from novatrade.evaluation.fitness import compute_scout_score
@@ -43,6 +43,7 @@ class WalkForwardConfig:
     holdout_bars: int = 2190  # 3 months final holdout (24 * 91.25)
     min_oos_is_ratio: float = 0.6
     min_holdout_ratio: float = 0.7
+    timeframe_ratio: int = 4  # primary:higher TF bar ratio (4 for H1:H4, 12 for M5:H1)
 
 
 @dataclass
@@ -81,10 +82,17 @@ class WalkForwardResult:
 # ---------------------------------------------------------------------------
 
 
-def _slice_h4(h1_start: int, h1_end: int, h4_len: int) -> tuple[int, int]:
-    """Map H1 bar range to corresponding H4 bar range (4:1 ratio)."""
-    h4_start = h1_start // 4
-    h4_end = min(h1_end // 4, h4_len)
+def _slice_h4(h1_start: int, h1_end: int, h4_len: int, ratio: int = 4) -> tuple[int, int]:
+    """Map primary-TF bar range to corresponding higher-TF bar range.
+
+    Args:
+        h1_start: Start index in primary timeframe.
+        h1_end: End index in primary timeframe.
+        h4_len: Length of higher timeframe candle array.
+        ratio: Primary-to-higher TF bar ratio (default 4 for H1:H4, 12 for M5:H1).
+    """
+    h4_start = h1_start // ratio
+    h4_end = min(h1_end // ratio, h4_len)
     return h4_start, h4_end
 
 
@@ -94,14 +102,26 @@ def _run_single_backtest(
     h4_slice: list[Candle],
     *,
     min_trades: int = 30,
+    base_environment: BacktestEnvironment | None = None,
 ) -> float:
-    """Run a backtest on a candle slice and return the scout score."""
+    """Run a backtest on a candle slice and return the scout score.
+
+    Args:
+        config: Strategy configuration.
+        h1_slice: Primary timeframe candle slice.
+        h4_slice: Higher timeframe candle slice.
+        min_trades: Minimum trades for a valid score.
+        base_environment: Base environment to overlay strategy params onto.
+            Defaults to ``DEFAULT_ENVIRONMENT`` (H1/H4).  Pass
+            ``BacktestEnvironment.for_m5()`` for M5 walk-forward.
+    """
     if not h1_slice or not h4_slice:
         return 0.0
 
+    base = base_environment if base_environment is not None else DEFAULT_ENVIRONMENT
     env_kwargs = config.to_environment_kwargs()
     try:
-        environment = replace(DEFAULT_ENVIRONMENT, **env_kwargs)
+        environment = replace(base, **env_kwargs)
     except TypeError:
         return 0.0
 
@@ -131,6 +151,7 @@ def run_walk_forward(
     h1_candles: list[Candle],
     h4_candles: list[Candle],
     wf_config: WalkForwardConfig | None = None,
+    base_environment: BacktestEnvironment | None = None,
 ) -> WalkForwardResult:
     """Run rolling walk-forward validation on *config* against candle data.
 
@@ -139,6 +160,9 @@ def run_walk_forward(
         h1_candles: Full H1 candle series.
         h4_candles: Full H4 candle series.
         wf_config: Walk-forward parameters (defaults to ``WalkForwardConfig()``).
+        base_environment: Base environment to overlay strategy params onto.
+            Defaults to ``DEFAULT_ENVIRONMENT`` (H1/H4).  Pass
+            ``BacktestEnvironment.for_m5()`` for M5 walk-forward.
 
     Returns:
         ``WalkForwardResult`` with per-window and aggregate outcomes.
@@ -178,17 +202,17 @@ def run_walk_forward(
         h1_train = h1_candles[train_start:train_end]
         h1_test = h1_candles[test_start:test_end]
 
-        # Slice H4 (aligned via 4:1 ratio)
-        h4_ts, h4_te = _slice_h4(train_start, train_end, n_h4)
+        # Slice H4 (aligned via configured ratio)
+        h4_ts, h4_te = _slice_h4(train_start, train_end, n_h4, wf.timeframe_ratio)
         h4_train = h4_candles[h4_ts:h4_te]
 
-        h4_ts2, h4_te2 = _slice_h4(test_start, test_end, n_h4)
+        h4_ts2, h4_te2 = _slice_h4(test_start, test_end, n_h4, wf.timeframe_ratio)
         h4_test = h4_candles[h4_ts2:h4_te2]
 
         # Run IS and OOS backtests
         # Use min_trades=10 for both — WF windows are smaller than full dataset
-        is_score = _run_single_backtest(config, h1_train, h4_train, min_trades=10)
-        oos_score = _run_single_backtest(config, h1_test, h4_test, min_trades=10)
+        is_score = _run_single_backtest(config, h1_train, h4_train, min_trades=10, base_environment=base_environment)
+        oos_score = _run_single_backtest(config, h1_test, h4_test, min_trades=10, base_environment=base_environment)
 
         ratio = oos_score / is_score if is_score > 0 else (1.0 if oos_score > 0 else 0.0)
         passed = ratio >= wf.min_oos_is_ratio
@@ -236,10 +260,12 @@ def run_walk_forward(
     # Holdout evaluation
     if wf.holdout_bars > 0 and n_h1 > wf.holdout_bars:
         holdout_h1 = h1_candles[-wf.holdout_bars :]
-        h4_hs, h4_he = _slice_h4(n_h1 - wf.holdout_bars, n_h1, n_h4)
+        h4_hs, h4_he = _slice_h4(n_h1 - wf.holdout_bars, n_h1, n_h4, wf.timeframe_ratio)
         holdout_h4 = h4_candles[h4_hs:h4_he]
 
-        holdout_score = _run_single_backtest(config, holdout_h1, holdout_h4, min_trades=10)
+        holdout_score = _run_single_backtest(
+            config, holdout_h1, holdout_h4, min_trades=10, base_environment=base_environment
+        )
         result.holdout_score = holdout_score
 
         median_is = result.median_is_score if result.median_is_score else 0.0

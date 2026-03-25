@@ -19,7 +19,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from novatrade.backtest.engine import IRBBacktester
-from novatrade.backtest.environment import DEFAULT_ENVIRONMENT
+from novatrade.backtest.environment import DEFAULT_ENVIRONMENT, BacktestEnvironment
 from novatrade.backtest.metrics import EVAL_WINDOWS, compute_metrics
 from novatrade.cli.config_schema import StrategyConfig
 from novatrade.evaluation.fitness import compute_scout_score
@@ -113,11 +113,12 @@ class AutoResearchResult:
 BOUNDS = StrategyConfig.PARAMETER_BOUNDS
 
 
-def _random_organism(rng: np.random.Generator, gen: int = 0) -> Organism:
+def _random_organism(rng: np.random.Generator, gen: int = 0, bounds: dict | None = None) -> Organism:
     """Create a fully random organism."""
+    b_map = bounds or BOUNDS
     params = {}
     for p in StrategyConfig.OPTIMIZABLE_PARAMS:
-        b = BOUNDS[p]
+        b = b_map[p]
         val = rng.uniform(b.min_val, b.max_val)
         params[p] = round(val) if p in INT_PARAMS else float(val)
 
@@ -152,15 +153,22 @@ def _random_organism(rng: np.random.Generator, gen: int = 0) -> Organism:
     )
 
 
-def _mutate(org: Organism, rng: np.random.Generator, cfg: AutoResearchConfig, gen: int) -> Organism:
+def _mutate(
+    org: Organism,
+    rng: np.random.Generator,
+    cfg: AutoResearchConfig,
+    gen: int,
+    bounds: dict | None = None,
+) -> Organism:
     """Mutate an organism — perturb params + maybe flip features."""
+    b_map = bounds or BOUNDS
     params = copy.deepcopy(org.params)
     features = copy.deepcopy(org.features)
 
     # Mutate continuous params
     for p in StrategyConfig.OPTIMIZABLE_PARAMS:
         if rng.random() < cfg.mutation_rate:
-            b = BOUNDS[p]
+            b = b_map[p]
             # Gaussian perturbation (10% of range)
             spread = (b.max_val - b.min_val) * 0.10
             val = params[p] + rng.normal(0, spread)
@@ -259,8 +267,22 @@ def _tournament_select(pop: list[Organism], rng: np.random.Generator, k: int = 3
 # ---------------------------------------------------------------------------
 
 
-def _evaluate(org: Organism, h1: list[Candle], h4: list[Candle]) -> Organism:
-    """Run a backtest and score the organism."""
+def _evaluate(
+    org: Organism,
+    h1: list[Candle],
+    h4: list[Candle],
+    base_environment: BacktestEnvironment | None = None,
+) -> Organism:
+    """Run a backtest and score the organism.
+
+    Args:
+        org: Organism to evaluate.
+        h1: Primary timeframe candles.
+        h4: Higher timeframe candles.
+        base_environment: Base environment to overlay strategy params onto.
+            Defaults to ``DEFAULT_ENVIRONMENT`` (H1/H4).  Pass
+            ``BacktestEnvironment.for_m5()`` for M5 autoresearch.
+    """
     try:
         # Build StrategyConfig from params + features
         config_kwargs = copy.deepcopy(org.params)
@@ -270,7 +292,8 @@ def _evaluate(org: Organism, h1: list[Candle], h4: list[Candle]) -> Organism:
         config_kwargs["use_volatility_filter"] = org.features.get("use_volatility_filter", False)
 
         config = StrategyConfig.model_validate(config_kwargs)
-        env = replace(DEFAULT_ENVIRONMENT, **config.to_environment_kwargs())
+        base = base_environment if base_environment is not None else DEFAULT_ENVIRONMENT
+        env = replace(base, **config.to_environment_kwargs())
         bt = IRBBacktester(env=env)
         result = bt.run(h1, h4)
 
@@ -307,23 +330,37 @@ def run_autoresearch(
     h1_candles: list[Candle],
     h4_candles: list[Candle],
     config: AutoResearchConfig | None = None,
+    parameter_bounds: dict[str, object] | None = None,
+    base_environment: BacktestEnvironment | None = None,
 ) -> AutoResearchResult:
     """Run the evolutionary autoresearch loop.
 
     Maintains a population of strategy variants, evolves them through
     mutation/crossover/selection, and tracks the best performers.
+
+    Args:
+        h1_candles: Primary timeframe candles.
+        h4_candles: Higher timeframe candles.
+        config: Autoresearch configuration.
+        parameter_bounds: Optional override for parameter bounds dict.
+            Pass ``StrategyConfig.M5_PARAMETER_BOUNDS`` for M5 timeframe.
+        base_environment: Base environment to overlay strategy params onto.
+            Defaults to ``DEFAULT_ENVIRONMENT`` (H1/H4).  Pass
+            ``BacktestEnvironment.for_m5()`` for M5 autoresearch.
     """
     cfg = config or AutoResearchConfig()
     rng = np.random.default_rng(cfg.seed)
     t0 = time.monotonic()
     total_evals = 0
 
+    bounds = parameter_bounds or BOUNDS
+
     # Initialize population
-    population = [_random_organism(rng, gen=0) for _ in range(cfg.population_size)]
+    population = [_random_organism(rng, gen=0, bounds=bounds) for _ in range(cfg.population_size)]
 
     # Evaluate initial population
     for org in population:
-        _evaluate(org, h1_candles, h4_candles)
+        _evaluate(org, h1_candles, h4_candles, base_environment=base_environment)
         total_evals += 1
 
     population.sort(key=lambda o: o.scout_score, reverse=True)
@@ -351,11 +388,11 @@ def run_autoresearch(
                 p2 = _tournament_select(population, rng, cfg.tournament_size)
                 child = _crossover(p1, p2, rng, gen)
                 # Also mutate the child
-                child = _mutate(child, rng, cfg, gen)
+                child = _mutate(child, rng, cfg, gen, bounds=bounds)
             else:
                 # Pure mutation from tournament winner
                 parent = _tournament_select(population, rng, cfg.tournament_size)
-                child = _mutate(parent, rng, cfg, gen)
+                child = _mutate(parent, rng, cfg, gen, bounds=bounds)
 
             new_pop.append(child)
 
@@ -364,11 +401,11 @@ def run_autoresearch(
         for i in range(n_random):
             idx = cfg.population_size - 1 - i
             if idx >= cfg.elite_count:
-                new_pop[idx] = _random_organism(rng, gen)
+                new_pop[idx] = _random_organism(rng, gen, bounds=bounds)
 
         # Evaluate new organisms (skip elites — already scored)
         for org in new_pop[cfg.elite_count :]:
-            _evaluate(org, h1_candles, h4_candles)
+            _evaluate(org, h1_candles, h4_candles, base_environment=base_environment)
             total_evals += 1
 
         new_pop.sort(key=lambda o: o.scout_score, reverse=True)

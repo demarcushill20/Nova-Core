@@ -63,7 +63,7 @@ from novatrade.runtime.monitor_loop import MonitorLoop
 from novatrade.runtime.webhook_server import WebhookState, create_app
 from novatrade.storage.state_store import StateStore
 from novatrade.strategies.irb import IRBStrategy
-from novatrade.strategy.live_engine import LiveStrategyEngine
+from novatrade.strategy.live_engine import LiveConfig, LiveStrategyEngine
 from novatrade.validation.evidence import EvidenceRecorder
 
 log = logging.getLogger("novatrade.runtime.runner")
@@ -388,19 +388,39 @@ async def build_live_stack(
             "Set NOVATRADE_STRATEGY_CONFIG to a YAML path to load optimised params."
         )
 
+    # --- Resolve timeframes from strategy config or defaults ---
+    primary_tf = "H1"
+    higher_tf = "H4"
+    if config_path:
+        primary_tf = sc.primary_timeframe
+        higher_tf = sc.higher_timeframe
+        log.info(
+            "build_live_stack: timeframes from config: primary=%s, higher=%s",
+            primary_tf,
+            higher_tf,
+        )
+
+    live_config = LiveConfig(
+        symbol=symbol,
+        primary_timeframe=primary_tf,
+        higher_timeframe=higher_tf,
+    )
+
     env = BacktestEnvironment(**env_kwargs)
     strategy = IRBStrategy(env)
-    strategy_engine = LiveStrategyEngine(strategy, env)
+    strategy_engine = LiveStrategyEngine(strategy, env, config=live_config)
 
     # --- Warmup: pre-seed historical candles ---
     try:
-        h1_candles = await adapter.get_candles(symbol, "H1", 500)
-        h4_candles = await adapter.get_candles(symbol, "H4", 200)
-        strategy_engine.seed_history(h1_candles, h4_candles)
+        primary_candles = await adapter.get_candles(symbol, primary_tf, 500)
+        higher_candles = await adapter.get_candles(symbol, higher_tf, 200)
+        strategy_engine.seed_history(primary_candles, higher_candles)
         log.info(
-            "build_live_stack: seeded %d H1 + %d H4 candles",
-            len(h1_candles),
-            len(h4_candles),
+            "build_live_stack: seeded %d %s + %d %s candles",
+            len(primary_candles),
+            primary_tf,
+            len(higher_candles),
+            higher_tf,
         )
     except Exception:
         log.error(
@@ -416,10 +436,10 @@ async def build_live_stack(
     # --- Tick Pipeline ---
     poller = TickBatchPoller(adapter, cfg.symbols, interval=poll_interval)
 
-    # --- Bar Aggregator (ensure H4 is included) ---
+    # --- Bar Aggregator (ensure higher timeframe is included) ---
     timeframes = list(cfg.timeframes)
-    if "H4" not in timeframes:
-        timeframes.append("H4")
+    if higher_tf not in timeframes:
+        timeframes.append(higher_tf)
     aggregator = BarAggregator(timeframes=timeframes)
 
     # --- Feed Health ---

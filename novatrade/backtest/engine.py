@@ -78,6 +78,9 @@ class _OpenPosition:
     best_close: float = 0.0
     bars_held: int = 0
     breakeven_hit: bool = False  # v4: tracks if BE level was reached
+    partial_taken: bool = False  # v5: tracks if partial profit was taken
+    initial_stop: float = 0.0  # v5: original stop loss for R calculation
+    initial_volume: float = 0.0  # v5: original volume before partial
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +234,9 @@ class IRBBacktester:
         self._equity = self.env.initial_equity
         self._trade_counter = 0
         self._consecutive_losses = 0  # circuit breaker tracking
+        self._trades_today = 0  # v5: daily trade counter
+        self._last_flat_bar = -999  # v5: bar index when last went flat
+        self._current_day_key: int = -1  # v5: day boundary tracker
 
         # Result accumulators
         self._trades: list[CompletedTrade] = []
@@ -648,6 +654,8 @@ class IRBBacktester:
                 entry_bar=i,
                 current_stop=p.stop_loss,
                 best_close=bar.close,
+                initial_stop=p.stop_loss,  # v5
+                initial_volume=p.volume,  # v5
             )
             self._state = StrategyState.LONG if p.side == TradeSide.LONG else StrategyState.SHORT
             self._pending = None
@@ -846,11 +854,11 @@ class IRBBacktester:
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _build_h4_map(h1_candles: list[Candle], h4_candles: list[Candle]) -> list[int]:
-        """Map each H1 bar index to the most recent H4 bar index by timestamp.
+    def _build_h4_map(self, h1_candles: list[Candle], h4_candles: list[Candle]) -> list[int]:
+        """Map each primary-TF bar index to the most recent higher-TF bar index by timestamp.
 
-        If H4 candles have no timestamps (0.0), use a simple ratio mapping.
+        If higher-TF candles have no timestamps (0.0), use the ratio from
+        ``self.env.h1_to_h4_ratio`` for positional mapping.
         """
         n = len(h1_candles)
         if not h4_candles:
@@ -869,8 +877,9 @@ class IRBBacktester:
                 mapping.append(h4_idx)
             return mapping
         else:
-            # Simple ratio mapping: every 4 H1 bars = 1 H4 bar
-            return [min(i // 4, len(h4_candles) - 1) for i in range(n)]
+            # Ratio mapping using env-configured ratio (default 4 for H1:H4)
+            ratio = self.env.h1_to_h4_ratio
+            return [min(i // ratio, len(h4_candles) - 1) for i in range(n)]
 
 
 # ---------------------------------------------------------------------------

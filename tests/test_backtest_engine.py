@@ -296,7 +296,8 @@ class TestIRBBacktester:
         """Without timestamps, H4 mapping uses 4:1 ratio."""
         h1 = [_candle(1.1, 1.12, 1.08, 1.11) for _ in range(20)]
         h4 = [_candle(1.1, 1.12, 1.08, 1.11) for _ in range(5)]
-        mapping = IRBBacktester._build_h4_map(h1, h4)
+        bt = IRBBacktester()
+        mapping = bt._build_h4_map(h1, h4)
         assert len(mapping) == 20
         assert mapping[0] == 0
         assert mapping[3] == 0
@@ -307,7 +308,8 @@ class TestIRBBacktester:
         """With timestamps, H4 mapping uses timestamp matching."""
         h1 = [_candle(1.1, 1.12, 1.08, 1.11, ts=float(i * 3600)) for i in range(8)]
         h4 = [_candle(1.1, 1.12, 1.08, 1.11, ts=float(i * 14400)) for i in range(3)]
-        mapping = IRBBacktester._build_h4_map(h1, h4)
+        bt = IRBBacktester()
+        mapping = bt._build_h4_map(h1, h4)
         assert len(mapping) == 8
         # H4 bar 0 at ts=0, bar 1 at ts=14400 (4 hours)
         assert mapping[0] == 0  # H1 ts=0 → H4 bar 0

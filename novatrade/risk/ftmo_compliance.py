@@ -162,6 +162,46 @@ class LotSizeConsistencyChecker:
     def trade_count(self) -> int:
         return len(self._history)
 
+    @property
+    def rolling_average(self) -> float | None:
+        """Return rolling average lot size, or None if no trades recorded."""
+        if not self._history:
+            return None
+        return sum(r.volume for r in self._history) / len(self._history)
+
+    def report(self) -> dict:
+        """Return a monitoring-friendly snapshot of lot-size metrics.
+
+        Includes median, rolling average, min, max, count, and the
+        deviation band that will trigger rejection.
+        """
+        if not self._history:
+            return {
+                "trade_count": 0,
+                "median": None,
+                "rolling_average": None,
+                "min": None,
+                "max": None,
+                "deviation_band_low": None,
+                "deviation_band_high": None,
+                "enforcement_active": False,
+            }
+
+        volumes = [r.volume for r in self._history]
+        med = median(volumes)
+        avg = sum(volumes) / len(volumes)
+
+        return {
+            "trade_count": len(volumes),
+            "median": round(med, 4),
+            "rolling_average": round(avg, 4),
+            "min": round(min(volumes), 4),
+            "max": round(max(volumes), 4),
+            "deviation_band_low": round(med / self.max_deviation_factor, 4) if med > 0 else None,
+            "deviation_band_high": round(med * self.max_deviation_factor, 4) if med > 0 else None,
+            "enforcement_active": len(volumes) >= self.min_trades_for_enforcement,
+        }
+
     def save_state(self, path: Path | None = None) -> None:
         """Persist lot history to JSON for crash recovery."""
         path = path or (_STATE_DIR / "lot_history.json")
@@ -1075,3 +1115,154 @@ class BestDayRuleTracker:
             "days_traded": len(self._daily_pnl),
             "daily_breakdown": dict(self._daily_pnl),
         }
+
+
+# ---------------------------------------------------------------------------
+# SL Modification Counter
+# ---------------------------------------------------------------------------
+
+_DEFAULT_SL_MOD_CEILING_PER_TRADE = 50  # max SL mods per individual trade
+_DEFAULT_SL_MOD_CEILING_PER_DAY = 200  # max total SL mods across all trades per day
+
+
+@dataclass
+class SlModificationCounter:
+    """Tracks stop-loss modifications per position and per day.
+
+    FTMO EA compliance: excessive SL modifications are a strong EA
+    fingerprint.  The IRB EMA trailing stop modifies SL on each bar
+    close, which can accumulate quickly on lower timeframes.  This
+    tracker enforces per-trade and per-day ceilings.
+
+    Usage::
+
+        counter = SlModificationCounter()
+        counter.record("pos_123")
+        ok = counter.check("pos_123")  # RiskCheckResult
+    """
+
+    per_trade_ceiling: int = _DEFAULT_SL_MOD_CEILING_PER_TRADE
+    per_day_ceiling: int = _DEFAULT_SL_MOD_CEILING_PER_DAY
+    # Internal state
+    _per_position: dict[str, int] = field(default_factory=dict)
+    _day_key: str = field(default="", repr=False)
+    _day_count: int = field(default=0, repr=False)
+
+    def _ensure_day(self) -> None:
+        """Reset daily counter on new trading day (Europe/Prague)."""
+        today = datetime.now(timezone.utc).astimezone(_FTMO_TZ).strftime("%Y-%m-%d")
+        if today != self._day_key:
+            if self._day_key:
+                log.info(
+                    "SL mod counter day reset: %s had %d modifications",
+                    self._day_key,
+                    self._day_count,
+                )
+            self._day_key = today
+            self._day_count = 0
+            # Do NOT clear per-position counts — positions can span days
+
+    def record(self, position_id: str) -> None:
+        """Record a SL modification for a position.
+
+        Args:
+            position_id: The broker position ID being modified.
+        """
+        self._ensure_day()
+        self._per_position[position_id] = self._per_position.get(position_id, 0) + 1
+        self._day_count += 1
+
+        count = self._per_position[position_id]
+        if count == self.per_trade_ceiling:
+            log.warning(
+                "SL mod counter: position %s hit ceiling (%d mods)",
+                position_id,
+                count,
+            )
+
+    def check(self, position_id: str = "") -> RiskCheckResult:
+        """Check if SL modification limits have been reached.
+
+        Args:
+            position_id: If provided, also checks per-trade ceiling.
+                If empty, only checks daily ceiling.
+        """
+        self._ensure_day()
+
+        # Check daily ceiling
+        if self._day_count >= self.per_day_ceiling:
+            return RiskCheckResult(
+                name="sl_mod_limit",
+                passed=False,
+                detail=(
+                    f"daily SL modifications {self._day_count} >= ceiling "
+                    f"{self.per_day_ceiling} — blocking further modifications"
+                ),
+            )
+
+        # Check per-trade ceiling
+        if position_id:
+            count = self._per_position.get(position_id, 0)
+            if count >= self.per_trade_ceiling:
+                return RiskCheckResult(
+                    name="sl_mod_limit",
+                    passed=False,
+                    detail=(f"position {position_id} SL modifications {count} >= ceiling {self.per_trade_ceiling}"),
+                )
+
+        return RiskCheckResult(
+            name="sl_mod_limit",
+            passed=True,
+            detail=(
+                f"sl_mods_today={self._day_count}/{self.per_day_ceiling}"
+                + (
+                    f", position={self._per_position.get(position_id, 0)}/{self.per_trade_ceiling}"
+                    if position_id
+                    else ""
+                )
+            ),
+        )
+
+    def clear_position(self, position_id: str) -> None:
+        """Remove tracking for a closed position."""
+        self._per_position.pop(position_id, None)
+
+    @property
+    def daily_count(self) -> int:
+        self._ensure_day()
+        return self._day_count
+
+    def position_count(self, position_id: str) -> int:
+        """Return SL modification count for a specific position."""
+        return self._per_position.get(position_id, 0)
+
+    def save_state(self, path: Path | None = None) -> None:
+        """Persist SL mod counter state for crash recovery."""
+        self._ensure_day()
+        path = path or (_STATE_DIR / "sl_mod_counter.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "day": self._day_key,
+            "day_count": self._day_count,
+            "per_position": dict(self._per_position),
+        }
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def load_state(self, path: Path | None = None) -> bool:
+        """Load SL mod counter state.  Returns True if loaded."""
+        path = path or (_STATE_DIR / "sl_mod_counter.json")
+        if not path.exists():
+            return False
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            today = datetime.now(timezone.utc).astimezone(_FTMO_TZ).strftime("%Y-%m-%d")
+            if data.get("day") == today:
+                self._day_key = today
+                self._day_count = data.get("day_count", 0)
+                self._per_position = data.get("per_position", {})
+                log.info("Loaded SL mod counter: %d mods for %s", self._day_count, today)
+                return True
+            return False
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            log.warning("Failed to load SL mod counter from %s: %s", path, exc)
+            return False

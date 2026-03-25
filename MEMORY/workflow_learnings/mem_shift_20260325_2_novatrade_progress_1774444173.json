@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260325_2_novatrade_progress_1774444173",
+  "workflow_id": "shift_20260325_2_novatrade_progress",
+  "task_summary": "Added trade_allowed broker safety check and configurable timeframe support for M5 live readiness",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added trade_allowed broker safety check and configurable timeframe support for M5 live readiness"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260325_2_novatrade_progress"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added trade_allowed broker safety check and configurable timeframe support for M5 live readiness",
+  "created_at": "2026-03-25T13:09:33Z",
+  "confidence": "high"
+}

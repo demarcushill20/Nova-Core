@@ -1,0 +1,57 @@
+# IRB v5 - Relaxed Reliable Build (5min Champion)
+# Source: Pine Script v5 strategy validated on TradingView (24yr, $11.91M net profit)
+# Timeframe: M5 primary / H1 higher
+strategy_type: irb
+name: irb_v5_m5_champion
+version: "5.0.0"
+description: "IRB v5 Relaxed Reliable Build - 5min Champion. Balanced long/short, PF 1.15 (10yr), 63.6% profitable months."
+
+# Timeframes
+primary_timeframe: M5
+higher_timeframe: H1
+
+# IRB geometry
+irb_threshold: 0.45
+
+# Trend filter (v5 simple mode)
+use_simple_trend_filter: true
+ema_period: 20
+ema_fast_period: 20
+ema_slow_period: 50
+ema_slope_lookback: 5
+use_ema_stack_filter: false
+
+# HTF filter (H4 EMA slope only)
+mtf_lookback: 1
+
+# Signal filters
+atr_period: 14
+adx_period: 14
+adx_threshold: 0.0
+overextension_threshold: 2.5
+min_signal_atr_mult: 0.0
+
+# Order management
+trigger_window_bars: 12
+revalidate_pending: true
+
+# Trade management
+breakeven_r: 1.0
+trail_atr_multiplier: 2.0
+time_stop_bars: 20
+trail_delay_bars: 0
+
+# Partial exit (v5 feature)
+partial_exit_enabled: true
+partial_exit_pct: 50.0
+partial_r_target: 1.0
+
+# Risk controls
+max_trades_per_day: 3
+cooldown_bars: 1
+max_consecutive_losses: 0
+
+# Disabled filters
+session_filter: null
+use_volatility_filter: false
+use_regime_gate: false

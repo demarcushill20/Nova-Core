@@ -571,6 +571,7 @@ def _translate_account(info: dict) -> AccountState:
         mode=mode,
         server=info.get("server", ""),
         broker=info.get("broker", ""),
+        trade_allowed=info.get("tradeAllowed", True),
     )
 
 
