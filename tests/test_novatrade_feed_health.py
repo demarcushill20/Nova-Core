@@ -638,3 +638,49 @@ class TestLifecycle:
         snap = sup.get_snapshot("EURUSD")
         expected_avg = sum(spreads_pips) / len(spreads_pips)
         assert snap.avg_spread_pips == pytest.approx(expected_avg, rel=0.01)
+
+
+# ---------------------------------------------------------------------------
+# check_staleness: dedup key exclusion
+# ---------------------------------------------------------------------------
+
+
+class TestCheckStalenessExcludesDedup:
+    def test_dedup_keys_excluded_from_staleness(self) -> None:
+        """Dedup keys (e.g. 'EURUSD:SHORT') should not appear in check_staleness results."""
+        sup, clock = _make_supervisor()
+        # Feed a tick so EURUSD is tracked
+        sup.on_tick(_tick(ts=clock[0]))
+        # Trigger dedup tracking by calling is_duplicate_signal
+        sup.is_duplicate_signal("EURUSD", "SHORT")
+
+        staleness = sup.check_staleness()
+
+        assert "EURUSD" in staleness
+        assert "EURUSD:SHORT" not in staleness
+
+    def test_dedup_keys_do_not_pollute_staleness_after_multiple_signals(self) -> None:
+        """Multiple dedup keys should all be excluded from staleness."""
+        sup, clock = _make_supervisor()
+        sup.on_tick(_tick(ts=clock[0]))
+        sup.is_duplicate_signal("EURUSD", "LONG")
+        sup.is_duplicate_signal("EURUSD", "SHORT")
+        sup.is_duplicate_signal("GBPUSD", "LONG")
+
+        staleness = sup.check_staleness()
+
+        # Only real symbols should appear
+        assert "EURUSD" in staleness
+        for key in staleness:
+            assert ":" not in key, f"Dedup key {key!r} leaked into staleness"
+
+    def test_tracked_symbols_excludes_dedup_keys(self) -> None:
+        """tracked_symbols property should not include dedup keys."""
+        sup, clock = _make_supervisor()
+        sup.on_tick(_tick(ts=clock[0]))
+        sup.is_duplicate_signal("EURUSD", "SHORT")
+
+        symbols = sup.tracked_symbols
+
+        assert "EURUSD" in symbols
+        assert "EURUSD:SHORT" not in symbols

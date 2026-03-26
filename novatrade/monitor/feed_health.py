@@ -201,11 +201,15 @@ class FeedHealthSupervisor:
         """Periodic staleness check — call every 5-10s from a timer.
 
         Returns per-symbol state. Symbols that haven't sent a tick within
-        ``max_stale_seconds`` are marked STALE.
+        ``max_stale_seconds`` are marked STALE.  Dedup keys (containing ``:``)
+        are excluded — they track signal frequency, not feed health.
         """
         now = self._clock()
         result: dict[str, FeedState] = {}
         for symbol, ss in self._symbols.items():
+            # Skip dedup keys (e.g. "EURUSD:SHORT") — they never receive ticks
+            if ":" in symbol:
+                continue
             if symbol in self._disconnected:
                 result[symbol] = FeedState.DISCONNECTED
             elif ss.last_tick_ts == 0.0:
