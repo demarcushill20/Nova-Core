@@ -324,9 +324,19 @@ class LiveTradingAgent:
             return self._build_cancel_payload(signal)
         return None
 
-    def _build_entry_payload(self, signal: LiveSignal) -> dict[str, Any]:
-        """Build PLACE_STOP_ORDER or REPLACE_STOP_ORDER payload."""
-        side_mapped = _SIDE_MAP[signal.side]
+    def _build_entry_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
+        """Build PLACE_STOP_ORDER or REPLACE_STOP_ORDER payload.
+
+        Returns None if signal.side is not a recognized value.
+        """
+        side_mapped = _SIDE_MAP.get(signal.side)
+        order_type = _ORDER_TYPE_MAP.get(signal.side)
+        if side_mapped is None or order_type is None:
+            log.error(
+                "Unknown signal side %r — cannot build entry payload (expected LONG/SHORT)",
+                signal.side,
+            )
+            return None
         action = self._resolve_entry_action(signal.side)
 
         return {
@@ -337,7 +347,7 @@ class LiveTradingAgent:
             "symbol": signal.symbol,
             "broker_symbol": self._cfg.ftmo.resolve_symbol(signal.symbol),
             "side": side_mapped,
-            "order_type": _ORDER_TYPE_MAP[signal.side],
+            "order_type": order_type,
             "entry_price": signal.entry_price,
             "stop_loss": signal.stop_loss,
             "volume": signal.volume,
@@ -345,39 +355,51 @@ class LiveTradingAgent:
             "campaign": self._campaign,
         }
 
-    def _build_exit_payload(self, signal: LiveSignal) -> dict[str, Any]:
+    def _build_exit_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
         """Build CLOSE_POSITION payload."""
+        side_mapped = _SIDE_MAP.get(signal.side)
+        if side_mapped is None:
+            log.error("Unknown signal side %r — cannot build exit payload", signal.side)
+            return None
         return {
             "strategy_name": _STRATEGY_NAME,
             "strategy_version": _STRATEGY_VERSION,
             "action": "CLOSE_POSITION",
             "symbol": signal.symbol,
-            "side": _SIDE_MAP[signal.side],
+            "side": side_mapped,
             "close_reason": signal.exit_reason or "STRATEGY_EXIT",
             "campaign": self._campaign,
         }
 
-    def _build_modify_sl_payload(self, signal: LiveSignal) -> dict[str, Any]:
+    def _build_modify_sl_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
         """Build MODIFY_SL payload."""
+        side_mapped = _SIDE_MAP.get(signal.side)
+        if side_mapped is None:
+            log.error("Unknown signal side %r — cannot build modify_sl payload", signal.side)
+            return None
         return {
             "strategy_name": _STRATEGY_NAME,
             "strategy_version": _STRATEGY_VERSION,
             "action": "MODIFY_SL",
             "symbol": signal.symbol,
-            "side": _SIDE_MAP[signal.side],
+            "side": side_mapped,
             "old_stop": signal.metadata.get("old_stop", 0.0),
             "new_stop": signal.new_stop,
             "campaign": self._campaign,
         }
 
-    def _build_cancel_payload(self, signal: LiveSignal) -> dict[str, Any]:
+    def _build_cancel_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
         """Build CANCEL_ORDER payload."""
+        side_mapped = _SIDE_MAP.get(signal.side)
+        if side_mapped is None:
+            log.error("Unknown signal side %r — cannot build cancel payload", signal.side)
+            return None
         return {
             "strategy_name": _STRATEGY_NAME,
             "strategy_version": _STRATEGY_VERSION,
             "action": "CANCEL_ORDER",
             "symbol": signal.symbol,
-            "side": _SIDE_MAP[signal.side],
+            "side": side_mapped,
             "cancel_reason": signal.exit_reason or "PENDING_EXPIRED",
             "campaign": self._campaign,
         }

@@ -668,6 +668,83 @@ class TestOnFillExceptionHandling:
         engine.notify_fill.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# Defensive validation: unknown signal.side does not crash
+# ---------------------------------------------------------------------------
+
+
+class TestUnknownSideValidation:
+    def test_entry_unknown_side_returns_unsupported(self) -> None:
+        """Unknown signal.side should return rejected, not crash with KeyError."""
+        agent = _mock_trading_agent(AgentState.FLAT)
+        lta = LiveTradingAgent(agent, _mock_engine(), _cfg())
+
+        sig = _entry_signal(side="INVALID")
+        result = asyncio.run(lta.execute(sig))
+
+        assert result.success is False
+        assert "unsupported_signal_type" in result.rejected_reason
+        agent.process_alert.assert_not_called()
+
+    def test_exit_unknown_side_returns_unsupported(self) -> None:
+        """Unknown signal.side in exit should return rejected."""
+        agent = _mock_trading_agent(AgentState.LONG)
+        lta = LiveTradingAgent(agent, _mock_engine(), _cfg())
+
+        sig = _exit_signal(side="INVALID")
+        result = asyncio.run(lta.execute(sig))
+
+        assert result.success is False
+        assert "unsupported_signal_type" in result.rejected_reason
+        agent.process_alert.assert_not_called()
+
+    def test_modify_sl_unknown_side_returns_unsupported(self) -> None:
+        """Unknown signal.side in modify_sl should return rejected."""
+        agent = _mock_trading_agent(AgentState.LONG)
+        lta = LiveTradingAgent(agent, _mock_engine(), _cfg())
+
+        sig = _modify_sl_signal(side="INVALID")
+        result = asyncio.run(lta.execute(sig))
+
+        assert result.success is False
+        assert "unsupported_signal_type" in result.rejected_reason
+        agent.process_alert.assert_not_called()
+
+    def test_cancel_unknown_side_returns_unsupported(self) -> None:
+        """Unknown signal.side in cancel should return rejected."""
+        agent = _mock_trading_agent(AgentState.PENDING_LONG)
+        lta = LiveTradingAgent(agent, _mock_engine(), _cfg())
+
+        sig = _cancel_signal(side="INVALID")
+        result = asyncio.run(lta.execute(sig))
+
+        assert result.success is False
+        assert "unsupported_signal_type" in result.rejected_reason
+        agent.process_alert.assert_not_called()
+
+    def test_entry_with_empty_string_side_returns_unsupported(self) -> None:
+        """Empty string side should be handled gracefully."""
+        agent = _mock_trading_agent(AgentState.FLAT)
+        lta = LiveTradingAgent(agent, _mock_engine(), _cfg())
+
+        sig = _entry_signal(side="")
+        result = asyncio.run(lta.execute(sig))
+
+        assert result.success is False
+        agent.process_alert.assert_not_called()
+
+    def test_entry_lowercase_side_returns_unsupported(self) -> None:
+        """Lowercase side (e.g. 'long') should be rejected — must be LONG/SHORT."""
+        agent = _mock_trading_agent(AgentState.FLAT)
+        lta = LiveTradingAgent(agent, _mock_engine(), _cfg())
+
+        sig = _entry_signal(side="long")
+        result = asyncio.run(lta.execute(sig))
+
+        assert result.success is False
+        agent.process_alert.assert_not_called()
+
+
 class TestOnBrokerCloseExceptionHandling:
     def test_on_broker_close_agent_exception_does_not_crash(self) -> None:
         """If TradingAgent.notify_broker_close raises, on_broker_close doesn't crash."""
