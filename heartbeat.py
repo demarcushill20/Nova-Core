@@ -1718,15 +1718,35 @@ _NOVATRADE_GOAL_ID = "novatrade_100pct_operational"
 
 
 def _has_pending_task_for_dimension(dimension: str | None) -> bool:
-    """Check if TASKS/ already has a pending autonomy task targeting *dimension*."""
+    """Check if TASKS/ already has a pending or recently-completed autonomy task targeting *dimension*.
+
+    Prevents duplicate task storms by also considering tasks completed within
+    the last ``_DEDUP_COOLDOWN_S`` seconds (default 2 hours).
+    """
+    _DEDUP_COOLDOWN_S = 7200  # 2 hours
+
     if not dimension:
         return False
-    for f in TASKS_DIR.glob("*.md"):
-        if any(f.name.endswith(s) for s in (".done", ".failed", ".cancelled")):
-            continue
+    import time as _time
+
+    now = _time.time()
+    dim_lower = dimension.replace("_", " ")
+
+    for f in TASKS_DIR.glob("*.md*"):
+        fname = f.name
+        # Check if this is a completed/failed task within cooldown window
+        is_terminal = any(fname.endswith(s) for s in (".done", ".failed", ".cancelled"))
+        if is_terminal:
+            try:
+                mtime = f.stat().st_mtime
+                if now - mtime > _DEDUP_COOLDOWN_S:
+                    continue  # Too old — don't count
+            except OSError:
+                continue
+
         try:
             head = f.read_text()[:500]
-            if "source: autonomy-decision-engine" in head and dimension.replace("_", " ") in head.lower():
+            if "source: autonomy-decision-engine" in head and dim_lower in head.lower():
                 return True
         except OSError:
             continue

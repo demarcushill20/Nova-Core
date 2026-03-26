@@ -101,8 +101,9 @@ class MetaApiAdapter(MT5Adapter):
     - Order verification: post-placement polling confirms execution
     """
 
-    # Re-subscribe to market data every 15 minutes to prevent feed death.
-    _RESUB_INTERVAL_S = 900.0  # 15 minutes
+    # Re-subscribe to market data every 9 minutes to prevent feed death.
+    # Reduced from 900→540s after diagnosing RPC subscription expiry at ~23min.
+    _RESUB_INTERVAL_S = 540.0  # 9 minutes
 
     def __init__(self, config: MetaApiConfig) -> None:
         self._config = config

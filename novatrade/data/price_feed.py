@@ -62,6 +62,8 @@ class TickBatchPoller:
         self.ticks_yielded: int = 0
         self.polls: int = 0
         self.errors: int = 0
+        self._consecutive_errors: int = 0
+        self._CONSECUTIVE_ERROR_THRESHOLD: int = 10  # trigger resub after N errors
 
     @property
     def running(self) -> bool:
@@ -124,6 +126,7 @@ class TickBatchPoller:
                             continue
 
                         self._last_prices[symbol] = (price.bid, price.ask)
+                        self._consecutive_errors = 0  # reset on success
 
                         tick = Tick(
                             symbol=symbol,
@@ -136,7 +139,23 @@ class TickBatchPoller:
 
                     except Exception:
                         self.errors += 1
+                        self._consecutive_errors += 1
                         log.exception("Error polling %s — continuing", symbol)
+
+                        # Trigger resubscription after consecutive errors
+                        if self._consecutive_errors >= self._CONSECUTIVE_ERROR_THRESHOLD:
+                            log.warning(
+                                "TickBatchPoller: %d consecutive errors — requesting resubscription",
+                                self._consecutive_errors,
+                            )
+                            try:
+                                if hasattr(self._adapter, "subscribe_to_market_data"):
+                                    broker_syms = [self._broker_map.get(s, s) for s in self._symbols]
+                                    await self._adapter.subscribe_to_market_data(broker_syms)
+                                    log.info("Resubscription triggered after error threshold")
+                                    self._consecutive_errors = 0
+                            except Exception:
+                                log.exception("Resubscription failed")
 
                 # Elapsed-time-aware sleep
                 elapsed = time.monotonic() - loop_start

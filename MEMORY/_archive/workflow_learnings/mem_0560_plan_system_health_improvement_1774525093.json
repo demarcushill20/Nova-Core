@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0560_plan_system_health_improvement_1774525093",
+  "workflow_id": "0560_plan_system_health_improvement",
+  "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0560_plan_system_health_improvement_1774524628 (done)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-03-26T11:38:13Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260326_6_testing_quality_1774538731"
+}
