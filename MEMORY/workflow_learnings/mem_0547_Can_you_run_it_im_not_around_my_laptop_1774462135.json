@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0547_Can_you_run_it_im_not_around_my_laptop_1774462135",
+  "workflow_id": "0547_Can_you_run_it_im_not_around_my_laptop",
+  "task_summary": "Launched 10-year Dukascopy EURUSD M5 fetch (PID 2399550), installed pandas dep, created monitoring script",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Launched 10-year Dukascopy EURUSD M5 fetch (PID 2399550), installed pandas dep, created monitoring script"
+  ],
+  "successful_patterns": [
+    "task_completed: 0547_Can_you_run_it_im_not_around_my_laptop"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Launched 10-year Dukascopy EURUSD M5 fetch (PID 2399550), installed pandas dep, created monitoring script",
+  "created_at": "2026-03-25T18:08:55Z",
+  "confidence": "high"
+}

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260325_15_free_will_pm_1774488343",
+  "workflow_id": "shift_20260325_15_free_will_pm",
+  "task_summary": "Fixed 4 test bugs (2 off-by-one, 1 global time mock poison, 1 hidden test collision) \u2014 406 tests now passing",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 4 test bugs (2 off-by-one, 1 global time mock poison, 1 hidden test collision) \u2014 406 tests now passing"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260325_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 4 test bugs (2 off-by-one, 1 global time mock poison, 1 hidden test collision) \u2014 406 tests now passing",
+  "created_at": "2026-03-26T01:25:43Z",
+  "confidence": "high"
+}

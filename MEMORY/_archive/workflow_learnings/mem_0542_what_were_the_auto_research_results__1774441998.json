@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0542_what_were_the_auto_research_results__1774441998",
+  "workflow_id": "0542_what_were_the_auto_research_results_",
+  "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0542_what_were_the_auto_research_results__1774441697 (done)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-03-25T12:33:18Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0548_I_have_not_seen_a_trade_in_the_demo_account_can_you_investigate_1774462005"
+}

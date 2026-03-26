@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0553_with__1774502978",
+  "workflow_id": "0553_with_",
+  "task_summary": "Fixed 3 NovaTrade blockers \u2014 version mismatch (2.0.0\u21925.0.0), periodic market data resubscription (15min), tradeAllowed early detection at connect",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 3 NovaTrade blockers \u2014 version mismatch (2.0.0\u21925.0.0), periodic market data resubscription (15min), tradeAllowed early detection at connect"
+  ],
+  "successful_patterns": [
+    "task_completed: 0553_with_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 3 NovaTrade blockers \u2014 version mismatch (2.0.0\u21925.0.0), periodic market data resubscription (15min), tradeAllowed early detection at connect",
+  "created_at": "2026-03-26T05:29:38Z",
+  "confidence": "high"
+}

@@ -1,6 +1,6 @@
 {
-  "artifact_id": "mem_shift_20260325_1_system_health_1774441696",
-  "workflow_id": "shift_20260325_1_system_health",
+  "artifact_id": "mem_shift_20260325_11_novatrade_impl2_1774474906",
+  "workflow_id": "shift_20260325_11_novatrade_impl2",
   "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
   "task_class": "unknown",
   "roles_involved": [
@@ -10,11 +10,13 @@
     "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)"
   ],
   "successful_patterns": [
-    "plan_created: plan plan_shift_20260325_1_system_health_1774438245 (done)"
+    "plan_created: plan plan_shift_20260325_11_novatrade_impl2_1774472408 (done)"
   ],
   "failure_patterns": [],
   "verification_outcome": "not_verified",
   "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
-  "created_at": "2026-03-25T12:28:16Z",
-  "confidence": "high"
+  "created_at": "2026-03-25T21:41:46Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0556_Use_the_implementation-team_skill_to_complete_phase_2-3_step_by_step_1774508551"
 }
