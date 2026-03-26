@@ -381,8 +381,10 @@ class TestCooldown:
         assert cd.passed
 
     def test_cooldown_expired_passes(self):
+        from novatrade.risk.pre_trade_gate import _now
+
         gate = PreTradeGate(_cfg(risk={"cooldown_seconds": 1}))
-        gate._trade_log.append((time.time() - 5, "EURUSD", "BUY"))
+        gate._trade_log.append((_now() - 5, "EURUSD", "BUY"))
         decision = gate.evaluate(
             _order(symbol="EURUSD", side=OrderSide.BUY),
             _account(),

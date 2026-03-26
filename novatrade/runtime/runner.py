@@ -257,7 +257,44 @@ def build_stack(
             f"Blockers: {readiness.blockers}"
         )
 
+    # --- Persist strategy config for autonomy collector ---
+    _persist_strategy_config(cfg, cfg.symbols[0] if cfg.symbols else "EURUSD", "H1", "H4", "webhook")
+
     return ws, loop, readiness
+
+
+# ---------------------------------------------------------------------------
+# Strategy config persistence (for autonomy collector)
+# ---------------------------------------------------------------------------
+
+
+def _persist_strategy_config(
+    cfg: NovaTradeCfg,
+    symbol: str,
+    primary_tf: str,
+    higher_tf: str,
+    pipeline: str,
+) -> None:
+    """Write strategy_config.json so the autonomy collector can verify pipeline health."""
+    import json as _json
+
+    state_dir = Path(cfg.data_dir).parent / "STATE" / "novatrade"
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        config_path = state_dir / "strategy_config.json"
+        config_data = {
+            "strategy": "IRB",
+            "symbol": symbol,
+            "primary_timeframe": primary_tf,
+            "higher_timeframe": higher_tf,
+            "pipeline": pipeline,
+            "started_at": time.time(),
+            "symbols": cfg.symbols,
+        }
+        config_path.write_text(_json.dumps(config_data, indent=2))
+        log.info("persisted strategy_config.json to %s", config_path)
+    except OSError:
+        log.debug("Failed to persist strategy_config.json", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +480,18 @@ async def build_live_stack(
             exc_info=True,
         )
 
+    # --- Subscribe to market data (prime the price feed) ---
+    broker_symbols = list(broker_map.values())
+    try:
+        await adapter.subscribe_to_market_data(broker_symbols)
+        log.info("build_live_stack: subscribed to market data for %s", broker_symbols)
+    except Exception:
+        log.warning(
+            "build_live_stack: market data subscription failed — poller will "
+            "attempt on first poll, but initial ticks may be delayed",
+            exc_info=True,
+        )
+
     # --- Live Trading Agent ---
     live_agent = LiveTradingAgent(agent, strategy_engine, cfg, campaign="irb-live")
 
@@ -467,7 +516,11 @@ async def build_live_stack(
         live_agent=live_agent,
         health_interval=health_interval,
         state_store=state_store,
+        adapter=adapter,
     )
+
+    # --- Persist strategy config for autonomy collector ---
+    _persist_strategy_config(cfg, symbol, primary_tf, higher_tf, "live")
 
     log.info(
         "build_live_stack: ready — symbol=%s timeframes=%s poll=%.1fs health=%.1fs",

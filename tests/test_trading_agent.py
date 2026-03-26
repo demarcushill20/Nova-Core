@@ -106,7 +106,7 @@ def _signal_payload(**overrides) -> dict:
     """Build a valid signal_alert payload."""
     base = {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "PLACE_STOP_ORDER",
         "signal_type": "LONG_IRB",
         "irb_type": "UPTREND_IRB",
@@ -145,7 +145,7 @@ def _trail_payload(**overrides) -> dict:
     """Build a valid trail_alert payload."""
     base = {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "MODIFY_SL",
         "symbol": "EURUSD",
         "side": "BUY",
@@ -164,7 +164,7 @@ def _cancel_payload(**overrides) -> dict:
     """Build a valid cancel_alert payload."""
     base = {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "CANCEL_ORDER",
         "symbol": "EURUSD",
         "side": "BUY",
@@ -180,7 +180,7 @@ def _close_payload(**overrides) -> dict:
     """Build a valid close_alert payload."""
     base = {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "CLOSE_POSITION",
         "symbol": "EURUSD",
         "side": "BUY",

@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "novatrade-irb-alert-v2.0.0",
+  "$id": "novatrade-irb-alert-v5.0.0",
   "title": "NovaTrade Rob Hoffman IRB — Alert Payload Contract",
-  "description": "JSON schema for alert payloads emitted by strategy.pine v2.0.0 (3, 40). Consumed by the NovaTrade Trading Agent. Features EMA stack filter, EMA 10 close confirmation, and EMA-based trailing stop.",
-  "phase": "2 (Pine Implementation)",
-  "date": "2026-03-22",
-  "strategy_spec_version": "2.0.0",
+  "description": "JSON schema for alert payloads emitted by IRB v5.0.0 (full-Python M5 pipeline). Consumed by the NovaTrade Trading Agent. Features EMA stack filter, EMA 10 close confirmation, and EMA-based trailing stop.",
+  "phase": "5 (Full-Python Live Pipeline)",
+  "date": "2026-03-26",
+  "strategy_spec_version": "5.0.0",
   "input_parameters": {
     "EMA_CONFIRM_BARS": 3,
     "TRAIL_EMA_PERIOD": 40
@@ -37,7 +37,7 @@
       ],
       "properties": {
         "strategy_name":        { "type": "string", "const": "Rob Hoffman IRB" },
-        "strategy_version":     { "type": "string", "const": "2.0.0" },
+        "strategy_version":     { "type": "string", "const": "5.0.0" },
         "action":               { "type": "string", "enum": ["PLACE_STOP_ORDER", "REPLACE_STOP_ORDER"] },
         "signal_type":          { "type": "string", "enum": ["LONG_IRB", "SHORT_IRB"] },
         "irb_type":             { "type": "string", "enum": ["UPTREND_IRB", "DOWNTREND_IRB"] },
@@ -89,7 +89,7 @@
       ],
       "properties": {
         "strategy_name":    { "type": "string", "const": "Rob Hoffman IRB" },
-        "strategy_version": { "type": "string", "const": "2.0.0" },
+        "strategy_version": { "type": "string", "const": "5.0.0" },
         "action":           { "type": "string", "const": "MODIFY_SL" },
         "symbol":           { "type": "string", "const": "EURUSD" },
         "side":             { "type": "string", "enum": ["BUY", "SELL"] },
@@ -113,7 +113,7 @@
       ],
       "properties": {
         "strategy_name":    { "type": "string", "const": "Rob Hoffman IRB" },
-        "strategy_version": { "type": "string", "const": "2.0.0" },
+        "strategy_version": { "type": "string", "const": "5.0.0" },
         "action":           { "type": "string", "const": "CANCEL_ORDER" },
         "symbol":           { "type": "string", "const": "EURUSD" },
         "side":             { "type": "string", "enum": ["BUY", "SELL"] },
@@ -133,7 +133,7 @@
       ],
       "properties": {
         "strategy_name":    { "type": "string", "const": "Rob Hoffman IRB" },
-        "strategy_version": { "type": "string", "const": "2.0.0" },
+        "strategy_version": { "type": "string", "const": "5.0.0" },
         "action":           { "type": "string", "const": "CLOSE_POSITION" },
         "symbol":           { "type": "string", "const": "EURUSD" },
         "side":             { "type": "string", "enum": ["BUY", "SELL"] },

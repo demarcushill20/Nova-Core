@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
+from pathlib import Path
 from typing import Any
 
 from novatrade.config import NovaTradeCfg
@@ -44,6 +46,8 @@ _ORDER_TYPE_MAP: dict[str, str] = {
 
 _STRATEGY_NAME = "Rob Hoffman IRB"
 _STRATEGY_VERSION = "5.0.0"
+
+_VALIDATION_REPORTS_PATH = Path("OUTPUT/novatrade/validation_reports.jsonl")
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +203,20 @@ class LiveTradingAgent:
                 position_id,
             )
 
+        # --- Post-trade validation (best-effort, never crashes pipeline) ---
+        agent = self._trading_agent
+        symbol = agent._position_symbol or (agent._cfg.symbols[0] if agent._cfg.symbols else "")
+        side = "BUY" if agent._state == AgentState.LONG else "SELL"
+        self._run_post_trade_validation(
+            symbol=symbol,
+            side=side,
+            entry_price=fill_price,
+            stop_loss=stop_loss,
+            volume=volume,
+            fill_price=fill_price,
+            order_id=position_id,
+        )
+
     def on_broker_close(
         self,
         position_id: str,
@@ -234,6 +252,59 @@ class LiveTradingAgent:
                 "DESYNC: LiveStrategyEngine.notify_close raised for position=%s — "
                 "TradingAgent updated but engine did not. TradingAgent has authoritative state.",
                 position_id,
+            )
+
+    # -- Post-trade validation hook ----------------------------------------
+
+    def _run_post_trade_validation(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        stop_loss: float,
+        volume: float,
+        fill_price: float | None = None,
+        order_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Fire the post-trade validation hook (best-effort, never crashes the pipeline).
+
+        Constructs a ``TradeRecord`` from fill data and delegates to
+        ``post_trade_validation_hook`` which runs all validation rules,
+        appends a report to ``OUTPUT/novatrade/validation_reports.jsonl``,
+        and logs critical violations as warnings.
+        """
+        try:
+            from novatrade.validation.trade_validator import (
+                TradeRecord,
+                post_trade_validation_hook,
+            )
+
+            record = TradeRecord(
+                symbol=symbol,
+                side=side,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                volume=volume,
+                timestamp=time.time(),
+                campaign=self._campaign,
+                strategy_name=_STRATEGY_NAME,
+                strategy_version=_STRATEGY_VERSION,
+                outcome="FILLED",
+                fill_price=fill_price,
+                order_id=order_id,
+                metadata=metadata or {},
+            )
+
+            post_trade_validation_hook(
+                record,
+                reports_path=_VALIDATION_REPORTS_PATH,
+            )
+        except Exception:
+            log.warning(
+                "Post-trade validation hook failed (non-fatal) — trading continues",
+                exc_info=True,
             )
 
     # -- Internal: payload construction ------------------------------------
@@ -361,6 +432,18 @@ class LiveTradingAgent:
                 state_after=state_after,
                 rejected_reason=f"fill_ignored: agent in {state_after.value}",
             )
+
+        # --- Post-trade validation (best-effort, never crashes pipeline) ---
+        self._run_post_trade_validation(
+            symbol=signal.symbol,
+            side=_SIDE_MAP.get(signal.side, signal.side),
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            volume=signal.volume,
+            fill_price=signal.entry_price,
+            order_id=position_id,
+            metadata=signal.metadata,
+        )
 
         return AgentResult(
             success=True,

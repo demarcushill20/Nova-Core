@@ -1,6 +1,6 @@
 # NovaTrade IRB Demo Run — Active Risk Policy
 # Phase 6: Risk Management Hardening
-# Strategy: Rob Hoffman IRB v2.0.0
+# Strategy: Rob Hoffman IRB v5.0.0
 # Date: 2026-03-17
 
 # ---------------------------------------------------------------------------
@@ -8,7 +8,7 @@
 # ---------------------------------------------------------------------------
 policy_version: "1.0.0"
 strategy_id: "Rob Hoffman IRB"
-strategy_version: "2.0.0"
+strategy_version: "5.0.0"
 campaign: "ftmo-free-trial-march-2026"
 account_type: "FTMO Free Trial"
 account_size: 100000
@@ -116,7 +116,7 @@ policy_layers:
     description: "Strategy version validation (handled by TradingAgent.validate_alert)"
     checks:
       - strategy_name_match       # "Rob Hoffman IRB"
-      - strategy_version_match    # "2.0.0"
+      - strategy_version_match    # "5.0.0"
     on_fail: "DENY"
     rationale: >
       Validated in the Trading Agent's alert validation step (Phase 5). Not

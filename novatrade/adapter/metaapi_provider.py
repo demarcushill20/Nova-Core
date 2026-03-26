@@ -101,6 +101,9 @@ class MetaApiAdapter(MT5Adapter):
     - Order verification: post-placement polling confirms execution
     """
 
+    # Re-subscribe to market data every 15 minutes to prevent feed death.
+    _RESUB_INTERVAL_S = 900.0  # 15 minutes
+
     def __init__(self, config: MetaApiConfig) -> None:
         self._config = config
         self._api: MetaApi | None = None
@@ -108,6 +111,8 @@ class MetaApiAdapter(MT5Adapter):
         self._connection: Any = None  # RpcMetaApiConnectionInstance
         self._connected = False
         self._reconnecting = False  # guard against concurrent reconnect
+        self._subscribed_symbols: list[str] = []
+        self._last_resubscribe: float = 0.0
 
         # Circuit breaker for broker operations.
         # Pass _NoRedis to prevent SimpleCircuitBreaker from auto-connecting
@@ -154,6 +159,27 @@ class MetaApiAdapter(MT5Adapter):
             self._connection = self._account.get_rpc_connection()
             await self._connection.connect()
             await self._connection.wait_synchronized()
+
+            # Query account info to check tradeAllowed status early
+            try:
+                acct_info = await self._connection.get_account_information()
+                trade_allowed = acct_info.get("tradeAllowed", True)
+                if not trade_allowed:
+                    log.warning(
+                        "metaapi connect: ACCOUNT TRADING DISABLED — tradeAllowed=false "
+                        "(broker=%s, server=%s). Orders will be rejected by PreTradeGate.",
+                        acct_info.get("broker", "unknown"),
+                        acct_info.get("server", "unknown"),
+                    )
+                else:
+                    log.info(
+                        "metaapi connect: tradeAllowed=true (broker=%s, equity=%.2f %s)",
+                        acct_info.get("broker", "unknown"),
+                        acct_info.get("equity", 0.0),
+                        acct_info.get("currency", "USD"),
+                    )
+            except Exception as exc:
+                log.warning("metaapi connect: could not query account info: %s", _safe_error(exc))
 
             latency = (time.monotonic() - t0) * 1000
             self._connected = True
@@ -356,10 +382,52 @@ class MetaApiAdapter(MT5Adapter):
 
     # --- market data ---------------------------------------------------------
 
+    async def subscribe_to_market_data(self, symbols: list[str]) -> None:
+        """Subscribe to market data for symbols with long-term subscription.
+
+        Calls ``get_symbol_price(symbol, keep_subscription=True)`` for each
+        symbol to ensure the MetaApi terminal starts streaming prices before
+        the TickBatchPoller begins polling.  Without this, the first polls
+        may return stale or missing data.
+        """
+        await self._ensure_connected_or_reconnect()
+        for symbol in symbols:
+            try:
+                raw = await self._connection.get_symbol_price(symbol, keep_subscription=True)
+                log.info(
+                    "metaapi subscribe: %s bid=%.5f ask=%.5f (long-term subscription active)",
+                    symbol,
+                    raw["bid"],
+                    raw["ask"],
+                )
+            except Exception as exc:
+                log.warning("metaapi subscribe: failed for %s: %s", symbol, _safe_error(exc))
+        self._subscribed_symbols = list(symbols)
+        self._last_resubscribe = time.monotonic()
+
+    async def resubscribe_if_stale(self) -> bool:
+        """Re-subscribe to market data if the last subscription is older than 15 minutes.
+
+        Returns True if resubscription was performed, False if still fresh.
+        Called by the health monitor loop to prevent MetaApi feed death.
+        """
+        if not self._subscribed_symbols:
+            return False
+        elapsed = time.monotonic() - self._last_resubscribe
+        if elapsed < self._RESUB_INTERVAL_S:
+            return False
+        log.info(
+            "metaapi resubscribe: %d symbols (%.0fs since last subscription)",
+            len(self._subscribed_symbols),
+            elapsed,
+        )
+        await self.subscribe_to_market_data(self._subscribed_symbols)
+        return True
+
     async def get_symbol_price(self, symbol: str) -> SymbolPrice:
         """Get current bid/ask for a symbol."""
         await self._ensure_connected_or_reconnect()
-        raw = await self._connection.get_symbol_price(symbol)
+        raw = await self._connection.get_symbol_price(symbol, keep_subscription=True)
         log.debug("metaapi get_symbol_price: %s bid=%.5f ask=%.5f", symbol, raw["bid"], raw["ask"])
         return _translate_symbol_price(raw)
 

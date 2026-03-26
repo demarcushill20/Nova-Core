@@ -60,6 +60,15 @@ class MT5Adapter(ABC):
 
     # --- market data ---------------------------------------------------------
 
+    async def subscribe_to_market_data(self, symbols: list[str]) -> None:  # noqa: B027
+        """Subscribe to market data for *symbols* to prime the price feed.
+
+        This should be called before starting a tick poller to ensure the
+        broker terminal is streaming prices for the requested symbols.
+        Default implementation is a no-op; adapters that require explicit
+        subscription should override.
+        """
+
     @abstractmethod
     async def get_symbol_price(self, symbol: str) -> SymbolPrice:
         """Get current bid/ask for *symbol*."""

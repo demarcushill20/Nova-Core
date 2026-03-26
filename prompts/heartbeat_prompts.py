@@ -103,6 +103,30 @@ def _gather_extended_state(checks: list) -> str:
         except Exception:
             pass
 
+    # Autonomy progress snapshot (Phase 2.4)
+    autonomy_file = heartbeat.STATE_DIR / "autonomy_snapshot.json"
+    if autonomy_file.exists():
+        try:
+            snap = json.loads(autonomy_file.read_text())
+            score = snap.get("overall_score", 0)
+            alert = snap.get("alert_level", "unknown").upper()
+            parts.append(f"\n## Autonomy Progress: {score}/100 ({alert})")
+            for dim_name, dim_data in snap.get("dimensions", {}).items():
+                d_score = dim_data.get("score", 0)
+                d_trend = dim_data.get("trend", "stable")
+                parts.append(f"  - {dim_name}: {d_score:.0f} ({d_trend})")
+            dec = snap.get("decision", {})
+            if dec:
+                parts.append(f"  Last decision: {dec.get('mode', '?')} — {dec.get('reason', '')[:100]}")
+            goal = snap.get("goal_tree", {})
+            if goal:
+                parts.append(f"  Goal tree: {goal.get('completed', 0)}/{goal.get('total', 0)} sub-goals complete")
+                actionable = goal.get("actionable", [])
+                if actionable:
+                    parts.append(f"  Actionable: {', '.join(actionable[:3])}")
+        except Exception:
+            pass
+
     # Last heartbeat agent action (to avoid repeating)
     # Filter out false service-down claims to prevent feedback loops
     if heartbeat.HEARTBEAT_AGENT_LOG.exists():

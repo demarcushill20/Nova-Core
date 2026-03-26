@@ -78,7 +78,7 @@ class TestLondonFixAvoidance:
         blocked_times = [(15, 45), (15, 50), (16, 0), (16, 14)]
         for hour, minute in blocked_times:
             ts = self._make_ts(hour, minute)
-            with patch("time.time", return_value=ts):
+            with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
                 decision = gate.evaluate(_order(), _account(), [])
             failed_names = [c.name for c in decision.checks if not c.passed]
             assert "london_fix" in failed_names, f"Expected deny at {hour:02d}:{minute:02d} UTC"
@@ -87,7 +87,7 @@ class TestLondonFixAvoidance:
         """Orders at 15:44 should pass the London Fix check."""
         gate = PreTradeGate(_cfg(risk={"london_fix_avoidance_enabled": True}))
         ts = self._make_ts(15, 44)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
         assert len(london_checks) == 1
@@ -97,7 +97,7 @@ class TestLondonFixAvoidance:
         """Orders at 16:15 should pass (end of window is exclusive)."""
         gate = PreTradeGate(_cfg(risk={"london_fix_avoidance_enabled": True}))
         ts = self._make_ts(16, 15)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
         assert len(london_checks) == 1
@@ -107,7 +107,7 @@ class TestLondonFixAvoidance:
         """With london_fix_avoidance_enabled=False, 16:00 should pass."""
         gate = PreTradeGate(_cfg(risk={"london_fix_avoidance_enabled": False}))
         ts = self._make_ts(16, 0)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
         assert len(london_checks) == 1
@@ -129,28 +129,28 @@ class TestLondonFixAvoidance:
 
         # 15:30 should be blocked (start of custom window)
         ts = self._make_ts(15, 30)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
         assert not london_checks[0].passed
 
         # 16:29 should be blocked (still inside custom window)
         ts = self._make_ts(16, 29)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
         assert not london_checks[0].passed
 
         # 16:30 should pass (end of custom window, exclusive)
         ts = self._make_ts(16, 30)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
         assert london_checks[0].passed
 
         # 15:29 should pass (before custom window)
         ts = self._make_ts(15, 29)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
         assert london_checks[0].passed

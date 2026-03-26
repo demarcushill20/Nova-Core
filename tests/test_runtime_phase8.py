@@ -64,7 +64,7 @@ def _make_irb_signal(
     """Build a valid IRB signal alert payload."""
     return {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": action,
         "signal_type": "LONG_IRB" if side == "BUY" else "SHORT_IRB",
         "irb_type": "UPTREND_IRB" if side == "BUY" else "DOWNTREND_IRB",
@@ -100,7 +100,7 @@ def _make_irb_signal(
 def _make_cancel_alert(side: str = "BUY") -> dict:
     return {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "CANCEL_ORDER",
         "symbol": "EURUSD",
         "side": side,
@@ -113,7 +113,7 @@ def _make_cancel_alert(side: str = "BUY") -> dict:
 def _make_close_alert(side: str = "BUY") -> dict:
     return {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "CLOSE_POSITION",
         "symbol": "EURUSD",
         "side": side,
@@ -127,7 +127,7 @@ def _make_close_alert(side: str = "BUY") -> dict:
 def _make_trail_alert(side: str = "BUY") -> dict:
     return {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "MODIFY_SL",
         "symbol": "EURUSD",
         "side": side,

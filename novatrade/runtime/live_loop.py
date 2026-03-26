@@ -126,6 +126,7 @@ class LiveLoop:
         health_interval: float = 5.0,
         queue_maxsize: int = 100,
         state_store=None,
+        adapter=None,
     ) -> None:
         self._poller = poller
         self._aggregator = aggregator
@@ -134,6 +135,7 @@ class LiveLoop:
         self._live_agent = live_agent
         self._health_interval = health_interval
         self._state_store = state_store
+        self._adapter = adapter  # MetaApiAdapter for periodic resubscription
 
         self._signal_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_maxsize)
         self._metrics = LiveMetrics()
@@ -315,6 +317,7 @@ class LiveLoop:
                                 continue
 
                             self._increment_signal_counter(signal.signal_type)
+                            self._log_signal(signal)
                             log.info(
                                 "signal generated: %s %s %s",
                                 signal.symbol,
@@ -495,6 +498,21 @@ class LiveLoop:
                                 symbol,
                                 state.value,
                             )
+
+                    # Periodic market data resubscription to prevent feed death
+                    if self._adapter is not None and hasattr(self._adapter, "resubscribe_if_stale"):
+                        try:
+                            resubbed = await self._adapter.resubscribe_if_stale()
+                            if resubbed:
+                                log.info("health: market data resubscription completed")
+                        except Exception:
+                            log.warning("health: market data resubscription failed", exc_info=True)
+
+                    # Persist signal metrics for the autonomy collector
+                    self._persist_signal_metrics()
+
+                    # Persist equity snapshot for performance_stability scoring
+                    self._persist_equity_snapshot()
                 except Exception:
                     log.exception("health monitor error — continuing")
 
@@ -531,3 +549,132 @@ class LiveLoop:
         if attr is not None:
             current = getattr(self._metrics, attr)
             setattr(self._metrics, attr, current + 1)
+
+    def _persist_signal_metrics(self) -> None:
+        """Write live metrics to STATE/novatrade/live_metrics.json for autonomy collectors."""
+        import json as _json
+        from pathlib import Path as _Path
+
+        state_dir = _Path(self._get_base_path()) / "STATE" / "novatrade"
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            metrics_path = state_dir / "live_metrics.json"
+            metrics_path.write_text(_json.dumps(self._metrics.to_dict(), indent=2))
+        except OSError:
+            log.debug("Failed to persist signal metrics", exc_info=True)
+
+    def _persist_equity_snapshot(self) -> None:
+        """Append an equity snapshot to STATE/novatrade/equity_history.json.
+
+        Called periodically by the health monitor so the performance_stability
+        collector has continuous equity-curve data even during periods with no
+        trades.  The snapshot records current equity from the adapter (if
+        available) or falls back to the live agent's last known equity.
+        """
+        import json as _json
+        from datetime import datetime, timezone
+        from pathlib import Path as _Path
+
+        state_dir = _Path(self._get_base_path()) / "STATE" / "novatrade"
+        eq_path = state_dir / "equity_history.json"
+
+        # Resolve current equity from adapter or agent
+        equity: float | None = None
+        if self._adapter is not None and hasattr(self._adapter, "get_equity"):
+            try:
+                equity = self._adapter.get_equity()
+            except Exception:  # noqa: S110
+                pass
+        if equity is None and hasattr(self._live_agent, "last_equity"):
+            equity = self._live_agent.last_equity
+        if equity is None:
+            return  # no equity source available — skip
+
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+
+            # Load existing data
+            existing: dict = {"snapshots": [], "initial_equity": 100000.0}
+            if eq_path.exists():
+                try:
+                    raw = _json.loads(eq_path.read_text())
+                    if isinstance(raw, dict):
+                        existing = raw
+                    elif isinstance(raw, list):
+                        existing = {"snapshots": raw, "initial_equity": 100000.0}
+                except (ValueError, OSError):
+                    pass
+
+            snapshots = existing.get("snapshots", [])
+
+            # Deduplicate: skip if the last snapshot has the same equity value
+            # and was written less than 30 minutes ago
+            now_iso = datetime.now(timezone.utc).isoformat()
+            if snapshots:
+                last = snapshots[-1]
+                if last.get("equity") == equity:
+                    return  # no change — skip duplicate
+
+            snapshots.append(
+                {
+                    "equity": equity,
+                    "timestamp": now_iso,
+                    "source": "live",
+                }
+            )
+
+            # Retain last 720 entries (~30 days of hourly snapshots)
+            if len(snapshots) > 720:
+                snapshots = snapshots[-720:]
+
+            existing["snapshots"] = snapshots
+            existing["last_updated"] = now_iso
+            eq_path.write_text(_json.dumps(existing, indent=2))
+        except OSError:
+            log.debug("Failed to persist equity snapshot", exc_info=True)
+
+    def _log_signal(self, signal: Any) -> None:
+        """Append a signal event to STATE/novatrade/signal_log.json for autonomy collectors."""
+        import json as _json
+        from pathlib import Path as _Path
+
+        state_dir = _Path(self._get_base_path()) / "STATE" / "novatrade"
+        log_path = state_dir / "signal_log.json"
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+
+            # Load existing log
+            existing: list[dict] = []
+            if log_path.exists():
+                try:
+                    data = _json.loads(log_path.read_text())
+                    if isinstance(data, dict):
+                        existing = data.get("signals", [])
+                    elif isinstance(data, list):
+                        existing = data
+                except (ValueError, OSError):
+                    existing = []
+
+            # Append new signal entry
+            entry = {
+                "timestamp": time.time(),
+                "signal_type": signal.signal_type.value if hasattr(signal, "signal_type") else str(signal),
+                "side": getattr(signal, "side", "unknown"),
+                "symbol": getattr(signal, "symbol", "unknown"),
+            }
+            existing.append(entry)
+
+            # Retain only last 500 entries to prevent unbounded growth
+            if len(existing) > 500:
+                existing = existing[-500:]
+
+            log_path.write_text(_json.dumps({"signals": existing, "last_updated": time.time()}, indent=2))
+        except OSError:
+            log.debug("Failed to log signal", exc_info=True)
+
+    def _get_base_path(self) -> str:
+        """Return the base path for state persistence."""
+        # Use state_store's base_path if available, otherwise default
+        if self._state_store and hasattr(self._state_store, "base_dir"):
+            return str(self._state_store.base_dir.parent.parent)
+        return "/home/nova/nova-core"

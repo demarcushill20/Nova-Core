@@ -4,22 +4,22 @@ Tests that the supervisor is properly wired into the trading flow
 and provides the expected safety controls.
 """
 
-import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from novatrade.config import NovaTradeCfg
-from novatrade.execution.trading_agent import TradingAgent, AgentState
-from novatrade.models import AccountState, Position, OrderResult, OrderSide, OrderType
-from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor, HardLimits, SupervisorVerdict
+from novatrade.execution.trading_agent import AgentState, TradingAgent
+from novatrade.models import AccountState, OrderResult, OrderSide, Position
+from novatrade.risk.hard_risk_supervisor import HardLimits, HardRiskSupervisor
 from novatrade.risk.risk_engine import RiskEngine
-from novatrade.validation.evidence import EvidenceRecorder
 
 
 @pytest.fixture
 def cfg():
     """Test configuration."""
-    from novatrade.config import FtmoProfile, RiskConfig, MetaApiConfig, AccountMode
+    from novatrade.config import AccountMode, FtmoProfile, MetaApiConfig, RiskConfig
+
     return NovaTradeCfg(
         symbols=["EURUSD"],
         mode=AccountMode.DEMO,
@@ -52,7 +52,6 @@ def mock_adapter():
 @pytest.fixture
 def supervisor():
     """Test supervisor with conservative limits."""
-    import tempfile
     import uuid
 
     # Use unique directories for each test to avoid state persistence issues
@@ -110,7 +109,7 @@ class TestHardRiskSupervisorIntegration:
         """Test that supervisor vetos orders that exceed max lot size."""
         payload = {
             "strategy_name": "Rob Hoffman IRB",
-            "strategy_version": "2.0.0",
+            "strategy_version": "5.0.0",
             "action": "PLACE_STOP_ORDER",
             "signal_type": "LONG_ENTRY",
             "symbol": "EURUSD",
@@ -137,7 +136,7 @@ class TestHardRiskSupervisorIntegration:
         """Test that supervisor allows valid orders to proceed."""
         payload = {
             "strategy_name": "Rob Hoffman IRB",
-            "strategy_version": "2.0.0",
+            "strategy_version": "5.0.0",
             "action": "PLACE_STOP_ORDER",
             "signal_type": "LONG_ENTRY",
             "symbol": "EURUSD",
@@ -162,7 +161,7 @@ class TestHardRiskSupervisorIntegration:
         """Test that supervisor tracks trades opened."""
         payload = {
             "strategy_name": "Rob Hoffman IRB",
-            "strategy_version": "2.0.0",
+            "strategy_version": "5.0.0",
             "action": "PLACE_STOP_ORDER",
             "signal_type": "LONG_ENTRY",
             "symbol": "EURUSD",
@@ -211,7 +210,7 @@ class TestHardRiskSupervisorIntegration:
         # Close position payload
         payload = {
             "strategy_name": "Rob Hoffman IRB",
-            "strategy_version": "2.0.0",
+            "strategy_version": "5.0.0",
             "action": "CLOSE_POSITION",
             "symbol": "EURUSD",
             "side": "BUY",
@@ -236,7 +235,7 @@ class TestHardRiskSupervisorIntegration:
 
         payload = {
             "strategy_name": "Rob Hoffman IRB",
-            "strategy_version": "2.0.0",
+            "strategy_version": "5.0.0",
             "action": "PLACE_STOP_ORDER",
             "signal_type": "LONG_ENTRY",
             "symbol": "EURUSD",
@@ -270,7 +269,7 @@ class TestHardRiskSupervisorIntegration:
 
         payload = {
             "strategy_name": "Rob Hoffman IRB",
-            "strategy_version": "2.0.0",
+            "strategy_version": "5.0.0",
             "action": "PLACE_STOP_ORDER",
             "signal_type": "LONG_ENTRY",
             "symbol": "EURUSD",
@@ -294,8 +293,8 @@ class TestHardRiskSupervisorIntegration:
     @pytest.mark.asyncio
     async def test_runtime_integration_supervisor_wiring(self, cfg):
         """Test that build_stack properly wires the supervisor."""
-        from novatrade.runtime.runner import build_stack
         from novatrade.runtime.launch_gate import LaunchMode
+        from novatrade.runtime.runner import build_stack
 
         # This tests that our changes to build_stack work correctly
         ws, loop, readiness = build_stack(cfg, mode=LaunchMode.DRY_RUN)

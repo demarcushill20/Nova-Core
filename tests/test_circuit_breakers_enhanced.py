@@ -153,41 +153,46 @@ class TestExcludedExceptions:
 
 
 class TestAcall:
-    def test_acall_success(self):
+    @pytest.fixture(autouse=True)
+    def _fresh_loop(self):
+        """Ensure a fresh event loop for each async test."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        yield loop
+        loop.close()
+
+    def test_acall_success(self, _fresh_loop):
         cb = _make_cb()
-        result = asyncio.get_event_loop().run_until_complete(cb.acall(_async_ok, val=99))
+        result = _fresh_loop.run_until_complete(cb.acall(_async_ok, val=99))
         assert result == 99
         assert cb.state == "CLOSED"
 
-    def test_acall_failure_trips_breaker(self):
+    def test_acall_failure_trips_breaker(self, _fresh_loop):
         cb = _make_cb(failure_threshold=2)
-        loop = asyncio.get_event_loop()
         for _ in range(2):
             with pytest.raises(RuntimeError, match="async boom"):
-                loop.run_until_complete(cb.acall(_async_fail))
+                _fresh_loop.run_until_complete(cb.acall(_async_fail))
         assert cb.state == "OPEN"
 
-    def test_acall_rejects_when_open(self):
+    def test_acall_rejects_when_open(self, _fresh_loop):
         cb = _make_cb(failure_threshold=1)
-        loop = asyncio.get_event_loop()
         with pytest.raises(RuntimeError):
-            loop.run_until_complete(cb.acall(_async_fail))
+            _fresh_loop.run_until_complete(cb.acall(_async_fail))
         assert cb.state == "OPEN"
         with pytest.raises(CircuitBreakerError):
-            loop.run_until_complete(cb.acall(_async_ok))
+            _fresh_loop.run_until_complete(cb.acall(_async_ok))
 
-    def test_acall_excluded_exception(self):
+    def test_acall_excluded_exception(self, _fresh_loop):
         cb = _make_cb(
             failure_threshold=1,
             excluded_exceptions=(ValueError,),
         )
-        loop = asyncio.get_event_loop()
 
         async def raise_value():
             raise ValueError("async bad input")
 
         with pytest.raises(ValueError):
-            loop.run_until_complete(cb.acall(raise_value))
+            _fresh_loop.run_until_complete(cb.acall(raise_value))
         assert cb.state == "CLOSED"
         assert cb.failure_count == 0
 

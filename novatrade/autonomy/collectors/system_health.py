@@ -15,7 +15,7 @@ _SERVICES = [
     "novacore-watcher",
     "novacore-telegram",
     "novacore-telegram-notifier",
-    "novatrade",
+    "novacore-novatrade",
 ]
 
 
@@ -130,11 +130,20 @@ class SystemHealthCollector(BaseCollector):
         if not tasks_dir.is_dir():
             return 100.0, 0.0
 
+        # Lifecycle suffixes that are NOT orphans
+        _SKIP_SUFFIXES = (".done", ".failed", ".inprogress", ".partial", ".cleaned")
+        # Prefixes for scheduled shifts (not task orphans)
+        _SKIP_PREFIXES = ("shift_", "shift_gen_")
+
         cutoff = time.time() - 2 * 3600  # 2 hours ago
         orphans = 0
-        for p in tasks_dir.glob("*.md"):
+        for p in tasks_dir.glob("*.md*"):
             name_lower = p.name.lower()
-            if name_lower.endswith(".done") or name_lower.endswith(".failed"):
+            # Skip known lifecycle states
+            if any(name_lower.endswith(s) for s in _SKIP_SUFFIXES):
+                continue
+            # Skip scheduled shift files
+            if any(name_lower.startswith(s) for s in _SKIP_PREFIXES):
                 continue
             try:
                 if p.stat().st_mtime < cutoff:
@@ -179,15 +188,29 @@ class SystemHealthCollector(BaseCollector):
 
     @staticmethod
     def _extract_timestamp(text: str) -> datetime | None:
-        """Best-effort parse of the last ISO-like timestamp in text."""
-        # Match ISO-8601 variants: 2026-03-25T12:34:56 or 2026-03-25 12:34:56
+        """Best-effort parse of heartbeat timestamp from text.
+
+        Prioritises the 'Last check:' line, then falls back to the first
+        ISO-like timestamp found (not the last — service 'since' dates are
+        always later in the file and much older).
+        """
+        # Primary: look for the "Last check:" line specifically
+        lc_match = re.search(r"Last check:\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})", text)
+        if lc_match:
+            ts_str = lc_match.group(1).replace("T", " ")
+            try:
+                return datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                pass
+
+        # Fallback: first ISO timestamp in the file (not last!)
         pattern = r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}"
         matches = re.findall(pattern, text)
         if not matches:
             return None
-        last = matches[-1].replace("T", " ")
+        first = matches[0].replace("T", " ")
         try:
-            return datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
+            return datetime.strptime(first, "%Y-%m-%d %H:%M:%S")
         except ValueError:
             return None
 
@@ -217,7 +240,27 @@ class SystemHealthCollector(BaseCollector):
                         fh.seek(file_size - tail_size)
                         fh.readline()  # skip partial first line
                     for line in fh:
-                        if "ERROR" in line:
+                        # Only match structured log-level ERROR tokens.
+                        # Patterns: "[ERROR]", or a timestamp prefix
+                        # followed by ERROR (e.g. "2026-03-26 12:00:00 ERROR").
+                        # Skip prose/markdown/summary lines entirely.
+                        stripped = line.lstrip()
+                        if not stripped:
+                            continue
+                        # Skip obvious non-log lines (markdown, bullets, etc.)
+                        if stripped[0] in ("*", "-", "#", "`", ">"):
+                            continue
+                        if re.match(r"\d+\.\s", stripped):
+                            continue
+                        # Strip backtick-quoted content before matching
+                        # (avoids false positives from prose like `[ERROR]`)
+                        clean = re.sub(r"`[^`]*`", "", line)
+                        # Require structured log-level indicators:
+                        # "[ERROR]" bracket token, or timestamp-prefixed ERROR
+                        if "[ERROR]" in clean or re.match(
+                            r"\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}:\d{2}\S*\s+ERROR\b",
+                            stripped,
+                        ):
                             errors += 1
             except OSError:
                 continue

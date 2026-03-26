@@ -77,7 +77,7 @@ class TestRolloverDeadZone:
         gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": True}))
         for hour in (21, 22):
             ts = self._make_ts(hour, 30)
-            with patch("time.time", return_value=ts):
+            with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
                 decision = gate.evaluate(_order(), _account(), [])
             failed_names = [c.name for c in decision.checks if not c.passed]
             assert "rollover_dead_zone" in failed_names, f"Expected deny at {hour}:30 UTC"
@@ -86,7 +86,7 @@ class TestRolloverDeadZone:
         """Orders at 20:59 UTC should pass the rollover check."""
         gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": True}))
         ts = self._make_ts(20, 59)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert len(rollover_checks) == 1
@@ -96,7 +96,7 @@ class TestRolloverDeadZone:
         """Orders at 23:00 UTC (end of window) should pass."""
         gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": True}))
         ts = self._make_ts(23, 0)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert len(rollover_checks) == 1
@@ -107,7 +107,7 @@ class TestRolloverDeadZone:
         gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": False}))
         for hour in (21, 22):
             ts = self._make_ts(hour, 30)
-            with patch("time.time", return_value=ts):
+            with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
                 decision = gate.evaluate(_order(), _account(), [])
             rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
             assert len(rollover_checks) == 1
@@ -126,14 +126,14 @@ class TestRolloverDeadZone:
         )
         # 20:30 should be blocked
         ts = self._make_ts(20, 30)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert not rollover_checks[0].passed
 
         # 22:00 should pass (end of custom window)
         ts = self._make_ts(22, 0)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert rollover_checks[0].passed
@@ -151,21 +151,21 @@ class TestRolloverDeadZone:
         )
         # 23:30 should be blocked
         ts = self._make_ts(23, 30)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert not rollover_checks[0].passed
 
         # 00:30 should be blocked
         ts = self._make_ts(0, 30)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert not rollover_checks[0].passed
 
         # 01:00 should pass
         ts = self._make_ts(1, 0)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert rollover_checks[0].passed
@@ -174,7 +174,7 @@ class TestRolloverDeadZone:
         """The detail string should include the current UTC time."""
         gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": True}))
         ts = self._make_ts(22, 15)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert "22:15 UTC" in rollover_checks[0].detail
@@ -183,7 +183,7 @@ class TestRolloverDeadZone:
         """The start hour should be inclusive (21:00 is inside the zone)."""
         gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": True}))
         ts = self._make_ts(21, 0)
-        with patch("time.time", return_value=ts):
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert not rollover_checks[0].passed

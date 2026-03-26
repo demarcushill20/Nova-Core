@@ -93,7 +93,7 @@ class CircuitBreaker:
         if self._consecutive_failures < self.failure_threshold:
             return False
         # Check if cooldown has elapsed
-        if time.time() - self._tripped_at > self.cooldown_seconds:
+        if time.time() - self._tripped_at >= self.cooldown_seconds:
             self._consecutive_failures = 0
             _log.info("Circuit breaker reset after cooldown")
             return False
@@ -219,7 +219,7 @@ class ResponseCache:
         if entry is None:
             return None
         response, ts = entry
-        if time.time() - ts > self.ttl_seconds:
+        if time.time() - ts >= self.ttl_seconds:
             del self._cache[key]
             return None
         return response

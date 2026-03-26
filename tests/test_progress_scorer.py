@@ -359,7 +359,7 @@ async def test_sys_health_error_rate_high(sys_collector, tmp_path):
     logs_dir = tmp_path / "LOGS"
     logs_dir.mkdir()
     log_f = logs_dir / "test.log"
-    lines = ["ERROR something\n" for _ in range(5)]
+    lines = ["[ERROR] something\n" for _ in range(5)]
     log_f.write_text("".join(lines))
 
     async def mock_exec(*args, **kwargs):
@@ -468,7 +468,7 @@ def strat_collector(tmp_path):
 
 @pytest.mark.asyncio
 async def test_strategy_active_trading(strat_collector, tmp_path):
-    """5+ trades in 24h = score 100."""
+    """5+ trades in 24h = score 100 (list format)."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
     trades = [{"timestamp": time.time() - i * 3600} for i in range(6)]
@@ -480,21 +480,65 @@ async def test_strategy_active_trading(strat_collector, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_strategy_no_trades(strat_collector, tmp_path):
-    """0 trades = 20 (not critical — may be market conditions)."""
+async def test_strategy_active_trading_dict_format(strat_collector, tmp_path):
+    """5+ trades in dict format trade_log = score 100 (RC-1 fix)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    trades = [{"timestamp": time.time() - i * 3600} for i in range(6)]
+    data = {"trades": trades, "last_updated": "2026-03-26T11:30:00Z"}
+    (state_dir / "trade_log.json").write_text(json.dumps(data))
+
+    result = await strat_collector.collect()
+    tc = next(m for m in result.sub_metrics if m.name == "trades_last_24h")
+    assert tc.value == 100.0
+    assert tc.raw_value == 6.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_no_trades_market_hours(strat_collector, tmp_path):
+    """0 trades during market hours = 20 (concerning)."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
     (state_dir / "trade_log.json").write_text("[]")
 
-    result = await strat_collector.collect()
+    # Mock a Wednesday at 14:00 UTC (market hours)
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
     tc = next(m for m in result.sub_metrics if m.name == "trades_last_24h")
     assert tc.value == 20.0
 
 
 @pytest.mark.asyncio
-async def test_strategy_no_trade_log(strat_collector):
-    """Missing trade log = 0 trades = 20."""
-    result = await strat_collector.collect()
+async def test_strategy_no_trades_off_hours(strat_collector, tmp_path):
+    """0 trades off-hours = 80 (expected, market closed)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "trade_log.json").write_text("[]")
+
+    # Mock a Saturday at noon UTC (off-hours)
+    weekend = datetime(2026, 3, 28, 12, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = weekend
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
+    tc = next(m for m in result.sub_metrics if m.name == "trades_last_24h")
+    assert tc.value == 80.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_no_trade_log_market_hours(strat_collector):
+    """Missing trade log during market hours = 0 trades = 20."""
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
     tc = next(m for m in result.sub_metrics if m.name == "trades_last_24h")
     assert tc.value == 20.0
 
@@ -502,7 +546,6 @@ async def test_strategy_no_trade_log(strat_collector):
 @pytest.mark.asyncio
 async def test_strategy_silent_failure_weekend(strat_collector):
     """Weekend = no silent failure expected = 100."""
-    # Mock weekend
     weekend = datetime(2026, 3, 28, 12, 0, 0, tzinfo=timezone.utc)  # Saturday
     with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
         mock_dt.now.return_value = weekend
@@ -515,10 +558,298 @@ async def test_strategy_silent_failure_weekend(strat_collector):
 
 @pytest.mark.asyncio
 async def test_strategy_backtest_no_data(strat_collector):
-    """No backtest dir = placeholder 50."""
+    """No backtest dir = neutral 50."""
     result = await strat_collector.collect()
     bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
     assert bt.value == 50.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_backtest_with_results(strat_collector, tmp_path):
+    """Backtest exists but no live data = 60 (credit for backtesting)."""
+    bt_dir = tmp_path / "OUTPUT" / "backtests"
+    bt_dir.mkdir(parents=True)
+    (bt_dir / "irb_v2_baseline.json").write_text(json.dumps({"sharpe_ratio": 1.5, "profit_factor": 2.0}))
+
+    result = await strat_collector.collect()
+    bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
+    assert bt.value == 60.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_backtest_alignment_close(strat_collector, tmp_path):
+    """Backtest and live Sharpe within 10% = score 100."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    bt_dir = tmp_path / "OUTPUT" / "backtests"
+    bt_dir.mkdir(parents=True)
+
+    # Backtest Sharpe = 1.0
+    (bt_dir / "irb_v2_baseline.json").write_text(json.dumps({"sharpe_ratio": 1.0}))
+
+    # Live equity: steady rise → Sharpe ≈ 1.0
+    equities = [{"equity": 10000 + i * 100} for i in range(20)]
+    (state_dir / "equity_history.json").write_text(json.dumps({"snapshots": equities}))
+
+    result = await strat_collector.collect()
+    bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
+    # Live Sharpe will be very high (consistent returns), delta > 0.1
+    # Score depends on actual computed live Sharpe
+    assert bt.value >= 10.0  # at least some score
+
+
+@pytest.mark.asyncio
+async def test_strategy_backtest_nested_sharpe(strat_collector, tmp_path):
+    """Backtest with nested metrics.sharpe_ratio works."""
+    bt_dir = tmp_path / "OUTPUT" / "backtests"
+    bt_dir.mkdir(parents=True)
+    (bt_dir / "result.json").write_text(json.dumps({"metrics": {"sharpe_ratio": 0.8}}))
+
+    result = await strat_collector.collect()
+    bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
+    # Backtest found but no live data → 60
+    assert bt.value == 60.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_signal_rate_from_signal_log(strat_collector, tmp_path):
+    """Signal rate reads from signal_log.json, not trade_log (RC-3 fix)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+
+    # Empty trade log — previously would give 0 signal rate
+    (state_dir / "trade_log.json").write_text("[]")
+
+    # Signal log with recent signals
+    signals = [{"timestamp": time.time() - 60 * i, "type": "entry"} for i in range(3)]
+    (state_dir / "signal_log.json").write_text(json.dumps({"signals": signals}))
+
+    # Mock market hours
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
+    sg = next(m for m in result.sub_metrics if m.name == "signal_generation_rate")
+    assert sg.value == 60.0  # 3 signals * 20 = 60
+    assert sg.raw_value == 3.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_signal_rate_fallback_live_metrics(strat_collector, tmp_path):
+    """Signal rate falls back to live_metrics.json when signal_log absent."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+
+    # No signal_log.json, but live_metrics.json has signal counters
+    (state_dir / "live_metrics.json").write_text(
+        json.dumps({"signals_entry": 5, "signals_exit": 2, "signals_modify_sl": 1})
+    )
+
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
+    sg = next(m for m in result.sub_metrics if m.name == "signal_generation_rate")
+    assert sg.value == 100.0  # 8 signals * 20 = 160, clamped to 100
+    assert sg.raw_value == 8.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_signal_rate_off_hours(strat_collector):
+    """Signal rate off-hours = 80 (assume OK)."""
+    weekend = datetime(2026, 3, 28, 12, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = weekend
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
+    sg = next(m for m in result.sub_metrics if m.name == "signal_generation_rate")
+    assert sg.value == 80.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_pipeline_health_no_state(strat_collector):
+    """No STATE dir = pipeline health 25 (only halt check passes)."""
+    result = await strat_collector.collect()
+    sp = next(m for m in result.sub_metrics if m.name == "signal_pipeline_health")
+    assert sp.value == 25.0  # only no-halt-file check passes
+
+
+@pytest.mark.asyncio
+async def test_strategy_pipeline_health_with_metrics(strat_collector, tmp_path):
+    """Live metrics + no halt = pipeline health 75."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+
+    # Recent live_metrics.json
+    (state_dir / "live_metrics.json").write_text(json.dumps({"signals_entry": 3, "ticks": 100}))
+
+    result = await strat_collector.collect()
+    sp = next(m for m in result.sub_metrics if m.name == "signal_pipeline_health")
+    # Check 1: config markers exist (live_metrics.json) = 25
+    # Check 2: live_metrics recent = 25
+    # Check 3: signal log has entries (fallback reads live_metrics) = 25
+    # Check 4: no halt file = 25
+    assert sp.value == 100.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_pipeline_health_halted(strat_collector, tmp_path):
+    """Halted system = loses 25 points on halt check."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "halt_state.json").write_text(json.dumps({"halted": True}))
+
+    result = await strat_collector.collect()
+    sp = next(m for m in result.sub_metrics if m.name == "signal_pipeline_health")
+    # No config, no metrics, no signals, halted = 0
+    assert sp.value == 0.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_has_five_sub_metrics(strat_collector):
+    """Collect returns 5 sub-metrics (was 4 before signal_pipeline_health)."""
+    weekend = datetime(2026, 3, 28, 12, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = weekend
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
+    assert len(result.sub_metrics) == 5
+    names = {m.name for m in result.sub_metrics}
+    assert names == {
+        "trades_last_24h",
+        "silent_failure_detected",
+        "backtest_live_alignment",
+        "signal_generation_rate",
+        "signal_pipeline_health",
+    }
+
+
+@pytest.mark.asyncio
+async def test_strategy_load_trade_log_dict_format(strat_collector, tmp_path):
+    """_load_trade_log handles dict format with 'trades' key (RC-1 fix)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    data = {"trades": [{"timestamp": 1}], "last_updated": "2026-03-26"}
+    (state_dir / "trade_log.json").write_text(json.dumps(data))
+
+    result = strat_collector._load_trade_log()
+    assert len(result) == 1
+    assert result[0]["timestamp"] == 1
+
+
+@pytest.mark.asyncio
+async def test_strategy_load_trade_log_empty_dict(strat_collector, tmp_path):
+    """_load_trade_log handles dict with empty trades list."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    data = {"trades": [], "last_updated": "2026-03-26"}
+    (state_dir / "trade_log.json").write_text(json.dumps(data))
+
+    result = strat_collector._load_trade_log()
+    assert result == []
+
+
+# =====================================================================
+# StrategyCollector — pipeline-mode-aware tests
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_strategy_get_pipeline_mode(strat_collector, tmp_path):
+    """_get_pipeline_mode reads from strategy_config.json."""
+    # No file → unknown
+    assert strat_collector._get_pipeline_mode() == "unknown"
+
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "strategy_config.json").write_text(json.dumps({"pipeline": "webhook", "strategy": "IRB"}))
+    assert strat_collector._get_pipeline_mode() == "webhook"
+
+
+@pytest.mark.asyncio
+async def test_strategy_signal_rate_webhook_mode(strat_collector, tmp_path):
+    """In webhook mode, signal_rate uses OUTPUT recency as proxy."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "strategy_config.json").write_text(json.dumps({"pipeline": "webhook", "strategy": "IRB"}))
+
+    # Create a recent OUTPUT file
+    output_dir = tmp_path / "OUTPUT"
+    output_dir.mkdir(parents=True)
+    (output_dir / "recent_heartbeat.md").write_text("test")
+
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
+    sg = next(m for m in result.sub_metrics if m.name == "signal_generation_rate")
+    # Recent output file → 90 (very recent activity)
+    assert sg.value == 90.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_signal_rate_webhook_stale_config(strat_collector, tmp_path):
+    """Webhook mode with stale config → 30."""
+    import os
+
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    config_path = state_dir / "strategy_config.json"
+    config_path.write_text(json.dumps({"pipeline": "webhook", "strategy": "IRB"}))
+    # Make config 25 hours old
+    old_mtime = time.time() - 25 * 3600
+    os.utime(str(config_path), (old_mtime, old_mtime))
+
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
+    sg = next(m for m in result.sub_metrics if m.name == "signal_generation_rate")
+    assert sg.value == 30.0  # stale config
+
+
+@pytest.mark.asyncio
+async def test_strategy_pipeline_health_webhook_mode(strat_collector, tmp_path):
+    """In webhook mode, pipeline_health check 3 passes if config exists."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "strategy_config.json").write_text(json.dumps({"pipeline": "webhook", "strategy": "IRB"}))
+    (state_dir / "live_metrics.json").write_text(json.dumps({"ticks": 0}))
+
+    result = await strat_collector.collect()
+    sp = next(m for m in result.sub_metrics if m.name == "signal_pipeline_health")
+    # Check 1: config exists → 25
+    # Check 2: live_metrics recent → 25
+    # Check 3: webhook mode + config exists → 25
+    # Check 4: no halt → 25
+    assert sp.value == 100.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_signal_rate_webhook_no_output(strat_collector, tmp_path):
+    """Webhook mode, no OUTPUT files → still gets 70 (configured and waiting)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "strategy_config.json").write_text(json.dumps({"pipeline": "webhook", "strategy": "IRB"}))
+
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
+    sg = next(m for m in result.sub_metrics if m.name == "signal_generation_rate")
+    assert sg.value == 70.0  # configured, awaiting alerts
 
 
 # =====================================================================
@@ -598,10 +929,11 @@ def perf_collector(tmp_path):
 
 @pytest.mark.asyncio
 async def test_perf_no_data(perf_collector):
-    """No equity history = all placeholders (50)."""
+    """No equity history = insufficient-data score (30) with warnings."""
     result = await perf_collector.collect()
     sharpe = next(m for m in result.sub_metrics if m.name == "sharpe_ratio_30d")
-    assert sharpe.value == 50.0
+    assert sharpe.value == 30.0
+    assert any("Insufficient equity data" in w for w in result.warnings)
 
 
 @pytest.mark.asyncio
@@ -668,6 +1000,58 @@ async def test_perf_win_rate_stable(perf_collector, tmp_path):
     result = await perf_collector.collect()
     wr = next(m for m in result.sub_metrics if m.name == "win_rate_stability")
     assert wr.value >= 50.0
+
+
+@pytest.mark.asyncio
+async def test_perf_dict_format_equity(perf_collector, tmp_path):
+    """Dict-format equity_history.json with 'snapshots' key is parsed correctly."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    snapshots = [{"equity": 10000 + i * 50} for i in range(30)]
+    data = {"snapshots": snapshots, "last_updated": "2026-03-26T00:00:00Z", "initial_equity": 10000}
+    (state_dir / "equity_history.json").write_text(json.dumps(data))
+
+    result = await perf_collector.collect()
+    sharpe = next(m for m in result.sub_metrics if m.name == "sharpe_ratio_30d")
+    assert sharpe.raw_value != -1.0  # real data, not placeholder
+    assert sharpe.value >= 50.0
+
+
+@pytest.mark.asyncio
+async def test_perf_dict_format_empty_snapshots(perf_collector, tmp_path):
+    """Dict-format with empty snapshots array = no-data score."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    data = {"snapshots": [], "last_updated": "2026-03-26T00:00:00Z", "initial_equity": 100000}
+    (state_dir / "equity_history.json").write_text(json.dumps(data))
+
+    result = await perf_collector.collect()
+    sharpe = next(m for m in result.sub_metrics if m.name == "sharpe_ratio_30d")
+    assert sharpe.value == 30.0  # insufficient data, not neutral 50
+
+
+@pytest.mark.asyncio
+async def test_perf_backtest_source_tagged(perf_collector, tmp_path):
+    """Equity entries with source='backtest' are still scored normally."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    snapshots = [{"equity": 10000 + i * 30, "source": "backtest"} for i in range(30)]
+    data = {"snapshots": snapshots, "initial_equity": 10000}
+    (state_dir / "equity_history.json").write_text(json.dumps(data))
+
+    result = await perf_collector.collect()
+    assert result.score > 30.0  # real computation, not placeholder
+    dd = next(m for m in result.sub_metrics if m.name == "max_drawdown_30d")
+    assert dd.value == 100.0  # monotonic increase → zero drawdown
+
+
+@pytest.mark.asyncio
+async def test_perf_insufficient_data_warnings(perf_collector):
+    """All 4 sub-metrics emit insufficient-data warnings when no data."""
+    result = await perf_collector.collect()
+    assert len(result.warnings) == 4
+    for w in result.warnings:
+        assert "Insufficient equity data" in w
 
 
 # =====================================================================

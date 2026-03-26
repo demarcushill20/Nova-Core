@@ -76,7 +76,7 @@ class TestDegradationTierGating:
         # Stub telegram + write + inject
         monkeypatch.setattr(hb, "_send_telegram", lambda msg, **kw: None)
         monkeypatch.setattr(hb, "send_telegram_heartbeat", lambda checks: None)
-        monkeypatch.setattr(hb, "write_heartbeat", lambda checks: None)
+        monkeypatch.setattr(hb, "write_heartbeat", lambda checks, **kwargs: None)
         monkeypatch.setattr(hb, "inject_repair_task", lambda checks: None)
         monkeypatch.setattr(hb, "_append_metrics", lambda snap: None)
         monkeypatch.setattr(hb, "_telegram_cooldown_gate", lambda msg: False)
@@ -297,7 +297,7 @@ class TestBudgetWatchdogWiring:
 
         monkeypatch.setattr(hb, "_send_telegram", lambda msg, **kw: None)
         monkeypatch.setattr(hb, "send_telegram_heartbeat", lambda checks: None)
-        monkeypatch.setattr(hb, "write_heartbeat", lambda checks: None)
+        monkeypatch.setattr(hb, "write_heartbeat", lambda checks, **kwargs: None)
         monkeypatch.setattr(hb, "inject_repair_task", lambda checks: None)
         monkeypatch.setattr(hb, "_append_metrics", lambda snap: None)
         monkeypatch.setattr(hb, "_telegram_cooldown_gate", lambda msg: False)

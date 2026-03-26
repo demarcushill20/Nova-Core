@@ -16,14 +16,18 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-from zoneinfo import ZoneInfo
+
+# Module-level reference for testability — patch this, not time.time,
+# to avoid poisoning the global time module during tests.
+_now = time.time
+from typing import TYPE_CHECKING  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
 
 if TYPE_CHECKING:
     from novatrade.monitor.feed_health import FeedHealthSupervisor
 
-from novatrade.config import NovaTradeCfg
-from novatrade.models import (
+from novatrade.config import NovaTradeCfg  # noqa: E402
+from novatrade.models import (  # noqa: E402
     AccountMode,
     AccountState,
     HealthState,
@@ -35,7 +39,7 @@ from novatrade.models import (
     RiskVerdict,
     SymbolPrice,
 )
-from novatrade.risk.ftmo_compliance import (
+from novatrade.risk.ftmo_compliance import (  # noqa: E402
     FtmoDailyLossTracker,
     GapTradingPreventer,
     LotSizeConsistencyChecker,
@@ -45,7 +49,7 @@ from novatrade.risk.ftmo_compliance import (
     TradingDaysTracker,
     WeekendAutoCloser,
 )
-from novatrade.risk.position_sizer import PositionSizer
+from novatrade.risk.position_sizer import PositionSizer  # noqa: E402
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
@@ -134,7 +138,7 @@ class PreTradeGate:
         so the caller sees every failing rule at once.
         """
         checks: list[RiskCheckResult] = []
-        now = time.time()
+        now = _now()
 
         checks.append(self._check_kill_switch())
         checks.append(self._check_dry_run())
@@ -213,7 +217,7 @@ class PreTradeGate:
         Call this after a successful order placement so subsequent
         evaluate() calls see it.
         """
-        self._trade_log.append((time.time(), symbol, side_value))
+        self._trade_log.append((_now(), symbol, side_value))
         if volume > 0:
             self._lot_checker.record(volume, symbol)
         self._request_counter.record("order_open")

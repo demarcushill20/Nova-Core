@@ -12,75 +12,40 @@ from novatrade.autonomy.schemas import DimensionScore, SubMetric
 class PerformanceCollector(BaseCollector):
     """Measures performance stability: Sharpe, drawdown, win rate, PF trend."""
 
+    # Sentinel returned by sub-metric helpers when data is insufficient.
+    _NO_DATA_SCORE = 30.0
+    _NO_DATA_RAW = -1.0
+
     async def collect(self) -> DimensionScore:
         warnings: list[str] = []
         sub_metrics: list[SubMetric] = []
 
         equity_data = self._load_equity_history()
 
-        # --- sharpe_ratio_30d ---
-        try:
-            sharpe_score, sharpe_raw = self._compute_sharpe(equity_data)
-            sub_metrics.append(
-                SubMetric(
-                    name="sharpe_ratio_30d",
-                    value=self._safe_score(sharpe_score),
-                    raw_value=sharpe_raw,
-                    description="30-day Sharpe ratio",
-                )
-            )
-        except Exception as exc:
-            self.log.warning("sharpe_ratio_30d failed: %s", exc)
-            warnings.append(f"sharpe_ratio_30d failed: {exc}")
-            sub_metrics.append(SubMetric(name="sharpe_ratio_30d", value=0.0))
+        _metrics = [
+            ("sharpe_ratio_30d", self._compute_sharpe, "30-day Sharpe ratio"),
+            ("max_drawdown_30d", self._compute_max_drawdown, "30-day max drawdown vs FTMO 5% limit"),
+            ("win_rate_stability", self._compute_win_rate_stability, "Win rate variance across rolling windows"),
+            ("profit_factor_trend", self._compute_profit_factor_trend, "Profit factor direction"),
+        ]
 
-        # --- max_drawdown_30d ---
-        try:
-            dd_score, dd_raw = self._compute_max_drawdown(equity_data)
-            sub_metrics.append(
-                SubMetric(
-                    name="max_drawdown_30d",
-                    value=self._safe_score(dd_score),
-                    raw_value=dd_raw,
-                    description="30-day max drawdown vs FTMO 5% limit",
+        for metric_name, compute_fn, description in _metrics:
+            try:
+                score, raw = compute_fn(equity_data)
+                if raw == self._NO_DATA_RAW:
+                    warnings.append(f"Insufficient equity data for {metric_name}")
+                sub_metrics.append(
+                    SubMetric(
+                        name=metric_name,
+                        value=self._safe_score(score),
+                        raw_value=raw,
+                        description=description,
+                    )
                 )
-            )
-        except Exception as exc:
-            self.log.warning("max_drawdown_30d failed: %s", exc)
-            warnings.append(f"max_drawdown_30d failed: {exc}")
-            sub_metrics.append(SubMetric(name="max_drawdown_30d", value=0.0))
-
-        # --- win_rate_stability ---
-        try:
-            wr_score, wr_raw = self._compute_win_rate_stability(equity_data)
-            sub_metrics.append(
-                SubMetric(
-                    name="win_rate_stability",
-                    value=self._safe_score(wr_score),
-                    raw_value=wr_raw,
-                    description="Win rate variance across rolling windows",
-                )
-            )
-        except Exception as exc:
-            self.log.warning("win_rate_stability failed: %s", exc)
-            warnings.append(f"win_rate_stability failed: {exc}")
-            sub_metrics.append(SubMetric(name="win_rate_stability", value=0.0))
-
-        # --- profit_factor_trend ---
-        try:
-            pf_score, pf_raw = self._compute_profit_factor_trend(equity_data)
-            sub_metrics.append(
-                SubMetric(
-                    name="profit_factor_trend",
-                    value=self._safe_score(pf_score),
-                    raw_value=pf_raw,
-                    description="Profit factor direction",
-                )
-            )
-        except Exception as exc:
-            self.log.warning("profit_factor_trend failed: %s", exc)
-            warnings.append(f"profit_factor_trend failed: {exc}")
-            sub_metrics.append(SubMetric(name="profit_factor_trend", value=0.0))
+            except Exception as exc:
+                self.log.warning("%s failed: %s", metric_name, exc)
+                warnings.append(f"{metric_name} failed: {exc}")
+                sub_metrics.append(SubMetric(name=metric_name, value=0.0))
 
         avg = sum(m.value for m in sub_metrics) / max(len(sub_metrics), 1)
 
@@ -96,24 +61,32 @@ class PerformanceCollector(BaseCollector):
     # ------------------------------------------------------------------
 
     def _load_equity_history(self) -> list[dict]:
-        """Load equity history from STATE/novatrade/equity_history.json."""
+        """Load equity history from STATE/novatrade/equity_history.json.
+
+        Handles both list format ``[{...}, ...]`` and dict format
+        ``{"snapshots": [...], ...}``.
+        """
         path = Path(self.base_path) / "STATE" / "novatrade" / "equity_history.json"
         if not path.exists():
             return []
         try:
             data = json.loads(path.read_text())
-            return data if isinstance(data, list) else []
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return data.get("snapshots", [])
+            return []
         except (json.JSONDecodeError, OSError):
             return []
 
     def _compute_sharpe(self, equity_data: list[dict]) -> tuple[float, float]:
         """Compute Sharpe ratio from equity history."""
         if len(equity_data) < 2:
-            return 50.0, -1.0  # placeholder: no data
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         values = [e.get("equity", e.get("value", 0)) for e in equity_data]
         if len(values) < 2:
-            return 50.0, -1.0
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         # Daily returns
         returns = []
@@ -122,14 +95,14 @@ class PerformanceCollector(BaseCollector):
                 returns.append((values[i] - values[i - 1]) / values[i - 1])
 
         if not returns:
-            return 50.0, -1.0
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         mean_r = sum(returns) / len(returns)
         variance = sum((r - mean_r) ** 2 for r in returns) / max(len(returns) - 1, 1)
         std_r = variance**0.5
 
         if std_r == 0:
-            return 50.0, 0.0
+            return 60.0, 0.0  # zero volatility = stable (not a placeholder)
 
         # Annualized Sharpe (assuming daily data, 252 trading days)
         sharpe = (mean_r / std_r) * (252**0.5)
@@ -148,11 +121,11 @@ class PerformanceCollector(BaseCollector):
     def _compute_max_drawdown(self, equity_data: list[dict]) -> tuple[float, float]:
         """Compute max drawdown as percentage."""
         if len(equity_data) < 2:
-            return 50.0, -1.0  # placeholder: no data
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         values = [e.get("equity", e.get("value", 0)) for e in equity_data]
         if not values or max(values) == 0:
-            return 50.0, -1.0
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         peak = values[0]
         max_dd = 0.0
@@ -181,7 +154,7 @@ class PerformanceCollector(BaseCollector):
     def _compute_win_rate_stability(self, equity_data: list[dict]) -> tuple[float, float]:
         """Compute win rate variance across rolling windows."""
         if len(equity_data) < 2:
-            return 50.0, -1.0  # placeholder
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW  # placeholder
 
         values = [e.get("equity", e.get("value", 0)) for e in equity_data]
         returns = []
@@ -189,7 +162,7 @@ class PerformanceCollector(BaseCollector):
             returns.append(values[i] - values[i - 1])
 
         if len(returns) < 4:
-            return 50.0, -1.0
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         # Split into windows and compute win rate per window
         window_size = max(2, len(returns) // 4)
@@ -202,7 +175,7 @@ class PerformanceCollector(BaseCollector):
             win_rates.append(wins / len(window))
 
         if len(win_rates) < 2:
-            return 50.0, -1.0
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         mean_wr = sum(win_rates) / len(win_rates)
         variance = sum((w - mean_wr) ** 2 for w in win_rates) / len(win_rates)
@@ -222,7 +195,7 @@ class PerformanceCollector(BaseCollector):
     def _compute_profit_factor_trend(self, equity_data: list[dict]) -> tuple[float, float]:
         """Is profit factor improving, stable, or declining?"""
         if len(equity_data) < 4:
-            return 50.0, -1.0  # placeholder
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW  # placeholder
 
         values = [e.get("equity", e.get("value", 0)) for e in equity_data]
         returns = []
@@ -230,7 +203,7 @@ class PerformanceCollector(BaseCollector):
             returns.append(values[i] - values[i - 1])
 
         if len(returns) < 4:
-            return 50.0, -1.0
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         # Split into two halves and compute profit factor for each
         mid = len(returns) // 2
@@ -238,7 +211,7 @@ class PerformanceCollector(BaseCollector):
         pf_second = self._profit_factor(returns[mid:])
 
         if pf_first is None or pf_second is None:
-            return 50.0, -1.0
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         if pf_second > pf_first * 1.1:
             score = 80.0  # improving

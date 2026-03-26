@@ -38,21 +38,21 @@ signal.signal(signal.SIGINT, _heartbeat_signal_handler)
 try:
     from utils.sd_notify import notify_status as _sd_notify_status
 except ImportError:
-    _sd_notify_status = None  # type: ignore[assignment]
+    _sd_notify_status = None  # type: ignore[assignment,misc]
 
 try:
     from utils.structured_log import slog
     from utils.trace_context import TraceContext
 except ImportError:
-    slog = None  # type: ignore[assignment]
+    slog = None  # type: ignore[assignment,misc]
     TraceContext = None  # type: ignore[assignment,misc]
 
 try:
     from utils.max_plan_guard import record_invocation as _mpg_record
     from utils.max_plan_guard import should_allow_task as _mpg_allow
 except ImportError:
-    _mpg_record = None  # type: ignore[assignment]
-    _mpg_allow = None  # type: ignore[assignment]
+    _mpg_record = None  # type: ignore[assignment,misc]
+    _mpg_allow = None  # type: ignore[assignment,misc]
 
 try:
     from utils.self_healing import (
@@ -72,15 +72,49 @@ try:
     )
 except ImportError:
     _DegradationTier = None  # type: ignore[assignment,misc]
-    _sh_get_tier = None  # type: ignore[assignment]
-    _sh_record_error = None  # type: ignore[assignment]
-    _sh_record_mem = None  # type: ignore[assignment]
-    _sh_set_tier = None  # type: ignore[assignment]
+    _sh_get_tier = None  # type: ignore[assignment,misc]
+    _sh_record_error = None  # type: ignore[assignment,misc]
+    _sh_record_mem = None  # type: ignore[assignment,misc]
+    _sh_set_tier = None  # type: ignore[assignment,misc]
 
 try:
     from agents.budget_enforcer import budget as _budget_enforcer
 except ImportError:
-    _budget_enforcer = None  # type: ignore[assignment]
+    _budget_enforcer = None  # type: ignore[assignment,misc]
+
+try:
+    import asyncio as _asyncio
+
+    from novatrade.autonomy import (
+        ActionMode as _ActionMode,
+    )
+    from novatrade.autonomy import (
+        ContextAssembler as _ContextAssembler,
+    )
+    from novatrade.autonomy import (
+        DecisionEngine as _DecisionEngine,
+    )
+    from novatrade.autonomy import (
+        GoalDecomposer as _GoalDecomposer,
+    )
+    from novatrade.autonomy import (
+        ProgressScorer as _ProgressScorer,
+    )
+    from novatrade.autonomy import (
+        TaskSpecGenerator as _TaskSpecGenerator,
+    )
+    from novatrade.autonomy import (
+        build_novatrade_tree as _build_novatrade_tree,
+    )
+except ImportError:
+    _asyncio = None  # type: ignore[assignment,misc]
+    _ActionMode = None  # type: ignore[assignment,misc]
+    _ContextAssembler = None  # type: ignore[assignment,misc]
+    _DecisionEngine = None  # type: ignore[assignment,misc]
+    _GoalDecomposer = None  # type: ignore[assignment,misc]
+    _ProgressScorer = None  # type: ignore[assignment,misc]
+    _TaskSpecGenerator = None  # type: ignore[assignment,misc]
+    _build_novatrade_tree = None  # type: ignore[assignment,misc]
 
 from prompts.heartbeat_prompts import (  # noqa: E402
     _build_planning_prompt,
@@ -602,8 +636,8 @@ def check_cost_router() -> dict:
 # --- Output ------------------------------------------------------------------
 
 
-def write_heartbeat(checks: list) -> None:
-    """Write HEARTBEAT.md with timestamped checklist."""
+def write_heartbeat(checks: list, autonomy_snapshot: dict | None = None) -> None:
+    """Write HEARTBEAT.md with timestamped checklist and autonomy progress."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     lines = [
         "# NovaCore Heartbeat",
@@ -617,6 +651,27 @@ def write_heartbeat(checks: list) -> None:
     all_ok = all(c["ok"] for c in checks)
     lines.append("")
     lines.append(f"Overall: {'HEALTHY' if all_ok else 'UNHEALTHY'}")
+
+    # Autonomy progress section (Phase 2.4)
+    if autonomy_snapshot:
+        score = autonomy_snapshot.get("overall_score", 0)
+        alert = autonomy_snapshot.get("alert_level", "unknown").upper()
+        lines.append("")
+        lines.append(f"## Progress Score: {score}/100 ({alert})")
+        dims = autonomy_snapshot.get("dimensions", {})
+        for dim_name, dim_data in dims.items():
+            d_score = dim_data.get("score", 0)
+            d_trend = dim_data.get("trend", "stable")
+            lines.append(f"- {dim_name}: {d_score:.0f} ({d_trend})")
+
+        dec = autonomy_snapshot.get("decision", {})
+        if dec:
+            lines.append(f"\nDecision: **{dec.get('mode', '?')}** — {dec.get('reason', '')[:120]}")
+
+        goal = autonomy_snapshot.get("goal_tree", {})
+        if goal:
+            lines.append(f"Goal tree: {goal.get('completed', 0)}/{goal.get('total', 0)} sub-goals complete")
+
     lines.append("")
 
     HEARTBEAT_FILE.write_text("\n".join(lines) + "\n")
@@ -1657,6 +1712,132 @@ def _run_planning_cycle() -> None:
     )
 
 
+# --- Autonomy Cycle (Phase 2.4 + 3.4) ----------------------------------------
+
+_NOVATRADE_GOAL_ID = "novatrade_100pct_operational"
+
+
+def _has_pending_task_for_dimension(dimension: str | None) -> bool:
+    """Check if TASKS/ already has a pending autonomy task targeting *dimension*."""
+    if not dimension:
+        return False
+    for f in TASKS_DIR.glob("*.md"):
+        if any(f.name.endswith(s) for s in (".done", ".failed", ".cancelled")):
+            continue
+        try:
+            head = f.read_text()[:500]
+            if "source: autonomy-decision-engine" in head and dimension.replace("_", " ") in head.lower():
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _run_autonomy_cycle() -> dict | None:
+    """Run the autonomy pipeline: score → decide → decompose → generate tasks.
+
+    Uses a single asyncio.run() to orchestrate all async steps within one
+    event loop, keeping asyncio.Lock semantics correct.
+
+    Returns the progress snapshot dict for HEARTBEAT.md augmentation, or None
+    if the autonomy package is unavailable.
+    """
+    if _ProgressScorer is None or _asyncio is None:
+        return None
+
+    async def _pipeline() -> dict:
+        # Step 1: Score current system state
+        scorer = _ProgressScorer()
+        report = await scorer.score()
+        print(f"[autonomy] Progress score: {report.overall_score}/100 ({report.overall_alert.value})")
+
+        # Step 2: Assemble decision context
+        assembler = _ContextAssembler()
+        context = await assembler.assemble(report)
+
+        # Step 3: Run decision engine
+        engine = _DecisionEngine()
+        decision = await engine.decide(context)
+        print(f"[autonomy] Decision: {decision.mode.value} — {decision.reason[:100]}")
+
+        # Step 4: Bootstrap / update goal decomposition tree
+        decomposer = _GoalDecomposer()
+        tree = decomposer.load(_NOVATRADE_GOAL_ID)
+        if tree is None:
+            tree = _build_novatrade_tree()
+            print("[autonomy] Bootstrapped NovaTrade goal tree (17 sub-goals)")
+        tree = decomposer.update_progress(tree, report)
+        decomposer.persist(tree)
+
+        actionable = decomposer.get_actionable_subgoals(tree)
+        completed = sum(1 for sg in tree.sub_goals if sg.status.value == "completed")
+        print(f"[autonomy] Goal tree: {completed}/{len(tree.sub_goals)} complete, {len(actionable)} actionable")
+
+        # Step 5: Generate task file for non-MONITOR decisions
+        # Skip if a pending task already targets the same dimension (dedup)
+        if decision.mode != _ActionMode.MONITOR:
+            if _has_pending_task_for_dimension(decision.target_dimension):
+                print(f"[autonomy] Skipped task generation — pending task exists for {decision.target_dimension}")
+            else:
+                gen = _TaskSpecGenerator()
+                spec = gen.from_decision(decision)
+                task_path = gen.write_task_file(spec)
+                if task_path:
+                    print(f"[autonomy] Generated task: {task_path.name}")
+
+        # Step 6: Build snapshot dict
+        return {
+            "overall_score": report.overall_score,
+            "alert_level": report.overall_alert.value,
+            "dimensions": {
+                name: {
+                    "score": dim.score,
+                    "trend": report.trends.get(name, None) and report.trends[name].direction,
+                }
+                for name, dim in report.dimensions.items()
+            },
+            "decision": {
+                "mode": decision.mode.value,
+                "reason": decision.reason,
+                "target": decision.target_dimension,
+            },
+            "goal_tree": {
+                "completed": completed,
+                "total": len(tree.sub_goals),
+                "actionable": [sg.title for sg in actionable[:5]],
+            },
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    try:
+        snapshot = _asyncio.run(_pipeline())
+
+        # Atomic write of snapshot to STATE/
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        snap_path = STATE_DIR / "autonomy_snapshot.json"
+        import tempfile as _snap_tf
+
+        fd, tmp_path = _snap_tf.mkstemp(dir=str(STATE_DIR), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(snapshot, f, indent=2)
+            os.replace(tmp_path, str(snap_path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        return snapshot
+
+    except Exception as exc:
+        print(f"[autonomy] Cycle failed (non-fatal): {exc}")
+        if _sh_record_error is not None:
+            _sh_record_error("heartbeat.autonomy_cycle", exc)
+        return None
+
+
 # --- Main --------------------------------------------------------------------
 
 
@@ -1810,7 +1991,21 @@ def main() -> int:
     except Exception as e:
         checks.append({"name": "drift_detection", "ok": True, "detail": f"check skipped: {e}"})
 
-    write_heartbeat(checks)
+    # --- Autonomy cycle (Phase 2.4 + 3.4): score → decide → decompose → tasks ---
+    # Gated on degradation tier: skip at MINIMAL+ (tier >= 2), matching planning cycle policy
+    _autonomy_snapshot = None
+    _skip_autonomy = _heartbeat_shutdown_requested or _degradation_tier >= 2
+    if _ProgressScorer is not None and not _skip_autonomy:
+        _autonomy_snapshot = _run_autonomy_cycle()
+    elif _skip_autonomy and _ProgressScorer is not None:
+        _skip_reason = (
+            "shutdown requested"
+            if _heartbeat_shutdown_requested
+            else f"degradation tier >= MINIMAL ({_degradation_tier})"
+        )
+        print(f"[autonomy] Skipped ({_skip_reason})")
+
+    write_heartbeat(checks, autonomy_snapshot=_autonomy_snapshot)
 
     # Record metrics snapshot
     all_ok = all(c["ok"] for c in checks)
@@ -1877,15 +2072,15 @@ def main() -> int:
 
     # --- Self-Heal: Route warnings to investigation queue ---
     try:
+        from agents.self_heal_investigator import investigate_all_pending
         from utils.warning_router import (
-            collect_from_heartbeat,
             collect_from_budget,
             collect_from_drift,
-            collect_from_runaway,
             collect_from_error_summary,
+            collect_from_heartbeat,
             collect_from_memory,
+            collect_from_runaway,
         )
-        from agents.self_heal_investigator import investigate_all_pending
 
         # Collect warnings from all subsystems
         _warnings_queued = 0
@@ -1896,6 +2091,7 @@ def main() -> int:
 
         try:
             from utils.self_healing import get_error_summary, get_memory_snapshot
+
             _warnings_queued += collect_from_error_summary(get_error_summary(minutes=30))
             _mem_snap = get_memory_snapshot()
             _warnings_queued += collect_from_memory(
@@ -1905,9 +2101,10 @@ def main() -> int:
             pass
 
         try:
+            from dataclasses import asdict as _wr_asdict
+
             from utils.drift_detector import detect_drift as _wr_detect_drift
             from utils.max_plan_guard import detect_runaway as _wr_detect_runaway
-            from dataclasses import asdict as _wr_asdict
 
             _wr_drift = _wr_detect_drift(window_hours=24.0)
             if _wr_drift.drift_detected:
@@ -1927,7 +2124,10 @@ def main() -> int:
             _auto_fixed = sum(1 for r in _inv_results if r.action_taken == "auto_fixed" and r.fix_successful)
             _escalated = sum(1 for r in _inv_results if r.escalated)
             if _inv_results:
-                print(f"[self-heal] Investigated {len(_inv_results)} warnings: {_auto_fixed} auto-fixed, {_escalated} escalated")
+                print(
+                    f"[self-heal] Investigated {len(_inv_results)} warnings: "
+                    f"{_auto_fixed} auto-fixed, {_escalated} escalated"
+                )
     except Exception as e:
         print(f"[self-heal] Warning investigation failed (non-fatal): {e}")
 

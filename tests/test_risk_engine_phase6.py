@@ -24,6 +24,7 @@ from novatrade.models import (
     OrderType,
     Position,
     RiskAction,
+    RiskCheckResult,
     RiskVerdict,
 )
 from novatrade.risk.risk_engine import (
@@ -325,6 +326,11 @@ class TestDrawdownGovernance:
 
     def test_critical_drawdown_still_allows(self):
         engine = _make_engine()
+        # Mock the FTMO daily loss buffer so Layer 4 doesn't interfere
+        # with the Layer 2 drawdown governance test.
+        engine._gate._daily_loss_tracker.check = lambda b, e: RiskCheckResult(
+            name="ftmo_daily_loss", passed=True, detail="mocked"
+        )
         decision = engine.pre_trade_check(
             _order(),
             _account(equity=96_000),  # 4% daily DD (CRITICAL tier)

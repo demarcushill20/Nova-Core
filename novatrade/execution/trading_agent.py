@@ -100,7 +100,7 @@ class OrderIntent:
     broker_symbol: str
     side: OrderSide
     strategy_id: str = "Rob Hoffman IRB"
-    strategy_version: str = "2.0.0"
+    strategy_version: str = "5.0.0"
     campaign: str = ""
     source_bar_time: int = 0
     created_at: float = field(default_factory=time.time)
@@ -248,7 +248,7 @@ def validate_alert(payload: dict) -> tuple[str | None, str]:
 
     if payload.get("strategy_name") != "Rob Hoffman IRB":
         return f"unknown strategy: {payload.get('strategy_name')!r}", ""
-    if payload.get("strategy_version") != "2.0.0":
+    if payload.get("strategy_version") != "5.0.0":
         return f"version mismatch: {payload.get('strategy_version')!r}", ""
 
     # Required-field check per action type
@@ -592,7 +592,7 @@ class TradingAgent:
             stop_loss=payload["stop_loss"],
             idempotency_key=idem_key,
             strategy_id="Rob Hoffman IRB",
-            strategy_version="2.0.0",
+            strategy_version="5.0.0",
         )
 
         # --- Hard Risk Supervisor veto (BEFORE RiskEngine) ---

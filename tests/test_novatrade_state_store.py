@@ -98,7 +98,7 @@ def _signal_payload(side="BUY", bar_time=1000000):
     """Create a minimal valid PLACE_STOP_ORDER payload."""
     return {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "PLACE_STOP_ORDER",
         "signal_type": "ENTRY",
         "symbol": "EURUSD",
@@ -116,7 +116,7 @@ def _signal_payload(side="BUY", bar_time=1000000):
 def _cancel_payload(side="BUY"):
     return {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "CANCEL_ORDER",
         "symbol": "EURUSD",
         "side": side,
@@ -128,7 +128,7 @@ def _cancel_payload(side="BUY"):
 def _close_payload(side="BUY"):
     return {
         "strategy_name": "Rob Hoffman IRB",
-        "strategy_version": "2.0.0",
+        "strategy_version": "5.0.0",
         "action": "CLOSE_POSITION",
         "symbol": "EURUSD",
         "side": side,
