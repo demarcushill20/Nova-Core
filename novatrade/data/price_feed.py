@@ -28,7 +28,7 @@ class TickBatchPoller:
     """Polls broker for current prices and yields deduplicated Tick objects.
 
     Wraps ``MT5Adapter.get_symbol_price()`` in an async loop with:
-    - Configurable poll interval (default 0.5s)
+    - Configurable poll interval (default 2.0s)
     - Deduplication: skips if bid/ask unchanged from last poll
     - Zero-price guard (MetaApi occasionally returns 0.0)
     - Elapsed-time-aware sleep (subtracts poll duration from interval)
@@ -36,7 +36,7 @@ class TickBatchPoller:
 
     Usage::
 
-        poller = TickBatchPoller(adapter, ["EURUSD"], interval=0.5)
+        poller = TickBatchPoller(adapter, ["EURUSD"], interval=2.0)
         async for tick in poller.stream():
             process(tick)
     """
@@ -45,7 +45,7 @@ class TickBatchPoller:
         self,
         adapter: MT5Adapter,
         symbols: list[str],
-        interval: float = 0.5,
+        interval: float = 2.0,
         broker_map: dict[str, str] | None = None,
     ) -> None:
         if interval <= 0:

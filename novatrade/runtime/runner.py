@@ -305,7 +305,7 @@ def _persist_strategy_config(
 async def build_live_stack(
     cfg: NovaTradeCfg | None = None,
     *,
-    poll_interval: float = 0.5,
+    poll_interval: float = 30.0,
     health_interval: float = 5.0,
     shadow: bool = False,
     dry_run: bool = False,

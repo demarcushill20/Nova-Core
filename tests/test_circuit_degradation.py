@@ -9,7 +9,6 @@ Covers:
 import pytest
 
 from utils.self_healing import (
-    STATE_DIR,
     DegradationState,
     DegradationTier,
     _save_degradation_state,
@@ -24,10 +23,13 @@ from utils.self_healing import (
 
 
 @pytest.fixture(autouse=True)
-def _clean_degradation_state():
-    """Reset degradation state file before and after each test."""
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    # Reset to FULL
+def _clean_degradation_state(tmp_path, monkeypatch):
+    """Isolate degradation state to tmp_path so tests don't touch production."""
+    import utils.self_healing as sh
+
+    monkeypatch.setattr(sh, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(sh, "DEGRADATION_FILE", tmp_path / "degradation_state.json")
+    tmp_path.mkdir(parents=True, exist_ok=True)
     _save_degradation_state(DegradationState())
     yield
     _save_degradation_state(DegradationState())

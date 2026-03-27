@@ -118,8 +118,11 @@ def _compute_metrics(events: list[dict]) -> dict:
     success_rate = len(completed) / countable_tasks if countable_tasks > 0 else 1.0
     error_rate = len(errors) / all_events if all_events > 0 else 0.0
 
+    # Exclude rate-limited tasks from duration calculation — their fast
+    # bounce times (~20-80s) pollute the average and create false baselines.
+    genuine_tasks = completed + [e for e in failed if not _is_rate_limit_failure(e)]
     durations = []
-    for e in completed + failed:
+    for e in genuine_tasks:
         d = e.get("data", {})
         if isinstance(d, dict) and "duration_ms" in d:
             durations.append(d["duration_ms"])
@@ -186,6 +189,17 @@ def detect_drift(window_hours: float = 24.0) -> DriftReport:
         # No baseline yet — store current as baseline and return clean
         update_baseline(window_hours)
         return report
+
+    # Auto-refresh stale baselines (older than 3 days)
+    _BASELINE_MAX_AGE_HOURS = 72.0
+    bl_computed = baseline.get("computed_at", "")
+    if bl_computed:
+        try:
+            bl_ts = datetime.fromisoformat(bl_computed).timestamp()
+            if time.time() - bl_ts > _BASELINE_MAX_AGE_HOURS * 3600:
+                baseline = update_baseline(168.0)
+        except (ValueError, TypeError):
+            pass
 
     report.baseline_tasks = baseline.get("total_tasks", 0)
 

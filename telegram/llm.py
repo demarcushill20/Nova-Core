@@ -116,110 +116,140 @@ async def generate_response(
 
     _tg_t0 = _time.monotonic()
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd="/home/nova/nova-core",
-            env=child_env,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=CONVERSATION_TIMEOUT)
-        response = stdout.decode("utf-8", errors="replace").strip()
-        if proc.returncode != 0:
-            err = stderr.decode("utf-8", errors="replace").strip()
-            _log.error("Claude CLI error (rc=%d): %s", proc.returncode, err[:500])
-            return "Sorry, I hit a snag processing that. Want to try again?"
-        if not response:
-            _log.warning("Claude CLI returned empty response")
-            return "Hmm, I didn't get a response back. Could you try rephrasing?"
+    MAX_RETRIES = 2  # total attempts (1 original + 1 retry)
 
-        # Phase 2.2: Record token usage (estimate from char counts)
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
-            from agents.budget_enforcer import budget
-
-            budget.record_usage(
-                input_tokens=len(prompt) // 4,
-                output_tokens=len(response) // 4,
-                model=MODEL,
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd="/home/nova/nova-core",
+                env=child_env,
             )
-        except ImportError:
-            pass
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=CONVERSATION_TIMEOUT)
+            response = stdout.decode("utf-8", errors="replace").strip()
+            if proc.returncode != 0:
+                err_stderr = stderr.decode("utf-8", errors="replace").strip()
+                # Claude CLI sometimes puts error details in stdout
+                err_stdout = response if response and len(response) < 500 else ""
+                _log.error(
+                    "Claude CLI error (rc=%d, attempt %d/%d) stderr=%s stdout_hint=%s",
+                    proc.returncode,
+                    attempt,
+                    MAX_RETRIES,
+                    err_stderr[:500],
+                    err_stdout[:200],
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(3)  # brief pause before retry
+                    continue
+                return "Sorry, I hit a snag processing that. Want to try again?"
+            if not response:
+                _log.warning("Claude CLI returned empty response (attempt %d/%d)", attempt, MAX_RETRIES)
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(2)
+                    continue
+                return "Hmm, I didn't get a response back. Could you try rephrasing?"
 
-        # Max-plan guard: record completion
-        if _mpg_record is not None:
-            _mpg_record(
-                caller="telegram",
-                component="telegram.llm.generate_response",
-                model=MODEL,
-                success=True,
-                duration_secs=_time.monotonic() - _tg_t0,
-                automated=False,
-            )
+            # === Success path ===
 
-        # Phase 2.4: Redact secrets from LLM response before sending
-        try:
-            from utils.secrets import redact_text
+            # Phase 2.2: Record token usage (estimate from char counts)
+            try:
+                from agents.budget_enforcer import budget
 
-            response = redact_text(response)
-        except ImportError:
-            pass
+                budget.record_usage(
+                    input_tokens=len(prompt) // 4,
+                    output_tokens=len(response) // 4,
+                    model=MODEL,
+                )
+            except ImportError:
+                pass
 
-        # Phase 3.2: DLP gate — scan outbound response
-        try:
-            from utils.dlp_gate import dlp
+            # Max-plan guard: record completion
+            if _mpg_record is not None:
+                _mpg_record(
+                    caller="telegram",
+                    component="telegram.llm.generate_response",
+                    model=MODEL,
+                    success=True,
+                    duration_secs=_time.monotonic() - _tg_t0,
+                    automated=False,
+                )
 
-            response = dlp.scan_and_redact(response, context="telegram_llm")
-        except ImportError:
-            pass
+            # Phase 2.4: Redact secrets from LLM response before sending
+            try:
+                from utils.secrets import redact_text
 
-        # Phase 3.3: LLM Guard output scan
-        try:
-            from telegram.llm_guard_middleware import scan_output
+                response = redact_text(response)
+            except ImportError:
+                pass
 
-            out_result = scan_output(response)
-            if out_result.action == "block":
-                _log.warning("LLM_GUARD_OUTPUT_BLOCKED: findings=%s", out_result.findings)
-                return "I generated a response but it was flagged by security scanning. Let me try again differently."
-        except ImportError:
-            pass
+            # Phase 3.2: DLP gate — scan outbound response
+            try:
+                from utils.dlp_gate import dlp
 
-        _log.info("LLM response: len=%d", len(response))
+                response = dlp.scan_and_redact(response, context="telegram_llm")
+            except ImportError:
+                pass
 
-        # Langfuse LLM call tracing for cost tracking
-        if trace_llm_call is not None and llm_ctx:
-            trace_llm_call(
-                name="telegram:conversation",
-                input_text=prompt[:4000],
-                output_text=response[:4000],
-                model=MODEL,
-                metadata={"trace_id": llm_ctx.trace_id},
-            )
-        if slog and llm_ctx:
-            slog.event(
-                "telegram.llm_call_complete",
-                llm_ctx,
-                response_len=len(response),
-                duration_ms=llm_ctx.elapsed_ms(),
-            )
+            # Phase 3.3: LLM Guard output scan
+            try:
+                from telegram.llm_guard_middleware import scan_output
 
-        return response
+                out_result = scan_output(response)
+                if out_result.action == "block":
+                    _log.warning("LLM_GUARD_OUTPUT_BLOCKED: findings=%s", out_result.findings)
+                    return (
+                        "I generated a response but it was flagged by security scanning. Let me try again differently."
+                    )
+            except ImportError:
+                pass
 
-    except asyncio.TimeoutError:
-        _log.error("Claude CLI timed out after %ds", CONVERSATION_TIMEOUT)
-        if slog and llm_ctx:
-            slog.event("telegram.llm_call_timeout", llm_ctx, level="error", timeout=CONVERSATION_TIMEOUT)
-        try:
-            proc.kill()  # type: ignore[possibly-undefined]
-        except Exception:  # noqa: S110
-            pass
-        return "That took too long — let me try a simpler approach. What did you need?"
+            _log.info("LLM response: len=%d", len(response))
 
-    except Exception as exc:
-        _log.error("Claude CLI exception: %s", exc, exc_info=True)
-        if slog and llm_ctx:
-            slog.event("telegram.llm_call_error", llm_ctx, level="error", error=str(exc))
-        return "Something went wrong on my end. Give me a moment and try again."
+            # Langfuse LLM call tracing for cost tracking
+            if trace_llm_call is not None and llm_ctx:
+                trace_llm_call(
+                    name="telegram:conversation",
+                    input_text=prompt[:4000],
+                    output_text=response[:4000],
+                    model=MODEL,
+                    metadata={"trace_id": llm_ctx.trace_id},
+                )
+            if slog and llm_ctx:
+                slog.event(
+                    "telegram.llm_call_complete",
+                    llm_ctx,
+                    response_len=len(response),
+                    duration_ms=llm_ctx.elapsed_ms(),
+                )
+
+            return response
+
+        except asyncio.TimeoutError:
+            _log.error("Claude CLI timed out after %ds (attempt %d/%d)", CONVERSATION_TIMEOUT, attempt, MAX_RETRIES)
+            if slog and llm_ctx:
+                slog.event("telegram.llm_call_timeout", llm_ctx, level="error", timeout=CONVERSATION_TIMEOUT)
+            try:
+                proc.kill()  # type: ignore[possibly-undefined]
+            except Exception:  # noqa: S110
+                pass
+            if attempt < MAX_RETRIES:
+                continue
+            return "That took too long — let me try a simpler approach. What did you need?"
+
+        except Exception as exc:
+            _log.error("Claude CLI exception (attempt %d/%d): %s", attempt, MAX_RETRIES, exc, exc_info=True)
+            if slog and llm_ctx:
+                slog.event("telegram.llm_call_error", llm_ctx, level="error", error=str(exc))
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(3)
+                continue
+            return "Something went wrong on my end. Give me a moment and try again."
+
+    # Should never reach here, but safety fallback
+    return "Sorry, I hit a snag processing that. Want to try again?"
 
 
 def format_history_for_prompt(history: list[dict]) -> str:

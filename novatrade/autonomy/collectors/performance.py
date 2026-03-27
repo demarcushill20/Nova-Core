@@ -21,6 +21,7 @@ class PerformanceCollector(BaseCollector):
         sub_metrics: list[SubMetric] = []
 
         equity_data = self._load_equity_history()
+        has_data = len(equity_data) >= 2
 
         _metrics = [
             ("sharpe_ratio_30d", self._compute_sharpe, "30-day Sharpe ratio"),
@@ -29,11 +30,14 @@ class PerformanceCollector(BaseCollector):
             ("profit_factor_trend", self._compute_profit_factor_trend, "Profit factor direction"),
         ]
 
+        no_data_count = 0
         for metric_name, compute_fn, description in _metrics:
             try:
                 score, raw = compute_fn(equity_data)
                 if raw == self._NO_DATA_RAW:
+                    no_data_count += 1
                     warnings.append(f"Insufficient equity data for {metric_name}")
+                    description = f"[NO DATA] {description}"
                 sub_metrics.append(
                     SubMetric(
                         name=metric_name,
@@ -46,6 +50,17 @@ class PerformanceCollector(BaseCollector):
                 self.log.warning("%s failed: %s", metric_name, exc)
                 warnings.append(f"{metric_name} failed: {exc}")
                 sub_metrics.append(SubMetric(name=metric_name, value=0.0))
+
+        # Distinguish "no data available" from "low performance"
+        if not has_data:
+            warnings.append(
+                f"No equity data available — scores are placeholders "
+                f"({self._NO_DATA_SCORE:.0f}/100), not indicators of poor performance"
+            )
+        elif no_data_count > 0:
+            warnings.append(
+                f"{no_data_count}/{len(_metrics)} metrics lack sufficient data — partial placeholder scores in effect"
+            )
 
         avg = sum(m.value for m in sub_metrics) / max(len(sub_metrics), 1)
 

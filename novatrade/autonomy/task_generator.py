@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,6 +27,7 @@ class TaskSpec(BaseModel):
     target_dimension: str | None = None
     goal_justification: str = ""  # "Why am I doing this?"
     estimated_effort: str = "medium"  # light / medium / heavy
+    auto_execute: bool = True  # autonomy-generated tasks execute without human gating
 
 
 class TaskSpecGenerator:
@@ -55,12 +57,44 @@ class TaskSpecGenerator:
             )
         return generator(decision)
 
+    # Recently-completed tasks within this window are treated as duplicates,
+    # preventing the decision engine from regenerating the same task right
+    # after it finishes.
+    DONE_DEDUP_WINDOW_S: float = 24 * 3600  # 24 hours
+
     def has_pending_task(self, category: str, target_dimension: str | None) -> bool:
-        """Check if a pending task already exists for this category+dimension."""
-        if not self.tasks_dir.exists() or not target_dimension:
+        """Check if a pending *or recently completed* task exists for this category+dimension.
+
+        When target_dimension is None, matches on category slug alone
+        (e.g. "validate_recent_improvements" for VALIDATE tasks).
+
+        A ``.done`` file counts as a match if its mtime is within
+        ``DONE_DEDUP_WINDOW_S`` (default 24 h), preventing the engine from
+        regenerating a task that was only just completed.
+        """
+        if not self.tasks_dir.exists():
             return False
-        slug_fragment = self._slugify(f"{category} {target_dimension.replace('_', ' ')}")
-        return any(f.suffix in (".md", ".inprogress") and slug_fragment in f.name for f in self.tasks_dir.iterdir())
+        if target_dimension:
+            slug_fragment = self._slugify(f"{category} {target_dimension.replace('_', ' ')}")
+        else:
+            slug_fragment = self._slugify(category)
+
+        now = time.time()
+        for f in self.tasks_dir.iterdir():
+            if slug_fragment not in f.name:
+                continue
+            # Active tasks — always count as duplicates
+            if f.suffix in (".md", ".inprogress"):
+                return True
+            # Recently-completed tasks — count if within dedup window
+            if f.name.endswith(".done"):
+                try:
+                    age = now - f.stat().st_mtime
+                    if age < self.DONE_DEDUP_WINDOW_S:
+                        return True
+                except OSError:
+                    continue
+        return False
 
     def write_task_file(self, spec: TaskSpec, skip_dedup: bool = False) -> Path | None:
         """Write a TaskSpec to TASKS/<seq>_<slug>.md.
@@ -69,13 +103,9 @@ class TaskSpecGenerator:
         """
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
 
-        # Dedup: don't create duplicate tasks for the same category+dimension
-        if (
-            not skip_dedup
-            and spec.target_dimension
-            and spec.category
-            and self.has_pending_task(spec.category, spec.target_dimension)
-        ):
+        # Dedup: don't create duplicate tasks for the same category(+dimension).
+        # When target_dimension is None (e.g. VALIDATE), matches on category alone.
+        if not skip_dedup and spec.category and self.has_pending_task(spec.category, spec.target_dimension):
             log.info(
                 "Skipping duplicate task: %s/%s already pending",
                 spec.category,
@@ -98,6 +128,7 @@ class TaskSpecGenerator:
             f"target_dimension: {spec.target_dimension or 'none'}\n"
             f'goal_justification: "{safe_justification}"\n'
             f"estimated_effort: {spec.estimated_effort}\n"
+            f"auto_execute: {str(spec.auto_execute).lower()}\n"
             f'generated_at: "{datetime.now(timezone.utc).isoformat()}"\n'
             f"source: autonomy-decision-engine\n"
             f"---\n\n"
@@ -146,9 +177,12 @@ class TaskSpecGenerator:
             body=(
                 f"## Objective\n"
                 f"Fill knowledge gaps in the **{dim}** dimension.\n\n"
+                f"## Context\n"
+                f"{decision.reason}\n\n"
                 f"## Actions\n{actions}\n\n"
                 f"## Expected Outcome\n"
-                f"Clear understanding of current {dim} state with actionable findings."
+                f"Clear understanding of current {dim} state with actionable findings.\n"
+                f"Write a diagnostic report to OUTPUT/ with specific findings."
             ),
             priority="medium",
             category="research",
@@ -165,9 +199,12 @@ class TaskSpecGenerator:
             body=(
                 f"## Objective\n"
                 f"Create an improvement plan for the **{dim}** dimension.\n\n"
+                f"## Context\n"
+                f"{decision.reason}\n\n"
                 f"## Actions\n{actions}\n\n"
                 f"## Expected Outcome\n"
-                f"Detailed step-by-step plan to raise {dim} score above target."
+                f"Detailed step-by-step plan to raise {dim} score above target.\n"
+                f"Write plan to OUTPUT/ and create follow-up EXECUTE task."
             ),
             priority="high",
             category="plan",
@@ -184,7 +221,12 @@ class TaskSpecGenerator:
             body=(
                 f"## Objective\n"
                 f"Execute the existing improvement plan for **{dim}**.\n\n"
+                f"## Context\n"
+                f"{decision.reason}\n\n"
                 f"## Actions\n{actions}\n\n"
+                f"## Autonomy Note\n"
+                f"This task was auto-generated by the decision engine. Execute immediately.\n"
+                f"Do NOT wait for human approval — take corrective action now.\n\n"
                 f"## Expected Outcome\n"
                 f"Measurable improvement in {dim} score."
             ),
@@ -203,7 +245,13 @@ class TaskSpecGenerator:
             body=(
                 f"## Objective\n"
                 f"Fix the detected regression in **{dim}**.\n\n"
+                f"## Context\n"
+                f"{decision.reason}\n\n"
                 f"## Actions\n{actions}\n\n"
+                f"## Autonomy Note\n"
+                f"This is a CRITICAL auto-generated repair task. Execute immediately.\n"
+                f"Do NOT wait for human approval — diagnose and fix the issue now.\n"
+                f"If you cannot fix it, escalate via Telegram alert.\n\n"
                 f"## Expected Outcome\n"
                 f"Restore {dim} score to previous level or higher."
             ),
@@ -221,6 +269,8 @@ class TaskSpecGenerator:
             body=(
                 f"## Objective\n"
                 f"Verify that recent improvements are stable.\n\n"
+                f"## Context\n"
+                f"{decision.reason}\n\n"
                 f"## Actions\n{actions}\n\n"
                 f"## Expected Outcome\n"
                 f"Confirmation that all dimensions remain above target."

@@ -818,9 +818,16 @@ tags:
     log(f"Wrote vault diary: {vault_filename} ({len(note)} bytes)")
 
 
+_SKIP_PREFIXES = ("autonomous_report_",)
+
+
 def maybe_notify(path: Path) -> None:
     # Notify for all .md output files (numbered tasks + legacy tg_ tasks)
     if path.suffix.lower() != ".md":
+        return
+
+    # Skip internal system reports — already saved to vault by the report script
+    if any(path.name.startswith(pfx) for pfx in _SKIP_PREFIXES):
         return
 
     # Fast pre-check before expensive work

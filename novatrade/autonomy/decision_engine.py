@@ -153,7 +153,19 @@ class DecisionEngine:
         report,
         context: DecisionContext,
     ) -> Decision:
-        """Apply the 6-mode decision rules."""
+        """Apply the decision rules with NovaTrade-specific detection."""
+
+        # --- Priority Rule 0: NovaTrade not trading (critical) ----------------
+        # If strategy_validity shows zero trades during market hours, escalate
+        # immediately regardless of other dimension scores.
+        novatrade_critical = self._detect_novatrade_not_trading(report)
+        if novatrade_critical:
+            return novatrade_critical
+
+        # --- Priority Rule 0b: Execution pipeline broken ----------------------
+        pipeline_critical = self._detect_pipeline_broken(report)
+        if pipeline_critical:
+            return pipeline_critical
 
         # Rule 1: Knowledge gap + low-scoring dimension → RESEARCH
         if knowledge_gaps and weakest_dim and weakest_dim.score < self.config.research_threshold:
@@ -162,10 +174,7 @@ class DecisionEngine:
                 mode=ActionMode.RESEARCH,
                 reason=f"Knowledge gap in {target} — confidence is low, need more data before acting.",
                 target_dimension=target,
-                suggested_actions=[
-                    f"Research current state of {target}",
-                    f"Gather metrics and logs for {target}",
-                ],
+                suggested_actions=self._specific_research_actions(target, report),
                 confidence="low",
             )
 
@@ -177,16 +186,12 @@ class DecisionEngine:
                 mode=ActionMode.REPAIR,
                 reason=f"Regression detected in {regression} — score dropped to {score_str}, was higher in 6h average.",
                 target_dimension=regression,
-                suggested_actions=[
-                    f"Diagnose root cause of {regression} regression",
-                    f"Check recent changes affecting {regression}",
-                    f"Fix and verify {regression} recovery",
-                ],
+                suggested_actions=self._specific_repair_actions(regression, report),
                 confidence="high",
             )
 
         # Rule 2: Low score + no existing plan → PLAN
-        if weakest_dim and weakest_dim.score < self.config.plan_threshold:
+        if weakest_name and weakest_dim and weakest_dim.score < self.config.plan_threshold:
             has_plan = self._has_existing_plan(weakest_name, context)
             if not has_plan:
                 return Decision(
@@ -196,10 +201,7 @@ class DecisionEngine:
                         "with no active plan — need to create improvement plan."
                     ),
                     target_dimension=weakest_name,
-                    suggested_actions=[
-                        f"Analyze blockers for {weakest_name}",
-                        f"Create improvement plan for {weakest_name}",
-                    ],
+                    suggested_actions=self._specific_plan_actions(weakest_name, report),
                     confidence="medium",
                 )
 
@@ -211,10 +213,7 @@ class DecisionEngine:
                     "— existing plan found, proceed with execution."
                 ),
                 target_dimension=weakest_name,
-                suggested_actions=[
-                    f"Execute next step of {weakest_name} improvement plan",
-                    "Verify progress after execution",
-                ],
+                suggested_actions=self._specific_execute_actions(weakest_name, report),
                 confidence="medium",
             )
 
@@ -241,6 +240,207 @@ class DecisionEngine:
             suggested_actions=[],
             confidence="high",
         )
+
+    # -------------------------------------------------------------------
+    # NovaTrade-specific detectors (Priority Rule 0)
+    # -------------------------------------------------------------------
+
+    def _detect_novatrade_not_trading(self, report) -> Decision | None:
+        """Detect if NovaTrade is running but not placing trades.
+
+        This is the #1 failure the operator cares about — the system should
+        never silently fail to trade during market hours.
+        """
+        dim = report.dimensions.get("strategy_validity")
+        if dim is None:
+            return None
+
+        # Find the trades_last_24h sub-metric
+        trades_metric = None
+        silent_failure = None
+        for sm in dim.sub_metrics:
+            if sm.name == "trades_last_24h":
+                trades_metric = sm
+            elif sm.name == "silent_failure_detected":
+                silent_failure = sm
+
+        # Zero trades during market hours = critical
+        # SubMetric.value is the normalized score (0-100); score 20 = zero trades during market hours
+        if trades_metric and trades_metric.value <= 20:
+            return Decision(
+                mode=ActionMode.REPAIR,
+                reason=(
+                    f"CRITICAL: NovaTrade has ZERO trades in the last 24h "
+                    f"(trade score={trades_metric.value:.0f}/100). "
+                    "This means the strategy is not executing — immediate diagnosis required."
+                ),
+                target_dimension="strategy_validity",
+                suggested_actions=[
+                    "Check novacore-novatrade.service status with systemctl",
+                    "Check STATE/novatrade/trade_log.json for recent entries",
+                    "Check STATE/novatrade/halt_state.json for active risk halt",
+                    "Check MetaApi connection status and recent errors",
+                    "Check LOGS/ for order rejection or broker connection errors",
+                    "Restart novacore-novatrade.service if service is down",
+                    "Send Telegram alert to operator about zero-trade condition",
+                ],
+                confidence="high",
+            )
+
+        # Silent failure (no signals for 4+ hours during market hours)
+        # SubMetric.value is the score (0-100): 0 = silence detected, 100 = signals flowing
+        if silent_failure and silent_failure.value < 10:
+            return Decision(
+                mode=ActionMode.REPAIR,
+                reason=(
+                    "CRITICAL: NovaTrade silent failure — no signal output for 4+ hours "
+                    "during market hours. Strategy pipeline may be stuck or crashed."
+                ),
+                target_dimension="strategy_validity",
+                suggested_actions=[
+                    "Check novacore-novatrade.service logs with journalctl -u novacore-novatrade -n 100",
+                    "Check if strategy process is running but hung",
+                    "Restart novacore-novatrade.service",
+                    "Verify signal output resumes after restart",
+                    "Send Telegram alert about silent failure condition",
+                ],
+                confidence="high",
+            )
+
+        return None
+
+    def _detect_pipeline_broken(self, report) -> Decision | None:
+        """Detect if the execution pipeline is critically broken."""
+        dim = report.dimensions.get("execution_pipeline")
+        if dim is None:
+            return None
+
+        # Check for critical broker connectivity failure
+        for sm in dim.sub_metrics:
+            if sm.name == "pipeline_connectivity" and sm.value < 20:
+                return Decision(
+                    mode=ActionMode.REPAIR,
+                    reason=(
+                        f"CRITICAL: Broker connectivity is at {sm.value:.0f}/100 — "
+                        "most API calls are failing. Orders cannot be placed."
+                    ),
+                    target_dimension="execution_pipeline",
+                    suggested_actions=[
+                        "Check MetaApi SDK connection status",
+                        "Verify API credentials are valid",
+                        "Check network connectivity to MetaApi servers",
+                        "Restart novacore-novatrade.service to force reconnect",
+                        "Review STATE/metrics.json for error patterns",
+                        "Send Telegram alert about broker connectivity failure",
+                    ],
+                    confidence="high",
+                )
+
+            if sm.name == "rejection_rate" and sm.value < 20:
+                return Decision(
+                    mode=ActionMode.REPAIR,
+                    reason=(
+                        f"CRITICAL: Order rejection rate is extremely high "
+                        f"(score={sm.value:.0f}/100). Broker is rejecting most orders."
+                    ),
+                    target_dimension="execution_pipeline",
+                    suggested_actions=[
+                        "Check LOGS/ for specific rejection reasons from broker",
+                        "Verify lot sizes comply with broker minimums",
+                        "Check if FTMO daily loss limit has been hit",
+                        "Review risk gate pass/fail logs",
+                        "Send Telegram alert about order rejection spike",
+                    ],
+                    confidence="high",
+                )
+
+        return None
+
+    # -------------------------------------------------------------------
+    # Specific action generators (replace generic suggestions)
+    # -------------------------------------------------------------------
+
+    def _specific_research_actions(self, dimension: str, report) -> list[str]:
+        """Generate specific research actions based on the failing dimension."""
+        actions_map = {
+            "strategy_validity": [
+                "Check STATE/novatrade/trade_log.json for recent trade activity",
+                "Review signal_log.json for signal generation patterns",
+                "Check if strategy config at STATE/novatrade/strategy_config.json is correct",
+                "Review LOGS/ for any strategy errors or exceptions",
+            ],
+            "execution_pipeline": [
+                "Check STATE/metrics.json for contract success/failure rates",
+                "Review MetaApi connection logs for errors",
+                "Check if price feed is updating in STATE/novatrade/",
+                "Verify broker account status and margin availability",
+            ],
+            "system_health": [
+                "Run systemctl status on all novacore services",
+                "Check disk space and memory usage",
+                "Review error rate in LOGS/ for the last hour",
+                "Check for orphaned tasks in TASKS/ older than 2 hours",
+            ],
+            "risk_engine": [
+                "Check STATE/novatrade/halt_state.json for active halts",
+                "Review daily_loss_tracker.json for drawdown status",
+                "Check risk_policy.yaml for current risk parameters",
+                "Review pre-trade gate logs for rejection patterns",
+            ],
+            "performance_stability": [
+                "Load equity history from STATE/novatrade/equity_history.json",
+                "Calculate current Sharpe ratio and drawdown",
+                "Compare live performance to backtest baselines",
+                "Check for unusual equity curve patterns",
+            ],
+        }
+        return actions_map.get(
+            dimension,
+            [
+                f"Research current state of {dimension}",
+                f"Gather metrics and logs for {dimension}",
+            ],
+        )
+
+    def _specific_repair_actions(self, dimension: str, report) -> list[str]:
+        """Generate specific repair actions based on the failing dimension."""
+        base = [f"Diagnose root cause of {dimension} regression"]
+        extras = {
+            "strategy_validity": [
+                "Check if novacore-novatrade.service is running",
+                "Check for risk halt in STATE/novatrade/halt_state.json",
+                "Restart service if down: sudo systemctl restart novacore-novatrade",
+                "Verify trades resume after fix",
+            ],
+            "execution_pipeline": [
+                "Check MetaApi connection and recent errors",
+                "Restart novacore-novatrade.service to force reconnect",
+                "Verify order flow resumes after restart",
+            ],
+            "system_health": [
+                "Restart failed services",
+                "Clear error state and verify recovery",
+            ],
+        }
+        return base + extras.get(dimension, [f"Fix and verify {dimension} recovery"])
+
+    def _specific_plan_actions(self, dimension: str, report) -> list[str]:
+        """Generate specific plan actions based on the failing dimension."""
+        return [
+            f"Analyze root causes of low {dimension} score",
+            f"Identify specific blockers for {dimension} improvement",
+            "Create step-by-step improvement plan with measurable targets",
+            f"Estimate effort and set timeline for {dimension} recovery",
+        ]
+
+    def _specific_execute_actions(self, dimension: str, report) -> list[str]:
+        """Generate specific execution actions based on the failing dimension."""
+        return [
+            f"Review existing plan for {dimension} improvement",
+            f"Execute the next pending step of the {dimension} plan",
+            f"Verify measurable improvement in {dimension} score after execution",
+            "Update plan status and document what was done",
+        ]
 
     def _has_existing_plan(self, dimension: str | None, context: DecisionContext) -> bool:
         """Check if there's an active plan targeting this dimension."""

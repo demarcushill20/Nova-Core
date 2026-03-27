@@ -23,7 +23,7 @@ Usage:
         --env-out /etc/novacore/novatrade.env
 
 Notes:
-    - Use your MT5 INVESTOR (read-only) password, not the master password
+    - Use your MT5 MASTER (trading) password, not the investor/read-only password
     - The server name must match exactly (check your FTMO MT5 terminal)
     - Your MetaApi token is from https://app.metaapi.cloud/token
     - This script does NOT store secrets in the repo
@@ -146,9 +146,9 @@ FTMO_CAMPAIGN_LABEL={campaign}
 
     env_path = Path(args.env_out)
     env_path.parent.mkdir(parents=True, exist_ok=True)
-    env_path.write_text(env_content)
+    env_path.write_text(env_content)  # noqa: ASYNC240
     # Restrict permissions — secrets file
-    env_path.chmod(0o600)
+    env_path.chmod(0o600)  # noqa: ASYNC240
     print(f"  Written ({env_path}), permissions 600")
 
     # --- Summary -------------------------------------------------------------

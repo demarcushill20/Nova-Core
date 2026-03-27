@@ -384,8 +384,27 @@ class MetaApiAdapter(MT5Adapter):
                     log.error("metaapi %s failed after %d attempts: %s", op_name, max_retries + 1, msg)
                     return OrderResult(ok=False, error=f"Failed after {max_retries + 1} attempts: {msg}")
 
-                delay = 2**attempt
-                log.warning("metaapi %s attempt %d failed: %s, retrying in %ds", op_name, attempt + 1, msg, delay)
+                # Rate-limit detection: use longer backoff for 429/TooManyRequests
+                is_rate_limit = any(
+                    hint in str(exc).lower() for hint in ("429", "too many requests", "toomanyrequests", "rate limit")
+                )
+                if is_rate_limit:
+                    delay = max(10, 2 ** (attempt + 3))  # 10s, 16s, 32s
+                    log.warning(
+                        "metaapi %s: rate-limited, backing off %ds (attempt %d)",
+                        op_name,
+                        delay,
+                        attempt + 1,
+                    )
+                else:
+                    delay = 2**attempt
+                    log.warning(
+                        "metaapi %s attempt %d failed: %s, retrying in %ds",
+                        op_name,
+                        attempt + 1,
+                        msg,
+                        delay,
+                    )
                 await asyncio.sleep(delay)
 
         # Should not reach here, but safety net

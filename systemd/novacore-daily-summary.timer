@@ -1,0 +1,13 @@
+[Unit]
+Description=NovaCore Daily Executive Summary Timer (23:20 CT daily)
+After=network-online.target
+
+[Timer]
+# systemd v247+ supports timezone in OnCalendar format.
+# This system runs systemd v249 — timezone annotation is supported.
+OnCalendar=*-*-* 23:20:00 America/Chicago
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

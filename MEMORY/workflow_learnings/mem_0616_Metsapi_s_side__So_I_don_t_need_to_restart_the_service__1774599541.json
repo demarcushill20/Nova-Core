@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0616_Metsapi_s_side__So_I_don_t_need_to_restart_the_service__1774599541",
+  "workflow_id": "0616_Metsapi_s_side__So_I_don_t_need_to_restart_the_service_",
+  "task_summary": "Confirmed NovaTrade does NOT need restart after MetaApi re-enables trading \u2014 auto-recovery within ~60s via fresh account state checks, circuit breaker reset, and auto-reconnect",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Confirmed NovaTrade does NOT need restart after MetaApi re-enables trading \u2014 auto-recovery within ~60s via fresh account state checks, circuit breaker reset, and auto-reconnect"
+  ],
+  "successful_patterns": [
+    "task_completed: 0616_Metsapi_s_side__So_I_don_t_need_to_restart_the_service_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Confirmed NovaTrade does NOT need restart after MetaApi re-enables trading \u2014 auto-recovery within ~60s via fresh account state checks, circuit breaker reset, and auto-reconnect",
+  "created_at": "2026-03-27T08:19:01Z",
+  "confidence": "high"
+}

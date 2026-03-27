@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0574_Yes_lets_fix_all_3_issues_1774541425",
+  "workflow_id": "0574_Yes_lets_fix_all_3_issues",
+  "task_summary": "Fixed 3 issues \u2014 task dedup (2h cooldown prevents 26+ duplicate tasks), feed resub interval (900\u2192540s + error-triggered resub), committed+pushed 65 files",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 3 issues \u2014 task dedup (2h cooldown prevents 26+ duplicate tasks), feed resub interval (900\u2192540s + error-triggered resub), committed+pushed 65 files"
+  ],
+  "successful_patterns": [
+    "task_completed: 0574_Yes_lets_fix_all_3_issues"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 3 issues \u2014 task dedup (2h cooldown prevents 26+ duplicate tasks), feed resub interval (900\u2192540s + error-triggered resub), committed+pushed 65 files",
+  "created_at": "2026-03-26T16:10:25Z",
+  "confidence": "high"
+}

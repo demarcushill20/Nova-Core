@@ -51,19 +51,52 @@ class ProgressScorer:
             "performance_stability": PerformanceCollector(base_path),
         }
 
+    # Per-collector timeout — prevents a hung collector from blocking the
+    # entire autonomy cycle (e.g. systemctl stuck waiting for dbus).
+    COLLECTOR_TIMEOUT_S: float = 10.0
+
     async def score(self) -> ProgressReport:
         """Run all collectors and produce a ProgressReport."""
         dimensions: dict[str, DimensionScore] = {}
         warnings: list[str] = []
 
+        # Load history once — reused for cache-fallback and trend detection.
+        history = self._load_history()
+        cached_scores = self._last_cached_scores(history)
+
         for name, collector in self._collectors.items():
             try:
-                dim_score = await collector.collect()
+                dim_score = await asyncio.wait_for(
+                    collector.collect(),
+                    timeout=self.COLLECTOR_TIMEOUT_S,
+                )
                 dimensions[name] = dim_score
+            except asyncio.TimeoutError:
+                log.error("Collector %s timed out after %.0fs", name, self.COLLECTOR_TIMEOUT_S)
+                fallback = cached_scores.get(name)
+                if fallback is not None:
+                    warnings.append(f"Collector {name} timed out — using cached score {fallback:.1f}")
+                    dimensions[name] = DimensionScore(
+                        name=name,
+                        score=fallback,
+                        warnings=["Timed out — cached score from last successful run"],
+                    )
+                else:
+                    warnings.append(f"Collector {name} timed out — no cached score, defaulting to 0")
+                    dimensions[name] = DimensionScore(name=name, score=0.0, warnings=["Timed out, no cache"])
             except Exception as exc:
                 log.error("Collector %s failed: %s", name, exc)
-                warnings.append(f"Collector {name} failed: {exc}")
-                dimensions[name] = DimensionScore(name=name, score=0.0, warnings=[str(exc)])
+                fallback = cached_scores.get(name)
+                if fallback is not None:
+                    warnings.append(f"Collector {name} failed — using cached score {fallback:.1f}")
+                    dimensions[name] = DimensionScore(
+                        name=name,
+                        score=fallback,
+                        warnings=[f"Failed ({exc}) — cached score from last successful run"],
+                    )
+                else:
+                    warnings.append(f"Collector {name} failed: {exc}")
+                    dimensions[name] = DimensionScore(name=name, score=0.0, warnings=[str(exc)])
 
         # Weighted average
         total_weight = sum(self.config.weights.get(k, 0.2) for k in dimensions)
@@ -71,8 +104,8 @@ class ProgressScorer:
             total_weight = 1.0
         overall = sum(dimensions[k].score * self.config.weights.get(k, 0.2) for k in dimensions) / total_weight
 
-        # Trend detection
-        trends = self._compute_trends(dimensions)
+        # Trend detection (reuses pre-loaded history)
+        trends = self._compute_trends(dimensions, history)
 
         report = ProgressReport(
             overall_score=round(overall, 1),
@@ -86,9 +119,32 @@ class ProgressScorer:
 
         return report
 
-    def _compute_trends(self, current: dict[str, DimensionScore]) -> dict[str, ScoreTrend]:
+    def _last_cached_scores(self, history: list[dict] | None = None) -> dict[str, float]:
+        """Return the most recent score per dimension from persisted history.
+
+        Used as a fallback when a collector throws or times out — prevents a
+        single failing collector from zeroing its dimension and triggering
+        false REPAIR/RESEARCH decisions.
+        """
+        if history is None:
+            history = self._load_history()
+        if not history:
+            return {}
+        # Walk backwards to find the most recent entry with dimension data.
+        for entry in reversed(history):
+            dims = entry.get("dimensions", {})
+            if dims:
+                return {name: max(0.0, min(100.0, d.get("score", 0.0))) for name, d in dims.items()}
+        return {}
+
+    def _compute_trends(
+        self,
+        current: dict[str, DimensionScore],
+        history: list[dict] | None = None,
+    ) -> dict[str, ScoreTrend]:
         """Compare current scores against rolling averages from history."""
-        history = self._load_history()
+        if history is None:
+            history = self._load_history()
         now = datetime.now(timezone.utc)
         trends: dict[str, ScoreTrend] = {}
 

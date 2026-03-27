@@ -377,7 +377,7 @@ async def _run_live(
 def run_live(
     symbols: str = typer.Option("EURUSD", help="Comma-separated symbols"),
     timeframe: str = typer.Option("H1", help="Primary timeframe"),
-    poll_interval: float = typer.Option(0.5, help="Tick poll interval in seconds"),
+    poll_interval: float = typer.Option(2.0, help="Tick poll interval in seconds"),
     shadow: bool = typer.Option(False, help="Shadow mode — log signals, no orders"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Use DryRunAdapter"),
 ) -> None:

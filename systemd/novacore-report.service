@@ -1,0 +1,40 @@
+[Unit]
+Description=NovaCore Autonomous Report Generator
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/nova/nova-core/scripts/autonomous_report.py
+WorkingDirectory=/home/nova/nova-core
+User=nova
+TimeoutStartSec=60
+
+# Security hardening (matches heartbeat pattern)
+ProtectSystem=strict
+ProtectHome=no
+ReadWritePaths=/home/nova/nova-core
+ReadWritePaths=/home/nova/nova-vault
+ReadWritePaths=/tmp
+ReadOnlyPaths=/etc/novacore
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=no
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectProc=default
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

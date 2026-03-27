@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0613_repair_strategy_validity_regression_1774596270",
+  "workflow_id": "0613_repair_strategy_validity_regression",
+  "task_summary": "Diagnosed NovaTrade zero-trade issue - MetaApi tradeAllowed=false requires operator re-provisioning",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed NovaTrade zero-trade issue - MetaApi tradeAllowed=false requires operator re-provisioning"
+  ],
+  "successful_patterns": [
+    "task_completed: 0613_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed NovaTrade zero-trade issue - MetaApi tradeAllowed=false requires operator re-provisioning",
+  "created_at": "2026-03-27T07:24:30Z",
+  "confidence": "high"
+}

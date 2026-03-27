@@ -10,6 +10,7 @@ Usage:
     python3 -m novatrade.autonomy --goals       # goal tree only
     python3 -m novatrade.autonomy --json        # raw JSON output
     python3 -m novatrade.autonomy --snapshot    # read last snapshot (no live collection)
+    python3 -m novatrade.autonomy --intelligence # reasoning engine + outcome tracking
 """
 
 from __future__ import annotations
@@ -90,7 +91,12 @@ def print_scores(report) -> None:
                 line = line[:75] + "..."
             print(f"  {line}")
 
-    # Warnings
+        # Per-dimension warnings (e.g. collector timeouts, no-data flags)
+        if dim.warnings:
+            for dw in dim.warnings:
+                print(f"    ! {dw}")
+
+    # Global warnings
     if report.warnings:
         print()
         print("  WARNINGS:")
@@ -275,6 +281,54 @@ async def _run_live(args: argparse.Namespace) -> int:
         tree = decomposer.update_progress(tree, report)
         print_goals(tree)
 
+    # Step 4: Intelligence (reasoning + outcomes)
+    if getattr(args, "intelligence", False):
+        from novatrade.autonomy.outcome_analyzer import OutcomeAnalyzer
+        from novatrade.autonomy.reasoning_engine import ReasoningEngine
+
+        print()
+        print("  INTELLIGENCE ENGINE")
+
+        # Outcome effectiveness
+        analyzer = OutcomeAnalyzer(BASE_PATH)
+        eff = analyzer.get_effectiveness_report()
+        if eff.resolved > 0:
+            print(
+                f"  Outcomes: {eff.resolved} resolved — "
+                f"{eff.effective} effective, {eff.neutral} neutral, "
+                f"{eff.counterproductive} counterproductive"
+            )
+            for mode, counts in eff.by_mode.items():
+                delta = eff.avg_delta_by_mode.get(mode, 0)
+                print(
+                    f"    {mode}: avg delta={delta:+.1f} "
+                    f"(E={counts.get('effective', 0)} N={counts.get('neutral', 0)} "
+                    f"C={counts.get('counterproductive', 0)})"
+                )
+        else:
+            print("  Outcomes: no resolved decisions yet")
+
+        # Reasoning
+        if "assembler" not in dir():
+            from novatrade.autonomy.decision_context import ContextAssembler as _CA
+
+            assembler = _CA(BASE_PATH)
+            context = await assembler.assemble(report)
+        reasoning_engine = ReasoningEngine(base_path=BASE_PATH)
+        recent = analyzer.get_recent_outcomes(5)
+        outcome_dicts = [{"mode": o.mode, "delta": o.delta, "effectiveness": o.effectiveness} for o in recent]
+        reasoning = await reasoning_engine.reason(context, report, outcome_dicts)
+        if reasoning:
+            print(f"\n  Reasoning: {reasoning.recommended_mode.upper()} -> {reasoning.target_dimension or 'system'}")
+            for step in reasoning.reasoning_chain:
+                print(f"    - {step[:90]}")
+            if reasoning.novel_insight:
+                print(f"  Insight: {reasoning.novel_insight[:120]}")
+            if reasoning.suggested_actions:
+                print("  Suggestions:")
+                for a in reasoning.suggested_actions[:3]:
+                    print(f"    -> {a[:90]}")
+
     if show_all:
         print_decision_history()
 
@@ -292,6 +346,7 @@ def main() -> int:
     parser.add_argument("--goals", action="store_true", help="Show goal tree only")
     parser.add_argument("--json", action="store_true", help="Output raw JSON report")
     parser.add_argument("--snapshot", action="store_true", help="Read last snapshot (no live collection)")
+    parser.add_argument("--intelligence", action="store_true", help="Show intelligence engine (reasoning + outcomes)")
 
     args = parser.parse_args()
 

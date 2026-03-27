@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260326_10_novatrade_impl_1774556745",
+  "workflow_id": "shift_20260326_10_novatrade_impl",
+  "task_summary": "Fixed P0-A MetaApi symbol resolution \u2014 added suffix normalization (.sim \u2192 clean symbol) in MetaApi adapter while preserving response compatibility",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed P0-A MetaApi symbol resolution \u2014 added suffix normalization (.sim \u2192 clean symbol) in MetaApi adapter while preserving response compatibility"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260326_10_novatrade_impl"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed P0-A MetaApi symbol resolution \u2014 added suffix normalization (.sim \u2192 clean symbol) in MetaApi adapter while preserving response compatibility",
+  "created_at": "2026-03-26T20:25:45Z",
+  "confidence": "high"
+}

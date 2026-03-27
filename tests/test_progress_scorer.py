@@ -1047,11 +1047,12 @@ async def test_perf_backtest_source_tagged(perf_collector, tmp_path):
 
 @pytest.mark.asyncio
 async def test_perf_insufficient_data_warnings(perf_collector):
-    """All 4 sub-metrics emit insufficient-data warnings when no data."""
+    """All 4 sub-metrics emit insufficient-data warnings when no data, plus summary."""
     result = await perf_collector.collect()
-    assert len(result.warnings) == 4
-    for w in result.warnings:
-        assert "Insufficient equity data" in w
+    per_metric = [w for w in result.warnings if "Insufficient equity data" in w]
+    assert len(per_metric) == 4
+    # M3: explicit no-data summary warning also present
+    assert any("No equity data available" in w or "placeholder" in w for w in result.warnings)
 
 
 # =====================================================================

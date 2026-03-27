@@ -95,6 +95,9 @@ try:
         DecisionEngine as _DecisionEngine,
     )
     from novatrade.autonomy import (
+        DirectActionExecutor as _DirectActionExecutor,
+    )
+    from novatrade.autonomy import (
         GoalDecomposer as _GoalDecomposer,
     )
     from novatrade.autonomy import (
@@ -111,6 +114,7 @@ except ImportError:
     _ActionMode = None  # type: ignore[assignment,misc]
     _ContextAssembler = None  # type: ignore[assignment,misc]
     _DecisionEngine = None  # type: ignore[assignment,misc]
+    _DirectActionExecutor = None  # type: ignore[assignment,misc]
     _GoalDecomposer = None  # type: ignore[assignment,misc]
     _ProgressScorer = None  # type: ignore[assignment,misc]
     _TaskSpecGenerator = None  # type: ignore[assignment,misc]
@@ -1717,20 +1721,23 @@ def _run_planning_cycle() -> None:
 _NOVATRADE_GOAL_ID = "novatrade_100pct_operational"
 
 
-def _has_pending_task_for_dimension(dimension: str | None) -> bool:
+def _has_pending_task_for_dimension(dimension: str | None, *, category: str | None = None) -> bool:
     """Check if TASKS/ already has a pending or recently-completed autonomy task targeting *dimension*.
 
     Prevents duplicate task storms by also considering tasks completed within
     the last ``_DEDUP_COOLDOWN_S`` seconds (default 2 hours).
+
+    When *dimension* is None but *category* is provided (e.g. "validate"),
+    dedup matches on category alone — prevents unbounded VALIDATE task spam.
     """
     _DEDUP_COOLDOWN_S = 7200  # 2 hours
 
-    if not dimension:
+    if not dimension and not category:
         return False
     import time as _time
 
     now = _time.time()
-    dim_lower = dimension.replace("_", " ")
+    dim_lower = dimension.replace("_", " ") if dimension else None
 
     for f in TASKS_DIR.glob("*.md*"):
         fname = f.name
@@ -1746,7 +1753,13 @@ def _has_pending_task_for_dimension(dimension: str | None) -> bool:
 
         try:
             head = f.read_text()[:500]
-            if "source: autonomy-decision-engine" in head and dim_lower in head.lower():
+            if "source: autonomy-decision-engine" not in head:
+                continue
+            # Match on dimension if provided
+            if dim_lower and dim_lower in head.lower():
+                return True
+            # Match on category alone (e.g. "validate" with no dimension)
+            if not dim_lower and category and f"category: {category}" in head:
                 return True
         except OSError:
             continue
@@ -1793,10 +1806,33 @@ def _run_autonomy_cycle() -> dict | None:
         completed = sum(1 for sg in tree.sub_goals if sg.status.value == "completed")
         print(f"[autonomy] Goal tree: {completed}/{len(tree.sub_goals)} complete, {len(actionable)} actionable")
 
-        # Step 5: Generate task file for non-MONITOR decisions
+        # Step 5: Direct action execution (inline, no task-file round-trip)
+        # For critical decisions (REPAIR/EXECUTE), run diagnostics and
+        # attempt safe remediation immediately, then alert via Telegram.
+        _action_result = None
+        if _DirectActionExecutor is not None and decision.mode != _ActionMode.MONITOR:
+            try:
+                executor = _DirectActionExecutor()
+                _action_result = executor.execute(decision, report)
+                _critical = [f for f in _action_result.findings if f.status == "critical"]
+                if _critical:
+                    print(f"[autonomy] Direct action: {_action_result.summary}")
+                    for _f in _critical:
+                        print(f"[autonomy]   CRITICAL: {_f.check} — {_f.detail[:80]}")
+                if _action_result.actions_taken:
+                    for _a in _action_result.actions_taken:
+                        print(f"[autonomy]   ACTION: {_a[:100]}")
+                if _action_result.escalated:
+                    print("[autonomy]   ESCALATED — needs human attention")
+            except Exception as _ae_exc:
+                print(f"[autonomy] Direct action failed (non-fatal): {_ae_exc}")
+
+        # Step 6: Generate task file for non-MONITOR decisions (for deeper follow-up)
         # Skip if a pending task already targets the same dimension (dedup)
+        # For VALIDATE with no dimension, dedup on category to prevent spam
         if decision.mode != _ActionMode.MONITOR:
-            if _has_pending_task_for_dimension(decision.target_dimension):
+            _cat = decision.mode.value.lower()  # "validate", "repair", etc.
+            if _has_pending_task_for_dimension(decision.target_dimension, category=_cat):
                 print(f"[autonomy] Skipped task generation — pending task exists for {decision.target_dimension}")
             else:
                 gen = _TaskSpecGenerator()
@@ -1805,8 +1841,8 @@ def _run_autonomy_cycle() -> dict | None:
                 if task_path:
                     print(f"[autonomy] Generated task: {task_path.name}")
 
-        # Step 6: Build snapshot dict
-        return {
+        # Step 7: Build snapshot dict
+        _snap = {
             "overall_score": report.overall_score,
             "alert_level": report.overall_alert.value,
             "dimensions": {
@@ -1828,6 +1864,16 @@ def _run_autonomy_cycle() -> dict | None:
             },
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
+        # Include direct action results if any
+        if _action_result is not None:
+            _snap["direct_action"] = {
+                "summary": _action_result.summary,
+                "critical_findings": len([f for f in _action_result.findings if f.status == "critical"]),
+                "actions_taken": _action_result.actions_taken,
+                "alert_sent": _action_result.alert_sent,
+                "escalated": _action_result.escalated,
+            }
+        return _snap
 
     try:
         snapshot = _asyncio.run(_pipeline())
@@ -2072,6 +2118,31 @@ def main() -> int:
                 "detail": f"check skipped: {e}",
             }
         )
+
+    # --- Autonomous Report (every 2h) → NovaVault diary ---
+    try:
+        from scripts.autonomous_report import main as _run_autonomous_report
+
+        _report_gate_file = STATE_DIR / "last_autonomous_report.txt"
+        _report_interval_s = 7200  # 2 hours
+        _run_report = True
+        if _report_gate_file.exists():
+            try:
+                _last_report_ts = float(_report_gate_file.read_text().strip())
+                if time.time() - _last_report_ts < _report_interval_s:
+                    _run_report = False
+            except (ValueError, OSError):
+                pass
+        if _run_report and not _heartbeat_shutdown_requested:
+            print("[autonomous-report] Generating 2h diary report")
+            _report_rc = _run_autonomous_report()
+            if _report_rc == 0:
+                _report_gate_file.write_text(str(time.time()))
+                print("[autonomous-report] Report written to NovaVault diary")
+            else:
+                print(f"[autonomous-report] Report generation failed (rc={_report_rc})")
+    except Exception as e:
+        print(f"[autonomous-report] Failed (non-fatal): {e}")
 
     # --- Phase 7.7: production hardening maintenance ---
     try:
