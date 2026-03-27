@@ -419,6 +419,10 @@ class LiveLoop:
                             signal.signal_type.value,
                             result.rejected_reason,
                         )
+                        # Roll back strategy engine state on ENTRY veto
+                        if signal.signal_type == SignalType.ENTRY:
+                            self._strategy_engine.cancel_pending()
+                            log.info("rolled back engine state to FLAT after ENTRY veto")
                     elif result.rejected:
                         self._metrics.rejected += 1
                         log.warning(
@@ -426,6 +430,11 @@ class LiveLoop:
                             signal.signal_type.value,
                             result.rejected_reason,
                         )
+                        # Roll back strategy engine state on ENTRY rejection
+                        # to prevent phantom position / EXIT spam.
+                        if signal.signal_type == SignalType.ENTRY:
+                            self._strategy_engine.cancel_pending()
+                            log.info("rolled back engine state to FLAT after ENTRY rejection")
                     else:
                         self._metrics.errors += 1
                         log.warning(

@@ -137,10 +137,24 @@ class TickBatchPoller:
                         self.ticks_yielded += 1
                         yield tick
 
-                    except Exception:
+                    except Exception as exc:
                         self.errors += 1
                         self._consecutive_errors += 1
-                        log.exception("Error polling %s — continuing", symbol)
+
+                        # Rate-limit backoff: sleep until recommended retry time
+                        if "TooManyRequests" in type(exc).__name__:
+                            backoff = min(30 * self._consecutive_errors, 300)
+                            log.warning(
+                                "Rate limited polling %s — backing off %ds (consecutive=%d)",
+                                symbol,
+                                backoff,
+                                self._consecutive_errors,
+                            )
+                            if self._running:
+                                await asyncio.sleep(backoff)
+                            break  # skip remaining symbols this cycle
+                        else:
+                            log.exception("Error polling %s — continuing", symbol)
 
                         # Trigger resubscription after consecutive errors
                         if self._consecutive_errors >= self._CONSECUTIVE_ERROR_THRESHOLD:
@@ -156,12 +170,12 @@ class TickBatchPoller:
                                     self._consecutive_errors = 0
                             except Exception:
                                 log.exception("Resubscription failed")
-
-                # Elapsed-time-aware sleep
-                elapsed = time.monotonic() - loop_start
-                sleep_time = max(0, self._interval - elapsed)
-                if sleep_time > 0 and self._running:
-                    await asyncio.sleep(sleep_time)
+                else:
+                    # Normal completion (no rate-limit break) — interval sleep
+                    elapsed = time.monotonic() - loop_start
+                    sleep_time = max(0, self._interval - elapsed)
+                    if sleep_time > 0 and self._running:
+                        await asyncio.sleep(sleep_time)
         finally:
             self._running = False
             log.info(

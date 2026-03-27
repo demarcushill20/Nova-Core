@@ -2119,25 +2119,15 @@ def main() -> int:
             }
         )
 
-    # --- Autonomous Report (every 2h) → NovaVault diary ---
+    # --- Post-Heartbeat Autonomous Report → NovaVault diary ---
+    # Runs after EVERY heartbeat to provide visibility into goal-driven decisions
     try:
-        from scripts.autonomous_report import main as _run_autonomous_report
+        from scripts.autonomous_report import run_post_heartbeat_report
 
-        _report_gate_file = STATE_DIR / "last_autonomous_report.txt"
-        _report_interval_s = 7200  # 2 hours
-        _run_report = True
-        if _report_gate_file.exists():
-            try:
-                _last_report_ts = float(_report_gate_file.read_text().strip())
-                if time.time() - _last_report_ts < _report_interval_s:
-                    _run_report = False
-            except (ValueError, OSError):
-                pass
-        if _run_report and not _heartbeat_shutdown_requested:
-            print("[autonomous-report] Generating 2h diary report")
-            _report_rc = _run_autonomous_report()
+        if not _heartbeat_shutdown_requested:
+            print("[autonomous-report] Generating post-heartbeat report")
+            _report_rc = run_post_heartbeat_report(_autonomy_snapshot)
             if _report_rc == 0:
-                _report_gate_file.write_text(str(time.time()))
                 print("[autonomous-report] Report written to NovaVault diary")
             else:
                 print(f"[autonomous-report] Report generation failed (rc={_report_rc})")

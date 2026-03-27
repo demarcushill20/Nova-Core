@@ -45,33 +45,6 @@ log = logging.getLogger("novatrade.adapter.metaapi")
 # MetaApi trade-response numeric codes that indicate success.
 _SUCCESS_CODES = {0, 10008, 10009, 10010, 10025}
 
-# Known broker suffixes that need to be stripped for MetaApi compatibility
-_KNOWN_BROKER_SUFFIXES = [".sim", ".ftmo", ".t4b", ".pro"]
-
-
-def _normalize_symbol_for_metaapi(broker_symbol: str) -> str:
-    """Strip known broker suffixes to get the clean symbol that MetaApi expects.
-
-    Args:
-        broker_symbol: Symbol as sent from data layer (e.g., "EURUSD.sim")
-
-    Returns:
-        Clean symbol for MetaApi SDK (e.g., "EURUSD")
-
-    The data layer now correctly applies broker symbol mapping (EURUSD → EURUSD.sim)
-    but MetaApi SDK expects clean symbols without suffixes. This function provides
-    the reverse mapping for MetaApi compatibility.
-
-    Examples:
-        "EURUSD.sim" -> "EURUSD" (OANDA demo)
-        "GBPUSD.ftmo" -> "GBPUSD" (FTMO)
-        "EURUSD" -> "EURUSD" (no change)
-    """
-    for suffix in _KNOWN_BROKER_SUFFIXES:
-        if broker_symbol.endswith(suffix):
-            return broker_symbol[: -len(suffix)]
-    return broker_symbol
-
 
 # Map NovaTrade timeframe strings to MetaApi format.
 _TIMEFRAME_MAP = {
@@ -441,13 +414,10 @@ class MetaApiAdapter(MT5Adapter):
         await self._ensure_connected_or_reconnect()
         for symbol in symbols:
             try:
-                # Normalize symbol for MetaApi (strip .sim, .ftmo, etc.)
-                clean_symbol = _normalize_symbol_for_metaapi(symbol)
-                raw = await self._connection.get_symbol_price(clean_symbol, keep_subscription=True)
+                raw = await self._connection.get_symbol_price(symbol, keep_subscription=True)
                 log.info(
-                    "metaapi subscribe: %s (%s) bid=%.5f ask=%.5f (long-term subscription active)",
+                    "metaapi subscribe: %s bid=%.5f ask=%.5f (long-term subscription active)",
                     symbol,
-                    clean_symbol if clean_symbol != symbol else "no mapping",
                     raw["bid"],
                     raw["ask"],
                 )
@@ -478,18 +448,13 @@ class MetaApiAdapter(MT5Adapter):
     async def get_symbol_price(self, symbol: str) -> SymbolPrice:
         """Get current bid/ask for a symbol."""
         await self._ensure_connected_or_reconnect()
-        # Normalize symbol for MetaApi (strip .sim, .ftmo, etc.) but preserve original in response
-        clean_symbol = _normalize_symbol_for_metaapi(symbol)
-        raw = await self._connection.get_symbol_price(clean_symbol, keep_subscription=True)
+        raw = await self._connection.get_symbol_price(symbol, keep_subscription=True)
         log.debug(
-            "metaapi get_symbol_price: %s (%s) bid=%.5f ask=%.5f",
+            "metaapi get_symbol_price: %s bid=%.5f ask=%.5f",
             symbol,
-            clean_symbol if clean_symbol != symbol else "no mapping",
             raw["bid"],
             raw["ask"],
         )
-        # Override the symbol in response to match the requested symbol
-        raw["symbol"] = symbol
         return _translate_symbol_price(raw)
 
     async def get_candles(
@@ -501,17 +466,14 @@ class MetaApiAdapter(MT5Adapter):
         """Retrieve recent candles via MetaApi historical data API."""
         await self._ensure_connected_or_reconnect()
         ma_tf = _TIMEFRAME_MAP.get(timeframe, timeframe)
-        # Normalize symbol for MetaApi (strip .sim, .ftmo, etc.) but preserve original in response
-        clean_symbol = _normalize_symbol_for_metaapi(symbol)
         raw_candles = await self._account.get_historical_candles(
-            clean_symbol,
+            symbol,
             ma_tf,
             limit=count,
         )
         log.debug(
-            "metaapi get_candles: %s (%s) %s returned=%d",
+            "metaapi get_candles: %s %s returned=%d",
             symbol,
-            clean_symbol if clean_symbol != symbol else "no mapping",
             ma_tf,
             len(raw_candles),
         )

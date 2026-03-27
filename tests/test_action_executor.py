@@ -481,17 +481,20 @@ class TestAlerting:
     def test_log_file_written(self, tmp_path):
         """Alert should also write to LOGS/autonomy_actions.log."""
         (tmp_path / "LOGS").mkdir()
+        (tmp_path / "STATE").mkdir()
         executor = DirectActionExecutor(base_path=str(tmp_path))
         make_report()
         decision = make_decision(mode=ActionMode.REPAIR, target="strategy_validity")
 
-        # Call _send_alert directly (no Telegram creds → won't actually send)
         result = ActionResult(
             decision_mode="repair",
             target_dimension="strategy_validity",
             findings=[DiagnosticFinding(check="test", status="critical", detail="test detail")],
         )
-        executor._send_alert(decision, result)
+
+        # Mock urllib to prevent real Telegram sends (env vars may be set on VPS)
+        with patch("novatrade.autonomy.action_executor.urllib.request.urlopen"):
+            executor._send_alert(decision, result)
 
         log_path = tmp_path / "LOGS" / "autonomy_actions.log"
         assert log_path.exists()

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""NovaCore Autonomous Report — 2-hour system status digest.
+"""NovaCore Autonomous Report — post-heartbeat decision digest.
 
-Runs as a systemd oneshot (triggered by novacore-report.timer every 2h).
-Collects system health, autonomy scores, recent task activity, and
-heartbeat trends, then writes a diary note to NovaVault 90-diary/.
+Runs after EVERY heartbeat cycle to provide full visibility into
+goal-driven autonomous decisions, explaining actions and thought processes.
+
+Also supports standalone 2-hour digest mode via `main()`.
 
 Stdlib + existing novacore modules only.
 """
@@ -29,6 +30,8 @@ HEARTBEAT_FILE = BASE / "HEARTBEAT.md"
 METRICS_JSONL = STATE_DIR / "heartbeat_metrics.jsonl"
 AUTONOMY_SNAPSHOT = STATE_DIR / "autonomy_snapshot.json"
 DECISION_HISTORY = STATE_DIR / "decision_history.json"
+DECISION_OUTCOMES = STATE_DIR / "decision_outcomes.json"
+INVESTIGATIONS = STATE_DIR / "investigations.json"
 
 VAULT_DIR = Path("/home/nova/nova-vault")
 VAULT_DIARY = VAULT_DIR / "90-diary"
@@ -200,13 +203,37 @@ def collect_heartbeat_trends(window: int = 12) -> dict:
     }
 
 
-def collect_decision_history() -> list[dict]:
+def collect_decision_history(count: int = 5) -> list[dict]:
     """Read recent autonomy decisions."""
     try:
         if DECISION_HISTORY.exists():
             data = json.loads(DECISION_HISTORY.read_text())
             if isinstance(data, list):
-                return data[-5:]
+                return data[-count:]
+    except (json.JSONDecodeError, OSError):
+        pass
+    return []
+
+
+def collect_decision_outcomes(count: int = 5) -> list[dict]:
+    """Read recent decision outcome assessments."""
+    try:
+        if DECISION_OUTCOMES.exists():
+            data = json.loads(DECISION_OUTCOMES.read_text())
+            if isinstance(data, list):
+                return data[-count:]
+    except (json.JSONDecodeError, OSError):
+        pass
+    return []
+
+
+def collect_investigations(count: int = 3) -> list[dict]:
+    """Read recent investigation reports."""
+    try:
+        if INVESTIGATIONS.exists():
+            data = json.loads(INVESTIGATIONS.read_text())
+            if isinstance(data, list):
+                return data[-count:]
     except (json.JSONDecodeError, OSError):
         pass
     return []
@@ -215,17 +242,314 @@ def collect_decision_history() -> list[dict]:
 # ── Report Formatting ──────────────────────────────────────────────────────────
 
 
-def _alert_emoji(level: str) -> str:
-    """Map alert level to status indicator."""
-    return {"GREEN": "GREEN", "YELLOW": "YELLOW", "RED": "RED"}.get(level.upper(), level)
-
-
 def _trend_arrow(direction: str) -> str:
     return {"improving": "^", "degrading": "v", "stable": "="}.get(direction, "?")
 
 
+def _decision_mode_explanation(mode: str) -> str:
+    """Return a human-readable explanation of what a decision mode means."""
+    explanations = {
+        "monitor": "All systems nominal — no intervention needed. The engine is passively watching.",
+        "research": "Knowledge gap detected — the system needs more information before acting.",
+        "plan": "Low score detected with no existing remediation plan — creating one.",
+        "execute": "Low score detected with an existing plan — executing the planned fix.",
+        "repair": "Regression or critical failure detected — immediate corrective action.",
+        "validate": "All dimensions healthy with recent improvements — verifying stability.",
+    }
+    return explanations.get(mode.lower(), f"Unknown mode: {mode}")
+
+
+def _format_evaluation(dims: dict) -> list[str]:
+    """Format step 2: dimension evaluation."""
+    lines: list[str] = []
+    yellow = [n for n, d in dims.items() if 40 <= d.get("score", 0) < 70]
+    red = [n for n, d in dims.items() if d.get("score", 0) < 40]
+    green = [n for n, d in dims.items() if d.get("score", 0) >= 70]
+    degrading = [n for n, d in dims.items() if d.get("trend") == "degrading"]
+
+    if red:
+        names = ", ".join(d.replace("_", " ") for d in red)
+        lines.append(f"- CRITICAL dimensions below 40: **{names}** — requires immediate attention")
+    if yellow:
+        names = ", ".join(d.replace("_", " ") for d in yellow)
+        lines.append(f"- WARNING dimensions (40-70): **{names}** — needs improvement")
+    if green:
+        names = ", ".join(d.replace("_", " ") for d in green)
+        lines.append(f"- HEALTHY dimensions (70+): **{names}** — operating normally")
+    if degrading:
+        names = ", ".join(d.replace("_", " ") for d in degrading)
+        lines.append(f"- Degrading trends detected in: **{names}**")
+    if not degrading and not red and not yellow:
+        lines.append("- All dimensions healthy and stable — no concerns detected")
+    return lines
+
+
+def _format_actions(direct_action: dict, mode: str) -> list[str]:
+    """Format step 4: actions taken."""
+    lines: list[str] = []
+    if direct_action:
+        lines.append("**4. Actions Taken (what I did):**")
+        lines.append("")
+        summary = direct_action.get("summary", "")
+        if summary:
+            lines.append(f"- **Summary:** {summary}")
+        critical = direct_action.get("critical_findings", 0)
+        if critical:
+            lines.append(f"- **Critical findings:** {critical}")
+        actions = direct_action.get("actions_taken", [])
+        for a in actions:
+            lines.append(f"- {a}")
+        if direct_action.get("alert_sent"):
+            lines.append("- Telegram alert sent")
+        if direct_action.get("escalated"):
+            lines.append("- **ESCALATED** — flagged for human attention")
+        if not actions and not summary:
+            lines.append("- No direct actions were needed")
+        lines.append("")
+    elif mode.lower() == "monitor":
+        lines.append("**4. Actions Taken:** None — monitoring only, no intervention needed.")
+        lines.append("")
+    return lines
+
+
+def _format_thought_process(autonomy: dict, decisions: list[dict]) -> list[str]:
+    """Generate a narrative 'Thought Process' section explaining autonomous reasoning."""
+    lines: list[str] = []
+
+    dec = autonomy.get("decision", {})
+    mode = dec.get("mode", "monitor")
+    reason = dec.get("reason", "")
+    target = dec.get("target")
+    dims = autonomy.get("dimensions", {})
+    overall = autonomy.get("overall_score", 0)
+    goal = autonomy.get("goal_tree", {})
+    direct_action = autonomy.get("direct_action", {})
+
+    lines.append("### Decision Reasoning")
+    lines.append("")
+
+    # Step 1: What the engine observed
+    lines.append("**1. Observation (what I measured):**")
+    lines.append("")
+    lines.append(f"Overall autonomy score is **{overall}/100**. Dimensional breakdown:")
+    for dim_name, dim_data in dims.items():
+        score = dim_data.get("score", 0)
+        trend = dim_data.get("trend", "stable")
+        level = "GREEN" if score >= 70 else ("YELLOW" if score >= 40 else "RED")
+        pretty = dim_name.replace("_", " ").title()
+        lines.append(f"- **{pretty}**: {score:.0f}/100 ({level}, {_trend_arrow(trend)} {trend})")
+    lines.append("")
+
+    # Step 2: How the engine evaluated
+    lines.append("**2. Evaluation (how I interpreted the scores):**")
+    lines.append("")
+    lines.extend(_format_evaluation(dims))
+    lines.append("")
+
+    # Step 3: What the engine decided
+    lines.append("**3. Decision (what I chose to do):**")
+    lines.append("")
+    lines.append(f"- **Mode:** {mode.upper()}")
+    lines.append(f"- **Explanation:** {_decision_mode_explanation(mode)}")
+    if target:
+        lines.append(f"- **Target dimension:** {target.replace('_', ' ').title()}")
+    lines.append(f"- **Reason:** {reason}")
+    lines.append("")
+
+    # Step 4: What actions were taken
+    lines.extend(_format_actions(direct_action, mode))
+
+    # Step 5: Goal progress context
+    if goal:
+        completed = goal.get("completed", 0)
+        total = goal.get("total", 0)
+        actionable = goal.get("actionable", [])
+        lines.append("**5. Goal Context:**")
+        lines.append("")
+        lines.append(f"- NovaTrade goal tree: **{completed}/{total}** sub-goals complete")
+        if actionable:
+            lines.append(f"- Next actionable sub-goals: {', '.join(actionable[:3])}")
+        elif completed == total:
+            lines.append("- All sub-goals complete — maintaining operational excellence")
+        lines.append("")
+
+    # Step 6: Recent decision pattern (are we stuck in a loop?)
+    if len(decisions) >= 2:
+        modes = [d.get("mode", "?") for d in decisions[-5:]]
+        if len(set(modes)) == 1 and len(modes) >= 3:
+            lines.append("**6. Pattern Alert:**")
+            lines.append("")
+            if modes[0] == "monitor":
+                note = "this is expected for stable systems"
+            else:
+                note = "possible stuck loop, may need investigation"
+            lines.append(f"- Last {len(modes)} decisions were all **{modes[0].upper()}** — {note}")
+            lines.append("")
+
+    return lines
+
+
+def format_post_heartbeat_report(autonomy_snapshot: dict | None = None) -> str:  # noqa: C901
+    """Format a detailed post-heartbeat report with full decision reasoning.
+
+    This is the primary report format — runs after every heartbeat to give
+    full visibility into what the autonomy engine observed, decided, and did.
+    """
+    now_utc = datetime.now(timezone.utc)
+    now_ct = now_utc - timedelta(hours=5)  # CDT = UTC-5
+    date_str = now_utc.strftime("%Y-%m-%d")
+    time_str = now_ct.strftime("%I:%M %p CT")
+
+    # Use passed-in snapshot if available, otherwise read from disk
+    autonomy = autonomy_snapshot or collect_autonomy_scores()
+
+    # Collect remaining data
+    services = collect_service_status()
+    disk = collect_disk_usage()
+    tasks = collect_recent_tasks(hours=1)  # 1h window for per-heartbeat
+    decisions = collect_decision_history(count=5)
+    outcomes = collect_decision_outcomes(count=3)
+    investigations = collect_investigations(count=2)
+
+    # Build report
+    lines: list[str] = []
+
+    # Header
+    lines.append(f"## NovaCore Post-Heartbeat Report — {date_str} {time_str}")
+    lines.append("")
+
+    # Quick status bar
+    all_services_ok = all(s["ok"] for s in services)
+    overall_health = "HEALTHY" if all_services_ok else "DEGRADED"
+    if autonomy:
+        score = autonomy.get("overall_score", 0)
+        alert = autonomy.get("alert_level", "?")
+        mode = autonomy.get("decision", {}).get("mode", "?").upper()
+        lines.append(
+            f"**Status:** {overall_health} | **Score:** {score}/100"
+            f" ({alert}) | **Decision:** {mode}"
+            f" | **Disk:** {disk['used_pct']}%"
+        )
+    else:
+        lines.append(f"**Status:** {overall_health} | **Disk:** {disk['used_pct']}% | *Autonomy data unavailable*")
+    lines.append("")
+
+    # Services (compact)
+    svc_parts = []
+    for s in services:
+        mark = "[OK]" if s["ok"] else "[FAIL]"
+        svc_parts.append(f"{mark} {s['name']}")
+    lines.append(f"**Services:** {' | '.join(svc_parts)}")
+    lines.append("")
+
+    # ── Core: Decision Reasoning ──────────────────────────────────────────
+    if autonomy:
+        lines.extend(_format_thought_process(autonomy, decisions))
+
+    # ── Autonomy Dimensions Table ─────────────────────────────────────────
+    if autonomy and autonomy.get("dimensions"):
+        lines.append("### Dimension Scores")
+        lines.append("")
+        lines.append("| Dimension | Score | Status | Trend |")
+        lines.append("|-----------|-------|--------|-------|")
+        for dim_name, dim_data in autonomy["dimensions"].items():
+            score = dim_data.get("score", 0)
+            trend = dim_data.get("trend", "stable")
+            level = "GREEN" if score >= 70 else ("YELLOW" if score >= 40 else "RED")
+            arrow = _trend_arrow(trend)
+            pretty_name = dim_name.replace("_", " ").title()
+            lines.append(f"| {pretty_name} | {score:.0f} | {level} | {arrow} {trend} |")
+        lines.append("")
+
+    # ── Investigation Results ─────────────────────────────────────────────
+    if investigations:
+        lines.append("### Recent Investigations")
+        lines.append("")
+        for inv in investigations:
+            inv_id = inv.get("investigation_id", "?")
+            target = inv.get("target_dimension", "?").replace("_", " ").title()
+            root = inv.get("root_cause", "unknown")
+            confidence = inv.get("root_cause_confidence", "?")
+            recommended = inv.get("recommended_action", "")
+            escalated = inv.get("escalated", False)
+            lines.append(f"**Investigation {inv_id}** — {target}")
+            lines.append(f"- Root cause: {root} (confidence: {confidence})")
+            if recommended:
+                lines.append(f"- Recommended: {recommended[:150]}")
+            if escalated:
+                lines.append("- **ESCALATED** to human operator")
+            actions = inv.get("actions_taken", [])
+            if actions:
+                for a in actions[:3]:
+                    lines.append(f"- Action: {a[:120]}")
+            lines.append("")
+
+    # ── Decision Outcome Tracking ─────────────────────────────────────────
+    if outcomes:
+        lines.append("### Decision Effectiveness")
+        lines.append("")
+        for o in outcomes:
+            dec_id = o.get("decision_id", "?")
+            verdict = o.get("verdict", "pending")
+            delta = o.get("delta", 0)
+            mode = o.get("mode", "?")
+            sign = "+" if delta > 0 else ""
+            lines.append(f"- **{mode.upper()}** ({dec_id[:30]}): {verdict} ({sign}{delta:.1f} pts)")
+        lines.append("")
+
+    # ── Decision History (last 5) ─────────────────────────────────────────
+    if decisions:
+        lines.append("### Decision History (last 5)")
+        lines.append("")
+        for d in decisions:
+            mode = d.get("mode", "?")
+            reason = d.get("reason", "")[:120]
+            ts = d.get("decided_at", "") or d.get("timestamp", "")
+            target = d.get("target_dimension")
+            confidence = d.get("confidence", "")
+            if ts:
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    ts_short = dt.strftime("%H:%M UTC")
+                except (ValueError, TypeError):
+                    ts_short = ts[:16]
+            else:
+                ts_short = "?"
+            target_str = f" [{target.replace('_', ' ')}]" if target else ""
+            conf_str = f" ({confidence})" if confidence else ""
+            lines.append(f"- [{ts_short}] **{mode.upper()}**{target_str}{conf_str}: {reason}")
+        lines.append("")
+
+    # ── Task Activity ─────────────────────────────────────────────────────
+    lines.append("### Task Activity (last 1h)")
+    lines.append("")
+    done_ct = len(tasks["recently_done"])
+    fail_ct = len(tasks["recently_failed"])
+    lines.append(
+        f"- Pending: {tasks['pending']}"
+        f" | In Progress: {tasks['in_progress']}"
+        f" | Completed: {done_ct} | Failed: {fail_ct}"
+    )
+
+    if tasks["recently_done"]:
+        for t in tasks["recently_done"][:5]:
+            clean = re.sub(r"^\d+_", "", t).replace("_", " ")
+            lines.append(f"  - Done: {clean}")
+    if tasks["recently_failed"]:
+        for t in tasks["recently_failed"][:3]:
+            clean = re.sub(r"^\d+_", "", t).replace("_", " ")
+            lines.append(f"  - FAILED: {clean}")
+    lines.append("")
+
+    # Footer
+    lines.append("---")
+    lines.append(f"*Post-heartbeat report generated at {now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}*")
+
+    return "\n".join(lines)
+
+
 def format_report() -> str:  # noqa: C901
-    """Collect all data and format the autonomous report."""
+    """Collect all data and format the autonomous report (legacy 2h digest)."""
     now_utc = datetime.now(timezone.utc)
     now_ct = now_utc - timedelta(hours=5)  # CDT = UTC-5
     date_str = now_utc.strftime("%Y-%m-%d")
@@ -373,7 +697,7 @@ def format_report() -> str:  # noqa: C901
 # ── Vault Writer ───────────────────────────────────────────────────────────────
 
 
-def write_diary_note(body: str) -> Path:
+def write_diary_note(body: str, prefix: str = "autonomous-report") -> Path:
     """Write the report as a diary note in NovaVault 90-diary/."""
     VAULT_DIARY.mkdir(parents=True, exist_ok=True)
 
@@ -381,22 +705,23 @@ def write_diary_note(body: str) -> Path:
     date_str = now.strftime("%Y-%m-%d")
     time_slug = now.strftime("%H%M")
 
-    filename = f"autonomous-report-{date_str}-{time_slug}.md"
+    filename = f"{prefix}-{date_str}-{time_slug}.md"
     vault_path = VAULT_DIARY / filename
 
-    # Dedup: if a report for this 2h window already exists, skip
+    # Dedup: if a report for this exact minute already exists, skip
     if vault_path.exists():
         log(f"Report already exists: {filename} — skipping")
         return vault_path
 
     frontmatter = f"""---
 type: diary
-title: "NovaCore Autonomous Report — {date_str} {time_slug}"
+title: "NovaCore Post-Heartbeat Report — {date_str} {time_slug}"
 date: "{date_str}"
-source: nova-core-report
+source: nova-core-heartbeat-report
 tags:
   - "#type/diary"
   - "#project/novacore"
+  - "#report/heartbeat"
   - "#report/autonomous"
 ---
 """
@@ -406,19 +731,19 @@ tags:
     return vault_path
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Entry Points ──────────────────────────────────────────────────────────────
 
 REPORT_LOCK = STATE_DIR / "autonomous_report.lock"
-REPORT_COOLDOWN_S = 1500  # minimum 25 minutes between reports
+REPORT_COOLDOWN_S = 1500  # minimum 25 minutes between reports (legacy)
 
 
-def _acquire_report_lock() -> bool:
+def _acquire_report_lock(cooldown_s: int = REPORT_COOLDOWN_S) -> bool:
     """Prevent concurrent/rapid-fire report generation via lockfile + cooldown."""
     try:
         if REPORT_LOCK.exists():
             try:
                 last_ts = float(REPORT_LOCK.read_text().strip())
-                if time.time() - last_ts < REPORT_COOLDOWN_S:
+                if time.time() - last_ts < cooldown_s:
                     age_m = int((time.time() - last_ts) / 60)
                     log(f"Report cooldown active ({age_m}m since last) — skipping")
                     return False
@@ -431,7 +756,45 @@ def _acquire_report_lock() -> bool:
         return False
 
 
+def run_post_heartbeat_report(autonomy_snapshot: dict | None = None) -> int:
+    """Generate a post-heartbeat report with full decision reasoning.
+
+    Called by heartbeat.py after every autonomy cycle. Uses a shorter
+    cooldown (20 min) to allow one report per heartbeat (30 min interval)
+    while preventing duplicate runs.
+    """
+    t0 = time.monotonic()
+    log("Starting post-heartbeat report generation")
+
+    # 20-minute cooldown — heartbeats are 30 min apart, so this allows
+    # one report per heartbeat while blocking accidental double-runs
+    if not _acquire_report_lock(cooldown_s=1200):
+        return 0  # cooldown — not an error
+
+    try:
+        body = format_post_heartbeat_report(autonomy_snapshot)
+        vault_path = write_diary_note(body, prefix="heartbeat-report")
+        elapsed = round((time.monotonic() - t0) * 1000)
+        log(f"Post-heartbeat report complete in {elapsed}ms -> {vault_path.name}")
+
+        # Also write a copy to OUTPUT/ for audit trail
+        now = datetime.now(timezone.utc)
+        output_name = f"heartbeat_report_{now.strftime('%Y%m%d_%H%M%S')}.md"
+        output_path = OUTPUT_DIR / output_name
+        output_path.write_text(body, encoding="utf-8")
+        log(f"Output copy: {output_path.name}")
+
+        return 0
+    except Exception as e:
+        log(f"ERROR: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
 def main() -> int:
+    """Legacy 2-hour digest mode (standalone execution)."""
     t0 = time.monotonic()
     log("Starting autonomous report generation")
 
@@ -442,7 +805,7 @@ def main() -> int:
         body = format_report()
         vault_path = write_diary_note(body)
         elapsed = round((time.monotonic() - t0) * 1000)
-        log(f"Report complete in {elapsed}ms → {vault_path.name}")
+        log(f"Report complete in {elapsed}ms -> {vault_path.name}")
 
         # Also write a copy to OUTPUT/ for audit trail
         now = datetime.now(timezone.utc)

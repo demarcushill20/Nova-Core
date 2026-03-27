@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0623_Ok_thanks_I_just_got_another_one_____AUTONOMY_REPAIR__strategy_validity_1774618641",
+  "workflow_id": "0623_Ok_thanks_I_just_got_another_one_____AUTONOMY_REPAIR__strategy_validity",
+  "task_summary": "Fixed test isolation bug causing false \"test decision\" Telegram alerts + fixed dedup pruning window mismatch",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed test isolation bug causing false \"test decision\" Telegram alerts + fixed dedup pruning window mismatch"
+  ],
+  "successful_patterns": [
+    "task_completed: 0623_Ok_thanks_I_just_got_another_one_____AUTONOMY_REPAIR__strategy_validity"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed test isolation bug causing false \"test decision\" Telegram alerts + fixed dedup pruning window mismatch",
+  "created_at": "2026-03-27T13:37:21Z",
+  "confidence": "high"
+}

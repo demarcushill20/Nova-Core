@@ -22,7 +22,6 @@ import pytest
 
 from novatrade.adapter.metaapi_provider import (
     MetaApiAdapter,
-    _normalize_symbol_for_metaapi,
     _safe_error,
     _translate_account,
     _translate_candle,
@@ -1109,38 +1108,3 @@ class TestSafeError:
 # ---------------------------------------------------------------------------
 # Symbol normalization for MetaApi compatibility
 # ---------------------------------------------------------------------------
-
-
-class TestSymbolNormalization:
-    def test_strips_sim_suffix(self):
-        """OANDA demo symbols with .sim suffix should be normalized."""
-        assert _normalize_symbol_for_metaapi("EURUSD.sim") == "EURUSD"
-        assert _normalize_symbol_for_metaapi("GBPUSD.sim") == "GBPUSD"
-        assert _normalize_symbol_for_metaapi("USDJPY.sim") == "USDJPY"
-
-    def test_strips_ftmo_suffix(self):
-        """FTMO symbols with .ftmo suffix should be normalized."""
-        assert _normalize_symbol_for_metaapi("EURUSD.ftmo") == "EURUSD"
-        assert _normalize_symbol_for_metaapi("GBPUSD.ftmo") == "GBPUSD"
-
-    def test_strips_other_known_suffixes(self):
-        """Other known broker suffixes should be stripped."""
-        assert _normalize_symbol_for_metaapi("EURUSD.t4b") == "EURUSD"
-        assert _normalize_symbol_for_metaapi("EURUSD.pro") == "EURUSD"
-
-    def test_passthrough_clean_symbols(self):
-        """Symbols without suffixes should pass through unchanged."""
-        assert _normalize_symbol_for_metaapi("EURUSD") == "EURUSD"
-        assert _normalize_symbol_for_metaapi("GBPUSD") == "GBPUSD"
-        assert _normalize_symbol_for_metaapi("USDJPY") == "USDJPY"
-
-    def test_preserves_unknown_suffixes(self):
-        """Unknown suffixes should not be stripped."""
-        assert _normalize_symbol_for_metaapi("EURUSD.unknown") == "EURUSD.unknown"
-        assert _normalize_symbol_for_metaapi("EURUSD.custom") == "EURUSD.custom"
-
-    def test_edge_cases(self):
-        """Handle edge cases gracefully."""
-        assert _normalize_symbol_for_metaapi("") == ""
-        assert _normalize_symbol_for_metaapi(".sim") == ""  # malformed, gets stripped to empty
-        assert _normalize_symbol_for_metaapi("EURUSD.sim.backup") == "EURUSD.sim.backup"  # only strips known suffixes

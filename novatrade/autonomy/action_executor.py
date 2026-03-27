@@ -463,8 +463,9 @@ class DirectActionExecutor:
     # Alerting
     # -------------------------------------------------------------------
 
-    # Alert dedup: suppress duplicate (mode, dimension) alerts within this window
-    _ALERT_DEDUP_SECONDS = 300  # 5 minutes
+    # Alert dedup: suppress duplicate (mode, dimension) alerts within this window.
+    # 4 hours — one Telegram alert per issue, then log-only until the window expires.
+    _ALERT_DEDUP_SECONDS = 14400  # 4 hours
 
     def _is_duplicate_alert(self, decision: Decision) -> bool:
         """Check if we already sent this alert recently (file-based dedup)."""
@@ -486,8 +487,8 @@ class DirectActionExecutor:
 
         # Record this alert
         data[sig] = now
-        # Prune entries older than 1 hour
-        data = {k: v for k, v in data.items() if now - v < 3600}
+        # Prune entries older than the dedup window
+        data = {k: v for k, v in data.items() if now - v < self._ALERT_DEDUP_SECONDS}
         try:
             dedup_path.parent.mkdir(parents=True, exist_ok=True)
             dedup_path.write_text(json.dumps(data))
