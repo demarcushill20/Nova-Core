@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0624_What_do_i_put_in_place_of_redacted__The_MetaApi_account_is_re-provisioned_and_ve_1774633215",
+  "workflow_id": "0624_What_do_i_put_in_place_of_redacted__The_MetaApi_account_is_re-provisioned_and_ve",
+  "task_summary": "Identified [REDACTED] as /etc/novacore/novatrade.env and provided copy+restart instructions for new MetaApi account",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Identified [REDACTED] as /etc/novacore/novatrade.env and provided copy+restart instructions for new MetaApi account"
+  ],
+  "successful_patterns": [
+    "task_completed: 0624_What_do_i_put_in_place_of_redacted__The_MetaApi_account_is_re-provisioned_and_v"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Identified [REDACTED] as /etc/novacore/novatrade.env and provided copy+restart instructions for new MetaApi account",
+  "created_at": "2026-03-27T17:40:15Z",
+  "confidence": "high"
+}
