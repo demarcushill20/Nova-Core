@@ -643,6 +643,20 @@ class RiskEngine:
             fill_price,
             stop_loss,
         )
+        # Trade journal logging (v87 P2.4)
+        try:
+            from novatrade.monitor.trade_journal import log_trade_open
+
+            log_trade_open(
+                position_id=position_id,
+                symbol=symbol,
+                side=side.value,
+                volume=volume,
+                entry_price=fill_price,
+                stop_loss=stop_loss,
+            )
+        except Exception:  # noqa: S110 — journal is best-effort, must not block trading
+            pass
 
     def on_trade_close(
         self,
@@ -670,6 +684,22 @@ class RiskEngine:
         )
         self._trade_history.append(record)
         self._today_trades.append(record)
+
+        # Trade journal logging (v87 P2.4)
+        try:
+            from novatrade.monitor.trade_journal import log_trade_close
+
+            log_trade_close(
+                position_id=position_id,
+                symbol=symbol,
+                side=side,
+                volume=volume,
+                pnl_usd=pnl_usd,
+                pnl_pips=pnl_pips,
+                exit_reason=exit_reason,
+            )
+        except Exception:  # noqa: S110 — journal is best-effort, must not block trading
+            pass
 
         # Update drawdowns
         self._daily_dd.update(self._current_equity)

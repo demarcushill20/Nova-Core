@@ -198,6 +198,18 @@ class PreTradeGate:
                 len(failed),
                 ", ".join(f.name for f in failed),
             )
+            # Trade journal: log rejection (v87 P2.4)
+            try:
+                from novatrade.monitor.trade_journal import log_trade_reject
+
+                log_trade_reject(
+                    symbol=request.symbol,
+                    side=request.side.value,
+                    reason=first.detail,
+                    gate=first.name,
+                )
+            except Exception:  # noqa: S110 — journal is best-effort, must not block trading
+                pass
         else:
             decision = RiskDecision(
                 verdict=RiskVerdict.ALLOW,

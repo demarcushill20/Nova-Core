@@ -383,13 +383,15 @@ async def test_engine_persists_decision(tmp_path):
 
 @pytest.mark.asyncio
 async def test_engine_appends_decisions(tmp_path):
-    """Multiple decisions append to history."""
+    """Multiple identical decisions are deduped (v87 P3); different decisions append."""
     (tmp_path / "STATE").mkdir()
     engine = DecisionEngine(base_path=str(tmp_path))
     await engine.decide(make_context())
     await engine.decide(make_context())
     data = json.loads((tmp_path / "STATE" / "decision_history.json").read_text())
-    assert len(data) == 2
+    # Identical decisions are deduped into one entry with dedup_count
+    assert len(data) == 1
+    assert data[0].get("dedup_count", 1) == 2
 
 
 @pytest.mark.asyncio

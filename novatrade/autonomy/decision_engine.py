@@ -501,7 +501,11 @@ class DecisionEngine:
         return False
 
     async def _persist_decision(self, decision: Decision) -> None:
-        """Append decision to STATE/decision_history.json."""
+        """Append decision to STATE/decision_history.json.
+
+        Deduplicates consecutive identical MONITOR decisions to prevent
+        the history from filling with 84/100 identical entries (v87 P3).
+        """
         async with self._write_lock:
             self._history_path.parent.mkdir(parents=True, exist_ok=True)
             history: list[dict] = []
@@ -512,7 +516,34 @@ class DecisionEngine:
                 except (json.JSONDecodeError, OSError):
                     pass
 
-            history.append(json.loads(decision.model_dump_json()))
+            new_entry = json.loads(decision.model_dump_json())
+
+            # Dedup: skip if identical mode+reason+target as the last entry
+            if history:
+                last = history[-1]
+                if (
+                    last.get("mode") == new_entry.get("mode")
+                    and last.get("reason") == new_entry.get("reason")
+                    and last.get("target_dimension") == new_entry.get("target_dimension")
+                ):
+                    # Update timestamp on existing entry instead of appending
+                    history[-1]["decided_at"] = new_entry.get("decided_at", "")
+                    history[-1]["dedup_count"] = history[-1].get("dedup_count", 1) + 1
+                    # Still write (to update timestamp) but don't grow the list
+                    fd, tmp_path = tempfile.mkstemp(dir=str(self._history_path.parent), suffix=".tmp")
+                    try:
+                        with os.fdopen(fd, "w") as f:
+                            json.dump(history, f, indent=2, default=str)
+                        os.replace(tmp_path, str(self._history_path))
+                    except BaseException:
+                        try:
+                            os.unlink(tmp_path)
+                        except OSError:
+                            pass
+                        raise
+                    return
+
+            history.append(new_entry)
 
             # Keep last 100 decisions
             history = history[-100:]

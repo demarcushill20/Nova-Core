@@ -83,6 +83,11 @@ except ImportError:
     _budget_enforcer = None  # type: ignore[assignment,misc]
 
 try:
+    from utils.cruise_mode import update_cruise_state as _update_cruise_state
+except ImportError:
+    _update_cruise_state = None  # type: ignore[assignment,misc]
+
+try:
     import asyncio as _asyncio
 
     from novatrade.autonomy import (
@@ -2124,6 +2129,25 @@ def main() -> int:
         )
         print(f"[autonomy] Skipped ({_skip_reason})")
 
+    # --- CRUISE mode: reduce LLM cycle frequency during stable GREEN periods ---
+    _cruise_active = False
+    if _update_cruise_state is not None and _autonomy_snapshot is not None:
+        try:
+            _cruise_state = _update_cruise_state(
+                score=_autonomy_snapshot.get("overall_score", 0.0),
+                alert_level=_autonomy_snapshot.get("alert_level", ""),
+                decision_mode=_autonomy_snapshot.get("decision", {}).get("mode", ""),
+            )
+            _cruise_active = _cruise_state.active
+            if _cruise_active:
+                print(
+                    f"[cruise] ACTIVE — cycle {_cruise_state.cruise_cycles}/"
+                    f"{_cruise_state.consecutive_stable} stable "
+                    f"(skipping LLM agent, research, planning)"
+                )
+        except Exception as _cruise_exc:
+            print(f"[cruise] State update failed (non-fatal): {_cruise_exc}")
+
     write_heartbeat(checks, autonomy_snapshot=_autonomy_snapshot)
 
     # Record metrics snapshot
@@ -2310,8 +2334,11 @@ def main() -> int:
     else:
         # --- LLM-driven proactive heartbeat ---
         # Phase 6B: Skip LLM-driven agent in EMERGENCY (tier 3)
+        # v87 P3: Skip in CRUISE mode (system stable, no action needed)
         if _degradation_tier >= 3:
             print("[heartbeat-agent] Skipped (EMERGENCY degradation tier — no LLM calls)")
+        elif _cruise_active:
+            print("[heartbeat-agent] Skipped (CRUISE mode — system stable)")
         else:
             try:
                 _run_heartbeat_agent(checks)
@@ -2335,8 +2362,9 @@ def main() -> int:
         # --- Autonomous cycles: research (hourly) + planning (every 3 hours) ---
         # Phase 4.4: Gate expensive cycles on adaptive heartbeat config (budget-aware).
         # Phase 6B: Gate on degradation tier (research=optional, planning=optional).
-        _skip_research = _degradation_tier >= 1 or _heartbeat_shutdown_requested
-        _skip_planning = _degradation_tier >= 2 or _heartbeat_shutdown_requested
+        # v87 P3: Skip both in CRUISE mode (system stable, save LLM calls).
+        _skip_research = _degradation_tier >= 1 or _heartbeat_shutdown_requested or _cruise_active
+        _skip_planning = _degradation_tier >= 2 or _heartbeat_shutdown_requested or _cruise_active
         try:
             from utils.cost_router import read_heartbeat_config
 
@@ -2359,6 +2387,8 @@ def main() -> int:
                 if _heartbeat_shutdown_requested
                 else "degradation tier >= REDUCED"
                 if _degradation_tier >= 1
+                else "CRUISE mode"
+                if _cruise_active
                 else "budget-constrained mode"
             )
             print(f"[research-cycle] Skipped ({_skip_reason})")
@@ -2376,6 +2406,8 @@ def main() -> int:
                 if _heartbeat_shutdown_requested
                 else "degradation tier >= MINIMAL"
                 if _degradation_tier >= 2
+                else "CRUISE mode"
+                if _cruise_active
                 else "budget-constrained mode"
             )
             print(f"[planning-cycle] Skipped ({_skip_reason})")
