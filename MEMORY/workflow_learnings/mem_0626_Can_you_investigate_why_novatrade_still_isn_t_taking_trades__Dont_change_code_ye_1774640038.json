@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0626_Can_you_investigate_why_novatrade_still_isn_t_taking_trades__Dont_change_code_ye_1774640038",
+  "workflow_id": "0626_Can_you_investigate_why_novatrade_still_isn_t_taking_trades__Dont_change_code_ye",
+  "task_summary": "Investigated NovaTrade no-trade issue \u2014 root cause is PreTradeGate 10-pip minimum SL distance blocking all signals (avg M5 bar range 3.4 pips)",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Investigated NovaTrade no-trade issue \u2014 root cause is PreTradeGate 10-pip minimum SL distance blocking all signals (avg M5 bar range 3.4 pips)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0626_Can_you_investigate_why_novatrade_still_isn_t_taking_trades__Dont_change_code_y"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Investigated NovaTrade no-trade issue \u2014 root cause is PreTradeGate 10-pip minimum SL distance blocking all signals (avg M5 bar range 3.4 pips)",
+  "created_at": "2026-03-27T19:33:58Z",
+  "confidence": "high"
+}

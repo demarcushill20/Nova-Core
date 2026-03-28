@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0628_Lets_fix_this_issue__Critical_Trading_Blocker__NovaTrade_currently_executes_zero_1774692454",
+  "workflow_id": "0628_Lets_fix_this_issue__Critical_Trading_Blocker__NovaTrade_currently_executes_zero",
+  "task_summary": "Fixed hardcoded SL distance minimums (10\u21922 pips configurable) that rejected 97% of IRB trading signals, added symbol-aware pip conversion",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed hardcoded SL distance minimums (10\u21922 pips configurable) that rejected 97% of IRB trading signals, added symbol-aware pip conversion"
+  ],
+  "successful_patterns": [
+    "task_completed: 0628_Lets_fix_this_issue__Critical_Trading_Blocker__NovaTrade_currently_executes_zer"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed hardcoded SL distance minimums (10\u21922 pips configurable) that rejected 97% of IRB trading signals, added symbol-aware pip conversion",
+  "created_at": "2026-03-28T10:07:34Z",
+  "confidence": "high"
+}

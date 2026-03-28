@@ -254,7 +254,7 @@ class ValidationConfig:
     rollover_end_utc: int = _DEFAULT_ROLLOVER_END_UTC
 
     # Stop-loss validation
-    min_sl_distance_pips: float = 10.0  # minimum stop distance
+    min_sl_distance_pips: float = 3.0  # minimum stop distance (warn only)
 
 
 # ---------------------------------------------------------------------------

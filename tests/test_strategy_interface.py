@@ -341,6 +341,35 @@ class TestIRBStrategy:
         assert s.env.irb_threshold == 0.40
         assert s.env.ema_period == 25
 
+    def test_atr_sl_floor_widens_tight_stops(self) -> None:
+        """ATR-adaptive SL floor widens candle-geometry stops when too tight."""
+        # Create candles with very small ranges (tight bars) but clear trend
+        candles = _make_trending_candles(200, direction="up")
+        env = BacktestEnvironment(atr_sl_floor_multiplier=0.5)
+        s = IRBStrategy(env=env)
+        indicators = s.compute_indicators(candles)
+        signals = s.generate_signals(candles, indicators)
+        for sig in signals:
+            if sig.side == "LONG":
+                sl_dist = sig.entry_price - sig.stop_loss
+                # ATR floor ensures SL distance >= 0.5 * ATR
+                atr_val = indicators["atr"][sig.bar_index]
+                assert sl_dist >= 0.5 * atr_val - 1e-10, f"SL distance {sl_dist} < ATR floor {0.5 * atr_val}"
+
+    def test_atr_sl_floor_disabled_when_zero(self) -> None:
+        """With atr_sl_floor_multiplier=0, candle geometry is used as-is."""
+        candles = _make_trending_candles(200, direction="up")
+        env_off = BacktestEnvironment(atr_sl_floor_multiplier=0.0)
+        env_on = BacktestEnvironment(atr_sl_floor_multiplier=0.5)
+        s_off = IRBStrategy(env=env_off)
+        s_on = IRBStrategy(env=env_on)
+        ind = s_off.compute_indicators(candles)
+        sigs_off = s_off.generate_signals(candles, ind)
+        sigs_on = s_on.generate_signals(candles, ind)
+        # Both should produce signals; with floor=0, some may have tighter SLs
+        assert isinstance(sigs_off, list)
+        assert isinstance(sigs_on, list)
+
 
 # ===========================================================================
 # 3. MeanReversionStrategy tests

@@ -53,12 +53,23 @@ from novatrade.risk.position_sizer import PositionSizer  # noqa: E402
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
-# Minimum stop-loss distance in pips — prevents micro-stops that get
-# stopped out by spread noise alone.
-_MIN_SL_DISTANCE_PIPS = 10.0
-
 # Modes that the MVP is allowed to trade in.
 _MVP_ALLOWED_MODES = frozenset({AccountMode.DEMO})
+
+
+def _pip_value_for_symbol(symbol: str) -> float:
+    """Return pip value for a symbol (matches hard_risk_supervisor._pip_value).
+
+    Standard forex: 0.0001 (4th decimal).
+    JPY pairs: 0.01 (2nd decimal).
+    Gold/XAU: 0.1 (1st decimal).
+    """
+    s = symbol.upper().replace(".", "")
+    if "JPY" in s:
+        return 0.01
+    if "XAU" in s or "GOLD" in s:
+        return 0.1
+    return 0.0001
 
 
 class PreTradeGate:
@@ -390,7 +401,7 @@ class PreTradeGate:
 
         - BUY orders: SL must be below entry price
         - SELL orders: SL must be above entry price
-        - Distance must be >= _MIN_SL_DISTANCE_PIPS (prevents micro-stops)
+        - Distance must be >= RiskConfig.min_sl_distance_pips (prevents micro-stops)
         """
         if request.price is None or request.stop_loss is None:
             return RiskCheckResult(
@@ -402,8 +413,9 @@ class PreTradeGate:
         from novatrade.models import OrderSide
 
         sl_distance = abs(request.price - request.stop_loss)
-        # Convert to pips (assume 5-digit pricing for forex pairs)
-        sl_pips = sl_distance * 10_000
+        # Symbol-aware pip conversion (matches HardRiskSupervisor logic)
+        pip_val = _pip_value_for_symbol(request.symbol)
+        sl_pips = sl_distance / pip_val
 
         # Check SL direction
         if request.side == OrderSide.BUY and request.stop_loss >= request.price:
@@ -419,12 +431,13 @@ class PreTradeGate:
                 detail=f"SELL order SL ({request.stop_loss}) must be above entry ({request.price})",
             )
 
-        # Check minimum distance
-        if sl_pips < _MIN_SL_DISTANCE_PIPS:
+        # Check minimum distance — configurable via RiskConfig.min_sl_distance_pips
+        min_sl_pips = self._risk.min_sl_distance_pips
+        if sl_pips < min_sl_pips:
             return RiskCheckResult(
                 name="sl_distance",
                 passed=False,
-                detail=f"SL distance {sl_pips:.1f} pips < minimum {_MIN_SL_DISTANCE_PIPS} pips",
+                detail=f"SL distance {sl_pips:.1f} pips < minimum {min_sl_pips} pips",
             )
 
         return RiskCheckResult(

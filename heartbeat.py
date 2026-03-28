@@ -101,7 +101,13 @@ try:
         GoalDecomposer as _GoalDecomposer,
     )
     from novatrade.autonomy import (
+        OutcomeAnalyzer as _OutcomeAnalyzer,
+    )
+    from novatrade.autonomy import (
         ProgressScorer as _ProgressScorer,
+    )
+    from novatrade.autonomy import (
+        ReasoningEngine as _ReasoningEngine,
     )
     from novatrade.autonomy import (
         TaskSpecGenerator as _TaskSpecGenerator,
@@ -119,6 +125,8 @@ except ImportError:
     _ProgressScorer = None  # type: ignore[assignment,misc]
     _TaskSpecGenerator = None  # type: ignore[assignment,misc]
     _build_novatrade_tree = None  # type: ignore[assignment,misc]
+    _OutcomeAnalyzer = None  # type: ignore[assignment,misc]
+    _ReasoningEngine = None  # type: ignore[assignment,misc]
 
 from prompts.heartbeat_prompts import (  # noqa: E402
     _build_planning_prompt,
@@ -1793,6 +1801,42 @@ def _run_autonomy_cycle() -> dict | None:
         decision = await engine.decide(context)
         print(f"[autonomy] Decision: {decision.mode.value} — {decision.reason[:100]}")
 
+        # Step 3b: ReasoningEngine — LLM-powered gap analysis for novel situations
+        # Called when rule-based engine returns MONITOR but something may be off,
+        # or when multiple dimensions are degrading simultaneously.
+        _reasoning_result = None
+        if _ReasoningEngine is not None:
+            try:
+                reasoning = _ReasoningEngine()
+                if reasoning.should_reason(decision, report):
+                    _reasoning_result = await reasoning.reason(context, report)
+                    if _reasoning_result is not None:
+                        print(
+                            f"[autonomy] Reasoning: {_reasoning_result.recommended_mode}"
+                            f" (confidence={_reasoning_result.confidence})"
+                        )
+                        if _reasoning_result.novel_insight:
+                            print(f"[autonomy]   Insight: {_reasoning_result.novel_insight[:120]}")
+                        # If reasoning recommends a non-MONITOR action with high
+                        # confidence, upgrade the decision so downstream steps act on it
+                        if (
+                            _reasoning_result.recommended_mode != "MONITOR"
+                            and _reasoning_result.confidence in ("high", "medium")
+                            and decision.mode == _ActionMode.MONITOR
+                        ):
+                            from novatrade.autonomy import Decision as _Decision
+
+                            decision = _Decision(
+                                mode=_ActionMode[_reasoning_result.recommended_mode],
+                                reason=f"[reasoning] {_reasoning_result.reasoning_chain[0]}"
+                                if _reasoning_result.reasoning_chain
+                                else "[reasoning] LLM-identified gap",
+                                target_dimension=_reasoning_result.target_dimension,
+                            )
+                            print(f"[autonomy] Decision upgraded by reasoning → {decision.mode.value}")
+            except Exception as _re_exc:
+                print(f"[autonomy] Reasoning engine failed (non-fatal): {_re_exc}")
+
         # Step 4: Bootstrap / update goal decomposition tree
         decomposer = _GoalDecomposer()
         tree = decomposer.load(_NOVATRADE_GOAL_ID)
@@ -1842,7 +1886,7 @@ def _run_autonomy_cycle() -> dict | None:
                     print(f"[autonomy] Generated task: {task_path.name}")
 
         # Step 7: Build snapshot dict
-        _snap = {
+        _snap: dict[str, object] = {
             "overall_score": report.overall_score,
             "alert_level": report.overall_alert.value,
             "dimensions": {
@@ -1872,6 +1916,15 @@ def _run_autonomy_cycle() -> dict | None:
                 "actions_taken": _action_result.actions_taken,
                 "alert_sent": _action_result.alert_sent,
                 "escalated": _action_result.escalated,
+            }
+        # Include reasoning engine results if any
+        if _reasoning_result is not None:
+            _snap["reasoning"] = {
+                "recommended_mode": _reasoning_result.recommended_mode,
+                "target_dimension": _reasoning_result.target_dimension,
+                "confidence": _reasoning_result.confidence,
+                "novel_insight": _reasoning_result.novel_insight,
+                "suggested_actions": _reasoning_result.suggested_actions[:3],
             }
         return _snap
 

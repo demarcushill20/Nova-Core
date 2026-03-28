@@ -107,6 +107,11 @@ class RiskConfig:
     london_fix_start_minute_utc: int = 45
     london_fix_end_hour_utc: int = 16
     london_fix_end_minute_utc: int = 15
+    # Minimum SL distance in pips — prevents micro-stops that get stopped out
+    # by spread noise.  Lowered from 10.0→3.0→2.0: IRB strategy generates
+    # stops from candle geometry; ATR-adaptive SL now handles volatility
+    # gating, so this is a safety net only.
+    min_sl_distance_pips: float = 2.0
 
     def validate(self) -> list[str]:
         errors: list[str] = []

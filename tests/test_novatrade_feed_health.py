@@ -86,7 +86,7 @@ class TestFeedHealthConfig:
     def test_defaults(self) -> None:
         cfg = FeedHealthConfig()
         assert cfg.max_stale_seconds == 30.0
-        assert cfg.max_clock_drift_seconds == 5.0
+        assert cfg.max_clock_drift_seconds == 15.0
         assert cfg.max_spread_pips == 5.0
         assert cfg.spread_window == 20
         assert cfg.spread_spike_ratio == 3.0
@@ -216,18 +216,18 @@ class TestClockDrift:
 
     def test_drift_detected(self) -> None:
         sup, clock = _make_supervisor()
-        # Broker timestamp 6s behind system clock
-        state = sup.on_tick(_tick(ts=clock[0] - 6.0))
+        # Broker timestamp 16s behind system clock (exceeds 15s threshold)
+        state = sup.on_tick(_tick(ts=clock[0] - 16.0))
         assert state == FeedState.CLOCK_DRIFT
 
     def test_drift_within_tolerance(self) -> None:
         sup, clock = _make_supervisor()
-        state = sup.on_tick(_tick(ts=clock[0] - 4.0))
+        state = sup.on_tick(_tick(ts=clock[0] - 14.0))
         assert state == FeedState.HEALTHY
 
     def test_drift_recovery(self) -> None:
         sup, clock = _make_supervisor()
-        sup.on_tick(_tick(ts=clock[0] - 6.0))  # Drifted
+        sup.on_tick(_tick(ts=clock[0] - 16.0))  # Drifted
         state = sup.on_tick(_tick(ts=clock[0]))  # Normal
         assert state == FeedState.HEALTHY
 

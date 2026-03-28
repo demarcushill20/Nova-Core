@@ -202,6 +202,9 @@ class BacktestEnvironment:
     revalidate_pending: bool = False  # v5: re-check trend/HTF each bar for pending orders
     min_signal_atr_mult: float = 0.0  # v5: min signal range / ATR (0=disabled)
 
+    # --- ATR-adaptive stop loss (Quick Win) ---
+    atr_sl_floor_multiplier: float = 0.5  # min SL distance = ATR * this multiplier (0=disabled)
+
     # --- Measurement vs inference ---
     directly_measured: tuple[str, ...] = (
         "Pine syntax/compile readiness (Phase 3 static analysis, 45 checks)",

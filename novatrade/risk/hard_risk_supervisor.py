@@ -75,7 +75,7 @@ class HardLimits:
 
     # --- Fat finger protection ---
     max_volume_ratio: float = 5.0  # Reject if volume > ratio × median recent
-    min_stop_distance_pips: float = 5.0  # SL must be at least this far from entry
+    min_stop_distance_pips: float = 1.0  # SL must be at least this far from entry (absolute safety net)
 
     # --- Currency concentration ---
     max_same_symbol_positions: int = 1  # Max positions on same symbol
