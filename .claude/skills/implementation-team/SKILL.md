@@ -43,7 +43,43 @@ Otherwise: validate it, tighten where needed, and execute it as-is.
 
 **Do not use agent teams** for small, sequential, or tightly coupled edits — coordination overhead outweighs benefit.
 
-## Workflow
+## Multi-Phase Context Isolation
+
+When executing a plan with multiple phases/steps, **each phase gets a fresh agent with clean context**. This prevents context pollution from stale diffs, old review findings, and prior debug logs accumulating across phases.
+
+### Phase Boundary Protocol
+
+After each phase completes (passes verification), the orchestrator produces a **Phase Handoff Summary** before starting the next phase:
+
+```
+## Phase Handoff: Phase N → Phase N+1
+1. Files changed: <list of files added/modified/deleted>
+2. Key decisions: <architectural choices made, trade-offs taken>
+3. Public interface changes: <new exports, changed signatures, new config>
+4. Gotchas for next phase: <coupling points, things that must not break>
+5. Test status: <pass count, any skipped/known issues>
+```
+
+### What the Next Phase's Implementer Receives
+
+The Implementer subagent for phase N+1 is spawned with **only**:
+1. The validated plan for phase N+1 (not the full plan)
+2. The Phase Handoff Summary from phase N
+3. Cumulative handoff chain (condensed 2-3 line summaries of phases 1..N-1, if N > 2)
+
+The Implementer reads the actual files it needs from disk — it does **not** receive prior diffs, review findings, test output, or debug logs from earlier phases.
+
+### What the Orchestrator Retains
+
+The orchestrator (you) keeps the full plan and all handoff summaries to track progress and make phase-sequencing decisions. But this context is **not forwarded** to implementation subagents — only the scoped handoff is.
+
+### Why This Matters
+
+- **Fresh context = better code.** An agent loaded with 3 phases of stale diffs makes worse decisions than one that reads the current files fresh.
+- **Handoff summaries force clarity.** If you can't summarize what phase N did, the work wasn't clean enough.
+- **Debugging stays scoped.** When phase 3 breaks, the debugger gets phase 3's context — not a haystack of phases 1-3.
+
+## Workflow (Per Phase)
 
 ### 1. Plan Validation
 
@@ -93,9 +129,13 @@ The debugger must inspect the real implementation — not summaries. Fix root ca
 
 After fixes, re-run steps 3 and 4. Confirm acceptance criteria are actually met.
 
-### 7. Final Handoff
+### 7. Phase Completion
 
-Only after verification passes. Report:
+Only after verification passes.
+
+**If more phases remain:** produce a Phase Handoff Summary (see Phase Boundary Protocol above), then start the next phase with a fresh Implementer that receives only the handoff + the next phase's plan.
+
+**If this is the final phase (or a single-phase task):** report:
 
 ```
 ## Implementation Report
