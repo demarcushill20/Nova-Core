@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from unittest.mock import patch
 
 from novatrade.config import NovaTradeCfg, RiskConfig
@@ -596,12 +595,22 @@ class TestFeedHealth:
 
     def test_healthy_feed_passes(self):
         """Healthy feed → check passes."""
+        import calendar
+        import datetime
+
         from novatrade.data.tick import Tick
         from novatrade.monitor.feed_health import FeedHealthConfig, FeedHealthSupervisor
 
-        supervisor = FeedHealthSupervisor(FeedHealthConfig(max_stale_seconds=60.0))
+        # Use a fixed Wednesday timestamp to avoid weekend MARKET_CLOSED state
+        wed = datetime.datetime(2026, 3, 25, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        fake_now = calendar.timegm(wed.timetuple())
+
+        def clock() -> float:
+            return fake_now
+
+        supervisor = FeedHealthSupervisor(FeedHealthConfig(max_stale_seconds=60.0), clock=clock)
         # Feed a tick to make EURUSD healthy
-        supervisor.on_tick(Tick(symbol="EURUSD", bid=1.1000, ask=1.1002, timestamp=time.time()))
+        supervisor.on_tick(Tick(symbol="EURUSD", bid=1.1000, ask=1.1002, timestamp=fake_now))
 
         gate = PreTradeGate(_cfg(), feed_health=supervisor)
         decision = gate.evaluate(_order(symbol="EURUSD"), _account(), [])
@@ -611,10 +620,15 @@ class TestFeedHealth:
 
     def test_stale_feed_denies(self):
         """Stale feed → check denies order."""
+        import calendar
+        import datetime
+
         from novatrade.data.tick import Tick
         from novatrade.monitor.feed_health import FeedHealthConfig, FeedHealthSupervisor
 
-        clock_time = [time.time()]
+        # Use a fixed Wednesday timestamp to avoid weekend MARKET_CLOSED state
+        wed = datetime.datetime(2026, 3, 25, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        clock_time = [calendar.timegm(wed.timetuple())]
         supervisor = FeedHealthSupervisor(
             FeedHealthConfig(max_stale_seconds=5.0),
             clock=lambda: clock_time[0],
@@ -642,12 +656,22 @@ class TestFeedHealth:
 
     def test_wide_spread_denies(self):
         """Wide spread → SPREAD_WIDE → denies."""
+        import calendar
+        import datetime
+
         from novatrade.data.tick import Tick
         from novatrade.monitor.feed_health import FeedHealthConfig, FeedHealthSupervisor
 
-        supervisor = FeedHealthSupervisor(FeedHealthConfig(max_spread_pips=3.0))
+        # Use a fixed Wednesday timestamp to avoid weekend MARKET_CLOSED state
+        wed = datetime.datetime(2026, 3, 25, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        fake_now = calendar.timegm(wed.timetuple())
+
+        def clock() -> float:
+            return fake_now
+
+        supervisor = FeedHealthSupervisor(FeedHealthConfig(max_spread_pips=3.0), clock=clock)
         # Tick with 8 pip spread (> 3.0 max)
-        supervisor.on_tick(Tick(symbol="EURUSD", bid=1.1000, ask=1.1008, timestamp=time.time()))
+        supervisor.on_tick(Tick(symbol="EURUSD", bid=1.1000, ask=1.1008, timestamp=fake_now))
 
         gate = PreTradeGate(_cfg(), feed_health=supervisor)
         decision = gate.evaluate(_order(symbol="EURUSD"), _account(), [])
