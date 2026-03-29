@@ -34,6 +34,7 @@ from typing import Any
 from novatrade.data.bar_aggregator import BarAggregator
 from novatrade.data.price_feed import TickBatchPoller
 from novatrade.execution.live_trading_agent import LiveTradingAgent
+from novatrade.monitor.enhanced_health import EnhancedHealthMonitor
 from novatrade.monitor.feed_health import FeedHealthSupervisor, FeedState
 from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor, SupervisorAction
 from novatrade.strategy.live_engine import LiveSignal, LiveStrategyEngine, SignalType
@@ -139,11 +140,13 @@ class LiveLoop:
         self._state_store = state_store
         self._adapter = adapter  # MetaApiAdapter for periodic resubscription
         self._hard_supervisor = hard_risk_supervisor
+        self._enhanced_health = EnhancedHealthMonitor(adapter) if adapter else None
 
         self._signal_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_maxsize)
         self._metrics = LiveMetrics()
         self._running = False
         self._stop_event: asyncio.Event | None = None
+        self._health_cycle_count = 0
 
     # -- Public API --------------------------------------------------------
 
@@ -528,6 +531,11 @@ class LiveLoop:
 
                     # Hard Risk Supervisor monitoring
                     await self._check_hard_risk_supervisor()
+
+                    # Enhanced broker diagnostics (every 12 cycles = ~1 minute)
+                    self._health_cycle_count += 1
+                    if self._health_cycle_count % 12 == 0 and self._enhanced_health:
+                        await self._run_enhanced_diagnostics()
                 except Exception:
                     log.exception("health monitor error — continuing")
 
@@ -736,7 +744,7 @@ class LiveLoop:
                 return
 
             # Check supervisor for actions
-            actions = self._hard_supervisor.check_account(account, positions)
+            actions = self._hard_supervisor.check_account(account.equity, positions)
 
             for action in actions:
                 await self._execute_supervisor_action(action)
@@ -780,3 +788,21 @@ class LiveLoop:
 
         except Exception:
             log.exception("supervisor: failed to execute action %s", action.action)
+
+    async def _run_enhanced_diagnostics(self) -> None:
+        """Run enhanced broker diagnostics for comprehensive health monitoring."""
+        if not self._enhanced_health:
+            return
+
+        try:
+            log.debug("Running enhanced broker diagnostics...")
+            snapshot, diagnostics = await self._enhanced_health.take_health_snapshot_with_diagnostics()
+
+            if diagnostics:
+                critical_issues = diagnostics.get("summary", {}).get("critical_blocker")
+                if critical_issues and "tradeAllowed=false" in critical_issues:
+                    log.error("CRITICAL: %s", critical_issues)
+                else:
+                    log.debug("Enhanced diagnostics completed successfully")
+        except Exception:
+            log.warning("Enhanced diagnostics failed", exc_info=True)
