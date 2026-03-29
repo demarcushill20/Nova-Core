@@ -22,6 +22,10 @@ _SERVICES = [
 class SystemHealthCollector(BaseCollector):
     """Measures overall system health: services, orphaned tasks, uptime, errors."""
 
+    # Class-level cache for last-known-good service status.
+    # Survives transient "can't start new thread" / timeout failures.
+    _last_good_svc: tuple[float, float] | None = None
+
     async def collect(self) -> DimensionScore:
         warnings: list[str] = []
         sub_metrics: list[SubMetric] = []
@@ -29,6 +33,8 @@ class SystemHealthCollector(BaseCollector):
         # --- service_status ---
         try:
             svc_score, svc_raw = await self._check_services()
+            # Cache successful result for fallback on transient failures
+            SystemHealthCollector._last_good_svc = (svc_score, svc_raw)
             sub_metrics.append(
                 SubMetric(
                     name="service_status",
@@ -40,7 +46,20 @@ class SystemHealthCollector(BaseCollector):
         except Exception as exc:
             self.log.warning("service_status collection failed: %s", exc)
             warnings.append(f"service_status collection failed: {exc}")
-            sub_metrics.append(SubMetric(name="service_status", value=0.0))
+            # Use last-known-good value instead of 0.0 on transient errors
+            cached = SystemHealthCollector._last_good_svc
+            if cached is not None:
+                self.log.info("Using cached service_status: %s", cached[0])
+                sub_metrics.append(
+                    SubMetric(
+                        name="service_status",
+                        value=self._safe_score(cached[0]),
+                        raw_value=cached[1],
+                        description="Systemd service liveness (cached fallback)",
+                    )
+                )
+            else:
+                sub_metrics.append(SubMetric(name="service_status", value=0.0))
 
         # --- orphaned_tasks ---
         try:
@@ -121,6 +140,11 @@ class SystemHealthCollector(BaseCollector):
                     active += 1
             except (asyncio.TimeoutError, FileNotFoundError, OSError):
                 # systemctl not available or timed out
+                continue
+            except Exception as svc_exc:
+                # Catch threading/resource errors per-service instead of
+                # letting them abort the entire check
+                self.log.debug("service check for %s failed: %s", svc, svc_exc)
                 continue
         return active * 25.0, float(active)
 

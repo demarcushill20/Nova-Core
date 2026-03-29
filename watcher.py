@@ -489,7 +489,7 @@ def reap_stale_tasks(*, force: bool = False) -> list[str]:
         except OSError:
             continue
         if mtime < cutoff:
-            done_path = p.with_suffix(".done")
+            done_path = p.with_name(f"{p.stem}.md.done")
             try:
                 p.rename(done_path)
                 logger.info(

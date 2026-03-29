@@ -579,7 +579,7 @@ class TestReapStaleTasks(unittest.TestCase):
         reaped = watcher.reap_stale_tasks(force=True)
         self.assertEqual(reaped, ["0001_old.md"])
         self.assertFalse(task.exists())
-        self.assertTrue(Path(self.tmpdir, "0001_old.done").exists())
+        self.assertTrue(Path(self.tmpdir, "0001_old.md.done").exists())
 
     def test_keeps_recent_task(self):
         """Task younger than threshold is left alone."""
