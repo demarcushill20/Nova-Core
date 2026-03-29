@@ -35,6 +35,22 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+# ── Scheduler integration (graceful degradation) ────────────────────────────
+try:
+    import json as _json
+
+    from utils.scheduler.orchestrator import (
+        SchedulerResult,
+        build_block_plan,
+        build_shadow_comparison,
+        load_scheduler_config,
+    )
+    from utils.scheduler.work_unit import CommitmentLevel, TaskClass, WorkMode, WorkUnit
+
+    _HAS_SCHEDULER = True
+except Exception:  # ImportError, ModuleNotFoundError, etc.
+    _HAS_SCHEDULER = False
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 ROOT = Path("/home/nova/nova-core")
 TASKS = ROOT / "TASKS"
@@ -537,6 +553,148 @@ def log(msg: str) -> None:
         pass
 
 
+# ── Scheduler helpers ────────────────────────────────────────────────────────
+
+# Slug -> WorkMode mapping for shift blocks
+_SLUG_WORK_MODE: dict[str, str] = {
+    "system_health": "MONITORING",
+    "monitoring": "MONITORING",
+    "novatrade_status": "MONITORING",
+    "novatrade_monitoring": "MONITORING",
+    "research": "RESEARCH",
+    "deep_research": "RESEARCH",
+    "novatrade_research": "RESEARCH",
+    "implementation": "DEEP_IMPLEMENTATION",
+    "novatrade_impl": "DEEP_IMPLEMENTATION",
+    "novatrade_impl2": "DEEP_IMPLEMENTATION",
+    "code": "DEEP_IMPLEMENTATION",
+    "review": "REVIEW",
+    "testing": "REVIEW",
+    "testing_quality": "REVIEW",
+    "novatrade_testing": "REVIEW",
+    "planning": "ANALYSIS",
+    "strategy": "ANALYSIS",
+    "free_will": "ANALYSIS",
+    "free_will_pm": "ANALYSIS",
+    "novatrade_progress": "ANALYSIS",
+    "communication": "COMMUNICATION",
+    "session_wrap": "COMMUNICATION",
+    "evening_wrap": "COMMUNICATION",
+    "deployment": "DEPLOYMENT",
+    "admin": "ADMIN",
+    "memory_hygiene": "ADMIN",
+}
+
+
+def _convert_block_to_work_unit(block: dict, shift_date: date) -> WorkUnit:
+    """Convert a shift block dict into a scheduler WorkUnit."""
+    slug = block["slug"]
+    block_num = block["block"]
+    wu_id = f"shift_{shift_date}_{block_num}_{slug}"
+
+    mode_name = _SLUG_WORK_MODE.get(slug, "ANALYSIS")
+    work_mode = WorkMode[mode_name]
+
+    # Build scheduled_at datetime
+    scheduled_dt = datetime(
+        shift_date.year,
+        shift_date.month,
+        shift_date.day,
+        block["hour"],
+        block["minute"],
+        tzinfo=CT,
+    )
+
+    return WorkUnit(
+        id=wu_id,
+        title=block.get("title", slug),
+        done_condition=block.get("instructions", "")[:200],
+        work_mode=work_mode,
+        task_class=TaskClass.BOUNDED,
+        commitment_level=CommitmentLevel.HARD,
+        priority="high",
+        urgency=0.7,
+        strategic_value=0.6,
+        estimated_optimistic_min=20.0,
+        estimated_expected_min=35.0,
+        estimated_pessimistic_min=50.0,
+        confidence=0.7,
+        must_do_today=True,
+        schedulable_now=True,
+        hard_deadline=scheduled_dt + timedelta(minutes=45),
+    )
+
+
+def _optimize_blocks_with_scheduler(
+    blocks: list[dict],
+    shift_date: date,
+) -> tuple[list[dict], bool]:
+    """Use the dynamic scheduler to optimize block ordering and timing.
+
+    Returns (possibly-reordered blocks, was_optimized).
+    """
+    if not _HAS_SCHEDULER:
+        return blocks, False
+    try:
+        config = load_scheduler_config()
+        if not config.enabled:
+            return blocks, False
+
+        # Convert to WorkUnits
+        work_units = [_convert_block_to_work_unit(b, shift_date) for b in blocks]
+
+        # Calculate total shift duration
+        if not blocks:
+            return blocks, False
+        block_duration = len(blocks) * 45.0  # ~45 min per block
+
+        if config.shadow_mode:
+            # Shadow mode: log comparison but don't change order
+            comparison = build_shadow_comparison(
+                work_units,
+                block_duration_min=block_duration,
+                config=config,
+            )
+            log(f"[scheduler-shadow] {_json.dumps(comparison, indent=2)}")
+            return blocks, False
+
+        # Run full pipeline
+        result: SchedulerResult = build_block_plan(
+            work_units,
+            block_duration_min=block_duration,
+            config=config,
+        )
+
+        if not result.block_plan.scheduled_slots:
+            return blocks, False
+
+        # Reorder blocks to match scheduler's optimal sequence
+        slot_order = {slot.scored_task.work_unit.id: i for i, slot in enumerate(result.block_plan.scheduled_slots)}
+
+        def _block_sort_key(b: dict) -> int:
+            wu_id = f"shift_{shift_date}_{b['block']}_{b['slug']}"
+            return slot_order.get(wu_id, b["block"])
+
+        optimized = sorted(blocks, key=_block_sort_key)
+
+        # Log scheduler diagnostics
+        log(
+            f"[scheduler] Optimized {len(blocks)} blocks: "
+            f"scheduled={result.total_tasks_scheduled}, "
+            f"deferred={result.total_tasks_deferred}, "
+            f"variant={result.variant_used}"
+        )
+        if result.starvation_alerts:
+            log(f"[scheduler] Starvation alerts: {len(result.starvation_alerts)}")
+        if result.epic_warnings:
+            log(f"[scheduler] Epic warnings: {result.epic_warnings}")
+
+        return optimized, True
+    except Exception as exc:
+        log(f"[scheduler] Optimization failed (using default order): {exc}")
+        return blocks, False
+
+
 def ct_to_server_naive(ct_dt: datetime) -> datetime:
     """Convert a Central-Time-aware datetime to a naive datetime in server local time (UTC).
 
@@ -709,10 +867,21 @@ def cleanup_old_shifts(target_date: date | None = None) -> int:
     return moved
 
 
-def build_shift_task(block: dict, shift_date: date, context: str) -> tuple[str, str]:
+def build_shift_task(
+    block: dict,
+    shift_date: date,
+    context: str,
+    scheduler_optimized: bool = False,
+) -> tuple[str, str]:
     """Build a single shift-block task file.
 
     Returns (filename, content).
+
+    Args:
+        block: Block definition dict.
+        shift_date: Date for the shift.
+        context: Context string from previous day or morning.
+        scheduler_optimized: Whether the scheduler reordered this block.
     """
     n = block["block"]
     slug = block["slug"]
@@ -738,6 +907,19 @@ def build_shift_task(block: dict, shift_date: date, context: str) -> tuple[str, 
     else:
         context_title = "Context from Morning Shift"
 
+    # Build scheduler metadata lines for frontmatter
+    sched_lines = ""
+    if _HAS_SCHEDULER:
+        mode_name = _SLUG_WORK_MODE.get(slug, "analysis")
+        # Convert to the enum value format (lowercase with underscores)
+        mode_value = mode_name.lower()
+        sched_lines = (
+            f"work_mode: {mode_value}\n"
+            f"task_class: bounded\n"
+            f"commitment_level: hard\n"
+            f"scheduler_optimized: {str(scheduler_optimized).lower()}\n"
+        )
+
     content = f"""\
 ---
 scheduled_at: {scheduled_at}
@@ -745,7 +927,7 @@ priority: high
 shift_block: {n}
 shift_date: {shift_date}
 type: shift_block
----
+{sched_lines}---
 
 # Shift Block {n}: {block["title"]}
 
@@ -1022,12 +1204,9 @@ def generate_jit(
     # Combine all blocks
     all_blocks = MORNING_SHIFT_BLOCKS + AFTERNOON_SHIFT_BLOCKS
 
-    files_to_write: list[tuple[str, str]] = []
-    yesterday_context: str | None = None
-    morning_context: str | None = None
-
+    # Collect eligible blocks (within lead window and not already existing)
+    eligible_blocks: list[dict] = []
     for block in all_blocks:
-        # Compute block's CT datetime
         block_ct = datetime(
             shift_date.year,
             shift_date.month,
@@ -1036,15 +1215,21 @@ def generate_jit(
             block["minute"],
             tzinfo=CT,
         )
-
-        # Skip blocks not within the lead window
         if block_ct < now_ct or block_ct > cutoff_ct:
             continue
-
-        # Skip blocks that already exist
         if check_block_exists(shift_date, block["block"], block["slug"]):
             continue
+        eligible_blocks.append(block)
 
+    # Run scheduler optimization on eligible blocks
+    optimized_blocks, was_optimized = _optimize_blocks_with_scheduler(eligible_blocks, shift_date)
+
+    # Build task files from (potentially reordered) blocks
+    files_to_write: list[tuple[str, str]] = []
+    yesterday_context: str | None = None
+    morning_context: str | None = None
+
+    for block in optimized_blocks:
         # Lazy-load context (only fetched when actually needed)
         if block["block"] <= 8:
             if yesterday_context is None:
@@ -1055,7 +1240,7 @@ def generate_jit(
                 morning_context = get_morning_context(shift_date)
             context = morning_context
 
-        filename, content = build_shift_task(block, shift_date, context)
+        filename, content = build_shift_task(block, shift_date, context, scheduler_optimized=was_optimized)
         files_to_write.append((filename, content))
 
     if not files_to_write:
@@ -1140,18 +1325,35 @@ def generate_schedule(  # noqa: C901
     # Build all task files
     files_to_write: list[tuple[str, str]] = []
 
-    # Morning blocks
+    # Morning blocks (with scheduler optimization)
     if shift_name in ("morning", "both"):
-        for block in MORNING_SHIFT_BLOCKS:
-            filename, content = build_shift_task(block, shift_date, yesterday_context)
+        morning_blocks, morning_optimized = _optimize_blocks_with_scheduler(
+            list(MORNING_SHIFT_BLOCKS),
+            shift_date,
+        )
+        for block in morning_blocks:
+            filename, content = build_shift_task(
+                block,
+                shift_date,
+                yesterday_context,
+                scheduler_optimized=morning_optimized,
+            )
             files_to_write.append((filename, content))
 
-    # Afternoon blocks
+    # Afternoon blocks (with scheduler optimization)
     if shift_name in ("afternoon", "both"):
-        # Afternoon blocks get morning context if available
         morning_context = get_morning_context(shift_date)
-        for block in AFTERNOON_SHIFT_BLOCKS:
-            filename, content = build_shift_task(block, shift_date, morning_context)
+        afternoon_blocks, afternoon_optimized = _optimize_blocks_with_scheduler(
+            list(AFTERNOON_SHIFT_BLOCKS),
+            shift_date,
+        )
+        for block in afternoon_blocks:
+            filename, content = build_shift_task(
+                block,
+                shift_date,
+                morning_context,
+                scheduler_optimized=afternoon_optimized,
+            )
             files_to_write.append((filename, content))
 
     # Build generator safety-net tasks

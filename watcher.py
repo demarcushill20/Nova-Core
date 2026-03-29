@@ -77,6 +77,25 @@ try:
 except ImportError:
     _HAS_QUOTA = False
 
+# Intelligent Dynamic Block Scheduler (optional — degrades gracefully)
+try:
+    from utils.scheduler.execution_log import (
+        create_execution_record,
+        log_execution,
+    )
+    from utils.scheduler.replanner import (
+        load_block_state,
+        on_task_complete,
+        on_task_fail,
+        on_task_start,
+        save_block_state,
+    )
+    from utils.scheduler.work_unit import WorkUnit
+
+    _HAS_SCHEDULER = True
+except ImportError:
+    _HAS_SCHEDULER = False
+
 # --- Audit logger for watcher lifecycle events ---
 _audit = get_audit_logger("watcher")
 
@@ -89,6 +108,7 @@ LOGS_DIR = BASE_DIR / "LOGS"
 STATE_DIR = BASE_DIR / "STATE"
 CANCEL_DIR = STATE_DIR / "cancel"
 RUNNING_DIR = STATE_DIR / "running"
+SCHEDULER_STATE_DIR = STATE_DIR / "scheduler"
 LOG_FILE = LOGS_DIR / "watcher.log"
 POLL_INTERVAL = 60  # seconds between scans
 TASK_TIMEOUT = 14400  # max seconds per task execution (4 hours)
@@ -230,6 +250,24 @@ def _extract_keywords(task_text: str, max_keywords: int = 10) -> list[str]:
             if len(keywords) >= max_keywords:
                 break
     return keywords
+
+
+def _get_current_block_id() -> str | None:
+    """Get the block ID of the currently executing shift block, if any."""
+    if not _HAS_SCHEDULER:
+        return None
+    try:
+        # Look for the most recent shift task in TASKS/ that is .inprogress
+        inprogress = list(TASKS_DIR.glob("shift_*.md.inprogress"))
+        if inprogress:
+            stem = inprogress[0].name.replace(".md.inprogress", "")
+            # Block ID is the date portion: shift_YYYYMMDD
+            parts = stem.split("_block_")
+            if parts:
+                return parts[0]  # e.g., "shift_20260329"
+        return None
+    except Exception:
+        return None
 
 
 DISPATCH_PROMPT_TEMPLATE = """\
@@ -1427,6 +1465,21 @@ async def _dispatch_inner(task_path: Path):
     # Phase 6B.14: Update checkpoint to in_progress before subprocess starts
     update_checkpoint_status(stem, "in_progress")
 
+    # --- Scheduler: track task start for calibration ---
+    _sched_t0 = time.monotonic()
+    _sched_block_id = None
+    if _HAS_SCHEDULER:
+        try:
+            _sched_block_id = _get_current_block_id()
+            if _sched_block_id:
+                SCHEDULER_STATE_DIR.mkdir(parents=True, exist_ok=True)
+                _sched_state = load_block_state(_sched_block_id, state_dir=SCHEDULER_STATE_DIR)
+                if _sched_state:
+                    on_task_start(_sched_state, task_id=stem)
+                    save_block_state(_sched_state, state_dir=SCHEDULER_STATE_DIR)
+        except Exception as _sched_exc:
+            logger.debug("Scheduler on_task_start failed (non-fatal): %s", _sched_exc)
+
     exit_code = await _execute_worker(
         stem=stem,
         cmd=cmd,
@@ -1565,6 +1618,50 @@ async def _dispatch_inner(task_path: Path):
             increment_retry(stem)
     except FileNotFoundError:
         logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
+
+    # --- Scheduler: record execution and lifecycle ---
+    if _HAS_SCHEDULER:
+        try:
+            _sched_duration_min = (time.monotonic() - _sched_t0) / 60.0
+            # Create and log execution record for calibration.
+            # Build a minimal WorkUnit stub since we don't have the full scheduler
+            # work unit in the watcher dispatch path.
+            _sched_wu = WorkUnit(
+                id=stem,
+                title=stem,
+                estimated_expected_min=35.0,  # default shift block estimate
+            )
+            _sched_record = create_execution_record(
+                work_unit=_sched_wu,
+                actual_duration_min=_sched_duration_min,
+                outcome="success" if passed else "fail",
+                block_id=_sched_block_id or "",
+            )
+            SCHEDULER_STATE_DIR.mkdir(parents=True, exist_ok=True)
+            _exec_log_path = SCHEDULER_STATE_DIR / "execution_log.jsonl"
+            log_execution(_sched_record, log_path=_exec_log_path)
+            logger.info(
+                "SCHEDULER: execution logged — %s duration=%.1fmin outcome=%s",
+                stem,
+                _sched_duration_min,
+                "success" if passed else "fail",
+            )
+
+            # Update block state with completion/failure
+            if _sched_block_id:
+                _sched_state = load_block_state(_sched_block_id, state_dir=SCHEDULER_STATE_DIR)
+                if _sched_state:
+                    if passed:
+                        on_task_complete(
+                            _sched_state,
+                            task_id=stem,
+                            actual_duration_min=_sched_duration_min,
+                        )
+                    else:
+                        on_task_fail(_sched_state, task_id=stem, reason="verification_failed")
+                    save_block_state(_sched_state, state_dir=SCHEDULER_STATE_DIR)
+        except Exception as _sched_exc:
+            logger.debug("Scheduler execution logging failed (non-fatal): %s", _sched_exc)
 
     # --- Session completion recording (Phase 5) ---
     _session_mgr.record_task_completion(stem, success=passed)

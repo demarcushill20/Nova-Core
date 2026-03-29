@@ -88,6 +88,32 @@ except ImportError:
     _update_cruise_state = None  # type: ignore[assignment,misc]
 
 try:
+    from utils.scheduler.calibration import (
+        compute_calibration as _compute_calibration,
+    )
+    from utils.scheduler.calibration import (
+        generate_calibration_report as _generate_calibration_report,
+    )
+    from utils.scheduler.execution_log import read_execution_log as _read_execution_log
+    from utils.scheduler.interrupt_handler import (
+        InterruptEvent as _InterruptEvent,
+    )
+    from utils.scheduler.interrupt_handler import (
+        classify_interrupt as _classify_interrupt,
+    )
+    from utils.scheduler.interrupt_handler import (
+        load_interrupt_state as _load_interrupt_state,
+    )
+    from utils.scheduler.interrupt_handler import (
+        save_interrupt_state as _save_interrupt_state,
+    )
+    from utils.scheduler.orchestrator import load_scheduler_config as _load_sched_config
+
+    _HAS_SCHEDULER = True
+except ImportError:
+    _HAS_SCHEDULER = False
+
+try:
     import asyncio as _asyncio
 
     from novatrade.autonomy import (
@@ -2056,6 +2082,36 @@ def _run_autonomy_cycle() -> dict | None:
         return None
 
 
+# --- Scheduler health check --------------------------------------------------
+
+
+def check_scheduler() -> dict:
+    """Check that the dynamic scheduler is configured and operational."""
+    if not _HAS_SCHEDULER:
+        return {"name": "scheduler", "ok": True, "detail": "scheduler package not available (optional)"}
+    try:
+        config = _load_sched_config()
+        status_parts = []
+        status_parts.append(f"enabled={config.enabled}")
+        status_parts.append(f"shadow={config.shadow_mode}")
+        status_parts.append(f"variant={config.variant_selection}")
+
+        # Check if execution log exists and has records
+        exec_log = LOGS_DIR / "scheduler_execution.jsonl"
+        if exec_log.exists():
+            try:
+                records = _read_execution_log(exec_log)
+                status_parts.append(f"exec_records={len(records)}")
+            except Exception:
+                status_parts.append("exec_log=unreadable")
+        else:
+            status_parts.append("exec_log=none")
+
+        return {"name": "scheduler", "ok": True, "detail": ", ".join(status_parts)}
+    except Exception as e:
+        return {"name": "scheduler", "ok": False, "detail": f"config load failed: {e}"}
+
+
 # --- Main --------------------------------------------------------------------
 
 
@@ -2137,6 +2193,7 @@ def main() -> int:
     checks.append(check_pip_audit())
     checks.append(check_llm_cache())
     checks.append(check_cost_router())
+    checks.append(check_scheduler())
 
     # --- Self-healing runtime (Phase 6A) ---
     try:
@@ -2267,6 +2324,33 @@ def main() -> int:
     )
     _append_metrics(snapshot)
 
+    # --- Scheduler: create interrupt events for critical failures ---
+    if _HAS_SCHEDULER and not all_ok:
+        try:
+            _sched_state_dir = STATE_DIR / "scheduler"
+            _sched_state_dir.mkdir(parents=True, exist_ok=True)
+            _int_state = _load_interrupt_state(_sched_state_dir / "interrupt_state.json")
+
+            for _chk in checks:
+                if not _chk["ok"]:
+                    _level = _classify_interrupt(
+                        f"health_check_failed:{_chk['name']}",
+                        policy=None,  # use default policy
+                    )
+                    _evt = _InterruptEvent(
+                        source="heartbeat",
+                        event_type=f"health_check_failed:{_chk['name']}",
+                        level=_level,
+                        title=f"Health check failed: {_chk['name']}",
+                        detail=_chk.get("detail", "")[:200],
+                    )
+                    _int_state.interrupt_log.append(_evt)
+
+            _save_interrupt_state(_int_state, _sched_state_dir / "interrupt_state.json")
+            print(f"[scheduler] Created {len(fail_names)} interrupt event(s) for failed checks")
+        except Exception as _sched_exc:
+            print(f"[scheduler] Interrupt event creation failed (non-fatal): {_sched_exc}")
+
     # --- Phase 7.6: multi-agent heartbeat ---
     try:
         from agents.observability import Severity, run_multiagent_heartbeat
@@ -2311,6 +2395,42 @@ def main() -> int:
                 print(f"[autonomous-report] Report generation failed (rc={_report_rc})")
     except Exception as e:
         print(f"[autonomous-report] Failed (non-fatal): {e}")
+
+    # --- Scheduler: daily calibration report ---
+    if _HAS_SCHEDULER and not _heartbeat_shutdown_requested:
+        try:
+            _sched_state_dir = STATE_DIR / "scheduler"
+            _exec_log_path = LOGS_DIR / "scheduler_execution.jsonl"
+            _cal_report_marker = _sched_state_dir / "last_calibration_report.txt"
+
+            # Run calibration once per day
+            _should_calibrate = True
+            if _cal_report_marker.exists():
+                try:
+                    _last_cal = datetime.fromisoformat(_cal_report_marker.read_text().strip())
+                    _should_calibrate = (datetime.now(timezone.utc) - _last_cal).total_seconds() > 86400
+                except (ValueError, OSError):
+                    pass
+
+            if _should_calibrate and _exec_log_path.exists():
+                _records = _read_execution_log(_exec_log_path)
+                if len(_records) >= 5:
+                    _cal_table = _compute_calibration(_records)
+                    _cal_report = _generate_calibration_report(_cal_table, _records)
+                    # Write report to OUTPUT/
+                    _cal_stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                    _cal_path = OUTPUT_DIR / f"calibration_report__{_cal_stamp}.md"
+                    _cal_path.write_text(_cal_report, encoding="utf-8")
+
+                    # Update marker
+                    _sched_state_dir.mkdir(parents=True, exist_ok=True)
+                    _cal_report_marker.write_text(
+                        datetime.now(timezone.utc).isoformat(),
+                        encoding="utf-8",
+                    )
+                    print(f"[scheduler] Calibration report written: {_cal_path.name}")
+        except Exception as _cal_exc:
+            print(f"[scheduler] Calibration report failed (non-fatal): {_cal_exc}")
 
     # --- Phase 7.7: production hardening maintenance ---
     try:
