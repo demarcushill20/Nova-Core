@@ -31,7 +31,6 @@ from skills.version_store import (
     write_sidecar,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -46,9 +45,7 @@ def _make_skill(
     **kwargs,
 ) -> SkillVersion:
     """Create a SkillVersion with sensible defaults for testing."""
-    skill_id = kwargs.pop(
-        "skill_id", generate_skill_id(name, origin, generation)
-    )
+    skill_id = kwargs.pop("skill_id", generate_skill_id(name, origin, generation))
     return SkillVersion(
         skill_id=skill_id,
         name=name,
@@ -201,20 +198,14 @@ class TestSkillVersionStore:
         assert loaded is not None
         assert loaded.skill_id == sv.skill_id
 
-    def test_get_active_version_ignores_inactive(
-        self, store: SkillVersionStore
-    ):
+    def test_get_active_version_ignores_inactive(self, store: SkillVersionStore):
         sv = _make_skill(name="inactive-test", is_active=False)
         store.register_skill(sv)
         assert store.get_active_version("inactive-test") is None
 
     def test_list_skills_active_only(self, store: SkillVersionStore):
-        active = _make_skill(
-            name="list-a", skill_id="list_a_1", is_active=True
-        )
-        inactive = _make_skill(
-            name="list-b", skill_id="list_b_1", is_active=False
-        )
+        active = _make_skill(name="list-a", skill_id="list_a_1", is_active=True)
+        inactive = _make_skill(name="list-b", skill_id="list_b_1", is_active=False)
         store.register_skill(active)
         store.register_skill(inactive)
         result = store.list_skills(active_only=True)
@@ -223,12 +214,8 @@ class TestSkillVersionStore:
         assert "list-b" not in names
 
     def test_list_skills_all(self, store: SkillVersionStore):
-        active = _make_skill(
-            name="list-all-a", skill_id="all_a_1", is_active=True
-        )
-        inactive = _make_skill(
-            name="list-all-b", skill_id="all_b_1", is_active=False
-        )
+        active = _make_skill(name="list-all-a", skill_id="all_a_1", is_active=True)
+        inactive = _make_skill(name="list-all-b", skill_id="all_b_1", is_active=False)
         store.register_skill(active)
         store.register_skill(inactive)
         result = store.list_skills(active_only=False)
@@ -258,9 +245,7 @@ class TestSkillVersionStore:
         assert c.is_active is True
         assert c.version == "2.0.0"
 
-    def test_evolve_skill_keeps_parent_active(
-        self, store: SkillVersionStore
-    ):
+    def test_evolve_skill_keeps_parent_active(self, store: SkillVersionStore):
         parent = _make_skill(name="keeper", skill_id="keep_parent")
         store.register_skill(parent)
         child = _make_skill(
@@ -268,9 +253,7 @@ class TestSkillVersionStore:
             skill_id="keep_child",
             parent_ids=["keep_parent"],
         )
-        store.evolve_skill(
-            "keep_parent", child, deactivate_parent=False
-        )
+        store.evolve_skill("keep_parent", child, deactivate_parent=False)
         p = store.get_skill("keep_parent")
         assert p is not None
         assert p.is_active is True
@@ -317,9 +300,7 @@ class TestSkillVersionStore:
         assert len(chain) == 1
         assert chain[0].skill_id == "solo_1"
 
-    def test_get_lineage_chain_multi_generation(
-        self, store: SkillVersionStore
-    ):
+    def test_get_lineage_chain_multi_generation(self, store: SkillVersionStore):
         # Create a 3-generation chain: g0 -> g1 -> g2
         g0 = _make_skill(name="chain", skill_id="chain_g0")
         store.register_skill(g0)
@@ -347,9 +328,7 @@ class TestSkillVersionStore:
         chain = store.get_lineage_chain("nonexistent")
         assert chain == []
 
-    def test_rollback_deactivates_child_reactivates_parent(
-        self, store: SkillVersionStore
-    ):
+    def test_rollback_deactivates_child_reactivates_parent(self, store: SkillVersionStore):
         parent = _make_skill(name="rollback", skill_id="rb_parent")
         store.register_skill(parent)
         child = _make_skill(
@@ -360,7 +339,9 @@ class TestSkillVersionStore:
         )
         store.evolve_skill("rb_parent", child, deactivate_parent=True)
         # Verify parent is inactive
-        assert store.get_skill("rb_parent").is_active is False
+        parent_after = store.get_skill("rb_parent")
+        assert parent_after is not None
+        assert parent_after.is_active is False
         # Rollback
         restored = store.rollback_skill("rb_child")
         assert restored is not None
@@ -368,11 +349,10 @@ class TestSkillVersionStore:
         assert restored.is_active is True
         # Child should be deactivated
         c = store.get_skill("rb_child")
+        assert c is not None
         assert c.is_active is False
 
-    def test_rollback_no_parent_returns_none(
-        self, store: SkillVersionStore
-    ):
+    def test_rollback_no_parent_returns_none(self, store: SkillVersionStore):
         sv = _make_skill(name="no-parent", skill_id="np_1")
         store.register_skill(sv)
         result = store.rollback_skill("np_1")
@@ -494,6 +474,7 @@ class TestMigration:
         assert sv.lineage.origin == Origin.IMPORTED
         assert sv.lineage.generation == 0
         # Verify legacy fields in change_summary
+        assert sv.lineage.change_summary is not None
         summary = json.loads(sv.lineage.change_summary)
         assert summary["avg_duration_ms"] == 350000
         assert summary["last_used_ts"] == "2026-03-29T12:00:00Z"
@@ -582,22 +563,22 @@ class TestSkillIdentity:
 
     def test_generate_imported_id_format(self):
         sid = generate_skill_id("file-ops", Origin.IMPORTED)
-        h = hashlib.sha256("file-ops".encode()).hexdigest()[:8]
+        h = hashlib.sha256(b"file-ops").hexdigest()[:8]
         assert sid == f"file-ops__imp_{h}"
 
     def test_generate_derived_id_format(self):
         sid = generate_skill_id("file-ops", Origin.DERIVED, generation=2)
-        h = hashlib.sha256("file-ops2".encode()).hexdigest()[:8]
+        h = hashlib.sha256(b"file-ops2").hexdigest()[:8]
         assert sid == f"file-ops__v_2_{h}"
 
     def test_generate_fixed_id_format(self):
         sid = generate_skill_id("shell-ops", Origin.FIXED, generation=1)
-        h = hashlib.sha256("shell-ops1".encode()).hexdigest()[:8]
+        h = hashlib.sha256(b"shell-ops1").hexdigest()[:8]
         assert sid == f"shell-ops__v_1_{h}"
 
     def test_generate_captured_id_format(self):
         sid = generate_skill_id("new-skill", Origin.CAPTURED, generation=0)
-        h = hashlib.sha256("new-skill0".encode()).hexdigest()[:8]
+        h = hashlib.sha256(b"new-skill0").hexdigest()[:8]
         assert sid == f"new-skill__v_0_{h}"
 
     def test_imported_id_deterministic(self):
@@ -688,9 +669,7 @@ class TestSkillIdentity:
 class TestBugfixes:
     """Regression tests for issues found during code review."""
 
-    def test_cte_depth_limit_prevents_infinite_loop(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_cte_depth_limit_prevents_infinite_loop(self, store: SkillVersionStore, tmp_path: Path):
         """C1: Lineage chain with depth > _MAX_LINEAGE_DEPTH stops gracefully."""
         # Use a small depth limit for testability
         store._MAX_LINEAGE_DEPTH = 5
@@ -717,9 +696,7 @@ class TestBugfixes:
         assert len(chain) <= 6
         assert chain[0].skill_id == "depth_g7"
 
-    def test_evolve_skill_nonexistent_parent_raises(
-        self, store: SkillVersionStore
-    ):
+    def test_evolve_skill_nonexistent_parent_raises(self, store: SkillVersionStore):
         """H4: evolve_skill raises ValueError when parent doesn't exist."""
         child = _make_skill(
             name="orphan",
@@ -733,12 +710,10 @@ class TestBugfixes:
         """Registering the same skill_id twice should raise IntegrityError."""
         sv = _make_skill(name="dupe", skill_id="dupe_1")
         store.register_skill(sv)
-        with pytest.raises(Exception):
+        with pytest.raises(sqlite3.IntegrityError):
             store.register_skill(sv)
 
-    def test_get_active_version_returns_latest_generation(
-        self, store: SkillVersionStore
-    ):
+    def test_get_active_version_returns_latest_generation(self, store: SkillVersionStore):
         """H2: When multiple active versions exist, latest generation wins."""
         # Insert two versions of the same name, both active
         v1 = _make_skill(
@@ -788,11 +763,9 @@ class TestBugfixes:
             # Try to insert a lineage row with a bogus parent_id
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute(
-                    "INSERT INTO skill_lineage_parents (skill_id, parent_id) "
-                    "VALUES (?, ?)",
+                    "INSERT INTO skill_lineage_parents (skill_id, parent_id) VALUES (?, ?)",
                     ("fk_child", "bogus_parent"),
                 )
-                conn.commit()
         finally:
             conn.close()
 
@@ -801,8 +774,7 @@ class TestBugfixes:
         conn = store._get_conn()
         try:
             rows = conn.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='index' AND name='idx_skill_versions_name_active'"
+                "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_skill_versions_name_active'"
             ).fetchall()
             assert len(rows) == 1
         finally:

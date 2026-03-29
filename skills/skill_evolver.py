@@ -86,9 +86,7 @@ class SkillEvolver:
         self._captures_today_date: str = ""  # ISO date string for reset
 
         # Load mutation policy
-        self.forbidden_targets = self._load_forbidden_targets(
-            mutation_policy_path
-        )
+        self.forbidden_targets = self._load_forbidden_targets(mutation_policy_path)
 
     def _load_forbidden_targets(self, policy_path: str) -> list[str]:
         """Load forbidden mutation targets from mutation_policy.yaml."""
@@ -97,9 +95,7 @@ class SkillEvolver:
 
             path = Path(policy_path)
             if not path.exists():
-                logger.warning(
-                    "Mutation policy not found at %s", policy_path
-                )
+                logger.warning("Mutation policy not found at %s", policy_path)
                 return []
             with open(path) as f:
                 policy = yaml.safe_load(f)
@@ -156,9 +152,7 @@ class SkillEvolver:
             self._last_evolution_time.get(f"name:{parent.name}", 0),
         )
         if time.time() - last_time < COOLDOWN_SECONDS:
-            logger.info(
-                "Skill %s in cooldown, skipping fix", parent.name
-            )
+            logger.info("Skill %s in cooldown, skipping fix", parent.name)
             return None
 
         # Anti-loop: same task can't trigger fix twice
@@ -171,29 +165,21 @@ class SkillEvolver:
             return None
 
         # Load skill directory content
-        skill_dir = (
-            Path(parent.path)
-            if parent.path
-            else self.skills_base_dir / parent.name
-        )
+        skill_dir = Path(parent.path) if parent.path else self.skills_base_dir / parent.name
         if not skill_dir.exists():
             logger.error("Skill directory not found: %s", skill_dir)
             return None
 
         current_content = snapshot_skill_dir(str(skill_dir))
         if not current_content:
-            logger.error(
-                "No content found in skill directory: %s", skill_dir
-            )
+            logger.error("No content found in skill directory: %s", skill_dir)
             return None
 
         # Save pre-evolution snapshot
         self.version_store.save_snapshot(skill_id, current_content)
 
         # Get recent failure analyses for context
-        recent_analyses = self.version_store.get_analyses_for_skill(
-            skill_id, limit=5
-        )
+        recent_analyses = self.version_store.get_analyses_for_skill(skill_id, limit=5)
         failure_history = self._format_failure_history(recent_analyses)
 
         # Build fix prompt
@@ -220,9 +206,7 @@ class SkillEvolver:
                 # Call LLM to generate patch
                 patch_text = self._call_llm(prompt)
                 if not patch_text:
-                    logger.warning(
-                        "LLM returned empty response on attempt %d", attempt
-                    )
+                    logger.warning("LLM returned empty response on attempt %d", attempt)
                     continue
 
                 # Apply patch to SKILL.md
@@ -230,35 +214,25 @@ class SkillEvolver:
                 new_content = apply_patch(
                     file_path=skill_md_path,
                     patch_text=patch_text,
-                    governance_check=lambda old, new: check_governance(
-                        old, new, self.forbidden_targets
-                    ),
+                    governance_check=lambda old, new: check_governance(old, new, self.forbidden_targets),
                 )
 
                 # Validate the result
-                validation_errors = self._validate_fix(
-                    new_content, parent.name
-                )
+                validation_errors = self._validate_fix(new_content, parent.name)
                 if validation_errors:
                     logger.warning(
                         "Validation failed on attempt %d: %s",
                         attempt,
                         validation_errors,
                     )
-                    prompt = self._build_retry_prompt(
-                        prompt, patch_text, validation_errors
-                    )
+                    prompt = self._build_retry_prompt(prompt, patch_text, validation_errors)
                     continue
 
                 # Save original content for rollback
-                original_file_content = Path(skill_md_path).read_text(
-                    encoding="utf-8"
-                )
+                original_file_content = Path(skill_md_path).read_text(encoding="utf-8")
 
                 # Write the fixed content
-                Path(skill_md_path).write_text(
-                    new_content, encoding="utf-8"
-                )
+                Path(skill_md_path).write_text(new_content, encoding="utf-8")
 
                 try:
                     # Generate diff
@@ -275,9 +249,7 @@ class SkillEvolver:
 
                     # Create new version
                     new_gen = parent.lineage.generation + 1
-                    new_skill_id = generate_skill_id(
-                        parent.name, Origin.FIXED, new_gen
-                    )
+                    new_skill_id = generate_skill_id(parent.name, Origin.FIXED, new_gen)
 
                     new_version = SkillVersion(
                         skill_id=new_skill_id,
@@ -299,15 +271,11 @@ class SkillEvolver:
                     )
 
                     # Atomic evolution: register new + deactivate parent
-                    self.version_store.evolve_skill(
-                        parent.skill_id, new_version, deactivate_parent=True
-                    )
+                    self.version_store.evolve_skill(parent.skill_id, new_version, deactivate_parent=True)
 
                     # Save post-evolution snapshot
                     new_snapshot = snapshot_skill_dir(str(skill_dir))
-                    self.version_store.save_snapshot(
-                        new_skill_id, new_snapshot
-                    )
+                    self.version_store.save_snapshot(new_skill_id, new_snapshot)
 
                     # Update tracking
                     self._evolution_history[skill_id] = task_id
@@ -325,34 +293,20 @@ class SkillEvolver:
 
                 except Exception as e:
                     # Rollback: restore original file content on any failure
-                    Path(skill_md_path).write_text(
-                        original_file_content, encoding="utf-8"
-                    )
-                    logger.error(
-                        "Evolution failed, restored original SKILL.md: %s", e
-                    )
+                    Path(skill_md_path).write_text(original_file_content, encoding="utf-8")
+                    logger.error("Evolution failed, restored original SKILL.md: %s", e)
                     raise
 
             except GovernanceError as e:
-                logger.warning(
-                    "Governance violation on attempt %d: %s", attempt, e
-                )
-                prompt = self._build_retry_prompt(
-                    prompt, patch_text, [str(e)]
-                )
+                logger.warning("Governance violation on attempt %d: %s", attempt, e)
+                prompt = self._build_retry_prompt(prompt, patch_text, [str(e)])
                 continue
             except PatchError as e:
-                logger.warning(
-                    "Patch application failed on attempt %d: %s", attempt, e
-                )
-                prompt = self._build_retry_prompt(
-                    prompt, patch_text, [str(e)]
-                )
+                logger.warning("Patch application failed on attempt %d: %s", attempt, e)
+                prompt = self._build_retry_prompt(prompt, patch_text, [str(e)])
                 continue
             except Exception as e:
-                logger.error(
-                    "Unexpected error on attempt %d: %s", attempt, e
-                )
+                logger.error("Unexpected error on attempt %d: %s", attempt, e)
                 continue
 
         logger.error(
@@ -415,9 +369,7 @@ class SkillEvolver:
             self._last_evolution_time.get(f"name:{parent.name}", 0),
         )
         if time.time() - last_time < COOLDOWN_SECONDS:
-            logger.info(
-                "Skill %s in cooldown, skipping derivation", parent.name
-            )
+            logger.info("Skill %s in cooldown, skipping derivation", parent.name)
             return None
 
         # Anti-loop: same task can't trigger derivation twice
@@ -430,29 +382,21 @@ class SkillEvolver:
             return None
 
         # Load skill directory content
-        skill_dir = (
-            Path(parent.path)
-            if parent.path
-            else self.skills_base_dir / parent.name
-        )
+        skill_dir = Path(parent.path) if parent.path else self.skills_base_dir / parent.name
         if not skill_dir.exists():
             logger.error("Skill directory not found: %s", skill_dir)
             return None
 
         current_content = snapshot_skill_dir(str(skill_dir))
         if not current_content:
-            logger.error(
-                "No content found in skill directory: %s", skill_dir
-            )
+            logger.error("No content found in skill directory: %s", skill_dir)
             return None
 
         # Save pre-evolution snapshot
         self.version_store.save_snapshot(parent_id, current_content)
 
         # Get recent analyses for context
-        recent_analyses = self.version_store.get_analyses_for_skill(
-            parent_id, limit=5
-        )
+        recent_analyses = self.version_store.get_analyses_for_skill(parent_id, limit=5)
         success_history = self._format_success_history(recent_analyses)
 
         # Build derived prompt
@@ -478,34 +422,24 @@ class SkillEvolver:
                 # Call LLM to generate enhanced content
                 new_content = self._call_llm(prompt)
                 if not new_content:
-                    logger.warning(
-                        "LLM returned empty response on attempt %d", attempt
-                    )
+                    logger.warning("LLM returned empty response on attempt %d", attempt)
                     continue
 
                 # Validate the result (allow name change if new_name given)
-                validation_errors = self._validate_derived(
-                    new_content, effective_name
-                )
+                validation_errors = self._validate_derived(new_content, effective_name)
                 if validation_errors:
                     logger.warning(
                         "Validation failed on attempt %d: %s",
                         attempt,
                         validation_errors,
                     )
-                    prompt = self._build_retry_prompt(
-                        prompt, new_content, validation_errors
-                    )
+                    prompt = self._build_retry_prompt(prompt, new_content, validation_errors)
                     continue
 
                 # Write the derived content to the skill directory
                 skill_md_path = str(skill_dir / "SKILL.md")
-                original_file_content = Path(skill_md_path).read_text(
-                    encoding="utf-8"
-                )
-                Path(skill_md_path).write_text(
-                    new_content, encoding="utf-8"
-                )
+                original_file_content = Path(skill_md_path).read_text(encoding="utf-8")
+                Path(skill_md_path).write_text(new_content, encoding="utf-8")
 
                 try:
                     # Generate diff
@@ -522,9 +456,7 @@ class SkillEvolver:
 
                     # Create new version
                     new_gen = parent.lineage.generation + 1
-                    new_skill_id = generate_skill_id(
-                        effective_name, Origin.DERIVED, new_gen
-                    )
+                    new_skill_id = generate_skill_id(effective_name, Origin.DERIVED, new_gen)
 
                     new_version = SkillVersion(
                         skill_id=new_skill_id,
@@ -546,15 +478,11 @@ class SkillEvolver:
                     )
 
                     # Atomic evolution: register new, parent STAYS ACTIVE
-                    self.version_store.evolve_skill(
-                        parent.skill_id, new_version, deactivate_parent=False
-                    )
+                    self.version_store.evolve_skill(parent.skill_id, new_version, deactivate_parent=False)
 
                     # Save post-evolution snapshot
                     new_snapshot = snapshot_skill_dir(str(skill_dir))
-                    self.version_store.save_snapshot(
-                        new_skill_id, new_snapshot
-                    )
+                    self.version_store.save_snapshot(new_skill_id, new_snapshot)
 
                     # Update tracking
                     self._evolution_history[parent_id] = task_id
@@ -575,12 +503,8 @@ class SkillEvolver:
 
                 except Exception as e:
                     # Rollback: restore original file content on any failure
-                    Path(skill_md_path).write_text(
-                        original_file_content, encoding="utf-8"
-                    )
-                    logger.error(
-                        "Derivation failed, restored original SKILL.md: %s", e
-                    )
+                    Path(skill_md_path).write_text(original_file_content, encoding="utf-8")
+                    logger.error("Derivation failed, restored original SKILL.md: %s", e)
                     raise
 
             except Exception as e:
@@ -598,9 +522,7 @@ class SkillEvolver:
         )
         return None
 
-    def detect_improvement_candidates(
-        self, min_completions: int = 10, min_quality: float = 0.7
-    ) -> list[dict]:
+    def detect_improvement_candidates(self, min_completions: int = 10, min_quality: float = 0.7) -> list[dict]:
         """Find skills that consistently succeed and could benefit from specialization.
 
         Scans all active skills via get_skill_health() and filters for those
@@ -617,9 +539,7 @@ class SkillEvolver:
         candidates: list[dict] = []
 
         try:
-            health_list = self.version_store.get_skill_health(
-                min_selections=min_completions
-            )
+            health_list = self.version_store.get_skill_health(min_selections=min_completions)
         except Exception as e:
             logger.error("Failed to get skill health: %s", e)
             return candidates
@@ -634,9 +554,7 @@ class SkillEvolver:
                 continue
 
             # Check for DERIVED-type suggestions in analyses
-            analyses = self.version_store.get_analyses_for_skill(
-                health.skill_id, limit=20
-            )
+            analyses = self.version_store.get_analyses_for_skill(health.skill_id, limit=20)
             derived_suggestions: list[str] = []
             for analysis in analyses:
                 suggestions = analysis.get("evolution_suggestions", [])
@@ -717,9 +635,7 @@ class SkillEvolver:
 ## Output Format
 Output the complete enhanced SKILL.md content. Do NOT wrap in code fences."""
 
-    def _validate_derived(
-        self, new_content: str, expected_name: str
-    ) -> list[str]:
+    def _validate_derived(self, new_content: str, expected_name: str) -> list[str]:
         """Validate a derived SKILL.md.
 
         Same as _validate_fix but uses the effective name (which may differ
@@ -768,9 +684,7 @@ Output the complete enhanced SKILL.md content. Do NOT wrap in code fences."""
                 env=env,
             )
             if result.returncode != 0:
-                logger.warning(
-                    "LLM call failed: %s", result.stderr[:500]
-                )
+                logger.warning("LLM call failed: %s", result.stderr[:500])
                 return ""
             return result.stdout.strip()
         except subprocess.TimeoutExpired:
@@ -793,11 +707,7 @@ Output the complete enhanced SKILL.md content. Do NOT wrap in code fences."""
         skill_md = skill_content.get("SKILL.md", "(not found)")
         metadata = skill_content.get("metadata.json", "(not found)")
 
-        forbidden_str = (
-            ", ".join(forbidden_targets)
-            if forbidden_targets
-            else "(none)"
-        )
+        forbidden_str = ", ".join(forbidden_targets) if forbidden_targets else "(none)"
 
         return f"""You are a skill evolution engine. Fix the failing skill below.
 
@@ -860,9 +770,7 @@ Errors:
 
 Fix these errors and try again."""
 
-    def _validate_fix(
-        self, new_content: str, expected_name: str
-    ) -> list[str]:
+    def _validate_fix(self, new_content: str, expected_name: str) -> list[str]:
         """Validate a fixed SKILL.md.
 
         Returns list of validation errors. Empty means valid.
@@ -889,30 +797,18 @@ Fix these errors and try again."""
                 name_found = False
                 for line in frontmatter.split("\n"):
                     if line.strip().startswith("name:"):
-                        name_value = (
-                            line.split(":", 1)[1]
-                            .strip()
-                            .strip('"')
-                            .strip("'")
-                        )
+                        name_value = line.split(":", 1)[1].strip().strip('"').strip("'")
                         if name_value != expected_name:
-                            errors.append(
-                                f"Skill name changed from '{expected_name}' "
-                                f"to '{name_value}'"
-                            )
+                            errors.append(f"Skill name changed from '{expected_name}' to '{name_value}'")
                         name_found = True
                         break
 
                 if not name_found:
-                    errors.append(
-                        "name: field missing from frontmatter"
-                    )
+                    errors.append("name: field missing from frontmatter")
 
         # Check minimum content length
         if len(new_content.strip()) < 50:
-            errors.append(
-                "Fixed content is suspiciously short (< 50 chars)"
-            )
+            errors.append("Fixed content is suspiciously short (< 50 chars)")
 
         return errors
 
@@ -998,9 +894,7 @@ Fix these errors and try again."""
             return None
 
         # Determine skill name
-        skill_name = self._sanitize_skill_name(
-            suggested_name or pattern_description[:60]
-        )
+        skill_name = self._sanitize_skill_name(suggested_name or pattern_description[:60])
 
         # Duplicate detection: check existing skills by name similarity
         duplicate = self._check_duplicate_skill(skill_name)
@@ -1069,9 +963,7 @@ Fix these errors and try again."""
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         metadata_path = skill_dir / "metadata.json"
-        metadata_path.write_text(
-            json.dumps(metadata, indent=2), encoding="utf-8"
-        )
+        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
         # Generate description from pattern
         description = f"AUTO-LEARN: {pattern_description[:200]}"
@@ -1131,7 +1023,6 @@ Fix these errors and try again."""
         Returns:
             List of dicts with: task_ids, description_pattern
         """
-        import sqlite3
 
         try:
             conn = self.version_store._get_conn()
@@ -1172,10 +1063,7 @@ Fix these errors and try again."""
                 applied_tasks = {r["task_id"] for r in applied_rows}
 
             # Novel tasks = completed without any skill applied
-            novel_task_ids = [
-                tid for tid in task_skills
-                if tid not in applied_tasks
-            ]
+            novel_task_ids = [tid for tid in task_skills if tid not in applied_tasks]
 
             if len(novel_task_ids) < min_occurrences:
                 return []
@@ -1191,13 +1079,15 @@ Fix these errors and try again."""
             for pattern_key, tids in patterns.items():
                 if len(tids) >= min_occurrences:
                     skills_attempted = pattern_key.split("|") if pattern_key else []
-                    results.append({
-                        "task_ids": tids,
-                        "description_pattern": (
-                            f"Tasks succeeded without applying skills: "
-                            f"{', '.join(skills_attempted) if skills_attempted else 'none attempted'}"
-                        ),
-                    })
+                    results.append(
+                        {
+                            "task_ids": tids,
+                            "description_pattern": (
+                                f"Tasks succeeded without applying skills: "
+                                f"{', '.join(skills_attempted) if skills_attempted else 'none attempted'}"
+                            ),
+                        }
+                    )
 
             return results
         except Exception as e:
@@ -1213,11 +1103,10 @@ Fix these errors and try again."""
         suggested_name: str,
     ) -> str:
         """Build the prompt for AUTO-LEARN skill capture."""
-        examples_str = "\n".join(
-            f"  {i + 1}. {ex[:300]}" for i, ex in enumerate(task_examples[:10])
-        )
+        examples_str = "\n".join(f"  {i + 1}. {ex[:300]}" for i, ex in enumerate(task_examples[:10]))
 
-        return f"""You are a skill creation engine. Create a brand-new SKILL.md file from scratch based on a successful execution pattern.
+        return f"""You are a skill creation engine. Create a brand-new SKILL.md file from scratch \
+based on a successful execution pattern.
 
 ## Observed Pattern
 {pattern_description}
@@ -1278,9 +1167,7 @@ The output must start with --- (YAML frontmatter delimiter)."""
         """
         existing_skills = self.version_store.list_skills(active_only=True)
         for skill in existing_skills:
-            ratio = difflib.SequenceMatcher(
-                None, skill_name.lower(), skill.name.lower()
-            ).ratio()
+            ratio = difflib.SequenceMatcher(None, skill_name.lower(), skill.name.lower()).ratio()
             if ratio >= DUPLICATE_NAME_THRESHOLD:
                 return skill.name
         return None

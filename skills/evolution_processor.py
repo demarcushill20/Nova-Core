@@ -308,10 +308,7 @@ class EvolutionProcessor:
             task_examples: list[str] = []
             ctx = request.context or ""
             if ctx.startswith("task_ids="):
-                task_examples = [
-                    tid.strip() for tid in ctx[len("task_ids="):].split(",")
-                    if tid.strip()
-                ]
+                task_examples = [tid.strip() for tid in ctx[len("task_ids=") :].split(",") if tid.strip()]
             # Ensure minimum examples for the evolver
             if not task_examples:
                 task_examples = [request.task_id] if request.task_id else ["unknown"]
@@ -335,10 +332,8 @@ class EvolutionProcessor:
             skill = result.get("skill_name", request.skill_name)
             new_id = result.get("new_skill_id", "?")
 
-            msg = (
-                f"Skill evolved ({etype}): {skill}\n"
-                f"New version: {new_id}"
-            )
-            self.telegram_fn(msg)
+            msg = f"Skill evolved ({etype}): {skill}\nNew version: {new_id}"
+            if self.telegram_fn is not None:
+                self.telegram_fn(msg)
         except Exception as exc:
             logger.warning("Failed to send evolution telegram notification: %s", exc)

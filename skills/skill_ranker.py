@@ -5,11 +5,12 @@ Upgrades from keyword substring matching to:
 2. Quality-based auto-exclusion of poorly performing skills
 3. Mid-execution skill retrieval support
 """
+
 import logging
 import math
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -66,19 +67,13 @@ class BM25Ranker:
 
         for skill in skills:
             # Build document text: name + description + body[:2000]
-            text = (
-                f"{skill['name']} "
-                f"{skill.get('description', '')} "
-                f"{skill.get('body', '')[:2000]}"
-            )
+            text = f"{skill['name']} {skill.get('description', '')} {skill.get('body', '')[:2000]}"
             tokens = self._tokenize(text)
             self._tokenized_docs.append(tokens)
 
         # Compute document lengths
         self._doc_lengths = [len(doc) for doc in self._tokenized_docs]
-        self._avg_doc_length = (
-            sum(self._doc_lengths) / max(len(self._doc_lengths), 1)
-        )
+        self._avg_doc_length = sum(self._doc_lengths) / max(len(self._doc_lengths), 1)
 
         # Compute IDF
         n_docs = len(self._tokenized_docs)
@@ -91,9 +86,7 @@ class BM25Ranker:
         self._idf = {}
         for term, freq in df.items():
             # Standard BM25 IDF formula
-            self._idf[term] = math.log(
-                (n_docs - freq + 0.5) / (freq + 0.5) + 1.0
-            )
+            self._idf[term] = math.log((n_docs - freq + 0.5) / (freq + 0.5) + 1.0)
 
         self._built = True
         logger.debug(
@@ -152,14 +145,12 @@ class BM25Ranker:
                     if ranked.completion_rate < self.COMPLETION_RATE_FLOOR:
                         ranked.excluded = True
                         ranked.exclusion_reason = (
-                            f"completion_rate={ranked.completion_rate:.2f}"
-                            f" < {self.COMPLETION_RATE_FLOOR}"
+                            f"completion_rate={ranked.completion_rate:.2f} < {self.COMPLETION_RATE_FLOOR}"
                         )
                     elif ranked.fallback_rate > self.FALLBACK_RATE_CEIL:
                         ranked.excluded = True
                         ranked.exclusion_reason = (
-                            f"fallback_rate={ranked.fallback_rate:.2f}"
-                            f" > {self.FALLBACK_RATE_CEIL}"
+                            f"fallback_rate={ranked.fallback_rate:.2f} > {self.FALLBACK_RATE_CEIL}"
                         )
 
             # Combined score: BM25 * quality
@@ -167,9 +158,7 @@ class BM25Ranker:
             scored.append(ranked)
 
         # Sort by combined score, non-excluded first
-        scored.sort(
-            key=lambda s: (not s.excluded, s.combined_score), reverse=True
-        )
+        scored.sort(key=lambda s: (not s.excluded, s.combined_score), reverse=True)
 
         # Return top_k non-excluded + any excluded (for logging)
         non_excluded = [s for s in scored if not s.excluded]
@@ -179,9 +168,7 @@ class BM25Ranker:
 
         # Log exclusions
         for s in excluded:
-            logger.info(
-                "Skill auto-excluded: %s (%s)", s.name, s.exclusion_reason
-            )
+            logger.info("Skill auto-excluded: %s (%s)", s.name, s.exclusion_reason)
 
         return result
 
@@ -206,9 +193,7 @@ class BM25Ranker:
 
             # BM25 formula
             numerator = term_freq * (self.K1 + 1)
-            denominator = term_freq + self.K1 * (
-                1 - self.B + self.B * doc_len / max(self._avg_doc_length, 1)
-            )
+            denominator = term_freq + self.K1 * (1 - self.B + self.B * doc_len / max(self._avg_doc_length, 1))
             score += idf * (numerator / denominator)
 
         return score

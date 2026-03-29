@@ -12,7 +12,6 @@ Covers:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -33,7 +32,6 @@ from skills.skill_record import (
     generate_skill_id,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -48,9 +46,7 @@ def _make_skill(
     **kwargs,
 ) -> SkillVersion:
     """Create a SkillVersion with sensible defaults for testing."""
-    skill_id = kwargs.pop(
-        "skill_id", generate_skill_id(name, origin, generation)
-    )
+    skill_id = kwargs.pop("skill_id", generate_skill_id(name, origin, generation))
     return SkillVersion(
         skill_id=skill_id,
         name=name,
@@ -90,7 +86,7 @@ def _make_entry(**overrides) -> AuditEntry:
         "after_metrics": {"completion_rate": 0.8},
     }
     defaults.update(overrides)
-    return AuditEntry(**defaults)
+    return AuditEntry(**defaults)  # type: ignore[arg-type]
 
 
 def _mock_version_store(skills: dict[str, SkillVersion]) -> MagicMock:
@@ -273,23 +269,17 @@ class TestEvolutionAudit:
     # -- check_evolution_allowed -------------------------------------------
 
     def test_check_allowed_passes(self, audit: EvolutionAudit):
-        allowed, reason = audit.check_evolution_allowed(
-            "FIX", "my-skill", risk_level="low", generation=0
-        )
+        allowed, reason = audit.check_evolution_allowed("FIX", "my-skill", risk_level="low", generation=0)
         assert allowed is True
         assert reason == "allowed"
 
     def test_check_allowed_generation_cap_default(self, audit: EvolutionAudit):
         # Default max_generation is 5 when no policy loaded
-        allowed, reason = audit.check_evolution_allowed(
-            "FIX", "my-skill", generation=5
-        )
+        allowed, reason = audit.check_evolution_allowed("FIX", "my-skill", generation=5)
         assert allowed is False
         assert "Generation 5 >= max 5" in reason
 
-    def test_check_allowed_generation_cap_from_policy(
-        self, audit_with_policy: EvolutionAudit
-    ):
+    def test_check_allowed_generation_cap_from_policy(self, audit_with_policy: EvolutionAudit):
         # derived.max_generation=3 in the test policy
         allowed, reason = audit_with_policy.check_evolution_allowed(
             "DERIVED", "my-skill", risk_level="low", generation=3
@@ -298,25 +288,17 @@ class TestEvolutionAudit:
         assert "Generation 3 >= max 3" in reason
 
     def test_check_allowed_risk_blocks_non_fix(self, audit: EvolutionAudit):
-        allowed, reason = audit.check_evolution_allowed(
-            "DERIVED", "skill-x", risk_level="high", generation=0
-        )
+        allowed, reason = audit.check_evolution_allowed("DERIVED", "skill-x", risk_level="high", generation=0)
         assert allowed is False
         assert "only allows FIX" in reason
 
-    def test_check_allowed_risk_critical_blocks_captured(
-        self, audit: EvolutionAudit
-    ):
-        allowed, reason = audit.check_evolution_allowed(
-            "CAPTURED", "skill-y", risk_level="critical", generation=0
-        )
+    def test_check_allowed_risk_critical_blocks_captured(self, audit: EvolutionAudit):
+        allowed, reason = audit.check_evolution_allowed("CAPTURED", "skill-y", risk_level="critical", generation=0)
         assert allowed is False
         assert "only allows FIX" in reason
 
     def test_check_allowed_fix_at_high_risk(self, audit: EvolutionAudit):
-        allowed, reason = audit.check_evolution_allowed(
-            "FIX", "skill-z", risk_level="high", generation=0
-        )
+        allowed, reason = audit.check_evolution_allowed("FIX", "skill-z", risk_level="high", generation=0)
         assert allowed is True
 
     # -- check_auto_rollback -----------------------------------------------
@@ -340,12 +322,8 @@ class TestEvolutionAudit:
         store = _mock_version_store({"parent_1": parent, "child_1": child})
         assert audit.check_auto_rollback("child_1", "parent_1", store) is True
 
-    def test_auto_rollback_skips_insufficient_executions(
-        self, audit: EvolutionAudit
-    ):
-        parent = _make_skill(
-            skill_id="p1", executions=20, completions=18
-        )
+    def test_auto_rollback_skips_insufficient_executions(self, audit: EvolutionAudit):
+        parent = _make_skill(skill_id="p1", executions=20, completions=18)
         child = _make_skill(
             skill_id="c1",
             executions=AUTO_ROLLBACK_WINDOW - 1,  # not enough
@@ -355,9 +333,7 @@ class TestEvolutionAudit:
         assert audit.check_auto_rollback("c1", "p1", store) is False
 
     def test_auto_rollback_skips_parent_no_data(self, audit: EvolutionAudit):
-        parent = _make_skill(
-            skill_id="p2", executions=0, completions=0
-        )
+        parent = _make_skill(skill_id="p2", executions=0, completions=0)
         child = _make_skill(
             skill_id="c2",
             executions=AUTO_ROLLBACK_WINDOW,
@@ -368,7 +344,9 @@ class TestEvolutionAudit:
 
     def test_auto_rollback_passes_when_child_good(self, audit: EvolutionAudit):
         parent = _make_skill(
-            skill_id="p3", executions=20, completions=16  # 80%
+            skill_id="p3",
+            executions=20,
+            completions=16,  # 80%
         )
         child = _make_skill(
             skill_id="c3",
@@ -391,12 +369,12 @@ class TestEvolutionAudit:
         store = _mock_version_store({"c_only": child})
         assert audit.check_auto_rollback("c_only", "missing_parent", store) is False
 
-    def test_auto_rollback_boundary_exact_threshold(
-        self, audit: EvolutionAudit
-    ):
+    def test_auto_rollback_boundary_exact_threshold(self, audit: EvolutionAudit):
         """Child rate exactly at threshold should NOT trigger rollback."""
         parent = _make_skill(
-            skill_id="p4", executions=20, completions=20  # 100%
+            skill_id="p4",
+            executions=20,
+            completions=20,  # 100%
         )
         # Threshold = 100% * 0.8 = 80%; child at exactly 80% is fine
         child = _make_skill(
@@ -534,38 +512,28 @@ class TestGovernanceEnforcer:
     # -- validate_evolution ------------------------------------------------
 
     def test_validate_passes(self, enforcer: GovernanceEnforcer):
-        allowed, violations = enforcer.validate_evolution(
-            "FIX", "my-skill", risk_level="low", generation=0
-        )
+        allowed, violations = enforcer.validate_evolution("FIX", "my-skill", risk_level="low", generation=0)
         assert allowed is True
         assert violations == []
 
     def test_validate_frozen_skill(self, enforcer: GovernanceEnforcer):
         enforcer.freeze_skill("frozen-skill")
-        allowed, violations = enforcer.validate_evolution(
-            "FIX", "frozen-skill", risk_level="low", generation=0
-        )
+        allowed, violations = enforcer.validate_evolution("FIX", "frozen-skill", risk_level="low", generation=0)
         assert allowed is False
         assert any("frozen" in v for v in violations)
 
     def test_validate_wrong_risk_level(self, enforcer: GovernanceEnforcer):
-        allowed, violations = enforcer.validate_evolution(
-            "DERIVED", "my-skill", risk_level="high", generation=0
-        )
+        allowed, violations = enforcer.validate_evolution("DERIVED", "my-skill", risk_level="high", generation=0)
         assert allowed is False
         assert any("not allowed" in v for v in violations)
 
     def test_validate_generation_cap_default(self, enforcer: GovernanceEnforcer):
         # No policy loaded — default max_generation=5
-        allowed, violations = enforcer.validate_evolution(
-            "FIX", "my-skill", risk_level="low", generation=5
-        )
+        allowed, violations = enforcer.validate_evolution("FIX", "my-skill", risk_level="low", generation=5)
         assert allowed is False
         assert any("Generation 5 >= max allowed 5" in v for v in violations)
 
-    def test_validate_generation_cap_from_policy(
-        self, enforcer_with_policy: GovernanceEnforcer
-    ):
+    def test_validate_generation_cap_from_policy(self, enforcer_with_policy: GovernanceEnforcer):
         # derived.max_generation=3 in the test policy
         allowed, violations = enforcer_with_policy.validate_evolution(
             "DERIVED", "my-skill", risk_level="low", generation=3
@@ -573,9 +541,7 @@ class TestGovernanceEnforcer:
         assert allowed is False
         assert any("Generation 3 >= max allowed 3" in v for v in violations)
 
-    def test_validate_multiple_violations(
-        self, enforcer: GovernanceEnforcer
-    ):
+    def test_validate_multiple_violations(self, enforcer: GovernanceEnforcer):
         enforcer.freeze_skill("bad-skill")
         allowed, violations = enforcer.validate_evolution(
             "CAPTURED",
@@ -587,28 +553,20 @@ class TestGovernanceEnforcer:
         # Should have: frozen + risk level + generation cap = 3 violations
         assert len(violations) >= 3
 
-    def test_validate_fix_at_low_risk_generation_0(
-        self, enforcer_with_policy: GovernanceEnforcer
-    ):
+    def test_validate_fix_at_low_risk_generation_0(self, enforcer_with_policy: GovernanceEnforcer):
         allowed, violations = enforcer_with_policy.validate_evolution(
             "FIX", "good-skill", risk_level="low", generation=0
         )
         assert allowed is True
         assert violations == []
 
-    def test_validate_captured_at_low_risk(
-        self, enforcer_with_policy: GovernanceEnforcer
-    ):
+    def test_validate_captured_at_low_risk(self, enforcer_with_policy: GovernanceEnforcer):
         allowed, violations = enforcer_with_policy.validate_evolution(
             "CAPTURED", "new-skill", risk_level="low", generation=0
         )
         assert allowed is True
 
-    def test_validate_captured_at_medium_risk(
-        self, enforcer: GovernanceEnforcer
-    ):
-        allowed, violations = enforcer.validate_evolution(
-            "CAPTURED", "skill-x", risk_level="medium", generation=0
-        )
+    def test_validate_captured_at_medium_risk(self, enforcer: GovernanceEnforcer):
+        allowed, violations = enforcer.validate_evolution("CAPTURED", "skill-x", risk_level="medium", generation=0)
         assert allowed is False
         assert any("not allowed" in v for v in violations)

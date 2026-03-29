@@ -10,10 +10,7 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-
-import pytest
 
 from skills.skill_cache import (
     DEFAULT_CACHE_TTL,
@@ -21,7 +18,6 @@ from skills.skill_cache import (
     SkillCache,
     TokenStats,
 )
-
 
 # ---------------------------------------------------------------------------
 # TokenStats
@@ -181,6 +177,7 @@ class TestSkillCache:
         sc.record_usage("s", tokens_used=200, was_cached=False)
         sc.record_usage("s", tokens_used=50, was_cached=True)
         stats = sc.get_stats("s")
+        assert stats is not None
         assert stats.cold_tokens == 300
         assert stats.cold_count == 2
         assert stats.warm_tokens == 50
@@ -306,9 +303,7 @@ class TestProgressiveDisclosure:
 
     def test_header_format(self):
         """Header contains skill name, description, and scores."""
-        h = SkillCache.progressive_disclosure_header(
-            "my-skill", "Does useful things", 0.85, 0.92
-        )
+        h = SkillCache.progressive_disclosure_header("my-skill", "Does useful things", 0.85, 0.92)
         assert "[my-skill]" in h
         assert "Does useful things" in h
         assert "quality=0.85" in h
@@ -337,9 +332,7 @@ class TestExecutionTemplate:
 
     def test_template_structure(self):
         """Template has all required keys."""
-        t = SkillCache.build_execution_template(
-            "skill-x", "do a thing", "it worked great"
-        )
+        t = SkillCache.build_execution_template("skill-x", "do a thing", "it worked great")
         assert t["skill_name"] == "skill-x"
         assert t["task_pattern"] == "do a thing"
         assert t["execution_template"] == "it worked great"

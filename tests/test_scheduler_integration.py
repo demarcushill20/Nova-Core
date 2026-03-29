@@ -12,14 +12,11 @@ from __future__ import annotations
 
 import json
 import textwrap
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-import pytest
 
 from utils.scheduler.block import BlockPlan
 from utils.scheduler.execution_log import (
-    ExecutionRecord,
     _DEFAULT_LOG_PATH,
     create_execution_record,
     log_execution,
@@ -41,7 +38,6 @@ from utils.scheduler.work_unit import (
     WorkMode,
     WorkUnit,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -200,10 +196,7 @@ class TestBlockStateMerge:
         now_utc = datetime.now(timezone.utc)
 
         # --- Morning call ---
-        morning_tasks = [
-            _make_task(task_id=f"shift_20260329_{i}_morning", title=f"Morning {i}")
-            for i in range(1, 4)
-        ]
+        morning_tasks = [_make_task(task_id=f"shift_20260329_{i}_morning", title=f"Morning {i}") for i in range(1, 4)]
         morning_result = build_block_plan(morning_tasks, block_duration_min=180.0, config=config)
 
         morning_state = BlockState(
@@ -216,8 +209,7 @@ class TestBlockStateMerge:
 
         # --- Afternoon call (merge) ---
         afternoon_tasks = [
-            _make_task(task_id=f"shift_20260329_{i}_afternoon", title=f"Afternoon {i}")
-            for i in range(9, 12)
+            _make_task(task_id=f"shift_20260329_{i}_afternoon", title=f"Afternoon {i}") for i in range(9, 12)
         ]
         afternoon_result = build_block_plan(afternoon_tasks, block_duration_min=180.0, config=config)
 
@@ -227,9 +219,7 @@ class TestBlockStateMerge:
         # Reproduce the generator's merge logic
         merged_slots = list(existing.original_plan.scheduled_slots)
         merged_slots.extend(afternoon_result.block_plan.scheduled_slots)
-        merged_deferred = list(existing.original_plan.deferred_tasks) + list(
-            afternoon_result.block_plan.deferred_tasks
-        )
+        merged_deferred = list(existing.original_plan.deferred_tasks) + list(afternoon_result.block_plan.deferred_tasks)
         merged_plan = BlockPlan(
             scheduled_slots=merged_slots,
             deferred_tasks=merged_deferred,
@@ -335,7 +325,8 @@ class TestMetadataExtraction:
 
     def test_full_frontmatter(self, tmp_path: Path):
         task = tmp_path / "shift_20260329_3_implementation.md"
-        task.write_text(textwrap.dedent("""\
+        task.write_text(
+            textwrap.dedent("""\
             ---
             work_mode: deep_implementation
             task_class: bounded
@@ -344,7 +335,8 @@ class TestMetadataExtraction:
             ---
             # Implementation block
             Do the work.
-        """))
+        """)
+        )
         meta = self._extract(task)
         assert meta["work_mode"] == "deep_implementation"
         assert meta["task_class"] == "bounded"
@@ -353,12 +345,14 @@ class TestMetadataExtraction:
 
     def test_partial_frontmatter(self, tmp_path: Path):
         task = tmp_path / "shift_20260329_1_system_health.md"
-        task.write_text(textwrap.dedent("""\
+        task.write_text(
+            textwrap.dedent("""\
             ---
             work_mode: monitoring
             ---
             # System health check
-        """))
+        """)
+        )
         meta = self._extract(task)
         assert meta["work_mode"] == "monitoring"
         # Defaults for missing keys

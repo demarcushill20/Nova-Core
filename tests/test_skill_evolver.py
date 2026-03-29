@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -50,7 +50,6 @@ from skills.skill_record import (
 )
 from skills.version_store import SkillVersionStore
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -65,9 +64,7 @@ def _make_skill(
     **kwargs,
 ) -> SkillVersion:
     """Create a SkillVersion with sensible defaults for testing."""
-    skill_id = kwargs.pop(
-        "skill_id", generate_skill_id(name, origin, generation)
-    )
+    skill_id = kwargs.pop("skill_id", generate_skill_id(name, origin, generation))
     return SkillVersion(
         skill_id=skill_id,
         name=name,
@@ -145,7 +142,9 @@ class TestSkillPatch:
 
     def test_apply_patch_full_rewrite(self, skill_dir: Path):
         """Full rewrite: the patch IS the new content."""
-        new_content = "---\nname: test-skill\n---\nNew body with enough content to pass the minimum length validation check."
+        new_content = (
+            "---\nname: test-skill\n---\nNew body with enough content to pass the minimum length validation check."
+        )
         result = apply_patch(
             str(skill_dir / "SKILL.md"),
             new_content,
@@ -209,9 +208,7 @@ class TestSkillPatch:
 
     def test_whitespace_normalized_no_match(self):
         """Level 3: Returns None when no normalized match found."""
-        result = _whitespace_normalized_replace(
-            "alpha beta", "gamma delta", "x"
-        )
+        result = _whitespace_normalized_replace("alpha beta", "gamma delta", "x")
         assert result is None
 
     def test_indentation_flexible_match_level_4(self):
@@ -239,9 +236,7 @@ class TestSkillPatch:
     def test_governance_check_blocks_forbidden(self, skill_dir: Path):
         """GovernanceError raised when patch modifies forbidden section."""
         # Write content with output_contract
-        (skill_dir / "SKILL.md").write_text(
-            "---\noutput_contract: old\n---\nbody content here"
-        )
+        (skill_dir / "SKILL.md").write_text("---\noutput_contract: old\n---\nbody content here")
         # Patch that changes output_contract
         new_content = "---\noutput_contract: MODIFIED\n---\nbody content here"
 
@@ -249,9 +244,7 @@ class TestSkillPatch:
             apply_patch(
                 str(skill_dir / "SKILL.md"),
                 new_content,
-                governance_check=lambda o, n: check_governance(
-                    o, n, ["output_contract"]
-                ),
+                governance_check=lambda o, n: check_governance(o, n, ["output_contract"]),
             )
 
     def test_governance_allows_non_forbidden(self):
@@ -294,16 +287,10 @@ class TestSkillPatch:
         assert "improved things" in result
         assert "improved tests" in result
 
-    def test_apply_patch_preserves_non_matched_content(
-        self, skill_dir: Path
-    ):
+    def test_apply_patch_preserves_non_matched_content(self, skill_dir: Path):
         """SEARCH/REPLACE only modifies matched portions."""
         patch_text = (
-            "<<<<<<< SEARCH\n"
-            "This skill does testing things.\n"
-            "=======\n"
-            "This skill does patched things.\n"
-            ">>>>>>> REPLACE"
+            "<<<<<<< SEARCH\nThis skill does testing things.\n=======\nThis skill does patched things.\n>>>>>>> REPLACE"
         )
         result = apply_patch(str(skill_dir / "SKILL.md"), patch_text)
         # Non-matched content preserved
@@ -387,9 +374,7 @@ class TestSkillPatch:
 class TestSkillEvolver:
     """Tests for skills.skill_evolver.SkillEvolver."""
 
-    def _make_evolver(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def _make_evolver(self, store: SkillVersionStore, tmp_path: Path):
         """Create a SkillEvolver with a test mutation policy."""
         from skills.skill_evolver import SkillEvolver
 
@@ -407,11 +392,8 @@ class TestSkillEvolver:
             skills_base_dir=str(tmp_path),
         )
 
-    def test_evolve_fix_creates_new_version(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_creates_new_version(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix creates a new SkillVersion with correct lineage."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -441,11 +423,9 @@ class TestSkillEvolver:
         assert result.created_by == "auto_fix"
         assert "AUTO-FIX" in result.lineage.change_summary
 
-    def test_evolve_fix_respects_generation_cap(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_respects_generation_cap(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix returns None when skill is at max generation."""
-        from skills.skill_evolver import MAX_GENERATION, SkillEvolver
+        from skills.skill_evolver import MAX_GENERATION
 
         parent = _make_skill(
             name="test-skill",
@@ -463,11 +443,8 @@ class TestSkillEvolver:
         )
         assert result is None
 
-    def test_evolve_fix_respects_cooldown(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_respects_cooldown(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix returns None when skill is in cooldown."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -486,11 +463,8 @@ class TestSkillEvolver:
         )
         assert result is None
 
-    def test_evolve_fix_anti_loop(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_anti_loop(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix prevents same task from triggering fix twice."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -510,11 +484,8 @@ class TestSkillEvolver:
         )
         assert result is None
 
-    def test_evolve_fix_missing_skill(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_fix_missing_skill(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_fix returns None for non-existent skill."""
-        from skills.skill_evolver import SkillEvolver
 
         evolver = self._make_evolver(store, tmp_path)
         result = evolver.evolve_fix(
@@ -523,11 +494,8 @@ class TestSkillEvolver:
         )
         assert result is None
 
-    def test_evolve_fix_missing_directory(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_fix_missing_directory(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_fix returns None when skill directory doesn't exist."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -543,11 +511,8 @@ class TestSkillEvolver:
         )
         assert result is None
 
-    def test_evolve_fix_saves_pre_snapshot(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_saves_pre_snapshot(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix saves a pre-evolution snapshot."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -557,9 +522,7 @@ class TestSkillEvolver:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        fixed = SAMPLE_SKILL_MD.replace(
-            "testing things", "snapshot things"
-        )
+        fixed = SAMPLE_SKILL_MD.replace("testing things", "snapshot things")
         with patch.object(evolver, "_call_llm", return_value=fixed):
             evolver.evolve_fix(
                 skill_id="snap_pre_1",
@@ -571,11 +534,8 @@ class TestSkillEvolver:
         assert snapshot is not None
         assert "SKILL.md" in snapshot
 
-    def test_evolve_fix_saves_post_snapshot(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_saves_post_snapshot(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix saves a post-evolution snapshot for the new version."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -585,9 +545,7 @@ class TestSkillEvolver:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        fixed = SAMPLE_SKILL_MD.replace(
-            "testing things", "post-snapshot things"
-        )
+        fixed = SAMPLE_SKILL_MD.replace("testing things", "post-snapshot things")
         with patch.object(evolver, "_call_llm", return_value=fixed):
             result = evolver.evolve_fix(
                 skill_id="snap_post_1",
@@ -599,11 +557,8 @@ class TestSkillEvolver:
         assert post_snapshot is not None
         assert "SKILL.md" in post_snapshot
 
-    def test_evolve_fix_validation_name_change(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_validation_name_change(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix rejects patches that change the skill name."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -614,9 +569,7 @@ class TestSkillEvolver:
         evolver = self._make_evolver(store, tmp_path)
 
         # Return content with changed name — all 3 attempts
-        bad_content = SAMPLE_SKILL_MD.replace(
-            "name: test-skill", "name: renamed-skill"
-        )
+        bad_content = SAMPLE_SKILL_MD.replace("name: test-skill", "name: renamed-skill")
         with patch.object(evolver, "_call_llm", return_value=bad_content):
             result = evolver.evolve_fix(
                 skill_id="namechg_1",
@@ -626,11 +579,8 @@ class TestSkillEvolver:
         # Should fail because name was changed
         assert result is None
 
-    def test_evolve_fix_validation_empty_content(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_validation_empty_content(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix rejects empty content."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -652,7 +602,6 @@ class TestSkillEvolver:
         self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
     ):
         """evolve_fix rejects malformed frontmatter."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -672,11 +621,8 @@ class TestSkillEvolver:
 
         assert result is None
 
-    def test_evolve_fix_retry_on_patch_error(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_retry_on_patch_error(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix retries when PatchError occurs."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -687,16 +633,8 @@ class TestSkillEvolver:
         evolver = self._make_evolver(store, tmp_path)
 
         # First call: invalid SEARCH/REPLACE, second: valid full rewrite
-        bad_patch = (
-            "<<<<<<< SEARCH\n"
-            "nonexistent content xyz\n"
-            "=======\n"
-            "replacement\n"
-            ">>>>>>> REPLACE"
-        )
-        good_content = SAMPLE_SKILL_MD.replace(
-            "testing things", "retried things"
-        )
+        bad_patch = "<<<<<<< SEARCH\nnonexistent content xyz\n=======\nreplacement\n>>>>>>> REPLACE"
+        good_content = SAMPLE_SKILL_MD.replace("testing things", "retried things")
         call_count = 0
 
         def mock_llm(prompt):
@@ -715,11 +653,8 @@ class TestSkillEvolver:
         assert result is not None
         assert call_count == 2
 
-    def test_evolve_fix_retry_on_governance_error(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_retry_on_governance_error(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix retries when GovernanceError occurs."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -730,12 +665,8 @@ class TestSkillEvolver:
         evolver = self._make_evolver(store, tmp_path)
 
         # First: modifies output_contract (forbidden), second: clean
-        bad_content = SAMPLE_SKILL_MD.replace(
-            "output_contract:", "output_contract: MODIFIED"
-        )
-        good_content = SAMPLE_SKILL_MD.replace(
-            "testing things", "governance-clean things"
-        )
+        bad_content = SAMPLE_SKILL_MD.replace("output_contract:", "output_contract: MODIFIED")
+        good_content = SAMPLE_SKILL_MD.replace("testing things", "governance-clean things")
         call_count = 0
 
         def mock_llm(prompt):
@@ -746,7 +677,7 @@ class TestSkillEvolver:
             return good_content
 
         with patch.object(evolver, "_call_llm", side_effect=mock_llm):
-            result = evolver.evolve_fix(
+            evolver.evolve_fix(
                 skill_id="goverr_1",
                 direction="Test governance retry",
             )
@@ -755,11 +686,9 @@ class TestSkillEvolver:
         # The key is that it retries rather than crashing
         assert call_count >= 2
 
-    def test_evolve_fix_returns_none_after_all_retries(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_returns_none_after_all_retries(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix returns None when all retry attempts fail."""
-        from skills.skill_evolver import MAX_FIX_ATTEMPTS, SkillEvolver
+        from skills.skill_evolver import MAX_FIX_ATTEMPTS
 
         parent = _make_skill(
             name="test-skill",
@@ -770,9 +699,7 @@ class TestSkillEvolver:
         evolver = self._make_evolver(store, tmp_path)
 
         # Always return content with changed name
-        bad_content = SAMPLE_SKILL_MD.replace(
-            "name: test-skill", "name: bad-name"
-        )
+        bad_content = SAMPLE_SKILL_MD.replace("name: test-skill", "name: bad-name")
         call_count = 0
 
         def mock_llm(prompt):
@@ -791,11 +718,8 @@ class TestSkillEvolver:
 
     def test_build_fix_prompt_includes_context(self, tmp_path: Path):
         """_build_fix_prompt includes all relevant context."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "prompt_test.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "prompt_test.db")
         evolver = self._make_evolver(store, tmp_path)
 
         prompt = evolver._build_fix_prompt(
@@ -820,11 +744,8 @@ class TestSkillEvolver:
 
     def test_build_retry_prompt_includes_errors(self, tmp_path: Path):
         """_build_retry_prompt includes previous errors."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "retry_test.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "retry_test.db")
         evolver = self._make_evolver(store, tmp_path)
 
         prompt = evolver._build_retry_prompt(
@@ -840,11 +761,8 @@ class TestSkillEvolver:
 
     def test_format_failure_history(self, tmp_path: Path):
         """_format_failure_history formats analyses correctly."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "history_test.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "history_test.db")
         evolver = self._make_evolver(store, tmp_path)
 
         analyses = [
@@ -869,11 +787,8 @@ class TestSkillEvolver:
 
     def test_format_failure_history_empty(self, tmp_path: Path):
         """_format_failure_history returns empty for no analyses."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "empty_hist.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "empty_hist.db")
         evolver = self._make_evolver(store, tmp_path)
         assert evolver._format_failure_history([]) == ""
 
@@ -883,15 +798,10 @@ class TestSkillEvolver:
 
         policy_path = tmp_path / "policy.yaml"
         policy_path.write_text(
-            "evolution_policy:\n"
-            "  forbidden_targets:\n"
-            "    - tool_permissions\n"
-            "    - output_contract\n"
+            "evolution_policy:\n  forbidden_targets:\n    - tool_permissions\n    - output_contract\n"
         )
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "policy_test.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "policy_test.db")
         evolver = SkillEvolver(
             version_store=store,
             mutation_policy_path=str(policy_path),
@@ -904,15 +814,9 @@ class TestSkillEvolver:
         from skills.skill_evolver import SkillEvolver
 
         policy_path = tmp_path / "policy.yaml"
-        policy_path.write_text(
-            "forbidden_targets:\n"
-            "  - safety_rules\n"
-            "  - tool_doctrine\n"
-        )
+        policy_path.write_text("forbidden_targets:\n  - safety_rules\n  - tool_doctrine\n")
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "fallback_test.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "fallback_test.db")
         evolver = SkillEvolver(
             version_store=store,
             mutation_policy_path=str(policy_path),
@@ -924,82 +828,58 @@ class TestSkillEvolver:
         """Returns empty list when mutation policy file doesn't exist."""
         from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "missing_test.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "missing_test.db")
         evolver = SkillEvolver(
             version_store=store,
-            mutation_policy_path=str(
-                tmp_path / "nonexistent_policy.yaml"
-            ),
+            mutation_policy_path=str(tmp_path / "nonexistent_policy.yaml"),
         )
         assert evolver.forbidden_targets == []
 
     def test_check_cooldown_not_in_cooldown(self, tmp_path: Path):
         """check_cooldown returns True when skill can be evolved."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "cooldown1.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "cooldown1.db")
         evolver = self._make_evolver(store, tmp_path)
         # No previous evolution time
         assert evolver.check_cooldown("any_skill") is True
 
     def test_check_cooldown_in_cooldown(self, tmp_path: Path):
         """check_cooldown returns False during cooldown period."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "cooldown2.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "cooldown2.db")
         evolver = self._make_evolver(store, tmp_path)
         evolver._last_evolution_time["skill_x"] = time.time()
         assert evolver.check_cooldown("skill_x") is False
 
     def test_validate_fix_valid_content(self, tmp_path: Path):
         """_validate_fix returns no errors for valid content."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "valid_test.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "valid_test.db")
         evolver = self._make_evolver(store, tmp_path)
         errors = evolver._validate_fix(SAMPLE_SKILL_MD, "test-skill")
         assert errors == []
 
     def test_validate_fix_empty_content(self, tmp_path: Path):
         """_validate_fix catches empty content."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "empty_valid.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "empty_valid.db")
         evolver = self._make_evolver(store, tmp_path)
         errors = evolver._validate_fix("", "test-skill")
         assert any("empty" in e.lower() for e in errors)
 
     def test_validate_fix_name_changed(self, tmp_path: Path):
         """_validate_fix catches skill name changes."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "name_valid.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "name_valid.db")
         evolver = self._make_evolver(store, tmp_path)
-        content = SAMPLE_SKILL_MD.replace(
-            "name: test-skill", "name: different-name"
-        )
+        content = SAMPLE_SKILL_MD.replace("name: test-skill", "name: different-name")
         errors = evolver._validate_fix(content, "test-skill")
         assert any("name changed" in e.lower() for e in errors)
 
     def test_validate_fix_missing_name(self, tmp_path: Path):
         """_validate_fix catches missing name field."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "noname_valid.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "noname_valid.db")
         evolver = self._make_evolver(store, tmp_path)
         content = "---\ndescription: no name here\n---\nbody content that is long enough to pass length check"
         errors = evolver._validate_fix(content, "test-skill")
@@ -1007,11 +887,8 @@ class TestSkillEvolver:
 
     def test_validate_fix_malformed_frontmatter(self, tmp_path: Path):
         """_validate_fix catches malformed frontmatter."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "malformed_valid.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "malformed_valid.db")
         evolver = self._make_evolver(store, tmp_path)
         content = "---\nname: test-skill\nno closing delimiter but long enough content here"
         errors = evolver._validate_fix(content, "test-skill")
@@ -1019,37 +896,25 @@ class TestSkillEvolver:
 
     def test_validate_fix_short_content(self, tmp_path: Path):
         """_validate_fix catches suspiciously short content."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "short_valid.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "short_valid.db")
         evolver = self._make_evolver(store, tmp_path)
         errors = evolver._validate_fix("short", "test-skill")
         assert any("short" in e.lower() for e in errors)
 
     def test_validate_fix_no_frontmatter_allowed(self, tmp_path: Path):
         """_validate_fix allows content without frontmatter (body-only fix)."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "nobody_valid.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "nobody_valid.db")
         evolver = self._make_evolver(store, tmp_path)
-        content = (
-            "# No Frontmatter Skill\n\n"
-            "This is a body-only content that is long enough to pass validation checks."
-        )
+        content = "# No Frontmatter Skill\n\nThis is a body-only content that is long enough to pass validation checks."
         errors = evolver._validate_fix(content, "test-skill")
         assert errors == []
 
     def test_get_evolution_history(self, tmp_path: Path):
         """get_evolution_history returns a copy of the history dict."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "history_copy.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "history_copy.db")
         evolver = self._make_evolver(store, tmp_path)
         evolver._evolution_history["s1"] = "t1"
         evolver._evolution_history["s2"] = "t2"
@@ -1060,11 +925,8 @@ class TestSkillEvolver:
         history["s3"] = "t3"
         assert "s3" not in evolver._evolution_history
 
-    def test_evolve_fix_deactivates_parent(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_deactivates_parent(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_fix deactivates the parent version."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -1074,9 +936,7 @@ class TestSkillEvolver:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        fixed = SAMPLE_SKILL_MD.replace(
-            "testing things", "deactivation test"
-        )
+        fixed = SAMPLE_SKILL_MD.replace("testing things", "deactivation test")
         with patch.object(evolver, "_call_llm", return_value=fixed):
             result = evolver.evolve_fix(
                 skill_id="deact_parent_1",
@@ -1088,11 +948,8 @@ class TestSkillEvolver:
         assert parent_reloaded is not None
         assert parent_reloaded.is_active is False
 
-    def test_evolve_fix_empty_skill_dir(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_fix_empty_skill_dir(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_fix returns None for empty skill directory (no files)."""
-        from skills.skill_evolver import SkillEvolver
 
         empty_dir = tmp_path / "empty-skill"
         empty_dir.mkdir()
@@ -1111,11 +968,8 @@ class TestSkillEvolver:
         )
         assert result is None
 
-    def test_evolve_fix_anti_loop_empty_task_id(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_fix_anti_loop_empty_task_id(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """Anti-loop check is skipped for empty task_id."""
-        from skills.skill_evolver import SkillEvolver
 
         parent = _make_skill(
             name="test-skill",
@@ -1126,9 +980,7 @@ class TestSkillEvolver:
         evolver = self._make_evolver(store, tmp_path)
         evolver._evolution_history["noloop_empty_1"] = ""
 
-        fixed = SAMPLE_SKILL_MD.replace(
-            "testing things", "empty task id things"
-        )
+        fixed = SAMPLE_SKILL_MD.replace("testing things", "empty task id things")
         with patch.object(evolver, "_call_llm", return_value=fixed):
             result = evolver.evolve_fix(
                 skill_id="noloop_empty_1",
@@ -1170,19 +1022,9 @@ class TestGovernance:
 
     def test_multiple_forbidden_targets(self):
         """Checks all forbidden targets."""
-        old = (
-            "safety_rules: original\n"
-            "output_contract: original\n"
-            "description: same"
-        )
-        new = (
-            "safety_rules: modified\n"
-            "output_contract: modified\n"
-            "description: same"
-        )
-        violations = check_governance(
-            old, new, ["safety_rules", "output_contract"]
-        )
+        old = "safety_rules: original\noutput_contract: original\ndescription: same"
+        new = "safety_rules: modified\noutput_contract: modified\ndescription: same"
+        violations = check_governance(old, new, ["safety_rules", "output_contract"])
         assert len(violations) >= 2
 
     def test_underscore_hyphen_normalization(self):
@@ -1195,9 +1037,7 @@ class TestGovernance:
     def test_identical_content_no_violations(self):
         """No violations when content is identical."""
         content = "tool_permissions: read\noutput_contract: strict"
-        violations = check_governance(
-            content, content, ["tool_permissions", "output_contract"]
-        )
+        violations = check_governance(content, content, ["tool_permissions", "output_contract"])
         assert violations == []
 
 
@@ -1289,9 +1129,7 @@ class TestBugFixes:
 
     # --- C2: file rollback when evolve_skill DB call fails ---
 
-    def test_c2_rollback_on_db_failure(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_c2_rollback_on_db_failure(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """C2: SKILL.md is restored when DB evolve_skill() fails."""
         from skills.skill_evolver import SkillEvolver
 
@@ -1308,17 +1146,13 @@ class TestBugFixes:
             skills_base_dir=str(tmp_path),
         )
         # Write a minimal policy
-        (tmp_path / "mutation_policy.yaml").write_text(
-            "evolution_policy:\n  forbidden_targets: []\n"
-        )
+        (tmp_path / "mutation_policy.yaml").write_text("evolution_policy:\n  forbidden_targets: []\n")
         evolver.forbidden_targets = []
 
         # Save original content for comparison
         original_content = (skill_dir / "SKILL.md").read_text()
 
-        fixed_content = SAMPLE_SKILL_MD.replace(
-            "testing things", "rollback-test things"
-        )
+        fixed_content = SAMPLE_SKILL_MD.replace("testing things", "rollback-test things")
 
         # Make evolve_skill raise to simulate DB failure
         with (
@@ -1343,9 +1177,7 @@ class TestBugFixes:
 
     # --- H2: cooldown bypass via new skill_id ---
 
-    def test_h2_cooldown_by_name_prevents_bypass(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_h2_cooldown_by_name_prevents_bypass(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """H2: Cooldown tracked by skill name prevents bypass via new ID."""
         from skills.skill_evolver import SkillEvolver
 
@@ -1360,9 +1192,7 @@ class TestBugFixes:
             mutation_policy_path=str(tmp_path / "mutation_policy.yaml"),
             skills_base_dir=str(tmp_path),
         )
-        (tmp_path / "mutation_policy.yaml").write_text(
-            "evolution_policy:\n  forbidden_targets: []\n"
-        )
+        (tmp_path / "mutation_policy.yaml").write_text("evolution_policy:\n  forbidden_targets: []\n")
         evolver.forbidden_targets = []
 
         # Simulate that a previous evolution set the name-based cooldown
@@ -1375,9 +1205,7 @@ class TestBugFixes:
         )
         assert result is None
 
-    def test_h2_cooldown_set_for_new_id_and_name(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_h2_cooldown_set_for_new_id_and_name(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """H2: After successful fix, cooldown is set for parent, new ID, and name."""
         from skills.skill_evolver import SkillEvolver
 
@@ -1392,9 +1220,7 @@ class TestBugFixes:
             mutation_policy_path=str(tmp_path / "mutation_policy.yaml"),
             skills_base_dir=str(tmp_path),
         )
-        (tmp_path / "mutation_policy.yaml").write_text(
-            "evolution_policy:\n  forbidden_targets: []\n"
-        )
+        (tmp_path / "mutation_policy.yaml").write_text("evolution_policy:\n  forbidden_targets: []\n")
         evolver.forbidden_targets = []
 
         fixed = SAMPLE_SKILL_MD.replace("testing things", "cooldown-tracked")
@@ -1416,9 +1242,7 @@ class TestBugFixes:
         """H2: check_cooldown respects name-based cooldown."""
         from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "cd_name.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "cd_name.db")
         evolver = SkillEvolver(
             version_store=store,
             mutation_policy_path=str(tmp_path / "nonexistent.yaml"),
@@ -1518,9 +1342,7 @@ This skill does fast testing things optimized for speed.
 class TestEvolveDerived:
     """Tests for SkillEvolver.evolve_derived (AUTO-IMPROVE, Phase 4)."""
 
-    def _make_evolver(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def _make_evolver(self, store: SkillVersionStore, tmp_path: Path):
         """Create a SkillEvolver with a test mutation policy."""
         from skills.skill_evolver import SkillEvolver
 
@@ -1538,9 +1360,7 @@ class TestEvolveDerived:
             skills_base_dir=str(tmp_path),
         )
 
-    def test_evolve_derived_creates_new_version(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_creates_new_version(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived creates a new SkillVersion from a successful parent."""
         parent = _make_skill(
             name="test-skill",
@@ -1550,9 +1370,7 @@ class TestEvolveDerived:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD):
             result = evolver.evolve_derived(
                 parent_id="derived_parent_1",
                 direction="Add enhanced coverage analysis",
@@ -1566,9 +1384,7 @@ class TestEvolveDerived:
         assert result.lineage.generation == 1
         assert result.created_by == "auto_improve"
 
-    def test_evolve_derived_parent_stays_active(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_parent_stays_active(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived does NOT deactivate the parent (unlike evolve_fix)."""
         parent = _make_skill(
             name="test-skill",
@@ -1578,9 +1394,7 @@ class TestEvolveDerived:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD):
             result = evolver.evolve_derived(
                 parent_id="active_parent_1",
                 direction="Improve test reporting",
@@ -1592,9 +1406,7 @@ class TestEvolveDerived:
         assert parent_reloaded is not None
         assert parent_reloaded.is_active is True
 
-    def test_evolve_derived_with_custom_name(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_with_custom_name(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived uses new_name when provided."""
         parent = _make_skill(
             name="test-skill",
@@ -1604,9 +1416,7 @@ class TestEvolveDerived:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_DERIVED_CUSTOM_NAME_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_DERIVED_CUSTOM_NAME_MD):
             result = evolver.evolve_derived(
                 parent_id="custom_name_1",
                 direction="Create a fast variant",
@@ -1628,9 +1438,7 @@ class TestEvolveDerived:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD):
             result = evolver.evolve_derived(
                 parent_id="inherit_name_1",
                 direction="Enhance without renaming",
@@ -1639,9 +1447,7 @@ class TestEvolveDerived:
         assert result is not None
         assert result.name == "test-skill"
 
-    def test_evolve_derived_origin_is_derived(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_origin_is_derived(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived sets origin to DERIVED."""
         parent = _make_skill(
             name="test-skill",
@@ -1651,9 +1457,7 @@ class TestEvolveDerived:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD):
             result = evolver.evolve_derived(
                 parent_id="origin_derived_1",
                 direction="Specialize for Python testing",
@@ -1662,9 +1466,7 @@ class TestEvolveDerived:
         assert result is not None
         assert result.lineage.origin == Origin.DERIVED
 
-    def test_evolve_derived_generation_incremented(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_generation_incremented(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived increments generation from parent."""
         parent = _make_skill(
             name="test-skill",
@@ -1676,9 +1478,7 @@ class TestEvolveDerived:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD):
             result = evolver.evolve_derived(
                 parent_id="gen_inc_1",
                 direction="Further enhance",
@@ -1688,9 +1488,7 @@ class TestEvolveDerived:
         assert result.lineage.generation == 3
         assert result.version == "1.3.0"
 
-    def test_evolve_derived_respects_generation_cap(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_respects_generation_cap(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived returns None when parent is at MAX_GENERATION."""
         from skills.skill_evolver import MAX_GENERATION
 
@@ -1711,9 +1509,7 @@ class TestEvolveDerived:
 
         assert result is None
 
-    def test_evolve_derived_respects_cooldown(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_respects_cooldown(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived returns None during cooldown period."""
         parent = _make_skill(
             name="test-skill",
@@ -1733,9 +1529,7 @@ class TestEvolveDerived:
 
         assert result is None
 
-    def test_evolve_derived_saves_snapshots(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_saves_snapshots(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived saves pre- and post-evolution snapshots."""
         parent = _make_skill(
             name="test-skill",
@@ -1745,9 +1539,7 @@ class TestEvolveDerived:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD):
             result = evolver.evolve_derived(
                 parent_id="snap_der_1",
                 direction="Test snapshot saving",
@@ -1763,9 +1555,7 @@ class TestEvolveDerived:
         assert new_snapshot is not None
         assert "SKILL.md" in new_snapshot
 
-    def test_evolve_derived_content_diff_generated(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_content_diff_generated(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived generates a content diff in the lineage."""
         parent = _make_skill(
             name="test-skill",
@@ -1775,9 +1565,7 @@ class TestEvolveDerived:
         store.register_skill(parent)
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_DERIVED_SKILL_MD):
             result = evolver.evolve_derived(
                 parent_id="diff_der_1",
                 direction="Generate a diff test",
@@ -1788,9 +1576,7 @@ class TestEvolveDerived:
         assert result.lineage.content_diff != ""
         assert result.lineage.change_summary == "AUTO-IMPROVE: Generate a diff test"
 
-    def test_evolve_derived_missing_parent_returns_none(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_derived_missing_parent_returns_none(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_derived returns None when parent_id is not in store."""
         evolver = self._make_evolver(store, tmp_path)
 
@@ -1801,9 +1587,7 @@ class TestEvolveDerived:
 
         assert result is None
 
-    def test_evolve_derived_missing_skill_dir_returns_none(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_derived_missing_skill_dir_returns_none(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_derived returns None when skill directory doesn't exist."""
         parent = _make_skill(
             name="test-skill",
@@ -1820,9 +1604,7 @@ class TestEvolveDerived:
 
         assert result is None
 
-    def test_evolve_derived_retry_on_failure(
-        self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path
-    ):
+    def test_evolve_derived_retry_on_failure(self, store: SkillVersionStore, skill_dir: Path, tmp_path: Path):
         """evolve_derived retries when validation fails on first attempt."""
         parent = _make_skill(
             name="test-skill",
@@ -1833,9 +1615,7 @@ class TestEvolveDerived:
         evolver = self._make_evolver(store, tmp_path)
 
         # First call: bad content (name changed), second: good content
-        bad_content = SAMPLE_DERIVED_SKILL_MD.replace(
-            "name: test-skill", "name: bad-name"
-        )
+        bad_content = SAMPLE_DERIVED_SKILL_MD.replace("name: test-skill", "name: bad-name")
         call_count = 0
 
         def mock_llm(prompt):
@@ -1885,9 +1665,7 @@ class TestEvolveDerived:
         assert result is None
         assert call_count == MAX_FIX_ATTEMPTS
 
-    def test_detect_improvement_candidates(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_detect_improvement_candidates(self, store: SkillVersionStore, tmp_path: Path):
         """detect_improvement_candidates finds healthy high-quality skills."""
         evolver = self._make_evolver(store, tmp_path)
 
@@ -1923,12 +1701,8 @@ class TestEvolveDerived:
             health_issues=[],
         )
 
-        with patch.object(
-            store, "get_skill_health", return_value=[mock_health]
-        ):
-            candidates = evolver.detect_improvement_candidates(
-                min_completions=10, min_quality=0.7
-            )
+        with patch.object(store, "get_skill_health", return_value=[mock_health]):
+            candidates = evolver.detect_improvement_candidates(min_completions=10, min_quality=0.7)
 
         assert len(candidates) == 1
         assert candidates[0]["skill_id"] == "hq_1"
@@ -1937,9 +1711,7 @@ class TestEvolveDerived:
         # Should contain generic suggestion since no DERIVED analyses exist
         assert "High-performing skill" in candidates[0]["suggestion"]
 
-    def test_detect_improvement_candidates_filters_unhealthy(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_detect_improvement_candidates_filters_unhealthy(self, store: SkillVersionStore, tmp_path: Path):
         """detect_improvement_candidates excludes unhealthy skills."""
         evolver = self._make_evolver(store, tmp_path)
 
@@ -1962,18 +1734,12 @@ class TestEvolveDerived:
             health_issues=["Low completion rate"],
         )
 
-        with patch.object(
-            store, "get_skill_health", return_value=[unhealthy]
-        ):
-            candidates = evolver.detect_improvement_candidates(
-                min_completions=5, min_quality=0.2
-            )
+        with patch.object(store, "get_skill_health", return_value=[unhealthy]):
+            candidates = evolver.detect_improvement_candidates(min_completions=5, min_quality=0.2)
 
         assert len(candidates) == 0
 
-    def test_detect_improvement_candidates_filters_low_quality(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_detect_improvement_candidates_filters_low_quality(self, store: SkillVersionStore, tmp_path: Path):
         """detect_improvement_candidates excludes skills below quality threshold."""
         evolver = self._make_evolver(store, tmp_path)
 
@@ -1996,24 +1762,15 @@ class TestEvolveDerived:
             health_issues=[],
         )
 
-        with patch.object(
-            store, "get_skill_health", return_value=[low_quality]
-        ):
-            candidates = evolver.detect_improvement_candidates(
-                min_completions=10, min_quality=0.7
-            )
+        with patch.object(store, "get_skill_health", return_value=[low_quality]):
+            candidates = evolver.detect_improvement_candidates(min_completions=10, min_quality=0.7)
 
         assert len(candidates) == 0
 
-    def test_build_derived_prompt_includes_context(
-        self, tmp_path: Path
-    ):
+    def test_build_derived_prompt_includes_context(self, tmp_path: Path):
         """_build_derived_prompt includes all relevant context."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "derived_prompt_test.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "derived_prompt_test.db")
         evolver = self._make_evolver(store, tmp_path)
 
         prompt = evolver._build_derived_prompt(
@@ -2035,15 +1792,10 @@ class TestEvolveDerived:
         assert "quality=0.9" in prompt
         assert "enhancement" in prompt.lower()
 
-    def test_build_derived_prompt_custom_name_instruction(
-        self, tmp_path: Path
-    ):
+    def test_build_derived_prompt_custom_name_instruction(self, tmp_path: Path):
         """_build_derived_prompt uses correct name instruction for custom name."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "derived_name_prompt.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "derived_name_prompt.db")
         evolver = self._make_evolver(store, tmp_path)
 
         prompt = evolver._build_derived_prompt(
@@ -2061,11 +1813,8 @@ class TestEvolveDerived:
 
     def test_format_success_history(self, tmp_path: Path):
         """_format_success_history formats analyses correctly."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "success_hist.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "success_hist.db")
         evolver = self._make_evolver(store, tmp_path)
 
         analyses = [
@@ -2082,11 +1831,8 @@ class TestEvolveDerived:
 
     def test_format_success_history_empty(self, tmp_path: Path):
         """_format_success_history returns empty for no analyses."""
-        from skills.skill_evolver import SkillEvolver
 
-        store = SkillVersionStore(
-            db_path=tmp_path / "empty_success.db"
-        )
+        store = SkillVersionStore(db_path=tmp_path / "empty_success.db")
         evolver = self._make_evolver(store, tmp_path)
         assert evolver._format_success_history([]) == ""
 
@@ -2127,9 +1873,7 @@ This skill handles cleanup of data pipeline artifacts.
 class TestEvolveCaptured:
     """Tests for SkillEvolver.evolve_captured (AUTO-LEARN, Phase 5)."""
 
-    def _make_evolver(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def _make_evolver(self, store: SkillVersionStore, tmp_path: Path):
         """Create a SkillEvolver with a test mutation policy."""
         from skills.skill_evolver import SkillEvolver
 
@@ -2147,15 +1891,11 @@ class TestEvolveCaptured:
             skills_base_dir=str(tmp_path / "skills"),
         )
 
-    def test_evolve_captured_creates_new_skill(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_creates_new_skill(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured creates a new SkillVersion from a pattern."""
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Cleaning up data pipeline artifacts after ETL jobs",
                 task_examples=[
@@ -2169,15 +1909,11 @@ class TestEvolveCaptured:
         assert result is not None
         assert result.name == "data-pipeline-cleanup"
 
-    def test_evolve_captured_origin_is_captured(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_origin_is_captured(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured sets origin to CAPTURED."""
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Pattern for origin test",
                 task_examples=["Example task 1", "Example task 2"],
@@ -2187,15 +1923,11 @@ class TestEvolveCaptured:
         assert result is not None
         assert result.lineage.origin == Origin.CAPTURED
 
-    def test_evolve_captured_generation_is_zero(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_generation_is_zero(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured creates skill at generation 0."""
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Pattern for generation test",
                 task_examples=["Task A", "Task B"],
@@ -2205,15 +1937,11 @@ class TestEvolveCaptured:
         assert result is not None
         assert result.lineage.generation == 0
 
-    def test_evolve_captured_no_parent(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_no_parent(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured creates skill with no parent IDs."""
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Pattern for parent test",
                 task_examples=["Task X", "Task Y"],
@@ -2223,15 +1951,11 @@ class TestEvolveCaptured:
         assert result is not None
         assert result.lineage.parent_ids == []
 
-    def test_evolve_captured_creates_skill_directory(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_creates_skill_directory(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured creates the skill directory on disk."""
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Pattern for directory test",
                 task_examples=["Task 1", "Task 2"],
@@ -2243,15 +1967,11 @@ class TestEvolveCaptured:
         assert skill_dir.exists()
         assert skill_dir.is_dir()
 
-    def test_evolve_captured_writes_skill_md(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_writes_skill_md(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured writes SKILL.md to the skill directory."""
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Pattern for SKILL.md test",
                 task_examples=["Task alpha", "Task beta"],
@@ -2265,15 +1985,11 @@ class TestEvolveCaptured:
         assert "data-pipeline-cleanup" in content
         assert "---" in content
 
-    def test_evolve_captured_writes_metadata_json(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_writes_metadata_json(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured writes metadata.json with quarantine flag."""
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Pattern for metadata test",
                 task_examples=["Task one", "Task two"],
@@ -2282,9 +1998,7 @@ class TestEvolveCaptured:
             )
 
         assert result is not None
-        metadata_path = (
-            tmp_path / "skills" / "data-pipeline-cleanup" / "metadata.json"
-        )
+        metadata_path = tmp_path / "skills" / "data-pipeline-cleanup" / "metadata.json"
         assert metadata_path.exists()
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         assert metadata["name"] == "data-pipeline-cleanup"
@@ -2294,9 +2008,7 @@ class TestEvolveCaptured:
         assert metadata["quarantine_successes_required"] == 5
         assert metadata["captured_from"]["task_id"] == "task_meta_1"
 
-    def test_evolve_captured_rate_limit(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_rate_limit(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured enforces max 2 captures per day."""
         from skills.skill_evolver import MAX_CAPTURES_PER_DAY
 
@@ -2310,14 +2022,10 @@ class TestEvolveCaptured:
         ]
         skill_mds = []
         for name in skill_names:
-            skill_mds.append(
-                SAMPLE_CAPTURED_SKILL_MD.replace(
-                    "data-pipeline-cleanup", name
-                )
-            )
+            skill_mds.append(SAMPLE_CAPTURED_SKILL_MD.replace("data-pipeline-cleanup", name))
 
         results = []
-        for i, (name, md) in enumerate(zip(skill_names, skill_mds)):
+        for i, (name, md) in enumerate(zip(skill_names, skill_mds, strict=False)):
             with patch.object(evolver, "_call_llm", return_value=md):
                 result = evolver.evolve_captured(
                     pattern_description=f"Pattern {i}",
@@ -2333,9 +2041,7 @@ class TestEvolveCaptured:
         assert results[2] is None
         assert evolver._captures_today == MAX_CAPTURES_PER_DAY
 
-    def test_evolve_captured_requires_min_task_examples(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_requires_min_task_examples(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured requires at least 2 task examples."""
         evolver = self._make_evolver(store, tmp_path)
 
@@ -2355,9 +2061,7 @@ class TestEvolveCaptured:
         )
         assert result is None
 
-    def test_evolve_captured_duplicate_detection(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_duplicate_detection(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured rejects skills with similar existing names."""
         evolver = self._make_evolver(store, tmp_path)
 
@@ -2369,9 +2073,7 @@ class TestEvolveCaptured:
         store.register_skill(existing)
 
         # Try to capture a skill with the same name
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Duplicate pattern",
                 task_examples=["Task dup 1", "Task dup 2"],
@@ -2380,9 +2082,7 @@ class TestEvolveCaptured:
 
         assert result is None
 
-    def test_evolve_captured_returns_none_on_llm_failure(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_returns_none_on_llm_failure(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured returns None when LLM returns empty response."""
         evolver = self._make_evolver(store, tmp_path)
 
@@ -2395,9 +2095,7 @@ class TestEvolveCaptured:
 
         assert result is None
 
-    def test_evolve_captured_returns_none_on_short_llm_response(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_returns_none_on_short_llm_response(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured returns None when LLM response is too short."""
         evolver = self._make_evolver(store, tmp_path)
 
@@ -2410,13 +2108,10 @@ class TestEvolveCaptured:
 
         assert result is None
 
-    def test_detect_novel_patterns(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_detect_novel_patterns(self, store: SkillVersionStore, tmp_path: Path):
         """detect_novel_patterns finds tasks that succeeded without skill application."""
         from skills.execution_analysis import (
             ExecutionAnalysis,
-            EvolutionSuggestion,
             SkillJudgment,
         )
 
@@ -2455,9 +2150,7 @@ class TestEvolveCaptured:
         assert "description_pattern" in pattern
         assert len(pattern["task_ids"]) >= 2
 
-    def test_detect_novel_patterns_excludes_applied(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_detect_novel_patterns_excludes_applied(self, store: SkillVersionStore, tmp_path: Path):
         """detect_novel_patterns excludes tasks where a skill was applied."""
         from skills.execution_analysis import (
             ExecutionAnalysis,
@@ -2494,29 +2187,22 @@ class TestEvolveCaptured:
         # Should find no novel patterns since all tasks had skills applied
         assert len(patterns) == 0
 
-    def test_evolve_captured_sanitize_name(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_sanitize_name(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured sanitizes suggested names properly."""
-        from skills.skill_evolver import SkillEvolver
 
         evolver = self._make_evolver(store, tmp_path)
 
         # Verify sanitization
-        assert evolver._sanitize_skill_name("My Cool Skill!") == "my-cool-skill-"[:len("my-cool-skill")]
+        assert evolver._sanitize_skill_name("My Cool Skill!") == "my-cool-skill-"[: len("my-cool-skill")]
         assert evolver._sanitize_skill_name("  UPPER case  ") == "upper-case"
         assert evolver._sanitize_skill_name("a--b---c") == "a-b-c"
         assert evolver._sanitize_skill_name("") != ""  # fallback name
 
-    def test_evolve_captured_created_by_auto_capture(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_created_by_auto_capture(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured sets created_by to 'auto_capture'."""
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Pattern for created_by test",
                 task_examples=["Task cb1", "Task cb2"],
@@ -2526,15 +2212,11 @@ class TestEvolveCaptured:
         assert result is not None
         assert result.created_by == "auto_capture"
 
-    def test_evolve_captured_registers_in_version_store(
-        self, store: SkillVersionStore, tmp_path: Path
-    ):
+    def test_evolve_captured_registers_in_version_store(self, store: SkillVersionStore, tmp_path: Path):
         """evolve_captured registers the new skill in the version store."""
         evolver = self._make_evolver(store, tmp_path)
 
-        with patch.object(
-            evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD
-        ):
+        with patch.object(evolver, "_call_llm", return_value=SAMPLE_CAPTURED_SKILL_MD):
             result = evolver.evolve_captured(
                 pattern_description="Pattern for store registration test",
                 task_examples=["Task reg1", "Task reg2"],

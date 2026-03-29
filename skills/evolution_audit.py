@@ -86,7 +86,7 @@ class EvolutionAudit:
     def _load_policy(self, path: str) -> dict:
         """Load the ``evolution_policy`` section from mutation_policy.yaml."""
         try:
-            import yaml  # noqa: F811 — local to isolate import error
+            import yaml
 
             p = Path(path)
             if not p.exists():
@@ -125,11 +125,7 @@ class EvolutionAudit:
 
     def get_entries_for_skill(self, skill_name: str) -> list[AuditEntry]:
         """Get all audit entries for a specific skill (last 500)."""
-        return [
-            e
-            for e in self.get_recent_entries(limit=500)
-            if e.skill_name == skill_name
-        ]
+        return [e for e in self.get_recent_entries(limit=500) if e.skill_name == skill_name]
 
     # -- governance gate ---------------------------------------------------
 
@@ -194,8 +190,7 @@ class EvolutionAudit:
         # Rollback if child significantly worse than parent
         if parent_rate > 0 and child_rate < parent_rate * REGRESSION_THRESHOLD:
             logger.warning(
-                "Auto-rollback triggered for %s: child_rate=%.2f < "
-                "parent_rate=%.2f * %.2f",
+                "Auto-rollback triggered for %s: child_rate=%.2f < parent_rate=%.2f * %.2f",
                 child.name,
                 child_rate,
                 parent_rate,
@@ -230,14 +225,12 @@ class EvolutionAudit:
         if skill.stats.completions >= required_successes:
             return (
                 True,
-                f"Reached {skill.stats.completions}/{required_successes} "
-                f"successful completions",
+                f"Reached {skill.stats.completions}/{required_successes} successful completions",
             )
 
         return (
             False,
-            f"Only {skill.stats.completions}/{required_successes} "
-            f"successful completions",
+            f"Only {skill.stats.completions}/{required_successes} successful completions",
         )
 
 
@@ -324,25 +317,18 @@ class GovernanceEnforcer:
 
         # Check frozen
         if self.is_frozen(skill_name):
-            violations.append(
-                f"Skill '{skill_name}' is frozen — no evolution allowed"
-            )
+            violations.append(f"Skill '{skill_name}' is frozen — no evolution allowed")
 
         # Check risk level
         allowed_types = self.get_allowed_evolution_types(risk_level)
         if evolution_type not in allowed_types:
-            violations.append(
-                f"Evolution type '{evolution_type}' not allowed "
-                f"for risk_level '{risk_level}'"
-            )
+            violations.append(f"Evolution type '{evolution_type}' not allowed for risk_level '{risk_level}'")
 
         # Check generation cap from policy
         evolution_config = self._policy.get("evolution_policy", {})
         type_config = evolution_config.get(evolution_type.lower(), {})
         max_gen = type_config.get("max_generation", 5)
         if generation >= max_gen:
-            violations.append(
-                f"Generation {generation} >= max allowed {max_gen}"
-            )
+            violations.append(f"Generation {generation} >= max allowed {max_gen}")
 
         return len(violations) == 0, violations

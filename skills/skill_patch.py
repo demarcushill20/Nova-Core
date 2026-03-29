@@ -17,6 +17,7 @@ from __future__ import annotations
 import difflib
 import logging
 import re
+from collections.abc import Callable
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -38,7 +39,7 @@ class GovernanceError(Exception):
 def apply_patch(
     file_path: str,
     patch_text: str,
-    governance_check: callable = None,
+    governance_check: Callable[[str, str], list[str]] | None = None,
 ) -> str:
     """Apply a patch to a file. Auto-detects patch format.
 
@@ -55,8 +56,7 @@ def apply_patch(
         # FULL rewrite — validate it looks like real content
         if len(patch_text.strip()) < 50:
             raise PatchError(
-                "Full rewrite content is too short to be valid "
-                f"({len(patch_text.strip())} chars, minimum 50)"
+                f"Full rewrite content is too short to be valid ({len(patch_text.strip())} chars, minimum 50)"
             )
         new_content = patch_text
 
@@ -64,9 +64,7 @@ def apply_patch(
     if governance_check:
         violations = governance_check(content, new_content)
         if violations:
-            raise GovernanceError(
-                f"Governance violations: {'; '.join(violations)}"
-            )
+            raise GovernanceError(f"Governance violations: {'; '.join(violations)}")
 
     return new_content
 
@@ -129,38 +127,26 @@ def _fuzzy_replace(content: str, search: str, replace: str) -> str:
     if result is not None:
         return result
 
-    raise PatchError(
-        f"Could not match search block (tried 4 fuzzy levels):\n{search[:200]}"
-    )
+    raise PatchError(f"Could not match search block (tried 4 fuzzy levels):\n{search[:200]}")
 
 
-def _trimmed_replace(
-    content: str, search: str, replace: str
-) -> str | None:
+def _trimmed_replace(content: str, search: str, replace: str) -> str | None:
     """Level 2: Strip leading/trailing whitespace from each line before matching."""
     content_lines = content.split("\n")
     search_lines = [line.strip() for line in search.split("\n")]
 
     # Find the search block in content (by trimmed comparison)
     for i in range(len(content_lines) - len(search_lines) + 1):
-        window = [
-            line.strip() for line in content_lines[i : i + len(search_lines)]
-        ]
+        window = [line.strip() for line in content_lines[i : i + len(search_lines)]]
         if window == search_lines:
             # Replace the matched lines
-            new_lines = (
-                content_lines[:i]
-                + replace.split("\n")
-                + content_lines[i + len(search_lines) :]
-            )
+            new_lines = content_lines[:i] + replace.split("\n") + content_lines[i + len(search_lines) :]
             return "\n".join(new_lines)
 
     return None
 
 
-def _whitespace_normalized_replace(
-    content: str, search: str, replace: str
-) -> str | None:
+def _whitespace_normalized_replace(content: str, search: str, replace: str) -> str | None:
     """Level 3: Collapse all whitespace to single space before matching."""
 
     def normalize(s: str) -> str:
@@ -205,9 +191,7 @@ def _map_normalized_index(original: str, normalized_idx: int) -> int | None:
     return None
 
 
-def _indentation_flexible_replace(
-    content: str, search: str, replace: str
-) -> str | None:
+def _indentation_flexible_replace(content: str, search: str, replace: str) -> str | None:
     """Level 4: Match ignoring indentation differences using SequenceMatcher."""
     content_lines = content.split("\n")
     search_lines = search.split("\n")
@@ -237,20 +221,14 @@ def _indentation_flexible_replace(
     # Require at least 85% similarity
     if best_ratio >= 0.85 and best_start >= 0:
         # Detect indentation of matched block
-        matched_lines = content_lines[
-            best_start : best_start + len(search_lines)
-        ]
+        matched_lines = content_lines[best_start : best_start + len(search_lines)]
         base_indent = _detect_indent(matched_lines)
 
         # Apply indentation to replacement
         replace_lines = replace.split("\n")
         indented_replace = _apply_indent(replace_lines, base_indent)
 
-        new_lines = (
-            content_lines[:best_start]
-            + indented_replace
-            + content_lines[best_start + len(search_lines) :]
-        )
+        new_lines = content_lines[:best_start] + indented_replace + content_lines[best_start + len(search_lines) :]
         return "\n".join(new_lines)
 
     return None
@@ -296,9 +274,7 @@ def _apply_indent(lines: list[str], base_indent: str) -> list[str]:
             # Remove existing base indent, add new base indent
             stripped_indent = len(line) - len(line.lstrip())
             relative_indent = max(0, stripped_indent - existing_indent)
-            result.append(
-                base_indent + " " * relative_indent + line.lstrip()
-            )
+            result.append(base_indent + " " * relative_indent + line.lstrip())
 
     return result
 
@@ -328,11 +304,41 @@ def check_governance(
         target_lower = target.lower().replace("_", " ").replace("-", " ")
         # Check if the diff region touches a forbidden section
         if _section_modified(old_content, new_content, target_lower):
-            violations.append(
-                f"Modification touches forbidden target: {target}"
-            )
+            violations.append(f"Modification touches forbidden target: {target}")
 
     return violations
+
+
+def _normalize_section_key(s: str) -> str:
+    """Normalize a section key for case/separator-insensitive comparison."""
+    return s.lower().strip().replace("_", " ").replace("-", " ")
+
+
+def _build_section_map(lines: list[str]) -> dict[int, str]:
+    """Map line index -> section name (normalized).
+
+    Handles YAML frontmatter delimiters (---) as section boundaries
+    that reset the current section to empty (body content).
+    """
+    section_map: dict[int, str] = {}
+    current_section = ""
+    frontmatter_delim_count = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Track frontmatter delimiters
+        if stripped == "---":
+            frontmatter_delim_count += 1
+            if frontmatter_delim_count >= 2:
+                # Closing delimiter — body starts, reset section
+                current_section = ""
+            section_map[i] = current_section
+            continue
+        # Detect top-level keys (no leading whitespace, has ':')
+        if stripped and not line[0].isspace() and ":" in stripped:
+            key = stripped.split(":", 1)[0]
+            current_section = _normalize_section_key(key)
+        section_map[i] = current_section
+    return section_map
 
 
 def _section_modified(old: str, new: str, section_name: str) -> bool:
@@ -344,10 +350,6 @@ def _section_modified(old: str, new: str, section_name: str) -> bool:
        belongs to (based on top-level keys), and check if any changed line
        falls within the forbidden section
     """
-
-    def _normalize(s: str) -> str:
-        return s.lower().strip().replace("_", " ").replace("-", " ")
-
     old_lines = old.split("\n")
     new_lines = new.split("\n")
 
@@ -359,45 +361,14 @@ def _section_modified(old: str, new: str, section_name: str) -> bool:
             # Skip diff headers (--- and +++ lines)
             if line.startswith("---") or line.startswith("+++"):
                 continue
-            if section_name in _normalize(line[1:]):
+            if section_name in _normalize_section_key(line[1:]):
                 return True
 
-    # Strategy 2: check if changed lines in the old/new content fall
-    # within a section headed by the forbidden target.
-    # Build a section map for the old content.
-    def _build_section_map(lines: list[str]) -> dict[int, str]:
-        """Map line index -> section name (normalized).
-
-        Handles YAML frontmatter delimiters (---) as section boundaries
-        that reset the current section to empty (body content).
-        """
-        section_map: dict[int, str] = {}
-        current_section = ""
-        frontmatter_delim_count = 0
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            # Track frontmatter delimiters
-            if stripped == "---":
-                frontmatter_delim_count += 1
-                if frontmatter_delim_count >= 2:
-                    # Closing delimiter — body starts, reset section
-                    current_section = ""
-                section_map[i] = current_section
-                continue
-            # Detect top-level keys (no leading whitespace, has ':')
-            if stripped and not line[0].isspace() and ":" in stripped:
-                key = stripped.split(":", 1)[0]
-                current_section = _normalize(key)
-            section_map[i] = current_section
-        return section_map
-
+    # Strategy 2: check if changed lines fall within a forbidden section
     old_sections = _build_section_map(old_lines)
     new_sections = _build_section_map(new_lines)
 
-    # Find which lines changed
-    import difflib as _dl
-
-    matcher = _dl.SequenceMatcher(None, old_lines, new_lines)
+    matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue

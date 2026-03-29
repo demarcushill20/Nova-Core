@@ -8,8 +8,9 @@ Uses Pydantic BaseModel following the project convention in utils/schemas/task.p
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
 from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class SkillJudgment(BaseModel):

@@ -53,7 +53,7 @@ class TestStructuredLogger:
 
             # Check log file content
             assert log_path.exists()
-            with open(log_path, "r") as f:
+            with open(log_path) as f:
                 line = f.read().strip()
                 logged_data = json.loads(line)
 
@@ -79,7 +79,7 @@ class TestStructuredLogger:
                 assert result[key] == value
 
             # Verify in log file
-            with open(log_path, "r") as f:
+            with open(log_path) as f:
                 logged_data = json.loads(f.read().strip())
 
             for key, value in ctx_dict.items():
@@ -121,7 +121,7 @@ class TestStructuredLogger:
             logger.event("third.event", data3="value3")
 
             # Read all lines
-            with open(log_path, "r") as f:
+            with open(log_path) as f:
                 lines = f.read().strip().split("\n")
 
             assert len(lines) == 3
@@ -143,7 +143,7 @@ class TestStructuredLogger:
 
             def log_events(thread_id):
                 for i in range(10):
-                    logger.event(f"thread.event", thread_id=thread_id, event_num=i)
+                    logger.event("thread.event", thread_id=thread_id, event_num=i)
 
             # Start multiple threads
             threads = []
@@ -157,7 +157,7 @@ class TestStructuredLogger:
                 t.join()
 
             # Check all events logged
-            with open(log_path, "r") as f:
+            with open(log_path) as f:
                 lines = f.read().strip().split("\n")
 
             assert len(lines) == 50  # 5 threads * 10 events each
@@ -176,7 +176,7 @@ class TestStructuredLogger:
             logger = StructuredLogger(log_path)
 
             # Test various data types
-            result = logger.event(
+            logger.event(
                 "complex.data",
                 int_val=42,
                 float_val=3.14,
@@ -188,7 +188,7 @@ class TestStructuredLogger:
             )
 
             # Check it's valid JSON
-            with open(log_path, "r") as f:
+            with open(log_path) as f:
                 logged_data = json.loads(f.read().strip())
 
             assert logged_data["data"]["int_val"] == 42
@@ -209,14 +209,11 @@ class TestStructuredLogger:
             for i in range(10):
                 logger.event("rotation.test", iteration=i, large_data="x" * 20)
 
-            # Check if any rotated files exist
-            rotated_files = list(Path(tmpdir).glob("test.*.jsonl"))
-
             # Should have at least original file
             assert log_path.exists()
 
             # Verify current file still has events
-            with open(log_path, "r") as f:
+            with open(log_path) as f:
                 current_content = f.read()
                 assert len(current_content) > 0
 
@@ -271,6 +268,7 @@ class TestSingletonInstance:
     def test_singleton_import(self):
         """Test importing the singleton slog instance."""
         from utils.structured_log import slog
+
         assert isinstance(slog, StructuredLogger)
 
     def test_singleton_functionality(self):

@@ -11,17 +11,13 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from skills.evolution_audit import AuditEntry, EvolutionAudit
 from skills.evolution_queue import EvolutionQueue
 from skills.execution_analysis import SkillHealth
-from skills.skill_cache import SkillCache, TokenStats
+from skills.skill_cache import SkillCache
 from skills.skill_dashboard import SkillDashboard
 from skills.skill_record import (
     ExecutionStats,
@@ -30,7 +26,6 @@ from skills.skill_record import (
     SkillVersion,
 )
 from skills.version_store import SkillVersionStore
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -156,9 +151,7 @@ class TestSkillDashboard:
 
         # Register two skills: one active, one inactive
         active_skill = _make_skill("skill-a", "skill-a__imp_aaa11111")
-        inactive_skill = _make_skill(
-            "skill-b", "skill-b__imp_bbb22222", is_active=False
-        )
+        inactive_skill = _make_skill("skill-b", "skill-b__imp_bbb22222", is_active=False)
         store.register_skill(active_skill)
         store.register_skill(inactive_skill)
 
@@ -174,13 +167,23 @@ class TestSkillDashboard:
 
         # Healthy skill: good completion rate
         healthy = _make_skill(
-            "good-skill", "good__imp_aaa11111",
-            selections=10, executions=10, completions=9, failures=1, fallbacks=0,
+            "good-skill",
+            "good__imp_aaa11111",
+            selections=10,
+            executions=10,
+            completions=9,
+            failures=1,
+            fallbacks=0,
         )
         # Unhealthy skill: low completion rate
         unhealthy = _make_skill(
-            "bad-skill", "bad__imp_bbb22222",
-            selections=10, executions=10, completions=2, failures=8, fallbacks=6,
+            "bad-skill",
+            "bad__imp_bbb22222",
+            selections=10,
+            executions=10,
+            completions=2,
+            failures=8,
+            fallbacks=6,
         )
         store.register_skill(healthy)
         store.register_skill(unhealthy)
@@ -247,9 +250,7 @@ class TestSkillDashboard:
         )
 
         for i in range(15):
-            audit.log_evolution(
-                _make_audit_entry("FIX", "success", skill_name=f"skill-{i}")
-            )
+            audit.log_evolution(_make_audit_entry("FIX", "success", skill_name=f"skill-{i}"))
 
         dash = SkillDashboard(evolution_audit=audit)
         result = dash.get_evolution_summary()
@@ -339,14 +340,18 @@ class TestLineageTree:
         store = SkillVersionStore(db_path=tmp_path / "test.db")
 
         parent = _make_skill(
-            "evolving", "evolving__imp_parent",
-            origin=Origin.IMPORTED, generation=0,
+            "evolving",
+            "evolving__imp_parent",
+            origin=Origin.IMPORTED,
+            generation=0,
         )
         store.register_skill(parent)
 
         child = _make_skill(
-            "evolving", "evolving__v_1_child",
-            origin=Origin.FIXED, generation=1,
+            "evolving",
+            "evolving__v_1_child",
+            origin=Origin.FIXED,
+            generation=1,
             parent_ids=["evolving__imp_parent"],
             change_summary="Fixed error handling",
         )
@@ -375,8 +380,15 @@ class TestLineageTree:
 
         node = result["nodes"][0]
         expected_fields = {
-            "skill_id", "name", "generation", "origin", "is_active",
-            "version", "stats", "change_summary", "created_at",
+            "skill_id",
+            "name",
+            "generation",
+            "origin",
+            "is_active",
+            "version",
+            "stats",
+            "change_summary",
+            "created_at",
         }
         assert expected_fields.issubset(set(node.keys()))
         assert "selections" in node["stats"]
@@ -398,10 +410,12 @@ class TestTelegramFormatting:
         """Basic health formatting without issues."""
         store = MagicMock(spec=SkillVersionStore)
         store.list_skills.return_value = [
-            _make_skill("a"), _make_skill("b"),
+            _make_skill("a"),
+            _make_skill("b"),
         ]
         store.get_skill_health.return_value = [
-            _make_health("a"), _make_health("b"),
+            _make_health("a"),
+            _make_health("b"),
         ]
 
         dash = SkillDashboard(version_store=store)
@@ -445,8 +459,7 @@ class TestTelegramFormatting:
         store = MagicMock(spec=SkillVersionStore)
         store.list_skills.return_value = [_make_skill(f"bad-{i}") for i in range(5)]
         unhealthy_list = [
-            _make_health(f"bad-{i}", skill_id=f"bad-{i}__imp_{i:08d}",
-                         is_healthy=False, completion_rate=0.1)
+            _make_health(f"bad-{i}", skill_id=f"bad-{i}__imp_{i:08d}", is_healthy=False, completion_rate=0.1)
             for i in range(5)
         ]
         store.get_skill_health.return_value = unhealthy_list

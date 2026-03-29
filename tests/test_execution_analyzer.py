@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from skills.execution_analysis import (
     EvolutionSuggestion,
@@ -30,7 +30,6 @@ from skills.skill_record import (
     SkillVersion,
 )
 from skills.version_store import SkillVersionStore
-
 
 # ===================================================================
 # Helpers
@@ -112,9 +111,9 @@ class TestExecutionAnalysisSchema:
         j = SkillJudgment(skill_name="x", quality_score=1.0)
         assert j.quality_score == 1.0
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             SkillJudgment(skill_name="x", quality_score=-0.1)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             SkillJudgment(skill_name="x", quality_score=1.1)
 
     def test_evolution_suggestion_fix(self):
@@ -152,21 +151,15 @@ class TestExecutionAnalysisSchema:
 
     def test_evolution_suggestion_priority_bounds(self):
         """priority should be clamped to [1, 5]."""
-        with pytest.raises(Exception):
-            EvolutionSuggestion(
-                type="FIX", target_skill_name="x", direction="d", priority=0
-            )
-        with pytest.raises(Exception):
-            EvolutionSuggestion(
-                type="FIX", target_skill_name="x", direction="d", priority=6
-            )
+        with pytest.raises(ValidationError):
+            EvolutionSuggestion(type="FIX", target_skill_name="x", direction="d", priority=0)
+        with pytest.raises(ValidationError):
+            EvolutionSuggestion(type="FIX", target_skill_name="x", direction="d", priority=6)
 
     def test_evolution_suggestion_invalid_type(self):
         """Invalid type should raise validation error."""
-        with pytest.raises(Exception):
-            EvolutionSuggestion(
-                type="INVALID", target_skill_name="x", direction="d"
-            )
+        with pytest.raises(ValidationError):
+            EvolutionSuggestion(type="INVALID", target_skill_name="x", direction="d")
 
     def test_execution_analysis_minimal(self):
         """ExecutionAnalysis with only required fields."""
@@ -184,9 +177,7 @@ class TestExecutionAnalysisSchema:
         a = ExecutionAnalysis(
             task_id="task-002",
             task_description="Fix the bug",
-            skill_judgments=[
-                SkillJudgment(skill_name="debug", applied=True, completed=True)
-            ],
+            skill_judgments=[SkillJudgment(skill_name="debug", applied=True, completed=True)],
             evolution_suggestions=[
                 EvolutionSuggestion(
                     type="DERIVED",
@@ -204,9 +195,9 @@ class TestExecutionAnalysisSchema:
 
     def test_execution_analysis_overall_quality_bounds(self):
         """overall_quality should be clamped to [0.0, 1.0]."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ExecutionAnalysis(task_id="t", overall_quality=-0.5)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ExecutionAnalysis(task_id="t", overall_quality=1.5)
 
     def test_skill_health_defaults(self):
@@ -533,15 +524,17 @@ class TestExecutionAnalyzer:
 
         mock_cache_result = {"response": llm_response_json}
 
-        with patch("utils.llm_cache.cached_llm_call", return_value=mock_cache_result):
-            with patch("utils.structured_output.parse_and_validate", return_value=mock_analysis):
-                result = analyzer._llm_analyze(
-                    task_id="llm-task-1",
-                    task_description="Test LLM path",
-                    selected_skills=["test-skill"],
-                    execution_trace="some trace output",
-                    outcome={"success": True, "exit_code": 0},
-                )
+        with (
+            patch("utils.llm_cache.cached_llm_call", return_value=mock_cache_result),
+            patch("utils.structured_output.parse_and_validate", return_value=mock_analysis),
+        ):
+            result = analyzer._llm_analyze(
+                task_id="llm-task-1",
+                task_description="Test LLM path",
+                selected_skills=["test-skill"],
+                execution_trace="some trace output",
+                outcome={"success": True, "exit_code": 0},
+            )
 
         assert result.task_id == "llm-task-1"
         assert result.task_description == "Test LLM path"
@@ -554,9 +547,7 @@ class TestExecutionAnalyzer:
 
         mock_analysis = ExecutionAnalysis(
             task_id="placeholder",
-            skill_judgments=[
-                SkillJudgment(skill_name="s", applied=True, completed=True)
-            ],
+            skill_judgments=[SkillJudgment(skill_name="s", applied=True, completed=True)],
             overall_quality=0.9,
         )
 
@@ -570,18 +561,20 @@ class TestExecutionAnalyzer:
         mock_subprocess_result.returncode = 0
         mock_subprocess_result.stdout = json.dumps({"result": "ok"})
 
-        with patch("utils.llm_cache.cached_llm_call", side_effect=capture_cached_llm_call):
-            with patch("utils.structured_output.parse_and_validate", return_value=mock_analysis):
-                with patch("subprocess.run", return_value=mock_subprocess_result) as mock_run:
-                    result = analyzer._llm_analyze(
-                        task_id="c1-test",
-                        task_description="System prompt test",
-                        selected_skills=["s"],
-                        execution_trace="trace",
-                        outcome={"success": True, "exit_code": 0},
-                    )
-                    # Call the captured call_fn to trigger subprocess.run
-                    captured_call_fn["fn"]()
+        with (
+            patch("utils.llm_cache.cached_llm_call", side_effect=capture_cached_llm_call),
+            patch("utils.structured_output.parse_and_validate", return_value=mock_analysis),
+            patch("subprocess.run", return_value=mock_subprocess_result) as mock_run,
+        ):
+            analyzer._llm_analyze(
+                task_id="c1-test",
+                task_description="System prompt test",
+                selected_skills=["s"],
+                execution_trace="trace",
+                outcome={"success": True, "exit_code": 0},
+            )
+            # Call the captured call_fn to trigger subprocess.run
+            captured_call_fn["fn"]()
 
         # Verify subprocess.run was called with the full prompt that contains the system prompt
         call_args = mock_run.call_args
@@ -597,9 +590,7 @@ class TestExecutionAnalyzer:
 
         mock_analysis = ExecutionAnalysis(
             task_id="placeholder",
-            skill_judgments=[
-                SkillJudgment(skill_name="s", applied=True, completed=True)
-            ],
+            skill_judgments=[SkillJudgment(skill_name="s", applied=True, completed=True)],
             overall_quality=0.9,
         )
 
@@ -607,15 +598,17 @@ class TestExecutionAnalyzer:
         mock_subprocess_result.returncode = 0
         mock_subprocess_result.stdout = mock_analysis.model_dump_json()
 
-        with patch("subprocess.run", return_value=mock_subprocess_result):
-            with patch("utils.structured_output.parse_and_validate", return_value=mock_analysis):
-                result = analyzer._llm_analyze(
-                    task_id="h2-test",
-                    task_description="No cache test",
-                    selected_skills=["s"],
-                    execution_trace="trace",
-                    outcome={"success": True, "exit_code": 0},
-                )
+        with (
+            patch("subprocess.run", return_value=mock_subprocess_result),
+            patch("utils.structured_output.parse_and_validate", return_value=mock_analysis),
+        ):
+            result = analyzer._llm_analyze(
+                task_id="h2-test",
+                task_description="No cache test",
+                selected_skills=["s"],
+                execution_trace="trace",
+                outcome={"success": True, "exit_code": 0},
+            )
 
         assert result.task_id == "h2-test"
         # cached_llm_call was never imported/called (use_cache=False)
@@ -627,9 +620,7 @@ class TestExecutionAnalyzer:
 
         mock_analysis = ExecutionAnalysis(
             task_id="placeholder",
-            skill_judgments=[
-                SkillJudgment(skill_name="s", applied=True, completed=True)
-            ],
+            skill_judgments=[SkillJudgment(skill_name="s", applied=True, completed=True)],
             overall_quality=0.9,
         )
 
@@ -637,16 +628,18 @@ class TestExecutionAnalyzer:
         mock_subprocess_result.returncode = 0
         mock_subprocess_result.stdout = mock_analysis.model_dump_json()
 
-        with patch("utils.llm_cache.cached_llm_call") as mock_cache:
-            with patch("subprocess.run", return_value=mock_subprocess_result):
-                with patch("utils.structured_output.parse_and_validate", return_value=mock_analysis):
-                    analyzer._llm_analyze(
-                        task_id="h2-test-2",
-                        task_description="No cache verify",
-                        selected_skills=["s"],
-                        execution_trace="trace",
-                        outcome={"success": True, "exit_code": 0},
-                    )
+        with (
+            patch("utils.llm_cache.cached_llm_call") as mock_cache,
+            patch("subprocess.run", return_value=mock_subprocess_result),
+            patch("utils.structured_output.parse_and_validate", return_value=mock_analysis),
+        ):
+            analyzer._llm_analyze(
+                task_id="h2-test-2",
+                task_description="No cache verify",
+                selected_skills=["s"],
+                execution_trace="trace",
+                outcome={"success": True, "exit_code": 0},
+            )
 
         mock_cache.assert_not_called()
 
@@ -661,16 +654,18 @@ class TestExecutionAnalyzer:
 
         mock_cache_result = {"response": "not valid json at all"}
 
-        with patch("utils.llm_cache.cached_llm_call", return_value=mock_cache_result):
-            with patch("utils.structured_output.parse_and_validate", return_value=None):
-                with pytest.raises(ValueError, match="Structured extraction returned None"):
-                    analyzer._llm_analyze(
-                        task_id="llm-task-2",
-                        task_description="Parse failure test",
-                        selected_skills=["skill-a"],
-                        execution_trace="trace",
-                        outcome={"success": False, "exit_code": 1},
-                    )
+        with (
+            patch("utils.llm_cache.cached_llm_call", return_value=mock_cache_result),
+            patch("utils.structured_output.parse_and_validate", return_value=None),
+            pytest.raises(ValueError, match="Structured extraction returned None"),
+        ):
+            analyzer._llm_analyze(
+                task_id="llm-task-2",
+                task_description="Parse failure test",
+                selected_skills=["skill-a"],
+                execution_trace="trace",
+                outcome={"success": False, "exit_code": 1},
+            )
 
     def test_analyze_falls_back_on_parse_failure(self, tmp_path):
         """analyze() should fall back to deterministic when parse_and_validate returns None."""
@@ -679,15 +674,17 @@ class TestExecutionAnalyzer:
 
         mock_cache_result = {"response": "not valid json at all"}
 
-        with patch("utils.llm_cache.cached_llm_call", return_value=mock_cache_result):
-            with patch("utils.structured_output.parse_and_validate", return_value=None):
-                result = analyzer.analyze(
-                    task_id="llm-task-2",
-                    task_description="Parse failure test",
-                    selected_skills=["skill-a"],
-                    execution_trace="trace",
-                    outcome={"success": False, "exit_code": 1},
-                )
+        with (
+            patch("utils.llm_cache.cached_llm_call", return_value=mock_cache_result),
+            patch("utils.structured_output.parse_and_validate", return_value=None),
+        ):
+            result = analyzer.analyze(
+                task_id="llm-task-2",
+                task_description="Parse failure test",
+                selected_skills=["skill-a"],
+                execution_trace="trace",
+                outcome={"success": False, "exit_code": 1},
+            )
 
         # Should have fallen back to deterministic via outer try/except
         assert result.task_id == "llm-task-2"
@@ -803,7 +800,7 @@ class TestVersionStoreAnalyses:
         for i in range(10):
             analysis = ExecutionAnalysis(
                 task_id=f"task-{i}",
-                analysis_timestamp=f"2026-03-29T{10+i:02d}:00:00Z",
+                analysis_timestamp=f"2026-03-29T{10 + i:02d}:00:00Z",
                 skill_judgments=[
                     SkillJudgment(skill_name="s", skill_id="skill-x", applied=True, completed=True),
                 ],
@@ -824,7 +821,7 @@ class TestVersionStoreAnalyses:
         for i in range(3):
             analysis = ExecutionAnalysis(
                 task_id=f"task-{i}",
-                analysis_timestamp=f"2026-03-29T{10+i:02d}:00:00Z",
+                analysis_timestamp=f"2026-03-29T{10 + i:02d}:00:00Z",
                 skill_judgments=[
                     SkillJudgment(skill_name="s", skill_id="skill-y", applied=True, completed=True),
                 ],
@@ -964,9 +961,7 @@ class TestVersionStoreAnalyses:
     def test_get_skill_health_excludes_inactive(self, tmp_path):
         """get_skill_health should only include active skills."""
         store = _make_store(tmp_path)
-        sv = _make_skill_version(
-            selections=10, executions=10, completions=10, is_active=False
-        )
+        sv = _make_skill_version(selections=10, executions=10, completions=10, is_active=False)
         store.register_skill(sv)
 
         health = store.get_skill_health(min_selections=5)
@@ -974,12 +969,10 @@ class TestVersionStoreAnalyses:
 
     def test_execution_analyses_table_exists(self, tmp_path):
         """The execution_analyses table should be created on init."""
-        store = _make_store(tmp_path)
+        _make_store(tmp_path)
         conn = sqlite3.connect(str(tmp_path / "test_skills.db"))
         try:
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='execution_analyses'"
-            )
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='execution_analyses'")
             tables = cursor.fetchall()
             assert len(tables) == 1
         finally:
@@ -1015,13 +1008,11 @@ class TestVersionStoreAnalyses:
         conn.close()
 
         # Now open with SkillVersionStore — should migrate to v2
-        store = SkillVersionStore(db_path=db_path)
+        SkillVersionStore(db_path=db_path)
 
         # Verify execution_analyses table was created
         conn = sqlite3.connect(str(db_path))
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='execution_analyses'"
-        )
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='execution_analyses'")
         tables = cursor.fetchall()
         assert len(tables) == 1, "execution_analyses table should exist after migration"
 

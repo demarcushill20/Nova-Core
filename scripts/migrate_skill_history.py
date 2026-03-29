@@ -30,14 +30,14 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from skills.skill_record import (
+from skills.skill_record import (  # noqa: E402
     ExecutionStats,
     Origin,
     SkillLineage,
     SkillVersion,
     generate_skill_id,
 )
-from skills.version_store import SkillVersionStore
+from skills.version_store import SkillVersionStore  # noqa: E402
 
 log = logging.getLogger("scripts.migrate_skill_history")
 
@@ -99,7 +99,7 @@ def migrate(
         sv = SkillVersion(
             skill_id=skill_id,
             name=name,
-            description=f"Migrated from skill_usage_history.json",
+            description="Migrated from skill_usage_history.json",
             path="",
             is_active=True,
             version="1.0.0",

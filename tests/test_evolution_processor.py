@@ -18,7 +18,6 @@ import pytest
 
 from skills.evolution_processor import EvolutionProcessor
 from skills.evolution_queue import EvolutionQueue, EvolutionRequest
-from skills.execution_analysis import ExecutionAnalysis, EvolutionSuggestion, SkillJudgment
 from skills.skill_evolver import EvolutionError, SkillEvolver
 from skills.skill_record import ExecutionStats, Origin, SkillLineage, SkillVersion
 from skills.version_store import SkillVersionStore, register_existing_skills
@@ -50,7 +49,7 @@ def _make_skill_version(
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def tmp_state_dir(tmp_path: Path) -> Path:
     """Provide a temporary state directory for EvolutionQueue persistence."""
     state = tmp_path / "state"
@@ -58,25 +57,25 @@ def tmp_state_dir(tmp_path: Path) -> Path:
     return state
 
 
-@pytest.fixture()
+@pytest.fixture
 def tmp_db(tmp_path: Path) -> Path:
     """Provide a temporary SQLite db path for SkillVersionStore."""
     return tmp_path / "skills.db"
 
 
-@pytest.fixture()
+@pytest.fixture
 def version_store(tmp_db: Path) -> SkillVersionStore:
     """Real SkillVersionStore backed by a temp SQLite database."""
     return SkillVersionStore(db_path=str(tmp_db))
 
 
-@pytest.fixture()
+@pytest.fixture
 def evolution_queue(tmp_state_dir: Path) -> EvolutionQueue:
     """Real EvolutionQueue backed by a temp state directory."""
     return EvolutionQueue(state_dir=str(tmp_state_dir))
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_evolver() -> MagicMock:
     """Mock SkillEvolver — all LLM-calling methods replaced."""
     evolver = MagicMock(spec=SkillEvolver)
@@ -88,7 +87,7 @@ def mock_evolver() -> MagicMock:
     return evolver
 
 
-@pytest.fixture()
+@pytest.fixture
 def processor(
     version_store: SkillVersionStore,
     evolution_queue: EvolutionQueue,
@@ -102,7 +101,7 @@ def processor(
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def processor_with_telegram(
     version_store: SkillVersionStore,
     evolution_queue: EvolutionQueue,
@@ -173,7 +172,9 @@ class TestProcessOne:
         self, processor: EvolutionProcessor, evolution_queue: EvolutionQueue, mock_evolver: MagicMock
     ):
         """DERIVED evolution type dispatches to evolve_derived."""
-        new_sv = _make_skill_version(name="derived-skill", skill_id="derived-skill__v_1_bb00bb00", origin=Origin.DERIVED)
+        new_sv = _make_skill_version(
+            name="derived-skill", skill_id="derived-skill__v_1_bb00bb00", origin=Origin.DERIVED
+        )
         mock_evolver.evolve_derived.return_value = new_sv
 
         _enqueue_request(
@@ -391,9 +392,7 @@ class TestStatsTracking:
 class TestRunHealthScan:
     """Tests for EvolutionProcessor.run_health_scan()."""
 
-    def test_run_health_scan_with_candidates(
-        self, processor: EvolutionProcessor, mock_evolver: MagicMock
-    ):
+    def test_run_health_scan_with_candidates(self, processor: EvolutionProcessor, mock_evolver: MagicMock):
         """Improvement candidates are enqueued as DERIVED."""
         mock_evolver.detect_improvement_candidates.return_value = [
             {"skill_id": "s1__imp_aa", "skill_name": "skill-1", "suggestion": "specialize for JSON"},
@@ -409,9 +408,7 @@ class TestRunHealthScan:
         # Verify items were enqueued
         assert processor.evolution_queue.queue_size() == 2
 
-    def test_run_health_scan_with_patterns(
-        self, processor: EvolutionProcessor, mock_evolver: MagicMock
-    ):
+    def test_run_health_scan_with_patterns(self, processor: EvolutionProcessor, mock_evolver: MagicMock):
         """Novel patterns are enqueued as CAPTURED."""
         mock_evolver.detect_improvement_candidates.return_value = []
         mock_evolver.detect_novel_patterns.return_value = [
@@ -424,9 +421,7 @@ class TestRunHealthScan:
         assert result["enqueued"] == 1
         assert result["candidates_found"] == 0
 
-    def test_run_health_scan_empty(
-        self, processor: EvolutionProcessor, mock_evolver: MagicMock
-    ):
+    def test_run_health_scan_empty(self, processor: EvolutionProcessor, mock_evolver: MagicMock):
         """When nothing detected, enqueued=0 and queue stays empty."""
         mock_evolver.detect_improvement_candidates.return_value = []
         mock_evolver.detect_novel_patterns.return_value = []
@@ -460,9 +455,7 @@ class TestRunHealthScan:
         assert result["health"]["unhealthy_skills"] == 1
         assert "bad-skill" in result["health"]["frozen_skills"]
 
-    def test_run_health_scan_error_handling(
-        self, processor: EvolutionProcessor, mock_evolver: MagicMock, caplog
-    ):
+    def test_run_health_scan_error_handling(self, processor: EvolutionProcessor, mock_evolver: MagicMock, caplog):
         """Errors in detect methods are caught; scan continues and returns partial results."""
         mock_evolver.detect_improvement_candidates.side_effect = RuntimeError("DB down")
         mock_evolver.detect_novel_patterns.return_value = [
@@ -628,8 +621,10 @@ class TestRunSkillAnalysisWiring:
 
         mock_store = MagicMock()
 
-        with patch.object(watcher, "_skill_version_store", mock_store), \
-             patch("skills.execution_analyzer.ExecutionAnalyzer", return_value=mock_analyzer_instance):
+        with (
+            patch.object(watcher, "_skill_version_store", mock_store),
+            patch("skills.execution_analyzer.ExecutionAnalyzer", return_value=mock_analyzer_instance),
+        ):
             result = _run_skill_analysis(
                 stem="wired-task",
                 task_text="Analyze this task",
@@ -668,10 +663,12 @@ class TestRunSkillAnalysisWiring:
         mock_store = MagicMock()
         mock_queue = MagicMock()
 
-        with patch.object(watcher, "_skill_version_store", mock_store), \
-             patch.object(watcher, "_skill_evolution_queue", mock_queue), \
-             patch("skills.execution_analyzer.ExecutionAnalyzer", return_value=mock_analyzer_instance):
-            result = _run_skill_analysis(
+        with (
+            patch.object(watcher, "_skill_version_store", mock_store),
+            patch.object(watcher, "_skill_evolution_queue", mock_queue),
+            patch("skills.execution_analyzer.ExecutionAnalyzer", return_value=mock_analyzer_instance),
+        ):
+            _run_skill_analysis(
                 stem="suggestion-task",
                 task_text="Task with issues",
                 selected_names=["my-skill"],
@@ -706,9 +703,11 @@ class TestEdgeCases:
         _enqueue_request(evolution_queue)
 
         # Patch complete_evolution to raise
-        with patch.object(evolution_queue, "complete_evolution", side_effect=RuntimeError("disk full")):
-            with caplog.at_level(logging.ERROR, logger="skills.evolution_processor"):
-                result = processor.process_one()
+        with (
+            patch.object(evolution_queue, "complete_evolution", side_effect=RuntimeError("disk full")),
+            caplog.at_level(logging.ERROR, logger="skills.evolution_processor"),
+        ):
+            result = processor.process_one()
 
         # Evolution itself succeeded even though complete_evolution failed
         assert result is not None

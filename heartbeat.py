@@ -562,7 +562,7 @@ def check_memory_systems() -> dict:
             checker = CrossSystemHealthChecker(max_checks_per_run=1)  # Light check for heartbeat
             # Only run a basic check to avoid expensive operations
             # This will detect major drift without full validation
-            if hasattr(checker, 'check_basic_connectivity'):
+            if hasattr(checker, "check_basic_connectivity"):
                 basic_result = checker.check_basic_connectivity()
                 if basic_result and basic_result.status != "ok":
                     issues.append(f"cross-system drift: {basic_result.check_name}")
@@ -2466,13 +2466,13 @@ def main() -> int:
 
     # --- Skill Evolution: process queue + health scan ---
     try:
+        from skills.evolution_audit import EvolutionAudit
         from skills.evolution_processor import EvolutionProcessor
         from skills.evolution_queue import EvolutionQueue
+        from skills.skill_cache import SkillCache
+        from skills.skill_dashboard import SkillDashboard
         from skills.skill_evolver import SkillEvolver
         from skills.version_store import SkillVersionStore
-        from skills.skill_dashboard import SkillDashboard
-        from skills.skill_cache import SkillCache
-        from skills.evolution_audit import EvolutionAudit
 
         _evo_store = SkillVersionStore()
         _evo_queue = EvolutionQueue()

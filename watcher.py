@@ -100,20 +100,17 @@ except ImportError:
 _skill_version_store = None
 _skill_evolution_queue = None
 try:
-    from skills.version_store import SkillVersionStore, register_existing_skills
     from skills.evolution_queue import EvolutionQueue as _EvolutionQueue
+    from skills.version_store import SkillVersionStore, register_existing_skills
+
     _skill_version_store = SkillVersionStore()
     _skill_evolution_queue = _EvolutionQueue()
     _all_skills = load_skills()
     _registered = register_existing_skills(_skill_version_store, _all_skills)
     if _registered:
-        logging.getLogger(__name__).info(
-            "SKILL EVOLUTION: registered %d new skills in version store", _registered
-        )
+        logging.getLogger(__name__).info("SKILL EVOLUTION: registered %d new skills in version store", _registered)
 except Exception as _sve_exc:
-    logging.getLogger(__name__).warning(
-        "Skill version store init failed (non-fatal): %s", _sve_exc
-    )
+    logging.getLogger(__name__).warning("Skill version store init failed (non-fatal): %s", _sve_exc)
     _skill_version_store = None
     _skill_evolution_queue = None
 
@@ -1898,8 +1895,8 @@ def _run_skill_analysis(
         if store is None:
             return None
 
-        from skills.execution_analyzer import ExecutionAnalyzer
         from skills.evolution_queue import EvolutionRequest
+        from skills.execution_analyzer import ExecutionAnalyzer
 
         analyzer = ExecutionAnalyzer(version_store=store)
 
