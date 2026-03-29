@@ -35,18 +35,23 @@ class TestBrokerDiagnostic:
 
             await diagnostic._test_connectivity()
 
-            # Verify adapter was created and connected
-            mock_adapter.assert_called_once_with(
-                token="test_token",
-                account_id="test_account",
-                region="us",
-            )
+            # Verify adapter was created with MetaApiConfig object and connected
+            mock_adapter.assert_called_once()
+            # Get the actual config passed to the adapter
+            call_args = mock_adapter.call_args[0]
+            assert len(call_args) == 1  # Should be called with one argument (the config)
+            config = call_args[0]
+            assert config.token == "test_token"
+            assert config.account_id == "test_account"
+            assert config.region == "london"
+
             adapter_instance.connect.assert_called_once()
 
             # Verify results
             assert diagnostic.results["tests"]["connectivity"]["status"] == "PASS"
             assert diagnostic.adapter is adapter_instance
 
+    @pytest.mark.asyncio
     async def test_connectivity_failure(self):
         """Test connectivity failure handling."""
         diagnostic = BrokerDiagnostic("test_account", "test_token")
@@ -62,6 +67,7 @@ class TestBrokerDiagnostic:
             assert "Connection failed" in diagnostic.results["tests"]["connectivity"]["error"]
             assert diagnostic.adapter is None
 
+    @pytest.mark.asyncio
     async def test_authentication_success(self):
         """Test successful authentication."""
         diagnostic = BrokerDiagnostic("test_account", "test_token")
@@ -81,6 +87,7 @@ class TestBrokerDiagnostic:
         assert test_result["account_type"] == "demo"
         assert test_result["server"] == "test-server"
 
+    @pytest.mark.asyncio
     async def test_authentication_skip_no_adapter(self):
         """Test authentication skipped when no adapter."""
         diagnostic = BrokerDiagnostic("test_account", "test_token")
@@ -91,6 +98,7 @@ class TestBrokerDiagnostic:
         # Verify skip
         assert diagnostic.results["tests"]["authentication"]["status"] == "SKIP"
 
+    @pytest.mark.asyncio
     async def test_account_status_trade_allowed_true(self):
         """Test account status with tradeAllowed=true."""
         diagnostic = BrokerDiagnostic("test_account", "test_token")
@@ -102,9 +110,11 @@ class TestBrokerDiagnostic:
         account.expertAllowed = True
         account.equity = 10000.0
         account.balance = 10000.0
+        account.margin = 0.0
         account.leverage = 100
         account.currency = "USD"
         account.state = "CONNECTED"
+        account.connectionStatus = "CONNECTED"
         diagnostic.adapter.get_account.return_value = account
 
         await diagnostic._test_account_status()
@@ -115,6 +125,7 @@ class TestBrokerDiagnostic:
         assert test_result["account_data"]["trade_allowed"] is True
         assert test_result["message"] == "Trade allowed: True"
 
+    @pytest.mark.asyncio
     async def test_account_status_trade_allowed_false(self):
         """Test account status with tradeAllowed=false (critical blocker)."""
         diagnostic = BrokerDiagnostic("test_account", "test_token")
@@ -125,6 +136,12 @@ class TestBrokerDiagnostic:
         account.tradeAllowed = False
         account.expertAllowed = True
         account.equity = 10000.0
+        account.balance = 10000.0
+        account.margin = 0.0
+        account.leverage = 100
+        account.currency = "USD"
+        account.state = "CONNECTED"
+        account.connectionStatus = "CONNECTED"
         diagnostic.adapter.get_account.return_value = account
 
         await diagnostic._test_account_status()
@@ -135,6 +152,7 @@ class TestBrokerDiagnostic:
         assert test_result["account_data"]["trade_allowed"] is False
         assert test_result["message"] == "Trade allowed: False"
 
+    @pytest.mark.asyncio
     async def test_trading_permissions_full_access(self):
         """Test trading permissions with full access."""
         diagnostic = BrokerDiagnostic("test_account", "test_token")
@@ -152,6 +170,7 @@ class TestBrokerDiagnostic:
         assert test_result["permissions"]["positions_access"] is True
         assert test_result["permissions"]["orders_access"] is True
 
+    @pytest.mark.asyncio
     async def test_trading_permissions_partial_access(self):
         """Test trading permissions with partial access."""
         diagnostic = BrokerDiagnostic("test_account", "test_token")
@@ -170,6 +189,7 @@ class TestBrokerDiagnostic:
         assert test_result["permissions"]["orders_access"] is False
         assert "Orders access denied" in test_result["permissions"]["orders_error"]
 
+    @pytest.mark.asyncio
     async def test_symbol_availability_success(self):
         """Test symbol availability with successful spec and price retrieval."""
         diagnostic = BrokerDiagnostic("test_account", "test_token")

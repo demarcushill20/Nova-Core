@@ -23,7 +23,7 @@ log = logging.getLogger("nova.scheduler.execution_log")
 # Default paths
 # ---------------------------------------------------------------------------
 
-_DEFAULT_LOG_PATH = Path("LOGS/scheduler_execution.jsonl")
+_DEFAULT_LOG_PATH = Path("STATE/scheduler/execution_log.jsonl")
 
 
 # ---------------------------------------------------------------------------

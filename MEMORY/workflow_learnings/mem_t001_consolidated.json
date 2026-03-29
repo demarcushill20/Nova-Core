@@ -26,5 +26,6 @@
     "consolidation_date": "2026-03-28T16:00:00Z"
   },
   "promotion_status": "superseded",
-  "superseded_by": "mem_t001_1774714673"
+  "superseded_by": "mem_t001_1774714673",
+  "supersedes": "mem_t001_1774758900"
 }

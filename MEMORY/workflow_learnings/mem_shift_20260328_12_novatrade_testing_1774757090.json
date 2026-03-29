@@ -17,5 +17,7 @@
   "reusable_guidance": "1/1 steps succeeded, 0/1 contracts valid, aggregate F (0.30)",
   "created_at": "2026-03-29T04:04:50Z",
   "confidence": "medium",
-  "supersedes": "mem_shift_20260328_12_novatrade_testing_1774744234"
+  "supersedes": "mem_shift_20260328_12_novatrade_testing_1774744234",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260328_12_novatrade_testing_1774772476"
 }

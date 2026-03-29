@@ -70,12 +70,15 @@ class BrokerDiagnostic:
 
         try:
             from novatrade.adapter.metaapi_provider import MetaApiAdapter
+            from novatrade.config import MetaApiConfig
 
-            self.adapter = MetaApiAdapter(
+            # Create config object for adapter
+            config = MetaApiConfig(
                 token=self.token,
                 account_id=self.account_id,
-                region="us",  # Default to US region
+                region="london",  # Updated to match production region
             )
+            self.adapter = MetaApiAdapter(config)
 
             # Test connection initialization
             await self.adapter.connect()
@@ -312,9 +315,9 @@ class BrokerDiagnostic:
         try:
             # Test order validation without execution
             # This tests the adapter's order preparation and validation logic
-            from novatrade.models import TradeRequest
+            from novatrade.models import OrderRequest
 
-            test_request = TradeRequest(
+            test_request = OrderRequest(
                 symbol="EURUSD",
                 action="buy",
                 volume=0.01,  # Minimum volume

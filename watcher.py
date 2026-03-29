@@ -96,6 +96,27 @@ try:
 except ImportError:
     _HAS_SCHEDULER = False
 
+# --- Skill evolution: register existing skills in version store (idempotent) ---
+_skill_version_store = None
+_skill_evolution_queue = None
+try:
+    from skills.version_store import SkillVersionStore, register_existing_skills
+    from skills.evolution_queue import EvolutionQueue as _EvolutionQueue
+    _skill_version_store = SkillVersionStore()
+    _skill_evolution_queue = _EvolutionQueue()
+    _all_skills = load_skills()
+    _registered = register_existing_skills(_skill_version_store, _all_skills)
+    if _registered:
+        logging.getLogger(__name__).info(
+            "SKILL EVOLUTION: registered %d new skills in version store", _registered
+        )
+except Exception as _sve_exc:
+    logging.getLogger(__name__).warning(
+        "Skill version store init failed (non-fatal): %s", _sve_exc
+    )
+    _skill_version_store = None
+    _skill_evolution_queue = None
+
 # --- Audit logger for watcher lifecycle events ---
 _audit = get_audit_logger("watcher")
 
@@ -261,13 +282,108 @@ def _get_current_block_id() -> str | None:
         inprogress = list(TASKS_DIR.glob("shift_*.md.inprogress"))
         if inprogress:
             stem = inprogress[0].name.replace(".md.inprogress", "")
-            # Block ID is the date portion: shift_YYYYMMDD
-            parts = stem.split("_block_")
-            if parts:
-                return parts[0]  # e.g., "shift_20260329"
+            # Extract shift_YYYYMMDD from filename like shift_20260329_1_system_health
+            parts = stem.split("_")
+            if len(parts) >= 2 and parts[0] == "shift":
+                block_id = f"{parts[0]}_{parts[1]}"  # shift_YYYYMMDD
+                return block_id
         return None
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Filename slug → work_mode fallback mapping
+# ---------------------------------------------------------------------------
+_SLUG_WORK_MODE_MAP: dict[str, str] = {
+    "system_health": "monitoring",
+    "health": "monitoring",
+    "monitoring": "monitoring",
+    "implementation": "deep_implementation",
+    "impl": "deep_implementation",
+    "novatrade": "deep_implementation",
+    "research": "research",
+    "deep_research": "research",
+    "analysis": "analysis",
+    "review": "review",
+    "testing": "review",
+    "quality": "review",
+    "free_will": "analysis",
+    "autonomy": "analysis",
+    "session_wrap": "communication",
+    "evening_wrap": "communication",
+    "memory_hygiene": "admin",
+    "deployment": "deployment",
+    "debugging": "debugging",
+}
+
+
+def _extract_task_metadata(task_path: Path) -> dict:
+    """Extract scheduler-relevant metadata from a task file's YAML frontmatter.
+
+    Returns a dict with keys: work_mode, task_class, commitment_level,
+    estimated_expected_min.  Falls back to sensible defaults if frontmatter
+    is missing or unparseable.
+    """
+    defaults: dict = {
+        "work_mode": "admin",
+        "task_class": "bounded",
+        "commitment_level": "soft",
+        "estimated_expected_min": 35.0,
+    }
+    try:
+        raw = task_path.read_text(encoding="utf-8", errors="replace")[:8192]
+    except Exception:
+        return defaults
+
+    # --- Parse YAML frontmatter (between leading --- markers) ---
+    fm: dict = {}
+    stripped = raw.lstrip()
+    if stripped.startswith("---"):
+        parts = stripped.split("---", 2)  # ['', yaml_block, rest]
+        if len(parts) >= 3:
+            yaml_block = parts[1]
+            for line in yaml_block.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                colon_idx = line.find(":")
+                if colon_idx > 0:
+                    key = line[:colon_idx].strip()
+                    val = line[colon_idx + 1 :].strip().strip('"').strip("'")
+                    fm[key] = val
+
+    result = dict(defaults)
+
+    # Extract work_mode from frontmatter first
+    if "work_mode" in fm:
+        result["work_mode"] = fm["work_mode"]
+    else:
+        # Infer from filename slug as fallback
+        stem = task_path.stem.replace(".md", "")  # handle .md.inprogress etc.
+        slug_parts = stem.lower().split("_")
+        for slug, mode in _SLUG_WORK_MODE_MAP.items():
+            slug_tokens = slug.split("_")
+            # Check if slug tokens appear as a contiguous subsequence
+            for i in range(len(slug_parts) - len(slug_tokens) + 1):
+                if slug_parts[i : i + len(slug_tokens)] == slug_tokens:
+                    result["work_mode"] = mode
+                    break
+            else:
+                continue
+            break
+
+    if "task_class" in fm:
+        result["task_class"] = fm["task_class"]
+    if "commitment_level" in fm:
+        result["commitment_level"] = fm["commitment_level"]
+    if "estimated_expected_min" in fm:
+        try:
+            result["estimated_expected_min"] = float(fm["estimated_expected_min"])
+        except (ValueError, TypeError):
+            pass
+
+    return result
 
 
 DISPATCH_PROMPT_TEMPLATE = """\
@@ -1224,6 +1340,14 @@ async def _dispatch_inner(task_path: Path):
         logger.warning("Could not read task file for skill selection: %s", exc)
         task_text = ""
 
+    # --- Extract scheduler metadata from frontmatter ---
+    _task_meta: dict = {}
+    if _HAS_SCHEDULER:
+        try:
+            _task_meta = _extract_task_metadata(inprogress_path)
+        except Exception:
+            _task_meta = {}
+
     # --- Phase 1.5: Task content validation ---
     validation = validate_task_content(task_text, task_stem=stem)
     if validation["blocked"]:
@@ -1589,6 +1713,25 @@ async def _dispatch_inner(task_path: Path):
             # (confidence already downgraded to 'low' by _apply_test_gate_result)
             logger.warning("TEST GATE: %s — tests failed, delivering with low confidence", stem)
 
+    # --- Skill execution analysis (non-fatal, offloaded to thread) ---
+    _analysis_log_text = ""
+    try:
+        _analysis_log_text = worker_log.read_text(encoding="utf-8")[-8000:]
+    except Exception:
+        pass
+    try:
+        await asyncio.to_thread(
+            _run_skill_analysis,
+            stem=stem,
+            task_text=task_text,
+            selected_names=selected_names,
+            log_text=_analysis_log_text,
+            passed=passed,
+            exit_code=exit_code,
+        )
+    except Exception:
+        logger.warning("Skill analysis thread failed for %s (non-fatal)", stem, exc_info=True)
+
     # --- Finalize task lifecycle ---
     try:
         if passed:
@@ -1624,18 +1767,23 @@ async def _dispatch_inner(task_path: Path):
         try:
             _sched_duration_min = (time.monotonic() - _sched_t0) / 60.0
             # Create and log execution record for calibration.
-            # Build a minimal WorkUnit stub since we don't have the full scheduler
-            # work unit in the watcher dispatch path.
+            # Build WorkUnit from task frontmatter metadata (or defaults).
             _sched_wu = WorkUnit(
                 id=stem,
                 title=stem,
-                estimated_expected_min=35.0,  # default shift block estimate
+                estimated_expected_min=_task_meta.get("estimated_expected_min", 35.0),
+                work_mode=_task_meta.get("work_mode", "admin"),
+                task_class=_task_meta.get("task_class", "bounded"),
+                commitment_level=_task_meta.get("commitment_level", "soft"),
             )
+            _sched_outcome = "success" if passed else "fail"
+            _sched_quality = 100.0 if passed else 0.0
             _sched_record = create_execution_record(
                 work_unit=_sched_wu,
                 actual_duration_min=_sched_duration_min,
-                outcome="success" if passed else "fail",
+                outcome=_sched_outcome,
                 block_id=_sched_block_id or "",
+                outcome_quality=_sched_quality,
             )
             SCHEDULER_STATE_DIR.mkdir(parents=True, exist_ok=True)
             _exec_log_path = SCHEDULER_STATE_DIR / "execution_log.jsonl"
@@ -1721,6 +1869,86 @@ async def _dispatch_inner(task_path: Path):
                     logger.info("LOOP RESOLVED: %s (task %s completed)", loop.loop_id, stem)
         except Exception as exc:
             logger.warning("Open-loop resolution failed (non-fatal): %s", exc)
+
+
+def _run_skill_analysis(
+    stem: str,
+    task_text: str,
+    selected_names: list[str],
+    log_text: str,
+    passed: bool,
+    exit_code: int,
+):
+    """Post-task skill execution analysis (non-fatal).
+
+    Analyzes how skills performed during task execution and feeds results
+    back into the skill evolution system.  Updates version-store stats and
+    enqueues evolution suggestions if any are produced.
+
+    Uses module-level ``_skill_version_store`` and ``_skill_evolution_queue``
+    singletons to avoid per-call SQLite/JSON initialization overhead.
+
+    This is a synchronous function — called from async via ``asyncio.to_thread``.
+    """
+    try:
+        if not selected_names:
+            return None
+
+        store = _skill_version_store
+        if store is None:
+            return None
+
+        from skills.execution_analyzer import ExecutionAnalyzer
+        from skills.evolution_queue import EvolutionRequest
+
+        analyzer = ExecutionAnalyzer(version_store=store)
+
+        outcome = {"success": passed, "exit_code": exit_code}
+        analysis = analyzer.analyze(
+            task_id=stem,
+            task_description=task_text[:2000],
+            selected_skills=selected_names,
+            execution_trace=log_text,
+            outcome=outcome,
+        )
+
+        # Update skill stat counters (selections, executions, completions, etc.)
+        analyzer.update_stats(analysis)
+
+        # Persist the analysis for health tracking
+        store.store_analysis(analysis)
+
+        # Enqueue evolution suggestions if any
+        queue = _skill_evolution_queue
+        if analysis.evolution_suggestions and queue is not None:
+            for suggestion in analysis.evolution_suggestions:
+                req = EvolutionRequest(
+                    skill_id=suggestion.target_skill_id,
+                    skill_name=suggestion.target_skill_name,
+                    evolution_type=suggestion.type,
+                    direction=suggestion.direction,
+                    priority=suggestion.priority,
+                    task_id=stem,
+                )
+                queue.enqueue(req)
+            logger.info(
+                "SKILL EVOLUTION: %d suggestions enqueued for %s",
+                len(analysis.evolution_suggestions),
+                stem,
+            )
+
+        logger.info(
+            "SKILL ANALYSIS: %s — quality=%.2f skills=%d suggestions=%d",
+            stem,
+            analysis.overall_quality,
+            len(analysis.skill_judgments),
+            len(analysis.evolution_suggestions),
+        )
+        return analysis
+
+    except Exception:
+        logger.warning("Skill analysis failed for %s (non-fatal)", stem, exc_info=True)
+        return None
 
 
 PYTEST_TIMEOUT = 120  # seconds — hard timeout for the test gate

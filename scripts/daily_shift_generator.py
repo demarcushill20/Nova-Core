@@ -45,6 +45,7 @@ try:
         build_shadow_comparison,
         load_scheduler_config,
     )
+    from utils.scheduler.replanner import BlockState, save_block_state
     from utils.scheduler.work_unit import CommitmentLevel, TaskClass, WorkMode, WorkUnit
 
     _HAS_SCHEDULER = True
@@ -688,6 +689,75 @@ def _optimize_blocks_with_scheduler(
             log(f"[scheduler] Starvation alerts: {len(result.starvation_alerts)}")
         if result.epic_warnings:
             log(f"[scheduler] Epic warnings: {result.epic_warnings}")
+
+        # Persist BlockPlan for downstream consumers (watcher, heartbeat)
+        try:
+            plan_path = ROOT / "STATE" / "scheduler" / "current_block_plan.json"
+            plan_path.parent.mkdir(parents=True, exist_ok=True)
+            plan_data = {
+                "generated_at": datetime.now().isoformat(),
+                "shift_date": str(shift_date),
+                "block_plan": result.block_plan.model_dump(mode="json") if result.block_plan else None,
+                "calibration_applied": result.calibration_applied,
+                "starvation_alerts": result.starvation_alerts,
+                "total_blocks": len(optimized),
+            }
+            plan_path.write_text(_json.dumps(plan_data, indent=2, default=str))
+            log(f"[scheduler] Persisted BlockPlan to {plan_path} ({len(optimized)} blocks)")
+        except Exception as e:
+            log(f"[scheduler] Failed to persist BlockPlan: {e}")
+
+        # Persist initial BlockState for the watcher's replanner
+        try:
+            block_id = f"shift_{shift_date:%Y%m%d}"
+            state_dir = ROOT / "STATE" / "scheduler"
+            # Use time-sorted order for start/end (not priority-sorted)
+            earliest = min(optimized, key=lambda b: (b["hour"], b["minute"]))
+            latest = max(optimized, key=lambda b: (b["hour"], b["minute"]))
+            block_start = datetime(
+                shift_date.year, shift_date.month, shift_date.day,
+                earliest["hour"], earliest["minute"],
+                tzinfo=CT,
+            ).astimezone(timezone.utc)
+            block_end = datetime(
+                shift_date.year, shift_date.month, shift_date.day,
+                latest["hour"], latest["minute"],
+                tzinfo=CT,
+            ).astimezone(timezone.utc) + timedelta(minutes=45)
+
+            # In batch mode (morning + afternoon), merge into existing state
+            from utils.scheduler.replanner import load_block_state
+            existing = load_block_state(block_id, state_dir=state_dir)
+            if existing and (existing.completed_task_ids or existing.in_progress_task_id):
+                # Active shift — don't overwrite progress
+                log(f"[scheduler] BlockState '{block_id}' already active, skipping overwrite")
+            elif existing:
+                # Extend existing plan (batch mode: morning created first, afternoon extends)
+                merged_slots = list(existing.original_plan.scheduled_slots)
+                if result.block_plan:
+                    merged_slots.extend(result.block_plan.scheduled_slots)
+                from utils.scheduler.block import BlockPlan
+                merged_plan = BlockPlan(
+                    scheduled_slots=merged_slots,
+                    deferred_tasks=list(existing.original_plan.deferred_tasks)
+                    + (list(result.block_plan.deferred_tasks) if result.block_plan else []),
+                )
+                existing.original_plan = merged_plan
+                existing.block_start_utc = min(existing.block_start_utc, block_start)
+                existing.block_end_utc = max(existing.block_end_utc, block_end)
+                save_block_state(existing, state_dir=state_dir)
+                log(f"[scheduler] Merged afternoon into BlockState '{block_id}'")
+            else:
+                initial_state = BlockState(
+                    block_id=block_id,
+                    original_plan=result.block_plan,
+                    block_start_utc=block_start,
+                    block_end_utc=block_end,
+                )
+                save_block_state(initial_state, state_dir=state_dir)
+                log(f"[scheduler] Persisted initial BlockState '{block_id}' to {state_dir}")
+        except Exception as e:
+            log(f"[scheduler] Failed to persist BlockState: {e}")
 
         return optimized, True
     except Exception as exc:

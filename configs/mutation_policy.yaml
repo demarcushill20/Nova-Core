@@ -57,3 +57,36 @@ model:
   default: "claude-sonnet-4-6"
   # Higher-quality model for high-risk skills
   high_risk: "claude-sonnet-4-6"
+
+# Evolution policy — governs AUTO-FIX, AUTO-IMPROVE, AUTO-LEARN
+evolution_policy:
+  # What can be modified during skill evolution
+  allowed_targets:
+    - description
+    - activation_criteria
+    - exclusions
+    - examples
+    - body_content  # allowed for evolution but NOT for optimizer
+    - workflow_steps  # allowed for evolution but NOT for optimizer
+
+  # What must NEVER be modified during evolution
+  forbidden_targets:
+    - tool_permissions
+    - output_contract
+    - safety_rules
+
+  # Per-origin constraints
+  fix:
+    max_generation: 5
+    cooldown_seconds: 7200
+    require_llm_confirmation: false
+
+  derived:
+    max_generation: 5
+    require_eval_gate: true
+    min_score_improvement: 0.02
+
+  captured:
+    quarantine_successes: 5
+    max_per_day: 2
+    similarity_threshold: 0.85

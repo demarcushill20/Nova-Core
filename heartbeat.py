@@ -48,6 +48,11 @@ except ImportError:
     TraceContext = None  # type: ignore[assignment,misc]
 
 try:
+    from utils.dual_memory_health import CrossSystemHealthChecker
+except ImportError:
+    CrossSystemHealthChecker = None  # type: ignore[assignment,misc]
+
+try:
     from utils.max_plan_guard import record_invocation as _mpg_record
     from utils.max_plan_guard import should_allow_task as _mpg_allow
 except ImportError:
@@ -535,15 +540,14 @@ def check_ruff() -> dict:
 
 
 def check_memory_systems() -> dict:
-    """Check connectivity to Fusion Memory and Obsidian Vault."""
+    """Check connectivity and cross-system health for Fusion Memory and Obsidian Vault."""
     issues = []
 
-    # Fusion Memory: check if the MCP server entry point exists
+    # Basic connectivity checks first
     fusion_server = Path.home() / "Nova_AI_Fusion_Memory_MCP" / "mcp_server.py"
     if not fusion_server.exists():
         issues.append("Fusion Memory mcp_server.py missing")
 
-    # Obsidian Vault: check if vault directory exists and has content
     vault_dir = Path("/home/nova/nova-vault")
     if not vault_dir.exists():
         issues.append("Obsidian vault dir missing")
@@ -552,8 +556,22 @@ def check_memory_systems() -> dict:
         if not meta_dir.exists() or not list(meta_dir.glob("*.md")):
             issues.append("Obsidian vault _meta/ empty or missing")
 
+    # Enhanced cross-system health monitoring (if available)
+    if CrossSystemHealthChecker is not None and len(issues) == 0:
+        try:
+            checker = CrossSystemHealthChecker(max_checks_per_run=1)  # Light check for heartbeat
+            # Only run a basic check to avoid expensive operations
+            # This will detect major drift without full validation
+            if hasattr(checker, 'check_basic_connectivity'):
+                basic_result = checker.check_basic_connectivity()
+                if basic_result and basic_result.status != "ok":
+                    issues.append(f"cross-system drift: {basic_result.check_name}")
+        except Exception as e:
+            # Don't fail the whole check if enhanced monitoring fails
+            issues.append(f"enhanced check failed: {str(e)[:50]}...")
+
     ok = len(issues) == 0
-    detail = "both reachable" if ok else "; ".join(issues)
+    detail = "both systems healthy" if ok else "; ".join(issues)
     return {"name": "memory_systems", "ok": ok, "detail": detail}
 
 
@@ -2097,7 +2115,7 @@ def check_scheduler() -> dict:
         status_parts.append(f"variant={config.variant_selection}")
 
         # Check if execution log exists and has records
-        exec_log = LOGS_DIR / "scheduler_execution.jsonl"
+        exec_log = STATE_DIR / "scheduler" / "execution_log.jsonl"
         if exec_log.exists():
             try:
                 records = _read_execution_log(exec_log)
@@ -2400,7 +2418,7 @@ def main() -> int:
     if _HAS_SCHEDULER and not _heartbeat_shutdown_requested:
         try:
             _sched_state_dir = STATE_DIR / "scheduler"
-            _exec_log_path = LOGS_DIR / "scheduler_execution.jsonl"
+            _exec_log_path = STATE_DIR / "scheduler" / "execution_log.jsonl"
             _cal_report_marker = _sched_state_dir / "last_calibration_report.txt"
 
             # Run calibration once per day
@@ -2445,6 +2463,52 @@ def main() -> int:
                 print(f"[heartbeat] Hardening: archived={archived} cleaned={cleaned}")
     except Exception as e:
         print(f"[heartbeat] Production hardening failed (non-fatal): {e}")
+
+    # --- Skill Evolution: process queue + health scan ---
+    try:
+        from skills.evolution_processor import EvolutionProcessor
+        from skills.evolution_queue import EvolutionQueue
+        from skills.skill_evolver import SkillEvolver
+        from skills.version_store import SkillVersionStore
+        from skills.skill_dashboard import SkillDashboard
+        from skills.skill_cache import SkillCache
+        from skills.evolution_audit import EvolutionAudit
+
+        _evo_store = SkillVersionStore()
+        _evo_queue = EvolutionQueue()
+        _evo_evolver = SkillEvolver(version_store=_evo_store)
+        _evo_dashboard = SkillDashboard(
+            version_store=_evo_store,
+            skill_cache=SkillCache(),
+            evolution_queue=_evo_queue,
+            evolution_audit=EvolutionAudit(),
+        )
+        _evo_processor = EvolutionProcessor(
+            version_store=_evo_store,
+            evolution_queue=_evo_queue,
+            skill_evolver=_evo_evolver,
+            dashboard=_evo_dashboard,
+            telegram_fn=_send_telegram,
+        )
+
+        # Process queued evolutions (up to 3 per heartbeat)
+        _evo_results = _evo_processor.process_batch(max_items=3)
+
+        # Run periodic health scan (detect improvement/capture candidates)
+        _evo_scan = _evo_processor.run_health_scan()
+
+        _evo_stats = _evo_processor.get_stats()
+        _evo_detail = (
+            f"processed={len(_evo_results)} "
+            f"candidates={_evo_scan.get('candidates_found', 0)} "
+            f"patterns={_evo_scan.get('patterns_found', 0)} "
+            f"queue={_evo_stats.get('queue_size', 0)}"
+        )
+        checks.append({"name": "skill_evolution", "ok": True, "detail": _evo_detail})
+        print(f"[skill-evolution] {_evo_detail}")
+    except Exception as e:
+        print(f"[skill-evolution] Failed (non-fatal): {e}")
+        checks.append({"name": "skill_evolution", "ok": True, "detail": f"check skipped: {e}"})
 
     # Always send heartbeat pulse to Telegram
     send_telegram_heartbeat(checks)

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0639_Can_you_scan_the_code_base_and_see_what_has_been_built_but_not_integrated__Basic_1774806755",
+  "workflow_id": "0639_Can_you_scan_the_code_base_and_see_what_has_been_built_but_not_integrated__Basic",
+  "task_summary": "Full codebase shelf audit \u2014 identified 40 items (20 modules + 20 scripts, ~15,700 LOC) built but not integrated into runtime",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Full codebase shelf audit \u2014 identified 40 items (20 modules + 20 scripts, ~15,700 LOC) built but not integrated into runtime"
+  ],
+  "successful_patterns": [
+    "task_completed: 0639_Can_you_scan_the_code_base_and_see_what_has_been_built_but_not_integrated__Basi"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Full codebase shelf audit \u2014 identified 40 items (20 modules + 20 scripts, ~15,700 LOC) built but not integrated into runtime",
+  "created_at": "2026-03-29T17:52:35Z",
+  "confidence": "high"
+}

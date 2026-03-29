@@ -813,9 +813,11 @@ def campaign_stop() -> None:
 # ---------------------------------------------------------------------------
 
 from novatrade.cli.commands.doctrine_cmd import doctrine_create, doctrine_show  # noqa: E402
+from novatrade.cli.commands.health_diagnostic import health_diagnostic  # noqa: E402
 
 doctrine_app.command("create")(doctrine_create)
 doctrine_app.command("show")(doctrine_show)
+app.command("health-diagnostic")(health_diagnostic)
 
 
 # ---------------------------------------------------------------------------
