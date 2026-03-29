@@ -9,10 +9,12 @@ Supports two shifts per day:
   - Afternoon shift (blocks 9-16): 2:30 PM - 7:45 PM CT
 
 Usage:
-    python3 scripts/daily_shift_generator.py                        # generate both shifts for tomorrow
-    python3 scripts/daily_shift_generator.py --today                # generate both shifts for today
-    python3 scripts/daily_shift_generator.py --today --shift morning  # morning only
-    python3 scripts/daily_shift_generator.py --today --shift afternoon # afternoon only
+    python3 scripts/daily_shift_generator.py                        # generate both shifts for tomorrow (batch)
+    python3 scripts/daily_shift_generator.py --today                # generate both shifts for today (batch)
+    python3 scripts/daily_shift_generator.py --today --shift morning  # morning only (batch)
+    python3 scripts/daily_shift_generator.py --today --shift afternoon # afternoon only (batch)
+    python3 scripts/daily_shift_generator.py --jit                  # JIT: only blocks due within 75 min
+    python3 scripts/daily_shift_generator.py --jit --lead-minutes 60 # JIT with custom lead time
     python3 scripts/daily_shift_generator.py --dry-run              # preview without writing
     python3 scripts/daily_shift_generator.py --today --dry-run --shift both
 
@@ -237,15 +239,16 @@ MORNING_SHIFT_BLOCKS: list[dict] = [
      - next_actions: prioritized list for tomorrow
      - key_decisions: important choices made today
 
-3. Generate tomorrow's schedule:
-   - Run: `python3 scripts/daily_shift_generator.py`
-   - Verify the generated task files look correct
-   - This ensures the self-perpetuating schedule continues""",
+3. Verify tomorrow's schedule readiness:
+   - JIT generation handles creating each block ~1 hour before it's due
+   - Verify the safety-net generator tasks exist for tomorrow
+   - If needed, run: `python3 scripts/daily_shift_generator.py --jit --lead-minutes 420`
+   - This ensures any missed blocks are caught""",
         "output_suffix": "wrap",
     },
 ]
 
-# ── Afternoon Shift Block Definitions (blocks 9-16) ──────────────────────
+# ── Afternoon Shift Block Definitions (blocks 9-16) ────────────���─────────
 AFTERNOON_SHIFT_BLOCKS: list[dict] = [
     {
         "block": 9,
@@ -448,10 +451,11 @@ AFTERNOON_SHIFT_BLOCKS: list[dict] = [
      - key_decisions: important choices made today
    - This checkpoint covers the full day, not just the afternoon
 
-3. Generate tomorrow's schedule:
-   - Run: `python3 scripts/daily_shift_generator.py`
-   - Verify the generated task files look correct
-   - This ensures the self-perpetuating schedule continues
+3. Verify tomorrow's schedule readiness:
+   - JIT generation handles creating each block ~1 hour before it's due
+   - Verify the safety-net generator tasks exist for tomorrow
+   - If needed, run: `python3 scripts/daily_shift_generator.py --jit --lead-minutes 420`
+   - This ensures any missed blocks are caught
 
 4. Send summary to operator:
    - Compile a concise day summary for Telegram
@@ -481,17 +485,17 @@ shift_date: {shift_date}
 shift_name: morning
 ---
 
-# Morning Schedule Generator
+# Morning Schedule Generator (Safety Net)
 
-Run the daily shift generator to create today's morning schedule:
+Run the JIT shift generator to create any missing morning blocks:
 
 ```bash
-python3 scripts/daily_shift_generator.py --today --shift morning
+python3 scripts/daily_shift_generator.py --jit --lead-minutes 420
 ```
 
-This task is auto-generated to perpetuate the daily shift schedule.
-If this task fires, it means Block 8 from the previous day did not
-generate today's schedule — this is the safety net.
+This task is a safety net — the watcher's built-in JIT timer normally
+creates each block ~1 hour before it's due. This only fires if the
+JIT timer missed blocks. The 420-minute lead covers the full morning shift.
 """
 
 AFTERNOON_GENERATOR_TEMPLATE = """\
@@ -503,17 +507,17 @@ shift_date: {shift_date}
 shift_name: afternoon
 ---
 
-# Afternoon Schedule Generator
+# Afternoon Schedule Generator (Safety Net)
 
-Run the daily shift generator to create today's afternoon schedule:
+Run the JIT shift generator to create any missing afternoon blocks:
 
 ```bash
-python3 scripts/daily_shift_generator.py --today --shift afternoon
+python3 scripts/daily_shift_generator.py --jit --lead-minutes 360
 ```
 
-This task is auto-generated to perpetuate the afternoon shift schedule.
-If this task fires, it means the afternoon shift was not yet generated
-— this is the safety net.
+This task is a safety net — the watcher's built-in JIT timer normally
+creates each block ~1 hour before it's due. This only fires if the
+JIT timer missed blocks. The 360-minute lead covers the full afternoon shift.
 """
 
 
@@ -960,7 +964,138 @@ def check_existing_shifts(  # noqa: C901
     return existing
 
 
+def check_block_exists(shift_date: date, block_num: int, slug: str) -> bool:
+    """Check if a specific shift block task already exists (any lifecycle state).
+
+    Checks TASKS/ and TASKS/archive/ for the block file in any state.
+    """
+    date_str = shift_date.strftime("%Y%m%d")
+    base = f"shift_{date_str}_{block_num}_{slug}.md"
+    lifecycle_suffixes = ("", ".inprogress", ".done", ".failed", ".cancelled")
+
+    search_dirs = [TASKS]
+    if TASKS_COMPLETED.exists():
+        search_dirs.append(TASKS_COMPLETED)
+
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for sfx in lifecycle_suffixes:
+            if (search_dir / f"{base}{sfx}").exists():
+                return True
+    return False
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
+
+
+def generate_jit(
+    shift_date: date,
+    lead_minutes: int = 75,
+    dry_run: bool = False,
+) -> None:
+    """Just-in-time shift generation: create only blocks due within lead_minutes.
+
+    Instead of batch-generating all blocks at once, this creates each block
+    individually ~1 hour before its scheduled time. Designed to be called
+    frequently (every 30 min) by a systemd timer.
+
+    Args:
+        shift_date: The date to generate blocks for.
+        lead_minutes: Only generate blocks starting within this many minutes.
+        dry_run: If True, preview without writing files.
+    """
+    now_ct = datetime.now(timezone.utc).astimezone(CT)
+    cutoff_ct = now_ct + timedelta(minutes=lead_minutes)
+
+    log(
+        f"JIT generation for {shift_date} (lead={lead_minutes}min, "
+        f"now={now_ct:%H:%M CT}, cutoff={cutoff_ct:%H:%M CT}, dry_run={dry_run})"
+    )
+
+    # Lookahead guard
+    today = now_ct.date()
+    if (shift_date - today).days > MAX_LOOKAHEAD_DAYS:
+        log(f"SKIPPED: target date {shift_date} beyond lookahead guard")
+        return
+
+    # Combine all blocks
+    all_blocks = MORNING_SHIFT_BLOCKS + AFTERNOON_SHIFT_BLOCKS
+
+    files_to_write: list[tuple[str, str]] = []
+    yesterday_context: str | None = None
+    morning_context: str | None = None
+
+    for block in all_blocks:
+        # Compute block's CT datetime
+        block_ct = datetime(
+            shift_date.year,
+            shift_date.month,
+            shift_date.day,
+            block["hour"],
+            block["minute"],
+            tzinfo=CT,
+        )
+
+        # Skip blocks not within the lead window
+        if block_ct < now_ct or block_ct > cutoff_ct:
+            continue
+
+        # Skip blocks that already exist
+        if check_block_exists(shift_date, block["block"], block["slug"]):
+            continue
+
+        # Lazy-load context (only fetched when actually needed)
+        if block["block"] <= 8:
+            if yesterday_context is None:
+                yesterday_context = get_yesterday_context()
+            context = yesterday_context
+        else:
+            if morning_context is None:
+                morning_context = get_morning_context(shift_date)
+            context = morning_context
+
+        filename, content = build_shift_task(block, shift_date, context)
+        files_to_write.append((filename, content))
+
+    if not files_to_write:
+        log("JIT: no blocks due within lead window (or all already exist)")
+        return
+
+    if dry_run:
+        print(f"\n{'=' * 60}")
+        print(f"DRY RUN — JIT blocks for {shift_date}")
+        print(f"{'=' * 60}\n")
+        for filename, _content in files_to_write:
+            print(f"  Would create: {filename}")
+        print(f"\nTotal: {len(files_to_write)} files")
+        return
+
+    # Write files
+    TASKS.mkdir(parents=True, exist_ok=True)
+    written_files: list[str] = []
+
+    for filename, content in files_to_write:
+        path = TASKS / filename
+        path.write_text(content, encoding="utf-8")
+        written_files.append(filename)
+        log(f"  JIT written: {filename}")
+
+    log(f"JIT generated {len(written_files)} block(s) for {shift_date}")
+
+    # Clean up old completed shift tasks
+    moved = cleanup_old_shifts(target_date=shift_date)
+    if moved:
+        log(f"Archived {moved} completed shift task(s)")
+
+    # Send a brief Telegram notification (only for first block of a shift)
+    if written_files:
+        ct_now_str = now_ct.strftime("%H:%M CT")
+        msg = (
+            f"JIT shift block(s) created: {', '.join(written_files)}\n"
+            f"Due within {lead_minutes}min (generated {ct_now_str})"
+        )
+        send_telegram(msg)
 
 
 def generate_schedule(  # noqa: C901
@@ -968,7 +1103,10 @@ def generate_schedule(  # noqa: C901
     dry_run: bool = False,
     shift_name: str = "both",
 ) -> None:
-    """Generate the shift schedule for the given date.
+    """Generate the shift schedule for the given date (batch mode).
+
+    Creates all blocks for the requested shift at once. Use --jit mode
+    for just-in-time generation (one block at a time, ~1 hour before).
 
     Args:
         shift_date: The date to generate the schedule for.
@@ -1108,6 +1246,19 @@ def main() -> None:
         default="both",
         help="Which shift to generate: morning (blocks 1-8), afternoon (blocks 9-16), or both (default: both)",
     )
+    parser.add_argument(
+        "--jit",
+        action="store_true",
+        help="Just-in-time mode: only generate blocks due within --lead-minutes (default 75). "
+        "Designed to be called frequently (every 30 min) by a systemd timer.",
+    )
+    parser.add_argument(
+        "--lead-minutes",
+        type=int,
+        default=75,
+        help="Lead time in minutes for JIT mode (default: 75). "
+        "Blocks are generated this many minutes before their scheduled time.",
+    )
     args = parser.parse_args()
 
     if args.date:
@@ -1116,8 +1267,8 @@ def main() -> None:
         except ValueError:
             print(f"Invalid date format: {args.date} (expected YYYY-MM-DD)", file=sys.stderr)
             sys.exit(1)
-    elif args.today:
-        # "Today" in Central Time
+    elif args.today or args.jit:
+        # JIT always operates on today
         ct_now = datetime.now(timezone.utc).astimezone(CT)
         shift_date = ct_now.date()
     else:
@@ -1125,7 +1276,10 @@ def main() -> None:
         ct_now = datetime.now(timezone.utc).astimezone(CT)
         shift_date = next_business_day(ct_now.date())
 
-    generate_schedule(shift_date, dry_run=args.dry_run, shift_name=args.shift)
+    if args.jit:
+        generate_jit(shift_date, lead_minutes=args.lead_minutes, dry_run=args.dry_run)
+    else:
+        generate_schedule(shift_date, dry_run=args.dry_run, shift_name=args.shift)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260328_5_free_will_1774708800",
+  "workflow_id": "shift_20260328_5_free_will",
+  "task_summary": "Fixed decision history dedup race condition \u2014 replaced per-instance asyncio.Lock with fcntl.flock file lock, added concurrent regression tests, compacted 100\u21925 entries",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed decision history dedup race condition \u2014 replaced per-instance asyncio.Lock with fcntl.flock file lock, added concurrent regression tests, compacted 100\u21925 entries"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260328_5_free_will"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed decision history dedup race condition \u2014 replaced per-instance asyncio.Lock with fcntl.flock file lock, added concurrent regression tests, compacted 100\u21925 entries",
+  "created_at": "2026-03-28T14:40:00Z",
+  "confidence": "high"
+}

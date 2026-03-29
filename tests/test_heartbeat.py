@@ -125,7 +125,7 @@ class TestCheckTaskQueue:
         assert result["ok"] is True
         assert "2 pending" in result["detail"]
 
-    def test_orphaned_inprogress(self, tmp_path):
+    def test_orphaned_inprogress_auto_recovered(self, tmp_path):
         _make_tmp_base(tmp_path)
         ip = tmp_path / "TASKS" / "0001_old.md.inprogress"
         ip.write_text("x")
@@ -133,8 +133,12 @@ class TestCheckTaskQueue:
         old_ts = (datetime.now(timezone.utc) - timedelta(minutes=30)).timestamp()
         os.utime(ip, (old_ts, old_ts))
         result = heartbeat.check_task_queue()
-        assert result["ok"] is False
-        assert "ORPHANED" in result["detail"]
+        # Orphaned tasks are now auto-recovered (reset to .md for retry)
+        assert result["ok"] is True
+        assert "AUTO-RECOVERED" in result["detail"]
+        # The .inprogress file should be gone, .md should exist
+        assert not ip.exists()
+        assert (tmp_path / "TASKS" / "0001_old.md").exists()
 
     def test_too_many_pending(self, tmp_path):
         _make_tmp_base(tmp_path)

@@ -1,0 +1,13 @@
+[Unit]
+Description=NovaCore JIT Shift Timer — fires every 30 min to create upcoming shift blocks
+
+[Timer]
+# Fire every 30 minutes during active hours (5:30 AM - 8:00 PM Central)
+# The JIT generator itself filters by lead time, so running outside
+# shift hours is harmless (it just finds no blocks to create).
+OnCalendar=*-*-* *:00,30:00 America/Chicago
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

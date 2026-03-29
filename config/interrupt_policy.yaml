@@ -1,0 +1,28 @@
+# Interrupt Handling & Preemption — Phase 8
+# Controls how incoming events (health alerts, operator messages, new tasks)
+# are classified and throttled during block execution.
+
+interrupt_policy:
+  # Maximum HIGH_INSERT preemptions per block before downgrading to DEFER.
+  # CRITICAL interrupts always bypass this budget.
+  max_preemptions_per_block: 2
+
+  # Maps event_type strings to interrupt levels:
+  #   critical     – stop immediately
+  #   high_insert  – finish checkpoint then switch
+  #   defer        – queue for next replan
+  #   log_only     – record, don't schedule
+  auto_classify_rules:
+    health_red: critical
+    health_yellow: high_insert
+    health_green: log_only
+    operator_critical: critical
+    operator_message: high_insert
+    operator_low: defer
+    operator_defer: defer
+    new_task_high: high_insert
+    new_task_medium: defer
+    new_task_low: log_only
+    budget_alert: high_insert
+    error_spike: high_insert
+    system_info: log_only

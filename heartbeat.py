@@ -310,10 +310,43 @@ def check_task_queue() -> dict:
         if age_min > ORPHAN_INPROGRESS_MINUTES:
             orphaned.append(ip.name)
 
+    # Auto-recover orphaned tasks inline — reset to .md for re-dispatch
+    auto_recovered = []
+    if orphaned:
+        for orphan_name in list(orphaned):
+            orphan_path = TASKS_DIR / orphan_name
+            stem = orphan_name.replace(".md.inprogress", "")
+            task_path = TASKS_DIR / f"{stem}.md"
+            failed_path = TASKS_DIR / f"{stem}.md.failed"
+
+            # Check retry eligibility
+            can_retry = True
+            try:
+                from utils.task_checkpoint import MAX_TASK_RETRIES, increment_retry
+
+                cp = increment_retry(stem)
+                if cp is not None and cp.retry_count >= MAX_TASK_RETRIES:
+                    can_retry = False
+            except Exception:
+                pass
+
+            try:
+                if can_retry:
+                    orphan_path.rename(task_path)
+                    auto_recovered.append(f"{stem}→retry")
+                else:
+                    orphan_path.rename(failed_path)
+                    auto_recovered.append(f"{stem}→failed(max-retries)")
+                orphaned.remove(orphan_name)
+            except (OSError, FileNotFoundError):
+                pass  # leave in orphaned list if rename fails
+
     ok = len(stale_pending) <= MAX_PENDING_TASKS and len(orphaned) == 0
     detail = (
         f"{len(pending)} pending ({len(stale_pending)} stale, {deferred_count} deferred), {len(inprogress)} in-progress"
     )
+    if auto_recovered:
+        detail += f", AUTO-RECOVERED: {', '.join(auto_recovered)}"
     if orphaned:
         detail += f", ORPHANED: {', '.join(orphaned)}"
     return {"name": "task_queue", "ok": ok, "detail": detail}
@@ -648,6 +681,67 @@ def check_cost_router() -> dict:
 
     except Exception as e:
         return {"name": "cost_router", "ok": True, "detail": f"check skipped: {e}"}
+
+
+def check_novatrade_signals() -> dict:
+    """Check NovaTrade signal generation rates and health status."""
+    try:
+        import json
+        from pathlib import Path
+
+        signal_stats_file = Path("/home/nova/nova-core/STATE/novatrade/signal_stats.json")
+
+        if not signal_stats_file.exists():
+            return {"name": "novatrade_signals", "ok": True, "detail": "no signal stats file (NovaTrade not running)"}
+
+        with open(signal_stats_file) as f:
+            stats = json.load(f)
+
+        status = stats.get("status", "UNKNOWN")
+        concern_level = stats.get("concern_level", "UNKNOWN")
+        signals_1h = stats.get("signals_1h", 0)
+        signals_4h = stats.get("signals_4h", 0)
+        signals_24h = stats.get("signals_24h", 0)
+        last_signal_at = stats.get("last_signal_at", "")
+
+        regime = stats.get("regime", "")
+        session = stats.get("session", "")
+
+        # Convert timestamps for readability
+        detail_parts = [
+            f"status={status}",
+            f"signals: 1h={signals_1h}, 4h={signals_4h}, 24h={signals_24h}",
+        ]
+
+        if regime or session:
+            ctx = []
+            if regime:
+                ctx.append(f"regime={regime}")
+            if session:
+                ctx.append(f"session={session}")
+            detail_parts.append(" ".join(ctx))
+
+        if last_signal_at:
+            try:
+                from datetime import datetime, timezone
+
+                last_dt = datetime.fromisoformat(last_signal_at.replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                hours_ago = (now - last_dt).total_seconds() / 3600
+                detail_parts.append(f"last: {hours_ago:.1f}h ago")
+            except (ValueError, TypeError, KeyError):
+                detail_parts.append(f"last: {last_signal_at[:19]}")
+
+        detail = " | ".join(detail_parts)
+
+        # Health assessment: RED/YELLOW = not ok, GREEN = ok
+        # MARKET_CLOSED is always GREEN (expected during weekends)
+        ok = concern_level == "GREEN"
+
+        return {"name": "novatrade_signals", "ok": ok, "detail": detail}
+
+    except Exception as e:
+        return {"name": "novatrade_signals", "ok": True, "detail": f"check failed: {e}"}
 
 
 # --- Output ------------------------------------------------------------------
@@ -2114,6 +2208,13 @@ def main() -> int:
             )
     except Exception as e:
         checks.append({"name": "drift_detection", "ok": True, "detail": f"check skipped: {e}"})
+
+    # --- NovaTrade signal monitoring ---
+    try:
+        signal_check = check_novatrade_signals()
+        checks.append(signal_check)
+    except Exception as e:
+        checks.append({"name": "novatrade_signals", "ok": True, "detail": f"check skipped: {e}"})
 
     # --- Autonomy cycle (Phase 2.4 + 3.4): score → decide → decompose → tasks ---
     # Gated on degradation tier: skip at MINIMAL+ (tier >= 2), matching planning cycle policy

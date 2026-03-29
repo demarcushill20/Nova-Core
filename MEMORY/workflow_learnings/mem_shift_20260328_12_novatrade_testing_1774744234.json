@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260328_12_novatrade_testing_1774744234",
+  "workflow_id": "shift_20260328_12_novatrade_testing",
+  "task_summary": "2/2 steps succeeded, 1/2 contracts valid, aggregate D (0.57)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "2/2 steps succeeded, 1/2 contracts valid, aggregate D (0.57)"
+  ],
+  "successful_patterns": [
+    "plan_revised: plan plan_shift_20260328_12_novatrade_testing_1774734312 (failed)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "2/2 steps succeeded, 1/2 contracts valid, aggregate D (0.57)",
+  "created_at": "2026-03-29T00:30:34Z",
+  "confidence": "medium",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260328_12_novatrade_testing_1774757090"
+}

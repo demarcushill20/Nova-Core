@@ -84,6 +84,9 @@ class TestDegradationTierGating:
         # Stub kill switch
         monkeypatch.setattr(hb, "check_kill_switch", lambda: None, raising=False)
 
+        # Disable CRUISE mode so degradation tier logic is tested in isolation
+        monkeypatch.setattr(hb, "_update_cruise_state", None)
+
         self.hb = hb
 
     def test_full_tier_runs_all_cycles(self, monkeypatch):
@@ -302,6 +305,9 @@ class TestBudgetWatchdogWiring:
         monkeypatch.setattr(hb, "_append_metrics", lambda snap: None)
         monkeypatch.setattr(hb, "_telegram_cooldown_gate", lambda msg: False)
         monkeypatch.setattr(hb, "_sh_record_mem", lambda: None)
+
+        # Disable CRUISE mode so budget tier logic is tested in isolation
+        monkeypatch.setattr(hb, "_update_cruise_state", None)
 
         self.hb = hb
 

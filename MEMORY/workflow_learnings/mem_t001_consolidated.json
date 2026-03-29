@@ -1,0 +1,30 @@
+{
+  "artifact_id": "mem_t001_consolidated",
+  "workflow_id": "t001",
+  "task_summary": "2/2 steps succeeded, 2/2 contracts valid, aggregate A (1.00) [CONSOLIDATED from 23 identical entries 2026-03-27 to 2026-03-28]",
+  "task_class": "task_execution",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Task t001 consistently succeeded across multiple executions",
+    "23 duplicate entries consolidated on 2026-03-28 memory hygiene"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_t001 (done)",
+    "consistent 100% success rate across multiple executions"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "verified",
+  "reusable_guidance": "Task t001 represents a reliable workflow pattern with consistent success (aggregate A, 1.00 score). Pattern successfully repeated 23 times between 2026-03-27 and 2026-03-28.",
+  "created_at": "2026-03-28T16:00:00Z",
+  "confidence": "high",
+  "consolidation_metadata": {
+    "original_count": 23,
+    "date_range": "2026-03-27T11:52:58Z to 2026-03-28T15:57:58Z",
+    "consolidated_by": "memory_hygiene",
+    "consolidation_date": "2026-03-28T16:00:00Z"
+  },
+  "promotion_status": "superseded",
+  "superseded_by": "mem_t001_1774714673"
+}

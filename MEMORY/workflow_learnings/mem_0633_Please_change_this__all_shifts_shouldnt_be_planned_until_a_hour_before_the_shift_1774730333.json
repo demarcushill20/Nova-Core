@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0633_Please_change_this__all_shifts_shouldnt_be_planned_until_a_hour_before_the_shift_1774730333",
+  "workflow_id": "0633_Please_change_this__all_shifts_shouldnt_be_planned_until_a_hour_before_the_shift",
+  "task_summary": "Added JIT shift generation \u2014 blocks created ~1 hour before due instead of all at once",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added JIT shift generation \u2014 blocks created ~1 hour before due instead of all at once"
+  ],
+  "successful_patterns": [
+    "task_completed: 0633_Please_change_this__all_shifts_shouldnt_be_planned_until_a_hour_before_the_shif"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added JIT shift generation \u2014 blocks created ~1 hour before due instead of all at once",
+  "created_at": "2026-03-28T20:38:53Z",
+  "confidence": "high"
+}

@@ -44,13 +44,16 @@ from utils.self_healing import DegradationTier as _DegradationTier
 from utils.self_healing import get_degradation_tier as _sh_get_tier
 from utils.self_healing import record_error as _sh_record_error
 from utils.self_healing import touch_dead_man_switch as _sh_touch
+
 try:
-    from utils.warning_router import emit as _wr_emit, WarningSeverity as _WarnSev
+    from utils.warning_router import WarningSeverity as _WarnSev
+    from utils.warning_router import emit as _wr_emit
 except ImportError:
     _wr_emit = None  # type: ignore[assignment]
-    _WarnSev = None  # type: ignore[assignment]
+    _WarnSev = None  # type: ignore[assignment,misc]
 from utils.structured_log import slog
 from utils.task_checkpoint import (
+    MAX_TASK_RETRIES,
     TaskCheckpoint,
     clear_checkpoint,
     increment_retry,
@@ -94,6 +97,7 @@ MAX_SUPERVISOR_ATTEMPTS = 2  # total attempts per task (1 original + up to 1 ret
 MAX_CONCURRENT_TASKS = int(os.environ.get("NOVA_MAX_CONCURRENT_TASKS", "2"))  # Phase 4.3
 STALE_TASK_AGE_HOURS = 12  # auto-mark pending .md tasks as .done after this many hours untouched
 STALE_REAP_INTERVAL = 3600  # seconds between staleness reaper runs (1 hour)
+JIT_SHIFT_INTERVAL = 1800  # seconds between JIT shift generation runs (30 min)
 
 METRICS_FILE = STATE_DIR / "metrics.json"
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
@@ -503,6 +507,135 @@ def reap_stale_tasks(*, force: bool = False) -> list[str]:
     return reaped
 
 
+# --- Orphan recovery ---
+ORPHAN_INPROGRESS_MINUTES = 15  # match heartbeat threshold
+ORPHAN_RECOVERY_INTERVAL = 300  # seconds between orphan recovery runs (5 min)
+_last_orphan_recovery_time: float = 0.0
+
+
+def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
+    """Auto-recover .inprogress tasks that are stuck (worker died/timed out).
+
+    Detects .inprogress files older than ORPHAN_INPROGRESS_MINUTES and:
+    - If checkpoint retry count < MAX_TASK_RETRIES: reset to .md for re-dispatch
+    - If max retries exhausted: rename to .failed
+
+    Runs at most once per ORPHAN_RECOVERY_INTERVAL seconds unless force=True.
+    Returns list of recovered/failed task filenames.
+    """
+    global _last_orphan_recovery_time
+    import time as _time
+
+    now_mono = _time.time()
+    if not force and (now_mono - _last_orphan_recovery_time) < ORPHAN_RECOVERY_INTERVAL:
+        return []
+    _last_orphan_recovery_time = now_mono
+
+    if not TASKS_DIR.exists():
+        return []
+
+    recovered: list[str] = []
+    cutoff_seconds = ORPHAN_INPROGRESS_MINUTES * 60
+
+    for ip in sorted(TASKS_DIR.glob("*.inprogress")):
+        try:
+            mtime = ip.stat().st_mtime
+        except OSError:
+            continue
+
+        age_s = now_mono - mtime
+        if age_s < cutoff_seconds:
+            continue  # Not old enough to be orphaned
+
+        stem = ip.name.replace(".md.inprogress", "")
+        task_file = TASKS_DIR / f"{stem}.md"
+        failed_file = TASKS_DIR / f"{stem}.md.failed"
+
+        # Check if retry is possible via checkpoint system
+        can_retry = True
+        try:
+            cp = increment_retry(stem)
+            if cp is None:
+                # No checkpoint — first recovery attempt, allow it
+                can_retry = True
+            elif cp.retry_count >= MAX_TASK_RETRIES:
+                can_retry = False
+        except Exception:
+            can_retry = True  # Err on side of retrying
+
+        if can_retry:
+            try:
+                ip.rename(task_file)
+                logger.info(
+                    "ORPHAN RECOVERY: %s → %s (stuck %.1f min, reset for retry)",
+                    ip.name,
+                    task_file.name,
+                    age_s / 60,
+                )
+                recovered.append(ip.name)
+            except (OSError, FileNotFoundError) as exc:
+                logger.warning("ORPHAN RECOVERY: failed to reset %s: %s", ip.name, exc)
+        else:
+            try:
+                ip.rename(failed_file)
+                logger.warning(
+                    "ORPHAN RECOVERY: %s → %s (max retries exhausted after %.1f min)",
+                    ip.name,
+                    failed_file.name,
+                    age_s / 60,
+                )
+                recovered.append(ip.name)
+            except (OSError, FileNotFoundError) as exc:
+                logger.warning("ORPHAN RECOVERY: failed to mark %s as failed: %s", ip.name, exc)
+
+    if recovered:
+        slog.event("task.orphan_recovered", count=len(recovered), tasks=recovered)
+    return recovered
+
+
+# --- JIT shift generation ---
+_last_jit_time: float = 0.0
+_JIT_SCRIPT = str(BASE_DIR / "scripts" / "daily_shift_generator.py")
+
+
+async def _maybe_run_jit_shift_generation() -> None:
+    """Periodically run the JIT shift generator to create upcoming blocks.
+
+    Fires every JIT_SHIFT_INTERVAL seconds. The generator itself handles
+    lead-time filtering and duplicate prevention, so this is safe to call
+    frequently.
+    """
+    global _last_jit_time
+    now = time.time()
+    if (now - _last_jit_time) < JIT_SHIFT_INTERVAL:
+        return
+    _last_jit_time = now
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            _JIT_SCRIPT,
+            "--jit",
+            "--lead-minutes",
+            "75",
+            cwd=str(BASE_DIR),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        if proc.returncode == 0:
+            out = stdout.decode().strip()
+            if out:
+                logger.info("JIT shift gen: %s", out.split("\n")[-1])
+        else:
+            logger.warning("JIT shift gen failed (rc=%d): %s", proc.returncode, stderr.decode()[:200])
+    except asyncio.TimeoutError:
+        logger.warning("JIT shift gen timed out after 60s")
+    except Exception as exc:
+        logger.warning("JIT shift gen error: %s", exc)
+
+
 def _is_retry_task(stem: str) -> bool:
     """Check if a task stem is already a retry task (contains __retry1)."""
     return "__retry1" in stem
@@ -834,7 +967,13 @@ async def _execute_worker(
             logger.error("EXECUTION TIMEOUT: %s (exceeded %ds)", stem, TASK_TIMEOUT)
             _sh_record_error("watcher._execute_worker", f"timeout after {TASK_TIMEOUT}s", task_id=stem)
             if _wr_emit is not None:
-                _wr_emit("watcher", "runaway", f"Task timeout: {stem} exceeded {TASK_TIMEOUT}s", severity=2, context={"task": stem, "timeout": TASK_TIMEOUT})
+                _wr_emit(
+                    "watcher",
+                    "runaway",
+                    f"Task timeout: {stem} exceeded {TASK_TIMEOUT}s",
+                    severity=2,
+                    context={"task": stem, "timeout": TASK_TIMEOUT},
+                )
             await _async_write(
                 worker_log,
                 f"=== TIMEOUT after {TASK_TIMEOUT}s ===\n\n=== EXIT CODE: -1 (timeout) ===\n=== END: {end_utc} ===\n",
@@ -882,7 +1021,13 @@ async def _execute_worker(
         logger.exception("EXECUTION ERROR: %s", stem)
         _sh_record_error("watcher._execute_worker", exc, task_id=stem)
         if _wr_emit is not None:
-            _wr_emit("watcher", "error_spike", f"Task execution error: {stem} — {exc}", severity=1, context={"task": stem, "error": str(exc)})
+            _wr_emit(
+                "watcher",
+                "error_spike",
+                f"Task execution error: {stem} — {exc}",
+                severity=1,
+                context={"task": stem, "error": str(exc)},
+            )
         await _async_write(
             worker_log,
             f"\n=== EXCEPTION: {exc} ===\n=== EXIT CODE: -1 (error) ===\n=== END: {end_utc} ===\n",
@@ -1857,6 +2002,12 @@ async def run() -> None:
 
             # Staleness reaper — auto-mark old pending tasks as .done
             reap_stale_tasks()
+
+            # Orphan recovery — reset stuck .inprogress tasks for re-dispatch
+            recover_orphaned_tasks()
+
+            # JIT shift generation — create upcoming shift blocks ~1hr before due
+            await _maybe_run_jit_shift_generation()
 
             # Phase 6B: check degradation tier — skip dispatch in EMERGENCY
             _watcher_tier = _sh_get_tier().tier

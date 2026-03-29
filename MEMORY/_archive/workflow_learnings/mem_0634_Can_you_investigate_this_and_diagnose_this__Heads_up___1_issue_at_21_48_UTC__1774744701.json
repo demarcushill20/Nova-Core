@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0634_Can_you_investigate_this_and_diagnose_this__Heads_up___1_issue_at_21_48_UTC__1774744701",
+  "workflow_id": "0634_Can_you_investigate_this_and_diagnose_this__Heads_up___1_issue_at_21_48_UTC_",
+  "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0634_Can_you_investigate_this_and_diagnose_this__Heads_up___1_issue_at_21_48"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-03-29T00:38:21Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260328_16_evening_wrap_1774758363"
+}

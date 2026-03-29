@@ -13,6 +13,7 @@ from typing import Any
 from novatrade.backtest.engine import compute_adx, compute_atr, compute_bbw, compute_ema
 from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
+from novatrade.monitor.signal_monitor import record_signal
 from novatrade.strategies.base import BaseStrategy, EntrySignal, ExitSignal
 
 
@@ -75,6 +76,9 @@ class IRBStrategy(BaseStrategy):
 
         if i < e.warmup_bars or i >= len(candles):
             return None
+
+        # Record that strategy evaluation occurred (for signal rate monitoring)
+        record_signal("any")
 
         bar = candles[i]
         ema = indicators.get("ema", [])
@@ -149,6 +153,9 @@ class IRBStrategy(BaseStrategy):
                 min_sl_dist = atr[i] * e.atr_sl_floor_multiplier
                 if (stop_loss - entry_price) < min_sl_dist:
                     stop_loss = entry_price + min_sl_dist
+
+        # Record trade signal for monitoring
+        record_signal("trade")
 
         return EntrySignal(
             bar_index=i,

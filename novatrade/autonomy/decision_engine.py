@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import fcntl
 import json
 import logging
 import os
@@ -74,7 +74,7 @@ class DecisionEngine:
         self.config = config or DecisionConfig()
         self.base_path = Path(base_path)
         self._history_path = self.base_path / "STATE" / "decision_history.json"
-        self._write_lock = asyncio.Lock()
+        self._lock_path = self._history_path.parent / ".decision_history.lock"
 
     async def decide(self, context: DecisionContext) -> Decision:
         """Run the adaptive decision loop."""
@@ -503,60 +503,64 @@ class DecisionEngine:
     async def _persist_decision(self, decision: Decision) -> None:
         """Append decision to STATE/decision_history.json.
 
-        Deduplicates consecutive identical MONITOR decisions to prevent
-        the history from filling with 84/100 identical entries (v87 P3).
+        Deduplicates consecutive identical decisions to prevent the history
+        from filling with redundant entries. Uses fcntl.flock for cross-instance
+        mutual exclusion (v87 P3, race-condition fix v88).
         """
-        async with self._write_lock:
-            self._history_path.parent.mkdir(parents=True, exist_ok=True)
-            history: list[dict] = []
-            if self._history_path.exists():
-                try:
-                    data = json.loads(self._history_path.read_text())
-                    history = data if isinstance(data, list) else []
-                except (json.JSONDecodeError, OSError):
-                    pass
+        self._history_path.parent.mkdir(parents=True, exist_ok=True)
 
-            new_entry = json.loads(decision.model_dump_json())
-
-            # Dedup: skip if identical mode+reason+target as the last entry
-            if history:
-                last = history[-1]
-                if (
-                    last.get("mode") == new_entry.get("mode")
-                    and last.get("reason") == new_entry.get("reason")
-                    and last.get("target_dimension") == new_entry.get("target_dimension")
-                ):
-                    # Update timestamp on existing entry instead of appending
-                    history[-1]["decided_at"] = new_entry.get("decided_at", "")
-                    history[-1]["dedup_count"] = history[-1].get("dedup_count", 1) + 1
-                    # Still write (to update timestamp) but don't grow the list
-                    fd, tmp_path = tempfile.mkstemp(dir=str(self._history_path.parent), suffix=".tmp")
-                    try:
-                        with os.fdopen(fd, "w") as f:
-                            json.dump(history, f, indent=2, default=str)
-                        os.replace(tmp_path, str(self._history_path))
-                    except BaseException:
-                        try:
-                            os.unlink(tmp_path)
-                        except OSError:
-                            pass
-                        raise
-                    return
-
-            history.append(new_entry)
-
-            # Keep last 100 decisions
-            history = history[-100:]
-
-            # Atomic write
-            fd, tmp_path = tempfile.mkstemp(dir=str(self._history_path.parent), suffix=".tmp")
+        # File-based lock — works across all DecisionEngine instances in the
+        # same process (and across processes). Replaces the per-instance
+        # asyncio.Lock that allowed concurrent writes from different instances.
+        with open(self._lock_path, "w") as lock_fd:  # noqa: ASYNC230 — intentional blocking for flock
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
             try:
-                with os.fdopen(fd, "w") as f:
-                    json.dump(history, f, indent=2, default=str)
-                os.replace(tmp_path, str(self._history_path))
-            except BaseException:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+                self._persist_decision_locked(decision)
+            finally:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+
+    def _persist_decision_locked(self, decision: Decision) -> None:
+        """Inner persist logic — caller must hold the file lock."""
+        history: list[dict] = []
+        if self._history_path.exists():
+            try:
+                data = json.loads(self._history_path.read_text())
+                history = data if isinstance(data, list) else []
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        new_entry = json.loads(decision.model_dump_json())
+
+        # Dedup: skip if identical mode+reason+target as the last entry
+        if history:
+            last = history[-1]
+            if (
+                last.get("mode") == new_entry.get("mode")
+                and last.get("reason") == new_entry.get("reason")
+                and last.get("target_dimension") == new_entry.get("target_dimension")
+            ):
+                # Update timestamp on existing entry instead of appending
+                history[-1]["decided_at"] = new_entry.get("decided_at", "")
+                history[-1]["dedup_count"] = history[-1].get("dedup_count", 1) + 1
+                self._atomic_write_history(history)
+                return
+
+        history.append(new_entry)
+
+        # Keep last 100 decisions
+        history = history[-100:]
+        self._atomic_write_history(history)
+
+    def _atomic_write_history(self, history: list[dict]) -> None:
+        """Atomic write via tempfile + rename."""
+        fd, tmp_path = tempfile.mkstemp(dir=str(self._history_path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(history, f, indent=2, default=str)
+            os.replace(tmp_path, str(self._history_path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise

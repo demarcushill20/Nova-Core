@@ -44,10 +44,13 @@ CLEARABLE_STATE_FILES = {
     "dead_man_switch.json",
 }
 
+TASKS_DIR = Path("TASKS")
+
 
 @dataclass
 class InvestigationResult:
     """Outcome of investigating a single warning."""
+
     warning_fingerprint: str
     warning_message: str
     timestamp: str = ""
@@ -72,13 +75,16 @@ class InvestigationResult:
 # Context collectors — gather diagnostic data for a warning category
 # ---------------------------------------------------------------------------
 
+
 def _collect_service_context(service_name: str) -> dict:
     """Collect systemd service state + recent journal lines."""
     ctx: dict[str, Any] = {"service": service_name}
     try:
         result = subprocess.run(
             ["systemctl", "is-active", service_name],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         ctx["is_active"] = result.stdout.strip()
     except Exception as e:
@@ -87,7 +93,9 @@ def _collect_service_context(service_name: str) -> dict:
     try:
         result = subprocess.run(
             ["journalctl", "-u", service_name, "-n", "20", "--no-pager", "-o", "short-iso"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         ctx["recent_logs"] = result.stdout.strip().split("\n")[-MAX_CONTEXT_LINES:]
     except Exception as e:
@@ -115,10 +123,12 @@ def _collect_resource_context() -> dict:
     try:
         result = subprocess.run(
             ["df", "-h", "/home/nova"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         ctx["disk"] = result.stdout.strip()
-    except Exception:
+    except Exception:  # noqa: S110 — non-critical context enrichment
         pass
 
     rss_file = STATE_DIR / "rss_history.jsonl"
@@ -157,7 +167,8 @@ def _collect_breaker_context() -> dict:
     """Circuit breaker states from registry."""
     ctx: dict[str, Any] = {}
     try:
-        from utils.breaker_registry import get_all_breaker_states
+        from utils.breaker_registry import get_all_breaker_states  # type: ignore[attr-defined]
+
         ctx["breaker_states"] = get_all_breaker_states()
     except Exception:
         # Fallback: check state file
@@ -243,6 +254,7 @@ def collect_context(category: str, warning_context: dict) -> dict:
 # Auto-fix actions — safe, deterministic, reversible
 # ---------------------------------------------------------------------------
 
+
 def _try_restart_service(service_name: str) -> tuple[bool, str]:
     """Restart a failed systemd service. Returns (success, detail)."""
     if service_name not in RESTARTABLE_SERVICES:
@@ -252,7 +264,9 @@ def _try_restart_service(service_name: str) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             ["systemctl", "is-active", service_name],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         state = result.stdout.strip()
         if state == "active":
@@ -263,14 +277,18 @@ def _try_restart_service(service_name: str) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             ["sudo", "systemctl", "restart", service_name],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             # Verify it came back
             time.sleep(2)
             verify = subprocess.run(
                 ["systemctl", "is-active", service_name],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if verify.stdout.strip() == "active":
                 return True, f"Restarted {service_name} successfully"
@@ -304,7 +322,7 @@ def _try_clear_stale_state(filename: str) -> tuple[bool, str]:
 def _try_adjust_degradation(target_tier: str, reason: str) -> tuple[bool, str]:
     """Adjust degradation tier if current is worse than target."""
     try:
-        from utils.self_healing import get_degradation_tier, set_degradation_tier, DegradationTier
+        from utils.self_healing import DegradationTier, get_degradation_tier, set_degradation_tier
 
         tier_map = {
             "FULL": DegradationTier.FULL,
@@ -326,24 +344,114 @@ def _try_adjust_degradation(target_tier: str, reason: str) -> tuple[bool, str]:
         return False, f"Degradation adjustment failed: {e}"
 
 
+def _try_recover_orphaned_tasks(orphaned_names: list[str] | None = None) -> tuple[bool, str]:  # noqa: C901
+    """Reset orphaned .inprogress tasks back to .md for re-dispatch.
+
+    Safe: atomic rename, respects retry limits, logs all actions.
+    """
+
+    if not TASKS_DIR.exists():
+        return False, "TASKS/ directory not found"
+
+    # Discover orphaned .inprogress files (>15 min old)
+    ORPHAN_THRESHOLD_S = 15 * 60
+    now = time.time()
+    recovered = []
+    failed_max_retry = []
+
+    targets = []
+    if orphaned_names:
+        for name in orphaned_names:
+            p = TASKS_DIR / name
+            if p.exists():
+                targets.append(p)
+    else:
+        targets = list(TASKS_DIR.glob("*.inprogress"))
+
+    for ip in targets:
+        try:
+            age_s = now - ip.stat().st_mtime
+        except OSError:
+            continue
+
+        if age_s < ORPHAN_THRESHOLD_S:
+            continue
+
+        stem = ip.name.replace(".md.inprogress", "")
+        task_file = TASKS_DIR / f"{stem}.md"
+        failed_file = TASKS_DIR / f"{stem}.md.failed"
+
+        # Check retry count via checkpoint
+        can_retry = True
+        try:
+            from utils.task_checkpoint import MAX_TASK_RETRIES, increment_retry
+
+            cp = increment_retry(stem)
+            if cp is not None and cp.retry_count >= MAX_TASK_RETRIES:
+                can_retry = False
+        except Exception:  # noqa: S110 — err on side of retrying
+            pass
+
+        if can_retry:
+            try:
+                ip.rename(task_file)
+                recovered.append(stem)
+            except (OSError, FileNotFoundError):
+                pass
+        else:
+            try:
+                ip.rename(failed_file)
+                failed_max_retry.append(stem)
+            except (OSError, FileNotFoundError):
+                pass
+
+    parts = []
+    if recovered:
+        parts.append(f"recovered {len(recovered)}: {', '.join(recovered)}")
+    if failed_max_retry:
+        parts.append(f"marked failed (max retries): {', '.join(failed_max_retry)}")
+
+    if parts:
+        return True, "; ".join(parts)
+    return True, "no orphaned tasks found to recover"
+
+
 # ---------------------------------------------------------------------------
 # Diagnosis engine — pattern-match warnings to known issues
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class DiagnosisResult:
     root_cause: str
     can_auto_fix: bool
-    fix_action: str = ""    # "restart_service", "clear_state", "adjust_degradation", "none"
+    fix_action: str = ""  # "restart_service", "clear_state", "adjust_degradation", "none"
     fix_params: dict = field(default_factory=dict)
     confidence: str = "medium"
     escalation_reason: str = ""
 
 
-def diagnose(warning_msg: str, category: str, context: dict) -> DiagnosisResult:
+def diagnose(warning_msg: str, category: str, context: dict) -> DiagnosisResult:  # noqa: C901
     """Pattern-match a warning to a known root cause and suggest action."""
 
     msg_lower = warning_msg.lower()
+
+    # Orphaned tasks → auto-recover (reset .inprogress → .md)
+    if "orphaned" in msg_lower or "ORPHANED" in warning_msg:
+        import re as _re
+
+        orphaned_names = _re.findall(r"ORPHANED:\s*(.+?)(?:$|,)", warning_msg)
+        names: list[str] = []
+        if orphaned_names:
+            for chunk in orphaned_names:
+                names.extend(n.strip() for n in chunk.split(",") if n.strip())
+        return DiagnosisResult(
+            root_cause="Task(s) stuck in .inprogress state — worker died or timed out",
+            can_auto_fix=True,
+            fix_action="recover_orphan",
+            fix_params={"orphaned_names": names or None},
+            confidence="high",
+        )
 
     # Service failures → restart
     if category in ("heartbeat", "service"):
@@ -470,6 +578,7 @@ FIX_ACTIONS = {
     "restart_service": _try_restart_service,
     "clear_state": _try_clear_stale_state,
     "adjust_degradation": _try_adjust_degradation,
+    "recover_orphan": _try_recover_orphaned_tasks,
 }
 
 
@@ -484,14 +593,16 @@ def execute_fix(diagnosis: DiagnosisResult) -> tuple[bool, str]:
 
     try:
         if diagnosis.fix_action == "restart_service":
-            return handler(diagnosis.fix_params["service_name"])
+            return handler(diagnosis.fix_params["service_name"])  # type: ignore[operator]
         elif diagnosis.fix_action == "clear_state":
-            return handler(diagnosis.fix_params["filename"])
+            return handler(diagnosis.fix_params["filename"])  # type: ignore[operator]
         elif diagnosis.fix_action == "adjust_degradation":
-            return handler(
+            return handler(  # type: ignore[operator]
                 diagnosis.fix_params["target_tier"],
                 diagnosis.fix_params.get("reason", "auto-fix"),
             )
+        elif diagnosis.fix_action == "recover_orphan":
+            return handler(diagnosis.fix_params.get("orphaned_names"))  # type: ignore[operator]
         else:
             return False, f"No executor for: {diagnosis.fix_action}"
     except Exception as e:
@@ -502,6 +613,7 @@ def execute_fix(diagnosis: DiagnosisResult) -> tuple[bool, str]:
 # Telegram escalation
 # ---------------------------------------------------------------------------
 
+
 def _send_telegram(text: str) -> bool:
     """Send message via Telegram API."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -511,10 +623,11 @@ def _send_telegram(text: str) -> bool:
 
     try:
         import urllib.request
+
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         payload = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}).encode()
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})  # noqa: S310
+        urllib.request.urlopen(req, timeout=10)  # noqa: S310
         return True
     except Exception:
         return False
@@ -523,8 +636,8 @@ def _send_telegram(text: str) -> bool:
 def escalate_to_telegram(result: InvestigationResult) -> bool:
     """Send investigation escalation to Telegram."""
     lines = [
-        f"🔍 *Self-Heal Investigation*",
-        f"",
+        "🔍 *Self-Heal Investigation*",
+        "",
         f"⚠️ *Warning:* {result.warning_message[:200]}",
         f"🔎 *Diagnosis:* {result.diagnosis}",
         f"🎯 *Root Cause:* {result.root_cause}",
@@ -533,7 +646,7 @@ def escalate_to_telegram(result: InvestigationResult) -> bool:
     if result.action_taken == "auto_fixed":
         lines.append(f"✅ *Auto-fixed:* {result.fix_description}")
         if not result.fix_successful:
-            lines.append(f"❌ *Fix failed — needs manual review*")
+            lines.append("❌ *Fix failed — needs manual review*")
     elif result.action_taken == "escalated":
         lines.append(f"📢 *Escalated:* {result.escalation_message}")
     else:
@@ -546,6 +659,7 @@ def escalate_to_telegram(result: InvestigationResult) -> bool:
 # ---------------------------------------------------------------------------
 # Investigation log
 # ---------------------------------------------------------------------------
+
 
 def _log_investigation(result: InvestigationResult) -> None:
     """Append investigation result to JSONL log."""
@@ -562,20 +676,21 @@ def _log_investigation(result: InvestigationResult) -> None:
             existing = lines[-MAX_INVESTIGATION_LOG:]
         existing.append(json.dumps(entry))
         INVESTIGATION_LOG.write_text("\n".join(existing) + "\n")
-    except Exception:
+    except Exception:  # noqa: S110 — best-effort log persistence
         pass
 
     # Write individual investigation file
     try:
         inv_file = INVESTIGATION_DIR / f"{result.investigation_id}.json"
         inv_file.write_text(json.dumps(entry, indent=2))
-    except Exception:
+    except Exception:  # noqa: S110 — best-effort investigation file write
         pass
 
 
 # ---------------------------------------------------------------------------
 # Main investigation pipeline
 # ---------------------------------------------------------------------------
+
 
 def investigate_warning(warning) -> InvestigationResult:
     """Full investigation pipeline for a single warning.
@@ -668,6 +783,7 @@ def investigate_all_pending() -> list[InvestigationResult]:
 # ---------------------------------------------------------------------------
 # Health check — heartbeat compatible
 # ---------------------------------------------------------------------------
+
 
 def check_investigator_health() -> dict:
     """Heartbeat-compatible health check for the investigator itself."""

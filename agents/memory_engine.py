@@ -15,12 +15,16 @@ Design constraints:
   - No LLM calls — all logic is deterministic.
 """
 
+import hashlib
 import json
+import logging
 import os
 import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 BASE = Path(os.environ.get("NOVACORE_ROOT", "/home/nova/nova-core"))
 MEMORY_DIR = BASE / "MEMORY"
@@ -164,6 +168,44 @@ def _atomic_write_json(path: Path, data: dict) -> None:
     tmp.rename(path)
 
 
+def _content_fingerprint(data: dict) -> str:
+    """Compute a content fingerprint for write-time dedup.
+
+    Uses the semantic content fields (not artifact_id or created_at which
+    are unique per write). Two artifacts with the same fingerprint contain
+    identical learnings and one is a redundant write.
+    """
+    parts = [
+        str(data.get("workflow_id", "")),
+        str(data.get("task_summary", ""))[:200],
+        str(data.get("task_class", "")),
+        str(data.get("reusable_guidance", ""))[:200],
+        str(data.get("verification_outcome", "")),
+        str(data.get("confidence", "")),
+    ]
+    raw = "|".join(parts)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _has_content_duplicate(target_dir: Path, fingerprint: str, *, max_scan: int = 200) -> Path | None:
+    """Check if an existing file in target_dir has the same content fingerprint.
+
+    Scans the most recent files first (by name, which embeds timestamps).
+    Returns the path of the duplicate if found, None otherwise.
+    """
+    if not target_dir.exists():
+        return None
+    files = sorted(target_dir.glob("mem_*.json"), reverse=True)[:max_scan]
+    for f in files:
+        try:
+            existing = json.loads(f.read_text(encoding="utf-8"))
+            if _content_fingerprint(existing) == fingerprint:
+                return f
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+    return None
+
+
 def write_memory_artifact(
     artifact: MemoryArtifact,
     target: str = "workflow_learnings",
@@ -180,7 +222,8 @@ def write_memory_artifact(
         Path to the written artifact file.
 
     Raises:
-        ValueError: If artifact fails validation or target is invalid.
+        ValueError: If artifact fails validation, target is invalid, or
+            a content-identical artifact already exists (write-time dedup).
     """
     data = artifact.to_dict()
     valid, errors = validate_memory_artifact(data)
@@ -198,6 +241,17 @@ def write_memory_artifact(
     # Prevent overwrite of existing artifacts (append-only memory)
     if path.exists():
         raise ValueError(f"Artifact already exists: {path}")
+
+    # Write-time content dedup: reject if an existing artifact has identical content
+    fingerprint = _content_fingerprint(data)
+    dup_path = _has_content_duplicate(target_dir, fingerprint)
+    if dup_path is not None:
+        logger.info(
+            "Write-time dedup: skipping %s (content-identical to %s)",
+            artifact.artifact_id,
+            dup_path.name,
+        )
+        raise ValueError(f"Content-identical artifact already exists: {dup_path.name} (fingerprint={fingerprint})")
 
     _atomic_write_json(path, data)
     return path
