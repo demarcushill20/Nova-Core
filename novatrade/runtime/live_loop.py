@@ -35,6 +35,7 @@ from novatrade.data.bar_aggregator import BarAggregator
 from novatrade.data.price_feed import TickBatchPoller
 from novatrade.execution.live_trading_agent import LiveTradingAgent
 from novatrade.monitor.feed_health import FeedHealthSupervisor, FeedState
+from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor, SupervisorAction
 from novatrade.strategy.live_engine import LiveSignal, LiveStrategyEngine, SignalType
 
 log = logging.getLogger("novatrade.runtime.live_loop")
@@ -127,6 +128,7 @@ class LiveLoop:
         queue_maxsize: int = 100,
         state_store=None,
         adapter=None,
+        hard_risk_supervisor: HardRiskSupervisor | None = None,
     ) -> None:
         self._poller = poller
         self._aggregator = aggregator
@@ -136,6 +138,7 @@ class LiveLoop:
         self._health_interval = health_interval
         self._state_store = state_store
         self._adapter = adapter  # MetaApiAdapter for periodic resubscription
+        self._hard_supervisor = hard_risk_supervisor
 
         self._signal_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_maxsize)
         self._metrics = LiveMetrics()
@@ -522,6 +525,9 @@ class LiveLoop:
 
                     # Persist equity snapshot for performance_stability scoring
                     self._persist_equity_snapshot()
+
+                    # Hard Risk Supervisor monitoring
+                    await self._check_hard_risk_supervisor()
                 except Exception:
                     log.exception("health monitor error — continuing")
 
@@ -687,3 +693,90 @@ class LiveLoop:
         if self._state_store and hasattr(self._state_store, "base_dir"):
             return str(self._state_store.base_dir.parent.parent)
         return "/home/nova/nova-core"
+
+    async def _check_hard_risk_supervisor(self) -> None:
+        """Check HardRiskSupervisor for emergency actions and execute them.
+
+        This method:
+        1. Gets current account state and positions
+        2. Calls supervisor.check_account()
+        3. Executes any supervisor actions (CLOSE_ALL, HALT, etc.)
+
+        Called periodically by the health monitor to ensure continuous
+        enforcement of hard risk limits.
+        """
+        if self._hard_supervisor is None:
+            return
+
+        try:
+            # Get current account and positions from adapter
+            if self._adapter is None:
+                log.debug("hard_supervisor: no adapter available for account check")
+                return
+
+            account = None
+            positions = []
+
+            if hasattr(self._adapter, "get_account"):
+                try:
+                    account = await self._adapter.get_account()
+                except Exception:
+                    log.warning("hard_supervisor: failed to get account", exc_info=True)
+                    return
+
+            if hasattr(self._adapter, "get_positions"):
+                try:
+                    positions = await self._adapter.get_positions()
+                except Exception:
+                    log.warning("hard_supervisor: failed to get positions", exc_info=True)
+                    return
+
+            if account is None:
+                log.debug("hard_supervisor: no account data for check")
+                return
+
+            # Check supervisor for actions
+            actions = self._hard_supervisor.check_account(account, positions)
+
+            for action in actions:
+                await self._execute_supervisor_action(action)
+
+        except Exception:
+            log.exception("hard_supervisor: error during monitoring check")
+
+    async def _execute_supervisor_action(self, action: SupervisorAction) -> None:
+        """Execute a supervisor action (CLOSE_ALL, HALT, etc.).
+
+        Args:
+            action: The supervisor action to execute
+        """
+        log.critical("SUPERVISOR ACTION: %s - %s", action.action, action.reason)
+
+        try:
+            if action.action == "CLOSE_ALL":
+                # Force close all positions
+                if hasattr(self._adapter, "close_all_positions"):
+                    await self._adapter.close_all_positions()
+                    log.critical("supervisor: all positions closed by supervisor order")
+                else:
+                    log.error("supervisor: close_all requested but adapter doesn't support it")
+
+            elif action.action == "HALT":
+                # Halt trading by stopping the loop
+                log.critical("supervisor: EMERGENCY HALT - stopping live loop")
+                self.stop()
+
+            elif action.action == "CLOSE_POSITION":
+                # Close specific positions
+                if hasattr(self._adapter, "close_position"):
+                    for position_id in action.position_ids:
+                        await self._adapter.close_position(position_id)
+                        log.critical("supervisor: position %s closed by supervisor order", position_id)
+                else:
+                    log.error("supervisor: close_position requested but adapter doesn't support it")
+
+            else:
+                log.error("supervisor: unknown action type: %s", action.action)
+
+        except Exception:
+            log.exception("supervisor: failed to execute action %s", action.action)

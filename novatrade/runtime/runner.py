@@ -517,6 +517,7 @@ async def build_live_stack(
         health_interval=health_interval,
         state_store=state_store,
         adapter=adapter,
+        hard_risk_supervisor=supervisor,
     )
 
     # --- Persist strategy config for autonomy collector ---
