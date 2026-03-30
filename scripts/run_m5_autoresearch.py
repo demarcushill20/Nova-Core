@@ -41,6 +41,7 @@ import yaml  # type: ignore[import-untyped]
 
 from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.cli.config_schema import StrategyConfig
+from novatrade.evaluation.champion_fitness import compute_champion_fitness
 from novatrade.optimization.autoresearch import (
     AutoResearchConfig,
     AutoResearchResult,
@@ -639,12 +640,16 @@ def main() -> int:
     # We run the autoresearch loop with M5-specific bounds and environment.
     # The run_autoresearch API accepts parameter_bounds and base_environment
     # so it will use M5 ranges for random init and mutation.
+    # Champion fitness scorer: ranks by multi-horizon consistency
+    # (monthly profitability, drawdown, PF stability, worst rolling 1yr, Calmar)
+    # instead of the default scout_score heuristic.
     result = run_autoresearch(
         h1_candles=m5_candles,  # primary TF candles (M5)
         h4_candles=h1_candles,  # higher TF candles (H1)
         config=ar_config,
         parameter_bounds=StrategyConfig.M5_PARAMETER_BOUNDS,  # type: ignore[arg-type]
         base_environment=m5_env,
+        fitness_fn=compute_champion_fitness,
     )
 
     total_elapsed = time.monotonic() - t0

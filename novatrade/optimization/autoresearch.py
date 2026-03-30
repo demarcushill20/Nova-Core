@@ -7,6 +7,10 @@ tournament selection + elitism to converge.
 
 Usage:
     result = run_autoresearch(h1_candles, h4_candles, config=AutoResearchConfig())
+
+    # With champion fitness scorer (multi-horizon consistency):
+    from novatrade.evaluation.champion_fitness import compute_champion_fitness
+    result = run_autoresearch(h1_candles, h4_candles, fitness_fn=compute_champion_fitness)
 """
 
 from __future__ import annotations
@@ -14,7 +18,9 @@ from __future__ import annotations
 import copy
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 import numpy as np
 
@@ -25,6 +31,10 @@ from novatrade.cli.config_schema import StrategyConfig
 from novatrade.evaluation.fitness import compute_scout_score
 from novatrade.models import Candle
 
+# Type alias for pluggable fitness functions.
+# Signature: (trades, total_bars, initial_equity) -> float [0.0, 1.0]
+FitnessFn = Callable[[list[Any], int, float], float]
+
 log = logging.getLogger("novatrade.optimization.autoresearch")
 
 # ---------------------------------------------------------------------------
@@ -32,7 +42,7 @@ log = logging.getLogger("novatrade.optimization.autoresearch")
 # ---------------------------------------------------------------------------
 
 # Session filter options (None = 24/5 trading)
-SESSION_OPTIONS = [None, "london", "newyork", "london_ny_overlap"]
+SESSION_OPTIONS: list[str | None] = [None, "london", "newyork", "london_ny_overlap"]
 
 # Discrete feature axes
 TRAIL_MODES = ["atr", "ema"]  # trail_ema_period=0 → ATR, >0 → EMA
@@ -129,7 +139,7 @@ def _random_organism(rng: np.random.Generator, gen: int = 0, bounds: dict | None
     features = {
         "use_ema_stack_filter": bool(rng.choice([True, False])),
         "ema_confirm_bars": int(rng.choice([0, 1, 2, 3, 4, 5])),
-        "session_filter": rng.choice(SESSION_OPTIONS),
+        "session_filter": SESSION_OPTIONS[int(rng.integers(0, len(SESSION_OPTIONS)))],
         "trail_mode": rng.choice(TRAIL_MODES),
         "use_breakeven": bool(rng.choice([True, False])),
         "use_volatility_filter": bool(rng.choice([True, False])),
@@ -187,7 +197,7 @@ def _mutate(
         features["ema_confirm_bars"] = int(rng.choice([0, 1, 2, 3, 4, 5]))
 
     if rng.random() < cfg.feature_flip_rate:
-        features["session_filter"] = rng.choice(SESSION_OPTIONS)
+        features["session_filter"] = SESSION_OPTIONS[int(rng.integers(0, len(SESSION_OPTIONS)))]
 
     if rng.random() < cfg.feature_flip_rate:
         features["trail_mode"] = rng.choice(TRAIL_MODES)
@@ -276,6 +286,7 @@ def _evaluate(
     h1: list[Candle],
     h4: list[Candle],
     base_environment: BacktestEnvironment | None = None,
+    fitness_fn: FitnessFn | None = None,
 ) -> Organism:
     """Run a backtest and score the organism.
 
@@ -286,6 +297,10 @@ def _evaluate(
         base_environment: Base environment to overlay strategy params onto.
             Defaults to ``DEFAULT_ENVIRONMENT`` (H1/H4).  Pass
             ``BacktestEnvironment.for_m5()`` for M5 autoresearch.
+        fitness_fn: Optional custom fitness function. If provided, called
+            with ``(trades, total_bars, initial_equity)`` and the result
+            is stored in ``org.scout_score``.  When ``None``, the default
+            ``compute_scout_score(metrics)`` is used.
     """
     try:
         # Build StrategyConfig from params + features
@@ -312,11 +327,17 @@ def _evaluate(
             initial_equity=env.initial_equity,
         )
 
-        org.scout_score = compute_scout_score(metrics)
+        # Populate organism fields from metrics (always needed for .viable check)
         org.profit_factor = metrics.profit_factor if metrics.profit_factor != float("inf") else 0.0
         org.trade_count = metrics.total_completed_trades
         org.net_pips = metrics.net_result_pips
         org.max_dd_pct = metrics.max_drawdown_pct
+
+        # Score: custom fitness function or default scout_score
+        if fitness_fn is not None:
+            org.scout_score = fitness_fn(result.trades, result.total_bars, env.initial_equity)
+        else:
+            org.scout_score = compute_scout_score(metrics)
 
     except Exception as exc:
         log.debug("Organism %s crashed: %s", org.organism_id, exc)
@@ -336,6 +357,7 @@ def run_autoresearch(
     config: AutoResearchConfig | None = None,
     parameter_bounds: dict[str, object] | None = None,
     base_environment: BacktestEnvironment | None = None,
+    fitness_fn: FitnessFn | None = None,
 ) -> AutoResearchResult:
     """Run the evolutionary autoresearch loop.
 
@@ -351,6 +373,10 @@ def run_autoresearch(
         base_environment: Base environment to overlay strategy params onto.
             Defaults to ``DEFAULT_ENVIRONMENT`` (H1/H4).  Pass
             ``BacktestEnvironment.for_m5()`` for M5 autoresearch.
+        fitness_fn: Optional custom fitness function replacing scout_score.
+            Signature: ``(trades, total_bars, initial_equity) -> float``.
+            Pass ``compute_champion_fitness`` for multi-horizon consistency
+            scoring.  When ``None``, uses default ``compute_scout_score``.
     """
     cfg = config or AutoResearchConfig()
     rng = np.random.default_rng(cfg.seed)
@@ -364,7 +390,7 @@ def run_autoresearch(
 
     # Evaluate initial population
     for org in population:
-        _evaluate(org, h1_candles, h4_candles, base_environment=base_environment)
+        _evaluate(org, h1_candles, h4_candles, base_environment=base_environment, fitness_fn=fitness_fn)
         total_evals += 1
 
     population.sort(key=lambda o: o.scout_score, reverse=True)
@@ -409,7 +435,7 @@ def run_autoresearch(
 
         # Evaluate new organisms (skip elites — already scored)
         for org in new_pop[cfg.elite_count :]:
-            _evaluate(org, h1_candles, h4_candles, base_environment=base_environment)
+            _evaluate(org, h1_candles, h4_candles, base_environment=base_environment, fitness_fn=fitness_fn)
             total_evals += 1
 
         new_pop.sort(key=lambda o: o.scout_score, reverse=True)
