@@ -2197,6 +2197,18 @@ def main() -> int:
                     # Persist so cycle runners calling get_degradation_tier() see the same value
                     if _sh_set_tier is not None and _DegradationTier is not None:
                         _sh_set_tier(_DegradationTier.REDUCED, reason=f"budget exceeded: {_budget_msg}")
+            else:
+                # Budget is OK - check if we need to clear a budget-triggered degradation
+                if _sh_get_tier is not None and _sh_set_tier is not None and _DegradationTier is not None:
+                    try:
+                        current_state = _sh_get_tier()
+                        if (current_state.tier == _DegradationTier.REDUCED and
+                            current_state.reason and "budget exceeded" in current_state.reason.lower()):
+                            print("[heartbeat] Budget now OK — clearing budget-triggered REDUCED tier")
+                            _sh_set_tier(_DegradationTier.FULL, reason="budget constraints resolved")
+                            _degradation_tier = 0  # Update local variable too
+                    except Exception as clear_err:
+                        print(f"[heartbeat] Failed to clear budget degradation (non-fatal): {clear_err}")
         except Exception as e:
             print(f"[heartbeat] Budget check failed (non-fatal): {e}")
 
