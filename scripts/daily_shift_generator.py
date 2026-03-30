@@ -36,6 +36,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 # ── Scheduler integration (graceful degradation) ────────────────────────────
+# Ensure project root is importable regardless of CWD (Claude workers may
+# run this script from a different directory).
+_PROJECT_ROOT = str(Path("/home/nova/nova-core"))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 try:
     import json as _json
 
@@ -256,11 +262,11 @@ MORNING_SHIFT_BLOCKS: list[dict] = [
      - next_actions: prioritized list for tomorrow
      - key_decisions: important choices made today
 
-3. Verify tomorrow's schedule readiness:
-   - JIT generation handles creating each block ~1 hour before it's due
-   - Verify the safety-net generator tasks exist for tomorrow
-   - If needed, run: `python3 scripts/daily_shift_generator.py --jit --lead-minutes 420`
-   - This ensures any missed blocks are caught""",
+3. Tomorrow's schedule:
+   - Shifts are generated automatically 30 minutes before each shift starts
+   - Morning shift: systemd timer at 6:00 AM CT creates blocks 1-8
+   - Afternoon shift: systemd timer at 2:00 PM CT creates blocks 9-16
+   - Do NOT pre-generate tomorrow's shifts — the scheduler optimizes best with fresh context""",
         "output_suffix": "wrap",
     },
 ]
@@ -468,11 +474,11 @@ AFTERNOON_SHIFT_BLOCKS: list[dict] = [
      - key_decisions: important choices made today
    - This checkpoint covers the full day, not just the afternoon
 
-3. Verify tomorrow's schedule readiness:
-   - JIT generation handles creating each block ~1 hour before it's due
-   - Verify the safety-net generator tasks exist for tomorrow
-   - If needed, run: `python3 scripts/daily_shift_generator.py --jit --lead-minutes 420`
-   - This ensures any missed blocks are caught
+3. Tomorrow's schedule:
+   - Shifts are generated automatically 30 minutes before each shift starts
+   - Morning shift: systemd timer at 6:00 AM CT creates blocks 1-8
+   - Afternoon shift: systemd timer at 2:00 PM CT creates blocks 9-16
+   - Do NOT pre-generate tomorrow's shifts — the scheduler optimizes best with fresh context
 
 4. Send summary to operator:
    - Compile a concise day summary for Telegram
@@ -485,9 +491,9 @@ AFTERNOON_SHIFT_BLOCKS: list[dict] = [
 SHIFT_BLOCKS = MORNING_SHIFT_BLOCKS
 
 # ── Generator Tasks (self-perpetuation) ───────────────────────────────────
-# Morning safety net: fires at 5:45 AM CT
-MORNING_GENERATOR_HOUR = 5
-MORNING_GENERATOR_MINUTE = 45
+# Morning safety net: fires at 6:15 AM CT (15 min before shift)
+MORNING_GENERATOR_HOUR = 6
+MORNING_GENERATOR_MINUTE = 15
 
 # Afternoon safety net: fires at 14:15 CT (before 2:30 PM start)
 AFTERNOON_GENERATOR_HOUR = 14
@@ -504,15 +510,15 @@ shift_name: morning
 
 # Morning Schedule Generator (Safety Net)
 
-Run the JIT shift generator to create any missing morning blocks:
+Generate all morning shift blocks (1-8):
 
 ```bash
-python3 scripts/daily_shift_generator.py --jit --lead-minutes 420
+python3 scripts/daily_shift_generator.py --today --shift morning
 ```
 
-This task is a safety net — the watcher's built-in JIT timer normally
-creates each block ~1 hour before it's due. This only fires if the
-JIT timer missed blocks. The 420-minute lead covers the full morning shift.
+This task is a safety net — the systemd timer normally generates the full
+morning shift 30 minutes before it starts. This only fires if the systemd
+timer missed. Generates all morning blocks in one batch.
 """
 
 AFTERNOON_GENERATOR_TEMPLATE = """\
@@ -526,15 +532,15 @@ shift_name: afternoon
 
 # Afternoon Schedule Generator (Safety Net)
 
-Run the JIT shift generator to create any missing afternoon blocks:
+Generate all afternoon shift blocks (9-16):
 
 ```bash
-python3 scripts/daily_shift_generator.py --jit --lead-minutes 360
+python3 scripts/daily_shift_generator.py --today --shift afternoon
 ```
 
-This task is a safety net — the watcher's built-in JIT timer normally
-creates each block ~1 hour before it's due. This only fires if the
-JIT timer missed blocks. The 360-minute lead covers the full afternoon shift.
+This task is a safety net — the systemd timer normally generates the full
+afternoon shift 30 minutes before it starts. This only fires if the systemd
+timer missed. Generates all afternoon blocks in one batch.
 """
 
 
@@ -715,18 +721,25 @@ def _optimize_blocks_with_scheduler(
             earliest = min(optimized, key=lambda b: (b["hour"], b["minute"]))
             latest = max(optimized, key=lambda b: (b["hour"], b["minute"]))
             block_start = datetime(
-                shift_date.year, shift_date.month, shift_date.day,
-                earliest["hour"], earliest["minute"],
+                shift_date.year,
+                shift_date.month,
+                shift_date.day,
+                earliest["hour"],
+                earliest["minute"],
                 tzinfo=CT,
             ).astimezone(timezone.utc)
             block_end = datetime(
-                shift_date.year, shift_date.month, shift_date.day,
-                latest["hour"], latest["minute"],
+                shift_date.year,
+                shift_date.month,
+                shift_date.day,
+                latest["hour"],
+                latest["minute"],
                 tzinfo=CT,
             ).astimezone(timezone.utc) + timedelta(minutes=45)
 
             # In batch mode (morning + afternoon), merge into existing state
             from utils.scheduler.replanner import load_block_state
+
             existing = load_block_state(block_id, state_dir=state_dir)
             if existing and (existing.completed_task_ids or existing.in_progress_task_id):
                 # Active shift — don't overwrite progress
@@ -737,6 +750,7 @@ def _optimize_blocks_with_scheduler(
                 if result.block_plan:
                     merged_slots.extend(result.block_plan.scheduled_slots)
                 from utils.scheduler.block import BlockPlan
+
                 merged_plan = BlockPlan(
                     scheduled_slots=merged_slots,
                     deferred_tasks=list(existing.original_plan.deferred_tasks)

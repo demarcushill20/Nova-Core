@@ -55,6 +55,7 @@ def _setup_watcher_mocks(stack, tmp_path, fake_decision, fake_execute_worker, ta
         mock.patch("watcher._audit", mock.MagicMock()),
         mock.patch("watcher.slog", mock.MagicMock()),
         mock.patch("watcher.audit_task_execution"),
+        mock.patch("watcher._HAS_SCHEDULER", False),
     ]
     for p in patches:
         stack.enter_context(p)

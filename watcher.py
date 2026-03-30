@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
 import sys
 import threading
@@ -84,6 +85,7 @@ try:
         log_execution,
     )
     from utils.scheduler.replanner import (
+        BlockState,
         load_block_state,
         on_task_complete,
         on_task_fail,
@@ -768,7 +770,7 @@ async def _maybe_run_jit_shift_generation() -> None:
             _JIT_SCRIPT,
             "--jit",
             "--lead-minutes",
-            "75",
+            "30",
             cwd=str(BASE_DIR),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -1595,9 +1597,22 @@ async def _dispatch_inner(task_path: Path):
             if _sched_block_id:
                 SCHEDULER_STATE_DIR.mkdir(parents=True, exist_ok=True)
                 _sched_state = load_block_state(_sched_block_id, state_dir=SCHEDULER_STATE_DIR)
-                if _sched_state:
-                    on_task_start(_sched_state, task_id=stem)
+                if _sched_state is None:
+                    # On-demand: create minimal BlockState so lifecycle hooks work
+                    # even when shift generator didn't persist one.
+                    from utils.scheduler.block import BlockPlan
+
+                    _now_utc = datetime.now(timezone.utc)
+                    _sched_state = BlockState(
+                        block_id=_sched_block_id,
+                        original_plan=BlockPlan(),
+                        block_start_utc=_now_utc,
+                        block_end_utc=_now_utc + timedelta(hours=8),
+                    )
                     save_block_state(_sched_state, state_dir=SCHEDULER_STATE_DIR)
+                    logger.info("SCHEDULER: created on-demand BlockState '%s'", _sched_block_id)
+                on_task_start(_sched_state, task_id=stem)
+                save_block_state(_sched_state, state_dir=SCHEDULER_STATE_DIR)
         except Exception as _sched_exc:
             logger.debug("Scheduler on_task_start failed (non-fatal): %s", _sched_exc)
 
@@ -1807,6 +1822,55 @@ async def _dispatch_inner(task_path: Path):
                     save_block_state(_sched_state, state_dir=SCHEDULER_STATE_DIR)
         except Exception as _sched_exc:
             logger.debug("Scheduler execution logging failed (non-fatal): %s", _sched_exc)
+
+    # --- Scheduler: write vault diary entry for completed shift tasks ---
+    if _HAS_SCHEDULER and stem.startswith("shift_"):
+
+        def _write_scheduler_diary() -> None:
+            vault_diary = Path("/home/nova/nova-vault/90-diary")
+            vault_diary.mkdir(parents=True, exist_ok=True)
+            diary_now = datetime.now(timezone.utc)
+            diary_date = diary_now.strftime("%Y-%m-%d")
+            diary_slug = re.sub(r"[^a-zA-Z0-9_-]", "-", stem)[:60].rstrip("-")
+            diary_file = vault_diary / f"sched-{diary_date}-{diary_slug}.md"
+            if diary_file.exists():
+                return
+            diary_duration = (time.monotonic() - _sched_t0) / 60.0
+            diary_outcome = "success" if passed else "fail"
+            diary_mode = _task_meta.get("work_mode", "unknown")
+            diary_class = _task_meta.get("task_class", "unknown")
+            diary_optimized = _task_meta.get("scheduler_optimized", "false")
+            diary_block = _task_meta.get("shift_block", "?")
+            diary_note = (
+                f"---\n"
+                f"type: diary\n"
+                f'title: "Scheduler: {stem}"\n'
+                f'date: "{diary_date}"\n'
+                f"source: nova-core-scheduler\n"
+                f"tags:\n"
+                f'  - "#type/diary"\n'
+                f'  - "#project/novacore"\n'
+                f'  - "#system/scheduler"\n'
+                f"---\n\n"
+                f"## Scheduled Task Completed\n\n"
+                f"| Field | Value |\n"
+                f"|-------|-------|\n"
+                f"| **Task** | `{stem}` |\n"
+                f"| **Block** | {diary_block} |\n"
+                f"| **Outcome** | {diary_outcome} |\n"
+                f"| **Duration** | {diary_duration:.1f} min |\n"
+                f"| **Work Mode** | {diary_mode} |\n"
+                f"| **Task Class** | {diary_class} |\n"
+                f"| **Optimized** | {diary_optimized} |\n"
+                f"| **Completed** | {diary_now.strftime('%Y-%m-%d %H:%M UTC')} |\n"
+            )
+            diary_file.write_text(diary_note, encoding="utf-8")
+            logger.info("SCHEDULER: diary written → %s", diary_file.name)
+
+        try:
+            await asyncio.to_thread(_write_scheduler_diary)
+        except Exception as _diary_exc:
+            logger.debug("Scheduler diary write failed (non-fatal): %s", _diary_exc)
 
     # --- Session completion recording (Phase 5) ---
     _session_mgr.record_task_completion(stem, success=passed)

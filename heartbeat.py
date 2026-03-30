@@ -2120,10 +2120,20 @@ def check_scheduler() -> dict:
             try:
                 records = _read_execution_log(exec_log)
                 status_parts.append(f"exec_records={len(records)}")
+                # Count real records (filter out synthetic/probe entries)
+                real_records = [r for r in records if r.actual_duration_min >= 0.1]
+                status_parts.append(f"real_records={len(real_records)}")
             except Exception:
                 status_parts.append("exec_log=unreadable")
         else:
             status_parts.append("exec_log=none")
+
+        # Check for today's BlockState
+        from datetime import date as _date_type
+
+        _today_block_id = f"shift_{_date_type.today():%Y%m%d}"
+        _block_state_path = STATE_DIR / "scheduler" / f"{_today_block_id}_state.json"
+        status_parts.append(f"block_state={'yes' if _block_state_path.exists() else 'no'}")
 
         return {"name": "scheduler", "ok": True, "detail": ", ".join(status_parts)}
     except Exception as e:
@@ -2284,6 +2294,55 @@ def main() -> int:
     except Exception as e:
         checks.append({"name": "drift_detection", "ok": True, "detail": f"check skipped: {e}"})
 
+    # --- Service staleness detection + auto-restart attempt ---
+    try:
+        from utils.service_staleness import check_all_staleness, restart_service
+
+        for sr in check_all_staleness():
+            if sr.is_stale:
+                # Attempt inline restart (works only if not under NoNewPrivileges)
+                rr = restart_service(sr.service)
+                if rr.success:
+                    checks.append(
+                        {
+                            "name": f"staleness:{sr.service}",
+                            "ok": True,
+                            "detail": f"was stale ({sr.commits_since_start} commits) — auto-restarted",
+                        }
+                    )
+                    stale_msg = (
+                        f"Auto-restarted {sr.service} — was running stale code "
+                        f"({sr.commits_since_start} commit(s), {sr.stale_hours:.1f}h behind)."
+                    )
+                else:
+                    # Restart failed (likely NoNewPrivileges) — alert only,
+                    # the novacore-auto-deploy timer will handle it.
+                    checks.append(
+                        {
+                            "name": f"staleness:{sr.service}",
+                            "ok": False,
+                            "detail": f"STALE ({sr.commits_since_start} commits, {sr.stale_hours:.1f}h) — "
+                            f"inline restart failed, awaiting auto-deploy timer",
+                        }
+                    )
+                    stale_msg = (
+                        f"Service {sr.service} is running stale code — "
+                        f"{sr.commits_since_start} commit(s) since start "
+                        f"({sr.stale_hours:.1f}h ago). Auto-deploy timer will restart."
+                    )
+                if _telegram_cooldown_gate(stale_msg):
+                    _send_telegram(stale_msg)
+            else:
+                checks.append(
+                    {
+                        "name": f"staleness:{sr.service}",
+                        "ok": True,
+                        "detail": sr.detail,
+                    }
+                )
+    except Exception as e:
+        checks.append({"name": "service_staleness", "ok": True, "detail": f"check skipped: {e}"})
+
     # --- NovaTrade signal monitoring ---
     try:
         signal_check = check_novatrade_signals()
@@ -2432,6 +2491,8 @@ def main() -> int:
 
             if _should_calibrate and _exec_log_path.exists():
                 _records = _read_execution_log(_exec_log_path)
+                # Filter out synthetic/probe records (real tasks take >0.1 min)
+                _records = [r for r in _records if r.actual_duration_min >= 0.1]
                 if len(_records) >= 5:
                     _cal_table = _compute_calibration(_records)
                     _cal_report = _generate_calibration_report(_cal_table, _records)
