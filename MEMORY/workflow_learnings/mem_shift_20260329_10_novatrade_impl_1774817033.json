@@ -16,5 +16,6 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Enhanced NovaTrade with comprehensive broker diagnostics - integrated shelf module into health monitoring with new CLI command",
   "created_at": "2026-03-29T20:43:53Z",
-  "confidence": "high"
+  "confidence": "high",
+  "supersedes": "mem_shift_20260329_10_novatrade_impl_1774816013"
 }

@@ -1,0 +1,24 @@
+[Unit]
+Description=NovaCore Auto-Deploy — restart stale services after code changes
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/nova/nova-core/scripts/auto_deploy.py
+WorkingDirectory=/home/nova/nova-core
+User=root
+EnvironmentFile=/etc/novacore/telegram.env
+
+# Timeout: staleness check + restarts should finish within 60s
+TimeoutStartSec=60
+
+# NOTE: No NoNewPrivileges=yes — this service needs to call systemctl restart.
+# Security is limited to: only restarts services listed in SERVICE_CODE_PATHS.
+ProtectHome=no
+ReadWritePaths=/home/nova/nova-core /tmp
+ReadOnlyPaths=/etc/novacore
+PrivateTmp=yes
+PrivateDevices=yes
+
+[Install]
+WantedBy=multi-user.target
