@@ -85,6 +85,7 @@ class TestFeedState:
 class TestFeedHealthConfig:
     def test_defaults(self) -> None:
         cfg = FeedHealthConfig()
+        assert cfg.poll_interval == 30.0
         assert cfg.max_stale_seconds == 30.0
         assert cfg.max_clock_drift_seconds == 15.0
         assert cfg.max_spread_pips == 5.0
@@ -92,7 +93,16 @@ class TestFeedHealthConfig:
         assert cfg.spread_spike_ratio == 3.0
         assert cfg.signal_dedup_window == 60.0
         assert cfg.max_signals_in_window == 2
-        assert cfg.stale_timestamp_threshold == 10.0
+        # Auto-derived: poll_interval * 1.2
+        assert cfg.stale_timestamp_threshold == 30.0 * 1.2
+
+    def test_stale_threshold_derived_from_poll_interval(self) -> None:
+        cfg = FeedHealthConfig(poll_interval=10.0)
+        assert cfg.stale_timestamp_threshold == 12.0
+
+    def test_stale_threshold_explicit_override(self) -> None:
+        cfg = FeedHealthConfig(poll_interval=30.0, stale_timestamp_threshold=60.0)
+        assert cfg.stale_timestamp_threshold == 60.0
 
     def test_frozen(self) -> None:
         cfg = FeedHealthConfig()

@@ -64,6 +64,7 @@ class FeedState(Enum):
 class FeedHealthConfig:
     """Immutable configuration for FeedHealthSupervisor."""
 
+    poll_interval: float = 30.0
     max_stale_seconds: float = 30.0
     max_clock_drift_seconds: float = 15.0
     max_spread_pips: float = 5.0
@@ -71,7 +72,11 @@ class FeedHealthConfig:
     spread_spike_ratio: float = 3.0
     signal_dedup_window: float = 60.0
     max_signals_in_window: int = 2
-    stale_timestamp_threshold: float = 10.0
+    stale_timestamp_threshold: float = 0.0  # Auto-derived from poll_interval
+
+    def __post_init__(self) -> None:
+        if self.stale_timestamp_threshold <= 0:
+            object.__setattr__(self, "stale_timestamp_threshold", self.poll_interval * 1.2)
 
 
 # ---------------------------------------------------------------------------

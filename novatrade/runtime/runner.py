@@ -43,7 +43,7 @@ from novatrade.data.price_feed import TickBatchPoller
 from novatrade.execution.live_trading_agent import LiveTradingAgent
 from novatrade.execution.trading_agent import TradingAgent
 from novatrade.models import AccountState
-from novatrade.monitor.feed_health import FeedHealthSupervisor
+from novatrade.monitor.feed_health import FeedHealthConfig, FeedHealthSupervisor
 from novatrade.monitor.ops_monitor import OpsMonitor
 from novatrade.risk.hard_risk_supervisor import HardLimits, HardRiskSupervisor
 from novatrade.risk.risk_engine import RiskEngine
@@ -505,7 +505,7 @@ async def build_live_stack(
     aggregator = BarAggregator(timeframes=timeframes)
 
     # --- Feed Health ---
-    feed_supervisor = FeedHealthSupervisor()
+    feed_supervisor = FeedHealthSupervisor(FeedHealthConfig(poll_interval=poll_interval))
 
     # --- LiveLoop ---
     live_loop = LiveLoop(
