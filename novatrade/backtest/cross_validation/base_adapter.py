@@ -46,8 +46,9 @@ class BaseEngineAdapter(ABC):
     @staticmethod
     def _candles_to_dataframe(candles: list[Candle]):
         """Convert Candle list → pandas DataFrame with DatetimeIndex + OHLCV columns."""
-        import pandas as pd
         from datetime import datetime, timezone
+
+        import pandas as pd
 
         data = {
             "Open": [c.open for c in candles],
@@ -56,7 +57,5 @@ class BaseEngineAdapter(ABC):
             "Close": [c.close for c in candles],
             "Volume": [c.volume for c in candles],
         }
-        index = pd.DatetimeIndex(
-            [datetime.fromtimestamp(c.timestamp, tz=timezone.utc) for c in candles]
-        )
+        index = pd.DatetimeIndex([datetime.fromtimestamp(c.timestamp, tz=timezone.utc) for c in candles])
         return pd.DataFrame(data, index=index)

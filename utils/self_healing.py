@@ -550,17 +550,22 @@ def evaluate_degradation(
 
         # De-escalation: only drop one tier at a time, require stability
         if new_tier < old_tier:
-            # Check if we've been at old_tier for at least 10 minutes
-            if state.since:
-                try:
-                    since_ts = datetime.fromisoformat(state.since).timestamp()
-                    if time.time() - since_ts < 600:  # 10 minutes
-                        new_tier = old_tier  # Hold, not enough calm time
-                except (ValueError, TypeError):
-                    pass
-            # Only drop one level at a time
-            if new_tier < old_tier - 1:
-                new_tier = DegradationTier(old_tier - 1)
+            # Check if current tier was triggered by budget constraints
+            # Budget-triggered degradations should not be auto-de-escalated
+            if state.reason and "budget exceeded" in state.reason.lower():
+                new_tier = old_tier  # Hold at current tier - budget issue must be resolved explicitly
+            else:
+                # Check if we've been at old_tier for at least 10 minutes
+                if state.since:
+                    try:
+                        since_ts = datetime.fromisoformat(state.since).timestamp()
+                        if time.time() - since_ts < 600:  # 10 minutes
+                            new_tier = old_tier  # Hold, not enough calm time
+                    except (ValueError, TypeError):
+                        pass
+                # Only drop one level at a time
+                if new_tier < old_tier - 1:
+                    new_tier = DegradationTier(old_tier - 1)
 
         if new_tier != old_tier:
             direction = "ESCALATED" if new_tier > old_tier else "DE-ESCALATED"

@@ -175,21 +175,30 @@ class TestTradeLogChecks:
         assert step.status == "critical"
         assert "does not exist" in step.result
 
-    def test_trade_log_empty(self, tmp_path: Path) -> None:
-        _setup_state(tmp_path, {"trade_log.json": []})
+    def test_trade_journal_empty(self, tmp_path: Path) -> None:
+        _setup_state(tmp_path)
+        state_dir = tmp_path / "STATE" / "novatrade"
+        (state_dir / "trade_journal.jsonl").write_text("")
         executor = InvestigationExecutor(str(tmp_path))
 
         step = executor._check_trade_log(1)
         assert step.status == "critical"
-        assert "0 trades" in step.result
+        assert "0 OPEN" in step.result
 
-    def test_trade_log_with_trades(self, tmp_path: Path) -> None:
-        _setup_state(tmp_path, {"trade_log.json": [{"id": 1}, {"id": 2}]})
+    def test_trade_journal_with_trades(self, tmp_path: Path) -> None:
+        _setup_state(tmp_path)
+        state_dir = tmp_path / "STATE" / "novatrade"
+        lines = [
+            json.dumps({"event": "OPEN", "position_id": "1", "logged_at": "2026-03-30T01:00:00+00:00"}),
+            json.dumps({"event": "CLOSE", "position_id": "1", "logged_at": "2026-03-30T02:00:00+00:00"}),
+            json.dumps({"event": "OPEN", "position_id": "2", "logged_at": "2026-03-30T03:00:00+00:00"}),
+        ]
+        (state_dir / "trade_journal.jsonl").write_text("\n".join(lines) + "\n")
         executor = InvestigationExecutor(str(tmp_path))
 
         step = executor._check_trade_log(1)
         assert step.status == "ok"
-        assert "2 trades" in step.result
+        assert "2 OPEN" in step.result
 
 
 class TestHaltStateChecks:
@@ -383,11 +392,13 @@ class TestMultiRoundInvestigation:
         _setup_state(
             tmp_path,
             {
-                "trade_log.json": [],
                 "halt_state.json": {"halted": False},
                 "connection_status.json": {"status": "connected"},
             },
         )
+        # Write empty trade journal (JSONL)
+        state_dir = tmp_path / "STATE" / "novatrade"
+        (state_dir / "trade_journal.jsonl").write_text("")
         executor = InvestigationExecutor(str(tmp_path))
 
         with patch("subprocess.run") as mock_run:

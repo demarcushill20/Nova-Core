@@ -184,11 +184,12 @@ class TestStrategyDiagnostics:
         assert len(silent) == 1
         assert "Silent failure" in silent[0].detail
 
-    def test_trade_log_empty(self, tmp_path):
-        """Empty trade log file should produce a critical finding."""
+    def test_trade_journal_empty(self, tmp_path):
+        """Empty trade journal file should produce a critical finding."""
         state_dir = tmp_path / "STATE" / "novatrade"
         state_dir.mkdir(parents=True)
-        (state_dir / "trade_log.json").write_text("[]")
+        # Write a JSONL file with only REJECT events (no OPEN trades)
+        (state_dir / "trade_journal.jsonl").write_text("")
 
         executor = DirectActionExecutor(base_path=str(tmp_path))
         report = make_report(
@@ -208,11 +209,11 @@ class TestStrategyDiagnostics:
         ):
             result = executor.execute(decision, report)
 
-        empty_log = [f for f in result.findings if f.check == "trade_log_empty"]
+        empty_log = [f for f in result.findings if f.check == "trade_journal_empty"]
         assert len(empty_log) == 1
 
-    def test_trade_log_missing(self, tmp_path):
-        """Missing trade log file should produce a critical finding."""
+    def test_trade_journal_missing(self, tmp_path):
+        """Missing trade journal file should produce a critical finding."""
         (tmp_path / "STATE" / "novatrade").mkdir(parents=True)
         executor = DirectActionExecutor(base_path=str(tmp_path))
         report = make_report(
@@ -232,7 +233,7 @@ class TestStrategyDiagnostics:
         ):
             result = executor.execute(decision, report)
 
-        missing = [f for f in result.findings if f.check == "trade_log_missing"]
+        missing = [f for f in result.findings if f.check == "trade_journal_missing"]
         assert len(missing) == 1
 
     def test_risk_halt_active(self, tmp_path):

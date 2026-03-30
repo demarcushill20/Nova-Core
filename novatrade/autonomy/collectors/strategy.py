@@ -112,24 +112,43 @@ class StrategyCollector(BaseCollector):
     # ------------------------------------------------------------------
 
     def _load_trade_log(self) -> list[dict]:
-        """Load trade log from STATE/novatrade/trade_log.json.
+        """Load trades from STATE/novatrade/trade_journal.jsonl.
 
-        Handles both formats:
-        - Legacy list: ``[{...}, ...]``
-        - Current dict: ``{"trades": [{...}, ...], "last_updated": "..."}``
+        Reads the append-only JSONL trade journal (source of truth) and
+        returns OPEN/CLOSE events with a numeric ``timestamp`` field
+        derived from the ISO ``logged_at`` field for backward compat.
         """
-        path = Path(self.base_path) / "STATE" / "novatrade" / "trade_log.json"
+        path = Path(self.base_path) / "STATE" / "novatrade" / "trade_journal.jsonl"
         if not path.exists():
             return []
+        trades: list[dict] = []
         try:
-            data = json.loads(path.read_text())
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
-                return data.get("trades", [])
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    event = entry.get("event", "")
+                    if event not in ("OPEN", "CLOSE"):
+                        continue
+                    # Convert logged_at ISO string to numeric timestamp
+                    logged_at = entry.get("logged_at", "")
+                    if logged_at:
+                        try:
+                            from datetime import datetime as _dt
+
+                            dt = _dt.fromisoformat(logged_at)
+                            entry["timestamp"] = dt.timestamp()
+                        except (ValueError, TypeError):
+                            entry["timestamp"] = 0
+                    trades.append(entry)
+        except OSError:
             return []
-        except (json.JSONDecodeError, OSError):
-            return []
+        return trades
 
     def _load_signal_log(self) -> list[dict]:
         """Load signal log from STATE/novatrade/signal_log.json.
@@ -243,6 +262,7 @@ class StrategyCollector(BaseCollector):
 
         Returns (score, delta) where delta is the relative divergence.
         No data on either side → neutral 50.
+        Pre-live (all equity snapshots from backtest, no real trades) → 60.
         """
         bt_sharpe = self._load_backtest_sharpe()
         live_sharpe = self._load_live_sharpe()
@@ -254,6 +274,11 @@ class StrategyCollector(BaseCollector):
         # Backtest exists but not enough live data → credit for having backtests
         if live_sharpe is None:
             return 60.0, -2.0
+
+        # Pre-live check: if all equity snapshots are from backtest runs,
+        # there's no real live/backtest divergence to measure yet.
+        if self._is_pre_live():
+            return 60.0, -3.0  # -3 sentinel = pre-live state
 
         # Real alignment: delta-based scoring
         denom = max(abs(bt_sharpe), 0.01)
@@ -269,6 +294,29 @@ class StrategyCollector(BaseCollector):
             score = 10.0  # significant divergence
 
         return score, round(delta, 3)
+
+    def _is_pre_live(self) -> bool:
+        """Return True if equity_history has no real live trading data.
+
+        Checks whether all snapshots have source='backtest' (or no source),
+        indicating no MetaApi live equity has been recorded yet.
+        """
+        path = Path(self.base_path) / "STATE" / "novatrade" / "equity_history.json"
+        if not path.exists():
+            return True
+        try:
+            data = json.loads(path.read_text())
+            snapshots = data if isinstance(data, list) else data.get("snapshots", [])
+            if not snapshots:
+                return True
+            for s in snapshots:
+                if isinstance(s, dict):
+                    source = s.get("source", "backtest")
+                    if source not in ("backtest", "simulation"):
+                        return False  # found real live data
+            return True  # all entries are backtest/simulation
+        except (json.JSONDecodeError, OSError):
+            return True
 
     def _load_backtest_sharpe(self) -> float | None:
         """Load most recent backtest Sharpe ratio from OUTPUT/backtests/."""

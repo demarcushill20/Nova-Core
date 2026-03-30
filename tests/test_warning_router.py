@@ -1,11 +1,8 @@
 """Tests for utils/warning_router.py — unified warning collection and routing."""
 
 import json
-import os
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -14,22 +11,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.warning_router import (
     Warning,
-    WarningSeverity,
     WarningCategory,
-    emit_warning,
-    emit,
-    get_pending_warnings,
-    mark_investigated,
-    get_queue_stats,
-    clear_queue,
-    collect_from_heartbeat,
-    collect_from_circuit_breakers,
-    collect_from_budget,
-    collect_from_drift,
-    collect_from_runaway,
-    collect_from_error_summary,
-    collect_from_memory,
+    WarningSeverity,
     _compute_fingerprint,
+    clear_queue,
+    collect_from_budget,
+    collect_from_circuit_breakers,
+    collect_from_drift,
+    collect_from_error_summary,
+    collect_from_heartbeat,
+    collect_from_memory,
+    collect_from_runaway,
+    emit,
+    emit_warning,
+    get_pending_warnings,
+    get_queue_stats,
+    mark_investigated,
 )
 
 

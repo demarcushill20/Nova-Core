@@ -466,13 +466,33 @@ def strat_collector(tmp_path):
     return StrategyCollector(str(tmp_path))
 
 
+def _write_trade_journal(state_dir, count, offset_hours=1):
+    """Helper: write ``count`` JSONL trade entries to trade_journal.jsonl."""
+    from datetime import datetime as _dt
+    from datetime import timedelta
+    from datetime import timezone as _tz
+
+    lines = []
+    for i in range(count):
+        ts = _dt.now(_tz.utc) - timedelta(hours=i * offset_hours)
+        lines.append(
+            json.dumps(
+                {
+                    "event": "OPEN",
+                    "logged_at": ts.isoformat(),
+                    "symbol": "EURUSD",
+                }
+            )
+        )
+    (state_dir / "trade_journal.jsonl").write_text("\n".join(lines) + "\n")
+
+
 @pytest.mark.asyncio
 async def test_strategy_active_trading(strat_collector, tmp_path):
-    """5+ trades in 24h = score 100 (list format)."""
+    """5+ trades in 24h = score 100 (JSONL journal format)."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    trades = [{"timestamp": time.time() - i * 3600} for i in range(6)]
-    (state_dir / "trade_log.json").write_text(json.dumps(trades))
+    _write_trade_journal(state_dir, 6)
 
     result = await strat_collector.collect()
     tc = next(m for m in result.sub_metrics if m.name == "trades_last_24h")
@@ -480,13 +500,11 @@ async def test_strategy_active_trading(strat_collector, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_strategy_active_trading_dict_format(strat_collector, tmp_path):
-    """5+ trades in dict format trade_log = score 100 (RC-1 fix)."""
+async def test_strategy_active_trading_journal_format(strat_collector, tmp_path):
+    """5+ trades in JSONL journal = score 100, raw_value 6."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    trades = [{"timestamp": time.time() - i * 3600} for i in range(6)]
-    data = {"trades": trades, "last_updated": "2026-03-26T11:30:00Z"}
-    (state_dir / "trade_log.json").write_text(json.dumps(data))
+    _write_trade_journal(state_dir, 6)
 
     result = await strat_collector.collect()
     tc = next(m for m in result.sub_metrics if m.name == "trades_last_24h")
@@ -499,7 +517,7 @@ async def test_strategy_no_trades_market_hours(strat_collector, tmp_path):
     """0 trades during market hours = 20 (concerning)."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    (state_dir / "trade_log.json").write_text("[]")
+    (state_dir / "trade_journal.jsonl").write_text("")
 
     # Mock a Wednesday at 14:00 UTC (market hours)
     market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
@@ -517,7 +535,7 @@ async def test_strategy_no_trades_off_hours(strat_collector, tmp_path):
     """0 trades off-hours = 80 (expected, market closed)."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    (state_dir / "trade_log.json").write_text("[]")
+    (state_dir / "trade_journal.jsonl").write_text("")
 
     # Mock a Saturday at noon UTC (off-hours)
     weekend = datetime(2026, 3, 28, 12, 0, 0, tzinfo=timezone.utc)
@@ -587,8 +605,8 @@ async def test_strategy_backtest_alignment_close(strat_collector, tmp_path):
     # Backtest Sharpe = 1.0
     (bt_dir / "irb_v2_baseline.json").write_text(json.dumps({"sharpe_ratio": 1.0}))
 
-    # Live equity: steady rise → Sharpe ≈ 1.0
-    equities = [{"equity": 10000 + i * 100} for i in range(20)]
+    # Live equity: steady rise → Sharpe ≈ 1.0 (source="live" to bypass pre-live check)
+    equities = [{"equity": 10000 + i * 100, "source": "live"} for i in range(20)]
     (state_dir / "equity_history.json").write_text(json.dumps({"snapshots": equities}))
 
     result = await strat_collector.collect()
@@ -596,6 +614,27 @@ async def test_strategy_backtest_alignment_close(strat_collector, tmp_path):
     # Live Sharpe will be very high (consistent returns), delta > 0.1
     # Score depends on actual computed live Sharpe
     assert bt.value >= 10.0  # at least some score
+
+
+@pytest.mark.asyncio
+async def test_strategy_backtest_alignment_pre_live(strat_collector, tmp_path):
+    """Pre-live: all equity snapshots from backtest → score 60 (no false divergence)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    bt_dir = tmp_path / "OUTPUT" / "backtests"
+    bt_dir.mkdir(parents=True)
+
+    # Backtest Sharpe = 0.15
+    (bt_dir / "irb_v2_baseline.json").write_text(json.dumps({"sharpe_ratio": 0.15}))
+
+    # Equity history from backtest only (pre-live state)
+    equities = [{"equity": 100000 + i * 10, "source": "backtest"} for i in range(20)]
+    (state_dir / "equity_history.json").write_text(json.dumps({"snapshots": equities}))
+
+    result = await strat_collector.collect()
+    bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
+    assert bt.value == 60.0  # pre-live neutral score, not penalized
+    assert bt.raw_value == -3.0  # sentinel for pre-live
 
 
 @pytest.mark.asyncio
@@ -617,8 +656,8 @@ async def test_strategy_signal_rate_from_signal_log(strat_collector, tmp_path):
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
 
-    # Empty trade log — previously would give 0 signal rate
-    (state_dir / "trade_log.json").write_text("[]")
+    # Empty trade journal — previously would give 0 signal rate
+    (state_dir / "trade_journal.jsonl").write_text("")
 
     # Signal log with recent signals
     signals = [{"timestamp": time.time() - 60 * i, "type": "entry"} for i in range(3)]
@@ -731,25 +770,29 @@ async def test_strategy_has_five_sub_metrics(strat_collector):
 
 
 @pytest.mark.asyncio
-async def test_strategy_load_trade_log_dict_format(strat_collector, tmp_path):
-    """_load_trade_log handles dict format with 'trades' key (RC-1 fix)."""
+async def test_strategy_load_trade_log_jsonl_format(strat_collector, tmp_path):
+    """_load_trade_log reads JSONL journal with OPEN/CLOSE events."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    data = {"trades": [{"timestamp": 1}], "last_updated": "2026-03-26"}
-    (state_dir / "trade_log.json").write_text(json.dumps(data))
+    lines = [
+        json.dumps({"event": "OPEN", "logged_at": "2026-03-26T10:00:00+00:00"}),
+        json.dumps({"event": "CLOSE", "logged_at": "2026-03-26T11:00:00+00:00"}),
+        json.dumps({"event": "SIGNAL", "logged_at": "2026-03-26T12:00:00+00:00"}),  # ignored
+    ]
+    (state_dir / "trade_journal.jsonl").write_text("\n".join(lines) + "\n")
 
     result = strat_collector._load_trade_log()
-    assert len(result) == 1
-    assert result[0]["timestamp"] == 1
+    assert len(result) == 2  # only OPEN + CLOSE
+    assert result[0]["event"] == "OPEN"
+    assert "timestamp" in result[0]
 
 
 @pytest.mark.asyncio
-async def test_strategy_load_trade_log_empty_dict(strat_collector, tmp_path):
-    """_load_trade_log handles dict with empty trades list."""
+async def test_strategy_load_trade_log_empty_journal(strat_collector, tmp_path):
+    """_load_trade_log handles empty journal file."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    data = {"trades": [], "last_updated": "2026-03-26"}
-    (state_dir / "trade_log.json").write_text(json.dumps(data))
+    (state_dir / "trade_journal.jsonl").write_text("")
 
     result = strat_collector._load_trade_log()
     assert result == []

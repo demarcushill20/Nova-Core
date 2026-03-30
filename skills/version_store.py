@@ -33,7 +33,7 @@ from skills.skill_record import (
 
 log = logging.getLogger("skills.version_store")
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 _CREATE_TABLES = """
 CREATE TABLE IF NOT EXISTS skill_versions (
@@ -87,16 +87,16 @@ CREATE TABLE IF NOT EXISTS execution_analyses (
     evolution_type TEXT,
     evolution_direction TEXT,
     evolution_priority INTEGER,
+    pattern_hash TEXT DEFAULT '',
     analyzed_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_analyses_skill ON execution_analyses(skill_id);
 CREATE INDEX IF NOT EXISTS idx_analyses_task ON execution_analyses(task_id);
+CREATE INDEX IF NOT EXISTS idx_analyses_pattern ON execution_analyses(pattern_hash);
 """
 
-_VALID_STAT_FIELDS = frozenset(
-    {"selections", "executions", "completions", "failures", "fallbacks"}
-)
+_VALID_STAT_FIELDS = frozenset({"selections", "executions", "completions", "failures", "fallbacks"})
 
 
 class SkillVersionStore:
@@ -153,26 +153,32 @@ class SkillVersionStore:
         Migration path:
         - v0/v1 -> v2: execution_analyses table (created via IF NOT EXISTS
           in _CREATE_TABLES, but we log the migration for observability).
+        - v2 -> v3: Add pattern_hash column to execution_analyses for
+          pattern-level dedup of LLM analysis calls.
 
         All table creation uses IF NOT EXISTS so migrations are idempotent.
         """
-        if from_version < 2:
-            if from_version > 0:
-                log.info(
-                    "skill_version_store: migrating schema v%d -> v%d",
-                    from_version,
-                    _SCHEMA_VERSION,
-                )
+        if from_version < 2 and from_version > 0:
+            log.info(
+                "skill_version_store: migrating schema v%d -> v%d",
+                from_version,
+                _SCHEMA_VERSION,
+            )
             # Tables are created idempotently by _CREATE_TABLES.
-            # Future migrations that ALTER existing tables go here.
+        if from_version == 2:
+            log.info("skill_version_store: migrating schema v2 -> v3 (adding pattern_hash column)")
+            # Add pattern_hash column if it doesn't exist yet.
+            try:
+                conn.execute("ALTER TABLE execution_analyses ADD COLUMN pattern_hash TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                # Column already exists (idempotent)
+                pass
 
     # -----------------------------------------------------------------
     # Row <-> SkillVersion mapping
     # -----------------------------------------------------------------
 
-    def _row_to_skill(
-        self, row: sqlite3.Row, parent_ids: list[str] | None = None
-    ) -> SkillVersion:
+    def _row_to_skill(self, row: sqlite3.Row, parent_ids: list[str] | None = None) -> SkillVersion:
         """Convert a database row to a SkillVersion instance."""
         pids = parent_ids if parent_ids is not None else []
         return SkillVersion(
@@ -200,9 +206,7 @@ class SkillVersionStore:
             created_by=row["created_by"] or "system",
         )
 
-    def _load_parent_ids(
-        self, conn: sqlite3.Connection, skill_id: str
-    ) -> list[str]:
+    def _load_parent_ids(self, conn: sqlite3.Connection, skill_id: str) -> list[str]:
         """Load parent IDs for a skill from the lineage table."""
         rows = conn.execute(
             "SELECT parent_id FROM skill_lineage_parents WHERE skill_id = ?",
@@ -273,9 +277,7 @@ class SkillVersionStore:
             parent_ids = self._load_parent_ids(conn, skill_id)
             return self._row_to_skill(row, parent_ids)
         except Exception:
-            log.exception(
-                "skill_version_store: failed to get skill %s", skill_id
-            )
+            log.exception("skill_version_store: failed to get skill %s", skill_id)
             return None
         finally:
             conn.close()
@@ -289,8 +291,7 @@ class SkillVersionStore:
         conn = self._get_conn()
         try:
             row = conn.execute(
-                "SELECT * FROM skill_versions WHERE name = ? AND is_active = 1 "
-                "ORDER BY generation DESC LIMIT 1",
+                "SELECT * FROM skill_versions WHERE name = ? AND is_active = 1 ORDER BY generation DESC LIMIT 1",
                 (name,),
             ).fetchone()
             if row is None:
@@ -311,13 +312,9 @@ class SkillVersionStore:
         conn = self._get_conn()
         try:
             if active_only:
-                rows = conn.execute(
-                    "SELECT * FROM skill_versions WHERE is_active = 1"
-                ).fetchall()
+                rows = conn.execute("SELECT * FROM skill_versions WHERE is_active = 1").fetchall()
             else:
-                rows = conn.execute(
-                    "SELECT * FROM skill_versions"
-                ).fetchall()
+                rows = conn.execute("SELECT * FROM skill_versions").fetchall()
             results = []
             for row in rows:
                 parent_ids = self._load_parent_ids(conn, row["skill_id"])
@@ -355,8 +352,7 @@ class SkillVersionStore:
             ).fetchone()
             if parent_row is None:
                 raise ValueError(
-                    f"Parent skill '{parent_id}' does not exist — "
-                    "cannot evolve from a non-existent parent"
+                    f"Parent skill '{parent_id}' does not exist — cannot evolve from a non-existent parent"
                 )
             conn.execute("BEGIN")
             # Insert the new version
@@ -448,9 +444,7 @@ class SkillVersionStore:
             parent_pids = self._load_parent_ids(conn, parent_id)
             return self._row_to_skill(parent_row, parent_pids)
         except Exception:
-            log.exception(
-                "skill_version_store: failed to rollback skill %s", skill_id
-            )
+            log.exception("skill_version_store: failed to rollback skill %s", skill_id)
             return None
         finally:
             conn.close()
@@ -466,9 +460,7 @@ class SkillVersionStore:
         Raises ValueError for invalid field names.
         """
         if field not in _VALID_STAT_FIELDS:
-            raise ValueError(
-                f"Invalid stat field '{field}'. Must be one of: {sorted(_VALID_STAT_FIELDS)}"
-            )
+            raise ValueError(f"Invalid stat field '{field}'. Must be one of: {sorted(_VALID_STAT_FIELDS)}")
         conn = self._get_conn()
         try:
             conn.execute(
@@ -490,7 +482,7 @@ class SkillVersionStore:
     # Execution analysis storage
     # -----------------------------------------------------------------
 
-    def store_analysis(self, analysis: ExecutionAnalysis) -> None:
+    def store_analysis(self, analysis: ExecutionAnalysis, pattern_hash: str = "") -> None:
         """Store execution analysis results for skill health tracking.
 
         For each SkillJudgment in the analysis, inserts a row into
@@ -510,13 +502,9 @@ class SkillVersionStore:
             # Build a lookup of evolution suggestions keyed by skill_name
             suggestions_by_skill: dict[str, list] = {}
             for suggestion in analysis.evolution_suggestions:
-                suggestions_by_skill.setdefault(
-                    suggestion.target_skill_name, []
-                ).append(suggestion)
+                suggestions_by_skill.setdefault(suggestion.target_skill_name, []).append(suggestion)
 
-            analyzed_at = analysis.analysis_timestamp or datetime.now(
-                timezone.utc
-            ).isoformat()
+            analyzed_at = analysis.analysis_timestamp or datetime.now(timezone.utc).isoformat()
 
             # M4 FIX: Wrap multi-insert in explicit transaction
             conn.execute("BEGIN")
@@ -528,20 +516,26 @@ class SkillVersionStore:
                 # not just the first one. Backwards-compatible: callers
                 # reading evolution_type can still check for a single value,
                 # and get_analyses_for_skill returns the full list.
-                matching_suggestions = suggestions_by_skill.get(
-                    judgment.skill_name, []
-                )
+                matching_suggestions = suggestions_by_skill.get(judgment.skill_name, [])
                 if matching_suggestions:
-                    evolution_data = json.dumps([
-                        {"type": s.type, "direction": s.direction, "priority": s.priority}
-                        for s in matching_suggestions
-                    ])
+                    json.dumps(
+                        [
+                            {"type": s.type, "direction": s.direction, "priority": s.priority}
+                            for s in matching_suggestions
+                        ]
+                    )
                     # Store first suggestion in legacy columns for simple queries
                     evolution_type = matching_suggestions[0].type
-                    evolution_direction = json.dumps([
-                        {"type": s.type, "direction": s.direction, "priority": s.priority}
-                        for s in matching_suggestions
-                    ]) if len(matching_suggestions) > 1 else matching_suggestions[0].direction
+                    evolution_direction = (
+                        json.dumps(
+                            [
+                                {"type": s.type, "direction": s.direction, "priority": s.priority}
+                                for s in matching_suggestions
+                            ]
+                        )
+                        if len(matching_suggestions) > 1
+                        else matching_suggestions[0].direction
+                    )
                     evolution_priority = matching_suggestions[0].priority
                 else:
                     evolution_type = None
@@ -553,8 +547,8 @@ class SkillVersionStore:
                        (analysis_id, task_id, skill_id, skill_name,
                         applied, completed, failure_reason, quality_score,
                         tool_issues, evolution_type, evolution_direction,
-                        evolution_priority, analyzed_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        evolution_priority, pattern_hash, analyzed_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         analysis_id,
                         analysis.task_id,
@@ -568,6 +562,7 @@ class SkillVersionStore:
                         evolution_type,
                         evolution_direction,
                         evolution_priority,
+                        pattern_hash,
                         analyzed_at,
                     ),
                 )
@@ -581,9 +576,7 @@ class SkillVersionStore:
         finally:
             conn.close()
 
-    def get_analyses_for_skill(
-        self, skill_id: str, limit: int = 20
-    ) -> list[dict]:
+    def get_analyses_for_skill(self, skill_id: str, limit: int = 20) -> list[dict]:
         """Return recent execution analyses for a specific skill.
 
         Results are ordered by analyzed_at descending (most recent first).
@@ -622,7 +615,9 @@ class SkillVersionStore:
                         "quality_score": row["quality_score"],
                         "tool_issues": json.loads(row["tool_issues"] or "[]"),
                         "evolution_type": row["evolution_type"],
-                        "evolution_direction": evo_direction if not evolution_suggestions else evolution_suggestions[0].get("direction", evo_direction),
+                        "evolution_direction": evo_direction
+                        if not evolution_suggestions
+                        else evolution_suggestions[0].get("direction", evo_direction),
                         "evolution_priority": row["evolution_priority"],
                         "evolution_suggestions": evolution_suggestions,
                         "analyzed_at": row["analyzed_at"],
@@ -635,6 +630,126 @@ class SkillVersionStore:
                 skill_id,
             )
             return []
+        finally:
+            conn.close()
+
+    def get_cached_analysis_by_pattern(self, pattern_hash: str, max_age_hours: float = 6.0) -> ExecutionAnalysis | None:
+        """Look up a recent analysis by pattern hash for dedup.
+
+        Returns the most recent ExecutionAnalysis matching the given
+        pattern_hash if it was created within ``max_age_hours``. Returns
+        None on cache miss.
+
+        This enables skipping redundant LLM calls when the same skill
+        combination + outcome pattern has already been analyzed recently.
+        """
+        if not pattern_hash:
+            return None
+        conn = self._get_conn()
+        try:
+            # Find the most recent task_id with this pattern_hash
+            row = conn.execute(
+                """SELECT DISTINCT task_id, analyzed_at
+                   FROM execution_analyses
+                   WHERE pattern_hash = ?
+                   ORDER BY analyzed_at DESC
+                   LIMIT 1""",
+                (pattern_hash,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            # Check age
+            analyzed_at = row["analyzed_at"]
+            try:
+                dt = datetime.fromisoformat(analyzed_at.replace("Z", "+00:00"))
+                age_hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+                if age_hours > max_age_hours:
+                    return None
+            except (ValueError, TypeError):
+                return None
+
+            # Reconstruct ExecutionAnalysis from all rows with this task_id + pattern_hash
+            task_id = row["task_id"]
+            judgment_rows = conn.execute(
+                """SELECT * FROM execution_analyses
+                   WHERE task_id = ? AND pattern_hash = ?
+                   ORDER BY rowid""",
+                (task_id, pattern_hash),
+            ).fetchall()
+
+            from skills.execution_analysis import EvolutionSuggestion, SkillJudgment
+
+            judgments = []
+            suggestions = []
+            overall_quality = 0.5
+
+            for jrow in judgment_rows:
+                judgments.append(
+                    SkillJudgment(
+                        skill_name=jrow["skill_name"],
+                        skill_id=jrow["skill_id"] or "",
+                        applied=bool(jrow["applied"]),
+                        completed=bool(jrow["completed"]),
+                        failure_reason=jrow["failure_reason"] or "",
+                        quality_score=jrow["quality_score"],
+                        tool_issues=json.loads(jrow["tool_issues"] or "[]"),
+                    )
+                )
+                # Reconstruct evolution suggestions
+                evo_dir = jrow["evolution_direction"]
+                if jrow["evolution_type"]:
+                    try:
+                        parsed = json.loads(evo_dir) if evo_dir else None
+                        if isinstance(parsed, list):
+                            for s in parsed:
+                                suggestions.append(
+                                    EvolutionSuggestion(
+                                        type=s.get("type", "FIX"),
+                                        target_skill_name=jrow["skill_name"],
+                                        target_skill_id=jrow["skill_id"] or "",
+                                        direction=s.get("direction", ""),
+                                        priority=s.get("priority", 3),
+                                    )
+                                )
+                        else:
+                            suggestions.append(
+                                EvolutionSuggestion(
+                                    type=jrow["evolution_type"],
+                                    target_skill_name=jrow["skill_name"],
+                                    target_skill_id=jrow["skill_id"] or "",
+                                    direction=evo_dir or "",
+                                    priority=jrow["evolution_priority"] or 3,
+                                )
+                            )
+                    except (json.JSONDecodeError, TypeError):
+                        suggestions.append(
+                            EvolutionSuggestion(
+                                type=jrow["evolution_type"],
+                                target_skill_name=jrow["skill_name"],
+                                target_skill_id=jrow["skill_id"] or "",
+                                direction=evo_dir or "",
+                                priority=jrow["evolution_priority"] or 3,
+                            )
+                        )
+
+            if judgments:
+                overall_quality = sum(j.quality_score for j in judgments) / len(judgments)
+
+            return ExecutionAnalysis(
+                task_id=task_id,
+                skill_judgments=judgments,
+                evolution_suggestions=suggestions,
+                overall_quality=round(overall_quality, 4),
+                analysis_timestamp=analyzed_at,
+                raw_response="[pattern-cache-hit]",
+            )
+        except Exception:
+            log.exception(
+                "skill_version_store: pattern cache lookup failed for %s",
+                pattern_hash,
+            )
+            return None
         finally:
             conn.close()
 
@@ -755,8 +870,7 @@ class SkillVersionStore:
             ).fetchall()
             if len(rows) >= self._MAX_LINEAGE_DEPTH:
                 log.warning(
-                    "skill_version_store: lineage chain for %s hit depth "
-                    "limit (%d) — possible cycle in lineage graph",
+                    "skill_version_store: lineage chain for %s hit depth limit (%d) — possible cycle in lineage graph",
                     skill_id,
                     self._MAX_LINEAGE_DEPTH,
                 )
@@ -785,9 +899,7 @@ class SkillVersionStore:
             skill_id: The skill version ID.
             content: Dict mapping filename to file content (e.g. SKILL.md text).
         """
-        compressed = gzip.compress(
-            json.dumps(content).encode("utf-8")
-        )
+        compressed = gzip.compress(json.dumps(content).encode("utf-8"))
         now = datetime.now(timezone.utc).isoformat()
         conn = self._get_conn()
         try:

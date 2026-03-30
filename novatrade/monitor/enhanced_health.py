@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from novatrade.adapter.base import MT5Adapter
@@ -34,8 +33,7 @@ class EnhancedHealthMonitor:
         self.diagnostic_cache_ttl = 300  # 5 minutes
 
     async def take_health_snapshot_with_diagnostics(
-        self,
-        force_diagnostic: bool = False
+        self, force_diagnostic: bool = False
     ) -> tuple[HealthSnapshot, dict[str, Any] | None]:
         """Take health snapshot with optional comprehensive diagnostics.
 
@@ -83,7 +81,7 @@ class EnhancedHealthMonitor:
         should_run_diagnostic = (
             force_diagnostic
             or health.state == HealthState.DOWN
-            or (hasattr(account, 'trade_allowed') and not getattr(account, 'trade_allowed', True))
+            or (hasattr(account, "trade_allowed") and not getattr(account, "trade_allowed", True))
             or self._should_refresh_diagnostic()
         )
 
@@ -105,13 +103,13 @@ class EnhancedHealthMonitor:
         """Run comprehensive broker diagnostic."""
         try:
             # Get adapter credentials for diagnostic
-            adapter_config = getattr(self.adapter, '_config', None)
+            adapter_config = getattr(self.adapter, "_config", None)
             if not adapter_config:
                 log.warning("Cannot run broker diagnostic: adapter config not accessible")
                 return None
 
-            account_id = getattr(adapter_config, 'account_id', None)
-            token = getattr(adapter_config, 'token', None)
+            account_id = getattr(adapter_config, "account_id", None)
+            token = getattr(adapter_config, "token", None)
 
             if not account_id or not token:
                 log.warning("Cannot run broker diagnostic: missing account_id or token")
@@ -121,19 +119,19 @@ class EnhancedHealthMonitor:
             diagnostic = BrokerDiagnostic(account_id, token)
             result = await asyncio.wait_for(
                 diagnostic.run_full_diagnostic(),
-                timeout=60.0  # 1 minute timeout
+                timeout=60.0,  # 1 minute timeout
             )
 
             # Cache results
             self.last_diagnostic_time = datetime.now(timezone.utc).timestamp()
             self.last_diagnostic_result = result
 
-            log.info("Broker diagnostic completed: %d tests run", len(result.get('tests', {})))
+            log.info("Broker diagnostic completed: %d tests run", len(result.get("tests", {})))
 
             # Log critical findings
-            summary = result.get('summary', {})
-            if summary.get('critical_issues'):
-                log.error("Broker diagnostic found critical issues: %s", summary['critical_issues'])
+            summary = result.get("summary", {})
+            if summary.get("critical_issues"):
+                log.error("Broker diagnostic found critical issues: %s", summary["critical_issues"])
 
             return result
 
@@ -149,29 +147,27 @@ class EnhancedHealthMonitor:
         log.info("Running focused trade permission diagnostic...")
 
         # Force fresh diagnostic run
-        _, diagnostic_result = await self.take_health_snapshot_with_diagnostics(
-            force_diagnostic=True
-        )
+        _, diagnostic_result = await self.take_health_snapshot_with_diagnostics(force_diagnostic=True)
 
         if not diagnostic_result:
             return {
                 "error": "Failed to run broker diagnostic",
-                "recommendation": "Check adapter configuration and connectivity"
+                "recommendation": "Check adapter configuration and connectivity",
             }
 
         # Extract trade permission specific findings
-        tests = diagnostic_result.get('tests', {})
-        summary = diagnostic_result.get('summary', {})
+        tests = diagnostic_result.get("tests", {})
+        summary = diagnostic_result.get("summary", {})
 
         trade_permission_analysis = {
-            "timestamp": diagnostic_result.get('timestamp'),
-            "account_id": diagnostic_result.get('account_id'),
-            "connectivity": tests.get('connectivity', {}).get('status'),
-            "authentication": tests.get('authentication', {}).get('status'),
-            "trading_permissions": tests.get('trading_permissions', {}),
-            "account_status": tests.get('account_status', {}),
-            "critical_issues": summary.get('critical_issues', []),
-            "recommendations": summary.get('recommendations', []),
+            "timestamp": diagnostic_result.get("timestamp"),
+            "account_id": diagnostic_result.get("account_id"),
+            "connectivity": tests.get("connectivity", {}).get("status"),
+            "authentication": tests.get("authentication", {}).get("status"),
+            "trading_permissions": tests.get("trading_permissions", {}),
+            "account_status": tests.get("account_status", {}),
+            "critical_issues": summary.get("critical_issues", []),
+            "recommendations": summary.get("recommendations", []),
         }
 
         return trade_permission_analysis
@@ -194,9 +190,7 @@ async def enhanced_health_check(adapter: MT5Adapter, include_diagnostic: bool = 
         Combined health and diagnostic results
     """
     monitor = EnhancedHealthMonitor(adapter)
-    snapshot, diagnostic = await monitor.take_health_snapshot_with_diagnostics(
-        force_diagnostic=include_diagnostic
-    )
+    snapshot, diagnostic = await monitor.take_health_snapshot_with_diagnostics(force_diagnostic=include_diagnostic)
 
     return {
         "health_snapshot": {

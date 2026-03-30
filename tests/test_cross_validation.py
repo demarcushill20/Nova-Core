@@ -12,8 +12,21 @@ Tests cover:
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
+from novatrade.backtest.cross_validation.base_adapter import BaseEngineAdapter
+from novatrade.backtest.cross_validation.comparator import (
+    CrossValidator,
+    format_consensus_report,
+    format_consensus_telegram,
+)
+from novatrade.backtest.cross_validation.nova_adapter import NovaEngineAdapter
+from novatrade.backtest.cross_validation.runner import (
+    ADAPTER_REGISTRY,
+    CrossValidationRunner,
+)
 from novatrade.backtest.cross_validation.types import (
     ConsensusReport,
     DivergenceSeverity,
@@ -21,30 +34,18 @@ from novatrade.backtest.cross_validation.types import (
     EngineId,
     EngineResult,
     MetricAvailability,
-    MetricDivergence,
     NormalizedMetrics,
     NormalizedTrade,
 )
-from novatrade.backtest.cross_validation.comparator import (
-    CrossValidator,
-    format_consensus_report,
-    format_consensus_telegram,
-)
-from novatrade.backtest.cross_validation.runner import (
-    ADAPTER_REGISTRY,
-    CrossValidationRunner,
-)
-from novatrade.backtest.cross_validation.nova_adapter import NovaEngineAdapter
-from novatrade.backtest.cross_validation.base_adapter import BaseEngineAdapter
 from novatrade.backtest.environment import DEFAULT_ENVIRONMENT
 from novatrade.models import Candle
-import os
 
 
 def _nautilus_safe():
     """Check if NautilusTrader BacktestEngine can be safely instantiated."""
     try:
         import nautilus_trader  # noqa: F401
+
         # BacktestEngine crashes with SIGABRT on resource-limited VPS
         # Only run these tests where the engine is known to work
         return os.environ.get("NAUTILUS_TESTS_ENABLED", "0") == "1"
@@ -57,8 +58,8 @@ def _nautilus_safe():
 # ------------------------------------------------------------------
 
 
-def _make_candle(ts: float, o: float, h: float, l: float, c: float, v: float = 100.0) -> Candle:
-    return Candle(timestamp=ts, open=o, high=h, low=l, close=c, volume=v)
+def _make_candle(ts: float, o: float, h: float, low: float, c: float, v: float = 100.0) -> Candle:
+    return Candle(timestamp=ts, open=o, high=h, low=low, close=c, volume=v)
 
 
 def _make_trending_candles(n: int = 200, start_price: float = 1.1000) -> list[Candle]:
@@ -74,11 +75,11 @@ def _make_trending_candles(n: int = 200, start_price: float = 1.1000) -> list[Ca
         # Every 20th bar: create an IRB-like candle with a long lower wick
         if i % 20 == 15:
             h = c + 0.0001
-            l = o - 0.0020  # long lower wick
+            low = o - 0.0020  # long lower wick
         else:
             h = max(o, c) + 0.0003
-            l = min(o, c) - 0.0003
-        candles.append(_make_candle(ts + i * 3600, o, h, l, c))
+            low = min(o, c) - 0.0003
+        candles.append(_make_candle(ts + i * 3600, o, h, low, c))
     return candles
 
 
@@ -122,9 +123,16 @@ class TestTypes:
 
     def test_normalized_trade_creation(self):
         t = NormalizedTrade(
-            trade_id=1, side="LONG", entry_bar=10, exit_bar=20,
-            entry_price=1.1000, exit_price=1.1050, stop_loss=1.0950,
-            pnl_pips=50.0, pnl_usd=500.0, hold_bars=10,
+            trade_id=1,
+            side="LONG",
+            entry_bar=10,
+            exit_bar=20,
+            entry_price=1.1000,
+            exit_price=1.1050,
+            stop_loss=1.0950,
+            pnl_pips=50.0,
+            pnl_usd=500.0,
+            hold_bars=10,
             exit_reason="trailing_stop",
         )
         assert t.side == "LONG"
@@ -192,20 +200,34 @@ class TestNovaAdapter:
         assert m.win_rate is not None
 
     def test_normalize_trades_preserves_count(self):
-        from novatrade.backtest.metrics import CompletedTrade, TradeSide, ExitReason
+        from novatrade.backtest.metrics import CompletedTrade, ExitReason, TradeSide
 
         trades = [
             CompletedTrade(
-                trade_id=1, side=TradeSide.LONG, entry_bar=10, exit_bar=20,
-                entry_price=1.1000, exit_price=1.1050, stop_loss=1.0950,
-                volume=0.1, exit_reason=ExitReason.TRAILING_STOP,
-                pnl_pips=50.0, pnl_usd=50.0,
+                trade_id=1,
+                side=TradeSide.LONG,
+                entry_bar=10,
+                exit_bar=20,
+                entry_price=1.1000,
+                exit_price=1.1050,
+                stop_loss=1.0950,
+                volume=0.1,
+                exit_reason=ExitReason.TRAILING_STOP,
+                pnl_pips=50.0,
+                pnl_usd=50.0,
             ),
             CompletedTrade(
-                trade_id=2, side=TradeSide.SHORT, entry_bar=30, exit_bar=40,
-                entry_price=1.1050, exit_price=1.1020, stop_loss=1.1100,
-                volume=0.1, exit_reason=ExitReason.STOP_LOSS,
-                pnl_pips=30.0, pnl_usd=30.0,
+                trade_id=2,
+                side=TradeSide.SHORT,
+                entry_bar=30,
+                exit_bar=40,
+                entry_price=1.1050,
+                exit_price=1.1020,
+                stop_loss=1.1100,
+                volume=0.1,
+                exit_reason=ExitReason.STOP_LOSS,
+                pnl_pips=30.0,
+                pnl_usd=30.0,
             ),
         ]
         normalized = NovaEngineAdapter._normalize_trades(trades)
@@ -471,23 +493,27 @@ class TestNautilusAdapter:
 
     def test_engine_id(self):
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
         assert adapter.engine_id == EngineId.NAUTILUS
 
     def test_engine_version(self):
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
         version = adapter.engine_version
         assert "nautilus_trader" in version
 
     def test_is_available_returns_bool(self):
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
         result = adapter.is_available()
         assert isinstance(result, bool)
 
     def test_implements_base_adapter(self):
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
         assert isinstance(adapter, BaseEngineAdapter)
         # Check all abstract methods are implemented (not raising NotImplementedError)
@@ -508,11 +534,13 @@ class TestNautilusAdapter:
     def test_build_instrument_creates_currency_pair(self):
         """_build_instrument creates a valid CurrencyPair when nautilus_trader is installed."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
         if not adapter.is_available():
             pytest.skip("nautilus_trader not installed")
 
         from nautilus_trader.model.identifiers import Venue
+
         venue = Venue("SIM")
         instrument = adapter._build_instrument(DEFAULT_ENVIRONMENT, venue)
 
@@ -527,11 +555,13 @@ class TestNautilusAdapter:
     def test_candles_to_nautilus_bars_converts_correctly(self):
         """_candles_to_nautilus_bars produces correct Bar objects."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
         if not adapter.is_available():
             pytest.skip("nautilus_trader not installed")
 
         from nautilus_trader.model.identifiers import Venue
+
         venue = Venue("SIM")
         instrument = adapter._build_instrument(DEFAULT_ENVIRONMENT, venue)
 
@@ -556,11 +586,13 @@ class TestNautilusAdapter:
     def test_build_instrument_fee_from_environment(self):
         """Verify fees are derived from BacktestEnvironment commission model."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
         if not adapter.is_available():
             pytest.skip("nautilus_trader not installed")
 
         from nautilus_trader.model.identifiers import Venue
+
         venue = Venue("SIM")
         instrument = adapter._build_instrument(DEFAULT_ENVIRONMENT, venue)
 
@@ -576,12 +608,14 @@ class TestNautilusAdapter:
     def test_build_strategy_returns_strategy_instance(self):
         """_build_strategy returns a NautilusTrader Strategy subclass."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
         if not adapter.is_available():
             pytest.skip("nautilus_trader not installed")
 
         from nautilus_trader.model.identifiers import Venue
         from nautilus_trader.trading.strategy import Strategy
+
         venue = Venue("SIM")
         instrument = adapter._build_instrument(DEFAULT_ENVIRONMENT, venue)
         strategy = adapter._build_strategy(DEFAULT_ENVIRONMENT, instrument)
@@ -593,6 +627,7 @@ class TestNautilusAdapter:
     def test_extract_trades_empty_without_records(self):
         """_extract_trades returns empty list for object without get_trade_records."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
         # Pass a mock strategy with no get_trade_records
         result = adapter._extract_trades(object())
@@ -601,6 +636,7 @@ class TestNautilusAdapter:
     def test_extract_trades_with_mock_records(self):
         """_extract_trades correctly normalises mock trade records."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
 
         class MockStrategy:
@@ -645,6 +681,7 @@ class TestNautilusAdapter:
     def test_extract_metrics_empty(self):
         """_extract_metrics returns zero-trade metrics for empty strategy."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
 
         class MockStrategy:
@@ -657,27 +694,49 @@ class TestNautilusAdapter:
     def test_extract_metrics_with_trades(self):
         """_extract_metrics computes correct win rate and PnL."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
 
         class MockStrategy:
             def get_trade_records(self):
                 return [
                     {
-                        "trade_id": 1, "side": "LONG", "entry_bar": 0, "exit_bar": 10,
-                        "entry_price": 1.1, "exit_price": 1.105, "stop_loss": 1.09,
-                        "pnl_pips": 50.0, "pnl_usd": 50.0, "hold_bars": 10,
+                        "trade_id": 1,
+                        "side": "LONG",
+                        "entry_bar": 0,
+                        "exit_bar": 10,
+                        "entry_price": 1.1,
+                        "exit_price": 1.105,
+                        "stop_loss": 1.09,
+                        "pnl_pips": 50.0,
+                        "pnl_usd": 50.0,
+                        "hold_bars": 10,
                         "exit_reason": "trailing_stop",
                     },
                     {
-                        "trade_id": 2, "side": "SHORT", "entry_bar": 20, "exit_bar": 30,
-                        "entry_price": 1.105, "exit_price": 1.11, "stop_loss": 1.1,
-                        "pnl_pips": -50.0, "pnl_usd": -50.0, "hold_bars": 10,
+                        "trade_id": 2,
+                        "side": "SHORT",
+                        "entry_bar": 20,
+                        "exit_bar": 30,
+                        "entry_price": 1.105,
+                        "exit_price": 1.11,
+                        "stop_loss": 1.1,
+                        "pnl_pips": -50.0,
+                        "pnl_usd": -50.0,
+                        "hold_bars": 10,
                         "exit_reason": "stop_loss",
                     },
                     {
-                        "trade_id": 3, "side": "LONG", "entry_bar": 40, "exit_bar": 50,
-                        "entry_price": 1.1, "exit_price": 1.106, "stop_loss": 1.09,
-                        "pnl_pips": 60.0, "pnl_usd": 60.0, "hold_bars": 10,
+                        "trade_id": 3,
+                        "side": "LONG",
+                        "entry_bar": 40,
+                        "exit_bar": 50,
+                        "entry_price": 1.1,
+                        "exit_price": 1.106,
+                        "stop_loss": 1.09,
+                        "pnl_pips": 60.0,
+                        "pnl_usd": 60.0,
+                        "hold_bars": 10,
                         "exit_reason": "trailing_stop",
                     },
                 ]
@@ -696,21 +755,36 @@ class TestNautilusAdapter:
     def test_extract_metrics_all_losses(self):
         """_extract_metrics handles all-loss scenario (profit_factor=0)."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
 
         class MockStrategy:
             def get_trade_records(self):
                 return [
                     {
-                        "trade_id": 1, "side": "LONG", "entry_bar": 0, "exit_bar": 5,
-                        "entry_price": 1.1, "exit_price": 1.095, "stop_loss": 1.09,
-                        "pnl_pips": -50.0, "pnl_usd": -50.0, "hold_bars": 5,
+                        "trade_id": 1,
+                        "side": "LONG",
+                        "entry_bar": 0,
+                        "exit_bar": 5,
+                        "entry_price": 1.1,
+                        "exit_price": 1.095,
+                        "stop_loss": 1.09,
+                        "pnl_pips": -50.0,
+                        "pnl_usd": -50.0,
+                        "hold_bars": 5,
                         "exit_reason": "stop_loss",
                     },
                     {
-                        "trade_id": 2, "side": "SHORT", "entry_bar": 10, "exit_bar": 15,
-                        "entry_price": 1.1, "exit_price": 1.105, "stop_loss": 1.11,
-                        "pnl_pips": -50.0, "pnl_usd": -50.0, "hold_bars": 5,
+                        "trade_id": 2,
+                        "side": "SHORT",
+                        "entry_bar": 10,
+                        "exit_bar": 15,
+                        "entry_price": 1.1,
+                        "exit_price": 1.105,
+                        "stop_loss": 1.11,
+                        "pnl_pips": -50.0,
+                        "pnl_usd": -50.0,
+                        "hold_bars": 5,
                         "exit_reason": "stop_loss",
                     },
                 ]
@@ -724,16 +798,26 @@ class TestNautilusAdapter:
     def test_extract_metrics_availability_flags(self):
         """Verify metric availability flags are set correctly."""
         from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+
         adapter = NautilusAdapter()
 
         class MockStrategy:
             def get_trade_records(self):
-                return [{
-                    "trade_id": 1, "side": "LONG", "entry_bar": 0, "exit_bar": 5,
-                    "entry_price": 1.1, "exit_price": 1.105, "stop_loss": 1.09,
-                    "pnl_pips": 50.0, "pnl_usd": 50.0, "hold_bars": 5,
-                    "exit_reason": "trailing_stop",
-                }]
+                return [
+                    {
+                        "trade_id": 1,
+                        "side": "LONG",
+                        "entry_bar": 0,
+                        "exit_bar": 5,
+                        "entry_price": 1.1,
+                        "exit_price": 1.105,
+                        "stop_loss": 1.09,
+                        "pnl_pips": 50.0,
+                        "pnl_usd": 50.0,
+                        "hold_bars": 5,
+                        "exit_reason": "trailing_stop",
+                    }
+                ]
 
         metrics = adapter._extract_metrics(None, MockStrategy())
         assert metrics.availability["total_trades"] == MetricAvailability.AVAILABLE

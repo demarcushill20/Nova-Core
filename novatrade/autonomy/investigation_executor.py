@@ -340,31 +340,41 @@ class InvestigationExecutor:
         )
 
     def _check_trade_log(self, round_num: int) -> InvestigationStep:
-        """Check trade log for recent activity."""
-        path = self._novatrade_state / "trade_log.json"
+        """Check trade journal for recent activity."""
+        path = self._novatrade_state / "trade_journal.jsonl"
         if not path.exists():
             return InvestigationStep(
                 round_num=round_num,
                 check="check_trade_log",
-                result="trade_log.json does not exist — zero trades ever",
+                result="trade_journal.jsonl does not exist — zero trades ever",
                 status="critical",
                 follow_up="check_halt_state",
             )
         try:
-            data = json.loads(path.read_text())
-            trades = data if isinstance(data, list) else data.get("trades", [])
+            open_count = 0
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("event") == "OPEN":
+                            open_count += 1
+                    except json.JSONDecodeError:
+                        continue
             return InvestigationStep(
                 round_num=round_num,
                 check="check_trade_log",
-                result=f"{len(trades)} trades in log",
-                status="ok" if trades else "critical",
-                follow_up="check_feed_health" if not trades else None,
+                result=f"{open_count} OPEN trades in journal",
+                status="ok" if open_count > 0 else "critical",
+                follow_up="check_feed_health" if open_count == 0 else None,
             )
-        except (json.JSONDecodeError, OSError) as exc:
+        except OSError as exc:
             return InvestigationStep(
                 round_num=round_num,
                 check="check_trade_log",
-                result=f"trade_log.json corrupted: {exc}",
+                result=f"trade_journal.jsonl unreadable: {exc}",
                 status="warning",
             )
 
@@ -740,27 +750,37 @@ class InvestigationExecutor:
             )
 
     def _check_trade_stats(self, round_num: int) -> InvestigationStep:
-        """Check trade statistics."""
-        path = self._novatrade_state / "trade_log.json"
+        """Check trade statistics from trade journal."""
+        path = self._novatrade_state / "trade_journal.jsonl"
         if not path.exists():
             return InvestigationStep(
                 round_num=round_num,
                 check="check_trade_stats",
-                result="No trade_log.json",
+                result="No trade_journal.jsonl",
                 status="info",
             )
         try:
-            data = json.loads(path.read_text())
-            trades = data if isinstance(data, list) else data.get("trades", [])
-            wins = sum(1 for t in trades if isinstance(t, dict) and t.get("profit", 0) > 0)
-            win_rate = wins / len(trades) * 100 if trades else 0
+            closes: list[dict] = []
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("event") == "CLOSE":
+                            closes.append(entry)
+                    except json.JSONDecodeError:
+                        continue
+            wins = sum(1 for t in closes if t.get("pnl_usd", 0) > 0)
+            win_rate = wins / len(closes) * 100 if closes else 0
             return InvestigationStep(
                 round_num=round_num,
                 check="check_trade_stats",
-                result=f"{len(trades)} trades, {win_rate:.1f}% win rate",
+                result=f"{len(closes)} closed trades, {win_rate:.1f}% win rate",
                 status="ok" if win_rate >= 40 else "warning",
             )
-        except (json.JSONDecodeError, OSError):
+        except OSError:
             return InvestigationStep(
                 round_num=round_num,
                 check="check_trade_stats",

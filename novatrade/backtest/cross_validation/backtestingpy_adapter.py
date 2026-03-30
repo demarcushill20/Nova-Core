@@ -63,9 +63,9 @@ class BacktestingPyAdapter(BaseEngineAdapter):
     ) -> EngineResult:
         t0 = time.monotonic()
         try:
-            from backtesting import Backtest, Strategy
-            from backtesting.lib import crossover
-            import numpy as np
+            import numpy as np  # noqa: F401 – used in _build_strategy_class closure
+            from backtesting import Backtest, Strategy  # noqa: F401
+            from backtesting.lib import crossover  # noqa: F401
 
             df = self._prepare_dataframe(h1_candles, h4_candles, env)
 
@@ -127,8 +127,6 @@ class BacktestingPyAdapter(BaseEngineAdapter):
         env: BacktestEnvironment,
     ):
         """Build DataFrame with OHLCV + pre-computed indicator columns."""
-        import pandas as pd
-        import numpy as np
 
         df = self._candles_to_dataframe(h1_candles)
 
@@ -194,15 +192,15 @@ class BacktestingPyAdapter(BaseEngineAdapter):
                         return
 
                     bar = self.data
-                    o, h, l, c = bar.Open[-1], bar.High[-1], bar.Low[-1], bar.Close[-1]
+                    o, h, low, c = bar.Open[-1], bar.High[-1], bar.Low[-1], bar.Close[-1]
                     body = abs(c - o) or 1e-10
                     upper_wick = h - max(o, c)
-                    lower_wick = min(o, c) - l
+                    lower_wick = min(o, c) - low
 
                     # IRB geometry: detect imbalance
                     if upper_wick / body > self.irb_threshold and c > ema_val:
                         # Bearish IRB (short signal) — upper wick dominant
-                        entry = l - _env.pip_value
+                        entry = low - _env.pip_value
                         sl = h + atr_val * 0.5
                         if sl > entry:
                             self.sell(stop=entry, sl=sl)
@@ -210,7 +208,7 @@ class BacktestingPyAdapter(BaseEngineAdapter):
                     elif lower_wick / body > self.irb_threshold and c < ema_val:
                         # Bullish IRB (long signal) — lower wick dominant
                         entry = h + _env.pip_value
-                        sl = l - atr_val * 0.5
+                        sl = low - atr_val * 0.5
                         if entry > sl:
                             self.buy(stop=entry, sl=sl)
                 else:
@@ -273,6 +271,7 @@ class BacktestingPyAdapter(BaseEngineAdapter):
             "profit_factor": MetricAvailability.AVAILABLE,
             "sortino_ratio": MetricAvailability.NOT_COMPUTED,
         }
+
         # Safe getattr for stats which is a pd.Series
         def _get(key, default=None):
             try:

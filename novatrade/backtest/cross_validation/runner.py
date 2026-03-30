@@ -38,10 +38,10 @@ def get_adapter(engine_id: EngineId) -> BaseEngineAdapter:
 
 # Auto-register built-in adapters
 def _auto_register() -> None:
-    from novatrade.backtest.cross_validation.nova_adapter import NovaEngineAdapter
     from novatrade.backtest.cross_validation.backtestingpy_adapter import BacktestingPyAdapter
-    from novatrade.backtest.cross_validation.vectorbt_adapter import VectorbtAdapter
     from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+    from novatrade.backtest.cross_validation.nova_adapter import NovaEngineAdapter
+    from novatrade.backtest.cross_validation.vectorbt_adapter import VectorbtAdapter
 
     register_adapter(EngineId.NOVA, NovaEngineAdapter)
     register_adapter(EngineId.BACKTESTING_PY, BacktestingPyAdapter)

@@ -1976,8 +1976,8 @@ def _run_skill_analysis(
         # Update skill stat counters (selections, executions, completions, etc.)
         analyzer.update_stats(analysis)
 
-        # Persist the analysis for health tracking
-        store.store_analysis(analysis)
+        # Persist the analysis for health tracking (includes pattern_hash for dedup)
+        analyzer.store_analysis(analysis)
 
         # Enqueue evolution suggestions if any
         queue = _skill_evolution_queue

@@ -1,9 +1,7 @@
 """Tests for agents/self_heal_investigator.py — AI-driven warning investigation."""
 
 import json
-import os
 import sys
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,20 +10,17 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.self_heal_investigator import (
-    InvestigationResult,
     DiagnosisResult,
+    InvestigationResult,
+    _log_investigation,
+    check_investigator_health,
     diagnose,
     execute_fix,
-    collect_context,
-    investigate_warning,
     investigate_all_pending,
-    check_investigator_health,
-    _log_investigation,
+    investigate_warning,
 )
 from utils.warning_router import (
-    Warning,
     WarningSeverity,
-    WarningCategory,
     emit,
     get_pending_warnings,
 )
@@ -220,9 +215,13 @@ class TestInvestigateWarning:
     @patch("agents.self_heal_investigator.execute_fix", return_value=(True, "Fixed"))
     @patch("agents.self_heal_investigator.collect_context", return_value={"is_active": "inactive"})
     def test_auto_fixed_warning(self, mock_ctx, mock_fix, mock_tg):
-        emit("heartbeat", "heartbeat", "Health check failed: novacore-watcher — inactive",
-             severity=WarningSeverity.CRITICAL,
-             context={"name": "novacore-watcher", "is_active": "inactive"})
+        emit(
+            "heartbeat",
+            "heartbeat",
+            "Health check failed: novacore-watcher — inactive",
+            severity=WarningSeverity.CRITICAL,
+            context={"name": "novacore-watcher", "is_active": "inactive"},
+        )
         warnings = get_pending_warnings()
         result = investigate_warning(warnings[0])
         assert result.action_taken == "auto_fixed"
@@ -231,9 +230,13 @@ class TestInvestigateWarning:
     @patch("agents.self_heal_investigator.escalate_to_telegram", return_value=False)
     @patch("agents.self_heal_investigator.collect_context", return_value={})
     def test_deferred_warning(self, mock_ctx, mock_tg):
-        emit("error_classifier", "error_spike", "Error spike: 10 errors in 60m",
-             severity=WarningSeverity.WARNING,
-             context={"total": 10, "by_category": {"TRANSIENT": 10}, "retry_eligible": 10})
+        emit(
+            "error_classifier",
+            "error_spike",
+            "Error spike: 10 errors in 60m",
+            severity=WarningSeverity.WARNING,
+            context={"total": 10, "by_category": {"TRANSIENT": 10}, "retry_eligible": 10},
+        )
         warnings = get_pending_warnings()
         # This one has no permanent errors, so diagnosis says "mostly transient" with no escalation
         result = investigate_warning(warnings[0])

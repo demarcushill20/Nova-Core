@@ -277,7 +277,7 @@ class DecisionEngine:
                 target_dimension="strategy_validity",
                 suggested_actions=[
                     "Check novacore-novatrade.service status with systemctl",
-                    "Check STATE/novatrade/trade_log.json for recent entries",
+                    "Check STATE/novatrade/trade_journal.jsonl for recent OPEN events",
                     "Check STATE/novatrade/halt_state.json for active risk halt",
                     "Check MetaApi connection status and recent errors",
                     "Check LOGS/ for order rejection or broker connection errors",
@@ -364,7 +364,7 @@ class DecisionEngine:
         """Generate specific research actions based on the failing dimension."""
         actions_map = {
             "strategy_validity": [
-                "Check STATE/novatrade/trade_log.json for recent trade activity",
+                "Check STATE/novatrade/trade_journal.jsonl for recent trade activity",
                 "Review signal_log.json for signal generation patterns",
                 "Check if strategy config at STATE/novatrade/strategy_config.json is correct",
                 "Review LOGS/ for any strategy errors or exceptions",

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 import re
 import shutil
 import sys
@@ -33,9 +32,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import yaml
+import yaml  # noqa: E402
 
-from novatrade.backtest.champion_challenger import (
+from novatrade.backtest.champion_challenger import (  # noqa: E402
     ComparisonResult,
     compare,
     format_markdown,
@@ -204,6 +203,7 @@ def telegram_notify(result: ComparisonResult):
     """Send Telegram notification with verdict."""
     try:
         from telegram_notifier import send_text
+
         msg = format_telegram(result)
         send_text(msg)
         print("  Telegram notification sent")
@@ -308,7 +308,7 @@ def cmd_watch(args):
                 return
 
             # Deduplicate
-            file_hash = hashlib.md5(path.read_bytes()).hexdigest()
+            file_hash = hashlib.md5(path.read_bytes()).hexdigest()  # noqa: S324
             if file_hash in seen:
                 return
             seen.add(file_hash)

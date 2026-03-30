@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import statistics
 import time
-from dataclasses import fields
 
 from novatrade.backtest.cross_validation.types import (
     ConsensusReport,
     DivergenceSeverity,
     DivergenceThresholds,
-    EngineId,
     EngineResult,
-    MetricAvailability,
     MetricDivergence,
     NormalizedMetrics,
 )
@@ -34,7 +31,10 @@ _PERCENTAGE_METRICS = {
 
 # Human-readable explanations for typical divergences
 _DIVERGENCE_EXPLANATIONS = {
-    "total_trades": "Trade count differences often stem from fill model quirks — stop-order vs close-price fills, or pending order expiry handling.",
+    "total_trades": (
+        "Trade count differences often stem from fill model quirks"
+        " — stop-order vs close-price fills, or pending order expiry handling."
+    ),
     "win_rate": "Win rate divergence may indicate different trailing stop or exit logic between engines.",
     "net_pnl_usd": "P&L differences accumulate from spread/commission modelling, fill prices, and compounding effects.",
     "net_pnl_pips": "Pip-based P&L may differ due to position sizing and cost accounting approaches.",
@@ -201,9 +201,14 @@ class CrossValidator:
             if values:
                 median_val = statistics.median(values)
                 # Preserve int type for count fields
-                if fname in ("total_trades", "long_trades", "short_trades",
-                             "max_consecutive_wins", "max_consecutive_losses"):
-                    setattr(consensus, fname, int(round(median_val)))
+                if fname in (
+                    "total_trades",
+                    "long_trades",
+                    "short_trades",
+                    "max_consecutive_wins",
+                    "max_consecutive_losses",
+                ):
+                    setattr(consensus, fname, round(median_val))
                 else:
                     setattr(consensus, fname, round(median_val, 4))
 
@@ -254,10 +259,7 @@ class CrossValidator:
         if warnings:
             lines.append(f"Warnings ({len(warnings)}):")
             for d in warnings:
-                lines.append(
-                    f"  - {d.metric_name}: {d.engine_a.value}={d.value_a}, "
-                    f"{d.engine_b.value}={d.value_b}"
-                )
+                lines.append(f"  - {d.metric_name}: {d.engine_a.value}={d.value_a}, {d.engine_b.value}={d.value_b}")
 
         if not critical and not warnings:
             lines.append("All metrics within acceptable thresholds.")
@@ -308,20 +310,22 @@ def format_consensus_report(report: ConsensusReport) -> str:
         lines.append("")
 
     cm = report.consensus_metrics
-    lines.extend([
-        "## Consensus Metrics (median)",
-        "",
-        f"| Metric | Value |",
-        f"|--------|-------|",
-        f"| Trades | {cm.total_trades} |",
-        f"| Win Rate | {cm.win_rate:.1f}% |" if cm.win_rate is not None else "| Win Rate | N/A |",
-        f"| Net P&L | ${cm.net_pnl_usd:,.2f} |" if cm.net_pnl_usd is not None else "| Net P&L | N/A |",
-        f"| Max DD | {cm.max_drawdown_pct:.1f}% |" if cm.max_drawdown_pct is not None else "| Max DD | N/A |",
-        f"| Sharpe | {cm.sharpe_ratio:.2f} |" if cm.sharpe_ratio is not None else "| Sharpe | N/A |",
-        f"| PF | {cm.profit_factor:.2f} |" if cm.profit_factor is not None else "| PF | N/A |",
-        "",
-        f"**Agreement Score: {report.agreement_score}/100**",
-    ])
+    lines.extend(
+        [
+            "## Consensus Metrics (median)",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
+            f"| Trades | {cm.total_trades} |",
+            f"| Win Rate | {cm.win_rate:.1f}% |" if cm.win_rate is not None else "| Win Rate | N/A |",
+            f"| Net P&L | ${cm.net_pnl_usd:,.2f} |" if cm.net_pnl_usd is not None else "| Net P&L | N/A |",
+            f"| Max DD | {cm.max_drawdown_pct:.1f}% |" if cm.max_drawdown_pct is not None else "| Max DD | N/A |",
+            f"| Sharpe | {cm.sharpe_ratio:.2f} |" if cm.sharpe_ratio is not None else "| Sharpe | N/A |",
+            f"| PF | {cm.profit_factor:.2f} |" if cm.profit_factor is not None else "| PF | N/A |",
+            "",
+            f"**Agreement Score: {report.agreement_score}/100**",
+        ]
+    )
 
     return "\n".join(lines)
 

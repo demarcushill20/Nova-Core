@@ -12,6 +12,9 @@ Usage::
     print(report.summary)
 """
 
+from novatrade.backtest.cross_validation.base_adapter import BaseEngineAdapter
+from novatrade.backtest.cross_validation.comparator import CrossValidator
+from novatrade.backtest.cross_validation.runner import CrossValidationRunner
 from novatrade.backtest.cross_validation.types import (
     ConsensusReport,
     DivergenceSeverity,
@@ -23,9 +26,6 @@ from novatrade.backtest.cross_validation.types import (
     NormalizedMetrics,
     NormalizedTrade,
 )
-from novatrade.backtest.cross_validation.base_adapter import BaseEngineAdapter
-from novatrade.backtest.cross_validation.comparator import CrossValidator
-from novatrade.backtest.cross_validation.runner import CrossValidationRunner
 
 __all__ = [
     "BaseEngineAdapter",

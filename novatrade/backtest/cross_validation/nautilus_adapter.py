@@ -37,8 +37,8 @@ from novatrade.backtest.cross_validation.types import (
     NormalizedMetrics,
     NormalizedTrade,
 )
-from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.backtest.engine import compute_atr, compute_ema
+from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
 
 
@@ -80,11 +80,11 @@ class NautilusAdapter(BaseEngineAdapter):
         t0 = time.monotonic()
         try:
             from nautilus_trader.backtest.engine import BacktestEngine, BacktestEngineConfig
-            from nautilus_trader.model.identifiers import Venue
+            from nautilus_trader.config import LoggingConfig
             from nautilus_trader.model.currencies import USD
             from nautilus_trader.model.enums import AccountType, OmsType
+            from nautilus_trader.model.identifiers import Venue
             from nautilus_trader.model.objects import Money
-            from nautilus_trader.config import LoggingConfig
 
             # Configure engine
             config = BacktestEngineConfig(
@@ -144,7 +144,7 @@ class NautilusAdapter(BaseEngineAdapter):
             finally:
                 try:
                     engine.dispose()
-                except Exception:
+                except Exception:  # noqa: S110
                     pass
         except ImportError:
             return EngineResult(
@@ -176,12 +176,12 @@ class NautilusAdapter(BaseEngineAdapter):
             - price_precision=5 for 5-digit FX (EURUSD)
             - size_precision=2 for 0.01 lot increments
         """
-        from nautilus_trader.model.instruments import CurrencyPair
-        from nautilus_trader.model.identifiers import InstrumentId, Symbol
-        from nautilus_trader.model.currencies import EUR, USD
-        from nautilus_trader.model.objects import Price, Quantity
-
         from decimal import Decimal
+
+        from nautilus_trader.model.currencies import EUR, USD
+        from nautilus_trader.model.identifiers import InstrumentId, Symbol
+        from nautilus_trader.model.instruments import CurrencyPair
+        from nautilus_trader.model.objects import Price, Quantity
 
         instrument_id = InstrumentId.from_str("EUR/USD.SIM")
 
@@ -216,8 +216,7 @@ class NautilusAdapter(BaseEngineAdapter):
             )
         except TypeError as exc:
             raise RuntimeError(
-                f"Failed to build CurrencyPair instrument. "
-                f"nautilus_trader API may have changed. Error: {exc}"
+                f"Failed to build CurrencyPair instrument. nautilus_trader API may have changed. Error: {exc}"
             ) from exc
 
         return instrument
@@ -240,7 +239,7 @@ class NautilusAdapter(BaseEngineAdapter):
             - BarAggregation.HOUR for H1 candles
             - PriceType.LAST for bar close reference
         """
-        from nautilus_trader.model.data import Bar, BarType, BarSpecification
+        from nautilus_trader.model.data import Bar, BarSpecification, BarType
         from nautilus_trader.model.enums import (
             AggregationSource,
             BarAggregation,
@@ -320,9 +319,8 @@ class NautilusAdapter(BaseEngineAdapter):
               overextension, etc.) -- uses the same simplified subset as the
               backtesting.py adapter for apples-to-apples comparison
         """
-        from nautilus_trader.trading.strategy import Strategy
         from nautilus_trader.config import StrategyConfig
-        from nautilus_trader.model.data import Bar, BarType, BarSpecification
+        from nautilus_trader.model.data import Bar, BarSpecification, BarType
         from nautilus_trader.model.enums import (
             AggregationSource,
             BarAggregation,
@@ -332,14 +330,16 @@ class NautilusAdapter(BaseEngineAdapter):
         )
         from nautilus_trader.model.identifiers import InstrumentId
         from nautilus_trader.model.objects import Price, Quantity
+        from nautilus_trader.trading.strategy import Strategy
 
         _env = env
         _instrument = instrument
         _compute_ema = compute_ema
         _compute_atr = compute_atr
 
-        class IRBNautilusConfig(StrategyConfig, frozen=True):
+        class IRBNautilusConfig(StrategyConfig, frozen=True):  # type: ignore[call-arg]
             """Configuration for IRB Nautilus strategy."""
+
             instrument_id: str = str(instrument.id)
             ema_period: int = env.ema_period
             atr_period: int = env.atr_period
@@ -415,7 +415,7 @@ class NautilusAdapter(BaseEngineAdapter):
                 # Extract OHLCV
                 o = float(bar.open)
                 h = float(bar.high)
-                l = float(bar.low)  # noqa: E741
+                low = float(bar.low)
                 c = float(bar.close)
                 v = float(bar.volume)
 
@@ -424,9 +424,7 @@ class NautilusAdapter(BaseEngineAdapter):
 
                 # Build a Candle for ATR computation
                 ts = bar.ts_event / 1_000_000_000 if bar.ts_event else 0.0
-                self._candle_list.append(
-                    Candle(timestamp=ts, open=o, high=h, low=l, close=c, volume=v)
-                )
+                self._candle_list.append(Candle(timestamp=ts, open=o, high=h, low=low, close=c, volume=v))
 
                 # Recompute indicators (incremental would be better but this is
                 # correct and mirrors the pre-compute approach)
@@ -436,11 +434,11 @@ class NautilusAdapter(BaseEngineAdapter):
                 bar_idx = len(self._bars) - 1
 
                 if self._in_position:
-                    self._manage_position(bar_idx, o, h, l, c)
+                    self._manage_position(bar_idx, o, h, low, c)
                 else:
-                    self._check_signal(bar_idx, o, h, l, c)
+                    self._check_signal(bar_idx, o, h, low, c)
 
-            def _check_signal(self, bar_idx: int, o: float, h: float, l: float, c: float) -> None:
+            def _check_signal(self, bar_idx: int, o: float, h: float, low: float, c: float) -> None:
                 """Check for IRB entry signal."""
                 if bar_idx < max(self._ema_period, self._atr_period):
                     return
@@ -453,24 +451,29 @@ class NautilusAdapter(BaseEngineAdapter):
 
                 body = abs(c - o) or 1e-10
                 upper_wick = h - max(o, c)
-                lower_wick = min(o, c) - l
+                lower_wick = min(o, c) - low
 
                 # IRB geometry (same as backtesting.py adapter)
                 if upper_wick / body > self._irb_threshold and c > ema_val:
                     # Bearish IRB -- short signal
-                    entry = l - self._pip_value
+                    entry = low - self._pip_value
                     sl = h + atr_val * 0.5
                     if sl > entry:
                         self._enter_position("SHORT", bar_idx, entry, sl, c)
                 elif lower_wick / body > self._irb_threshold and c < ema_val:
                     # Bullish IRB -- long signal
                     entry = h + self._pip_value
-                    sl = l - atr_val * 0.5
+                    sl = low - atr_val * 0.5
                     if entry > sl:
                         self._enter_position("LONG", bar_idx, entry, sl, c)
 
             def _enter_position(
-                self, side: str, bar_idx: int, entry: float, sl: float, current_price: float,
+                self,
+                side: str,
+                bar_idx: int,
+                entry: float,
+                sl: float,
+                current_price: float,
             ) -> None:
                 """Place a stop-market entry order."""
                 self._in_position = True
@@ -506,7 +509,7 @@ class NautilusAdapter(BaseEngineAdapter):
                     self._in_position = False
                     self._position_side = ""
 
-            def _manage_position(self, bar_idx: int, o: float, h: float, l: float, c: float) -> None:
+            def _manage_position(self, bar_idx: int, o: float, h: float, low: float, c: float) -> None:
                 """Manage trailing stop and time stop for open position."""
                 self._bars_in_trade += 1
 
@@ -521,7 +524,7 @@ class NautilusAdapter(BaseEngineAdapter):
 
                 if self._position_side == "LONG":
                     # Check stop hit
-                    if l <= self._trail_stop:
+                    if low <= self._trail_stop:
                         self._close_position(bar_idx, self._trail_stop, "stop_loss")
                         return
                     # Update trailing stop
@@ -555,19 +558,21 @@ class NautilusAdapter(BaseEngineAdapter):
                 else:
                     pnl_pips = (entry_price - exit_price) / self._pip_value
 
-                self._trade_records.append({
-                    "trade_id": len(self._trade_records) + 1,
-                    "side": side,
-                    "entry_bar": self._entry_bar_idx,
-                    "exit_bar": bar_idx,
-                    "entry_price": entry_price,
-                    "exit_price": exit_price,
-                    "stop_loss": self._current_stop_loss,
-                    "pnl_pips": pnl_pips,
-                    "pnl_usd": pnl_pips * self._pip_value_per_lot * self._volume,
-                    "hold_bars": bar_idx - self._entry_bar_idx,
-                    "exit_reason": reason,
-                })
+                self._trade_records.append(
+                    {
+                        "trade_id": len(self._trade_records) + 1,
+                        "side": side,
+                        "entry_bar": self._entry_bar_idx,
+                        "exit_bar": bar_idx,
+                        "entry_price": entry_price,
+                        "exit_price": exit_price,
+                        "stop_loss": self._current_stop_loss,
+                        "pnl_pips": pnl_pips,
+                        "pnl_usd": pnl_pips * self._pip_value_per_lot * self._volume,
+                        "hold_bars": bar_idx - self._entry_bar_idx,
+                        "exit_reason": reason,
+                    }
+                )
 
                 self._in_position = False
                 self._position_side = None
@@ -578,7 +583,7 @@ class NautilusAdapter(BaseEngineAdapter):
                         for pos in self.cache.positions():
                             if not pos.is_closed:
                                 self.close_position(pos)
-                except Exception:
+                except Exception:  # noqa: S110
                     pass
 
             def on_stop(self) -> None:
@@ -648,7 +653,7 @@ class NautilusAdapter(BaseEngineAdapter):
                             exit_reason="unknown",
                         )
                     )
-        except Exception:
+        except Exception:  # noqa: S110
             pass
 
         return trades
@@ -673,10 +678,7 @@ class NautilusAdapter(BaseEngineAdapter):
         if not trade_records:
             return NormalizedMetrics(
                 total_trades=0,
-                availability={
-                    k: MetricAvailability.AVAILABLE
-                    for k in ["total_trades"]
-                },
+                availability={k: MetricAvailability.AVAILABLE for k in ["total_trades"]},
             )
 
         total = len(trade_records)

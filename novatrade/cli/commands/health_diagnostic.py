@@ -25,7 +25,7 @@ console = Console()
 
 
 def health_diagnostic(
-    config: Path = typer.Option(
+    config: Path = typer.Option(  # noqa: B008
         None,
         "--config",
         "-c",
@@ -41,7 +41,7 @@ def health_diagnostic(
         "--trade-permission-focus",
         help="Focus on trade permission issues like 'tradeAllowed: false'",
     ),
-    output: Path = typer.Option(
+    output: Path = typer.Option(  # noqa: B008
         None,
         "--output",
         "-o",
@@ -75,15 +75,13 @@ def health_diagnostic(
         logging.basicConfig(level=logging.INFO)
 
     try:
-        asyncio.run(
-            _run_diagnostic(config, full_diagnostic, trade_permission_focus, output)
-        )
+        asyncio.run(_run_diagnostic(config, full_diagnostic, trade_permission_focus, output))
     except KeyboardInterrupt:
         rprint("\n[yellow]Diagnostic cancelled by user[/yellow]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except Exception as exc:
         rprint(f"[red]Diagnostic failed: {exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
 
 async def _run_diagnostic(
@@ -121,9 +119,7 @@ async def _run_diagnostic(
 
         elif full_diagnostic:
             rprint("🔬 Running comprehensive broker diagnostic...")
-            snapshot, diagnostic = await monitor.take_health_snapshot_with_diagnostics(
-                force_diagnostic=True
-            )
+            snapshot, diagnostic = await monitor.take_health_snapshot_with_diagnostics(force_diagnostic=True)
 
             results = {
                 "health_snapshot": _format_health_snapshot(snapshot),
@@ -158,12 +154,12 @@ async def _run_diagnostic(
             rprint(f"\n💾 Results saved to {output_path}")
 
         # Cleanup
-        await adapter.close()
+        await adapter.close()  # type: ignore[attr-defined]
 
     except Exception as exc:
         log.error("Health diagnostic failed: %s", exc, exc_info=True)
         rprint(f"❌ Diagnostic failed: {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
 
 def _format_health_snapshot(snapshot) -> dict:
@@ -267,7 +263,7 @@ def _display_trade_permission_results(results: dict) -> None:
         if trading_perms.get("trade_allowed") is not None:
             trade_allowed = trading_perms["trade_allowed"]
             allowed_color = "green" if trade_allowed else "red"
-            allowed_text = f"[{allowed_color}]{str(trade_allowed)}[/{allowed_color}]"
+            allowed_text = f"[{allowed_color}]{trade_allowed!s}[/{allowed_color}]"
             rprint(f"    tradeAllowed: {allowed_text}")
 
     critical_issues = results.get("critical_issues", [])

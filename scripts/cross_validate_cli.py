@@ -75,7 +75,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     # Run
     runner = CrossValidationRunner(engines=engines, thresholds=thresholds)
-    print(f"\nRunning cross-validation...")
+    print("\nRunning cross-validation...")
     report = runner.run(h1_candles, h4_candles, env)
 
     # Output
@@ -107,7 +107,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 def cmd_engines(args: argparse.Namespace) -> None:
     """List available engines."""
-    from novatrade.backtest.cross_validation.runner import ADAPTER_REGISTRY, get_adapter
+    from novatrade.backtest.cross_validation.runner import ADAPTER_REGISTRY
 
     print("Available backtesting engines:\n")
     for eid, cls in ADAPTER_REGISTRY.items():
@@ -119,9 +119,7 @@ def cmd_engines(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="NovaTrade multi-engine backtesting cross-validation"
-    )
+    parser = argparse.ArgumentParser(description="NovaTrade multi-engine backtesting cross-validation")
     sub = parser.add_subparsers(dest="command")
 
     # run

@@ -186,34 +186,44 @@ class DirectActionExecutor:
                     )
                 )
 
-        # Check trade log directly
-        trade_log = self._novatrade_state / "trade_log.json"
-        if trade_log.exists():
+        # Check trade journal directly (source of truth: JSONL format)
+        journal_path = self._novatrade_state / "trade_journal.jsonl"
+        if journal_path.exists():
             try:
-                data = json.loads(trade_log.read_text())
-                trades = data if isinstance(data, list) else data.get("trades", [])
-                if len(trades) == 0:
+                open_count = 0
+                with open(journal_path) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            if entry.get("event") == "OPEN":
+                                open_count += 1
+                        except json.JSONDecodeError:
+                            continue
+                if open_count == 0:
                     result.findings.append(
                         DiagnosticFinding(
-                            check="trade_log_empty",
+                            check="trade_journal_empty",
                             status="critical",
-                            detail="trade_log.json exists but contains zero trades.",
+                            detail="trade_journal.jsonl exists but contains zero OPEN events.",
                         )
                     )
-            except (json.JSONDecodeError, OSError):
+            except OSError:
                 result.findings.append(
                     DiagnosticFinding(
-                        check="trade_log_corrupt",
+                        check="trade_journal_corrupt",
                         status="warning",
-                        detail="trade_log.json exists but is corrupted/unreadable.",
+                        detail="trade_journal.jsonl exists but is unreadable.",
                     )
                 )
         else:
             result.findings.append(
                 DiagnosticFinding(
-                    check="trade_log_missing",
+                    check="trade_journal_missing",
                     status="critical",
-                    detail="trade_log.json does not exist — NovaTrade may never have traded.",
+                    detail="trade_journal.jsonl does not exist — NovaTrade may never have traded.",
                 )
             )
 
@@ -379,7 +389,13 @@ class DirectActionExecutor:
         service_down = any(f.check == "service_status" and "inactive" in f.detail.lower() for f in result.findings)
         trade_failure = any(
             f.check
-            in ("trades_last_24h", "trade_log_empty", "trade_log_missing", "broker_connectivity", "order_rejections")
+            in (
+                "trades_last_24h",
+                "trade_journal_empty",
+                "trade_journal_missing",
+                "broker_connectivity",
+                "order_rejections",
+            )
             for f in critical
         )
 

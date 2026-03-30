@@ -16,13 +16,10 @@ import pytest
 from novatrade.risk.hard_risk_supervisor import (
     HardLimits,
     HardRiskSupervisor,
-    SupervisorAction,
-    SupervisorDecision,
     SupervisorVerdict,
     _pip_usd_value,
     _pip_value,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -185,9 +182,7 @@ class TestRule1EquityFloor:
         assert d.rule == "equity_floor"
         assert supervisor.halted
 
-    def test_equity_at_floor_passes_floor_check(
-        self, tmp_state: tuple[Path, Path]
-    ) -> None:
+    def test_equity_at_floor_passes_floor_check(self, tmp_state: tuple[Path, Path]) -> None:
         """At exactly the floor, equity_floor passes but daily loss may trigger.
 
         Use limits where floor and daily cap are consistent.
@@ -289,7 +284,12 @@ class TestRule5MaxConcurrentPositions:
             _make_position(position_id="p3"),
         ]
         d = supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.1000, 1.0950, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.1000,
+            1.0950,
+            10_000.0,
             open_positions=positions,
         )
         assert d.verdict == SupervisorVerdict.VETO
@@ -298,7 +298,12 @@ class TestRule5MaxConcurrentPositions:
     def test_within_position_limit(self, supervisor: HardRiskSupervisor) -> None:
         positions = [_make_position(position_id="p1"), _make_position(position_id="p2")]
         d = supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.1000, 1.0950, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.1000,
+            1.0950,
+            10_000.0,
             open_positions=positions,
         )
         # Will pass positions check but may be vetoed by symbol concentration
@@ -314,7 +319,12 @@ class TestRule6CurrencyConcentration:
     def test_same_symbol_blocked(self, tight_supervisor: HardRiskSupervisor) -> None:
         positions = [_make_position(symbol="EURUSD", position_id="p1")]
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.1000, 1.0900, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.1000,
+            1.0900,
+            10_000.0,
             open_positions=positions,
         )
         assert d.verdict == SupervisorVerdict.VETO
@@ -323,7 +333,12 @@ class TestRule6CurrencyConcentration:
     def test_different_symbol_allowed(self, tight_supervisor: HardRiskSupervisor) -> None:
         positions = [_make_position(symbol="GBPUSD", position_id="p1")]
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.1000, 1.0900, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.1000,
+            1.0900,
+            10_000.0,
             open_positions=positions,
         )
         assert d.rule != "symbol_concentration"
@@ -341,7 +356,12 @@ class TestRule7DailyTradeCount:
             tight_supervisor.on_trade_opened(0.1)
 
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.1000, 1.0900, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.1000,
+            1.0900,
+            10_000.0,
         )
         assert d.verdict == SupervisorVerdict.VETO
         assert d.rule == "daily_trade_cap"
@@ -351,7 +371,12 @@ class TestRule7DailyTradeCount:
             tight_supervisor.on_trade_opened(0.1)
 
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.1000, 1.0900, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.1000,
+            1.0900,
+            10_000.0,
         )
         assert d.rule != "daily_trade_cap"
 
@@ -457,7 +482,12 @@ class TestRule10MinStopDistance:
     def test_stop_too_close(self, tight_supervisor: HardRiskSupervisor) -> None:
         # 5 pips distance but limit is 10
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.10000, 1.09950, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.10000,
+            1.09950,
+            10_000.0,
         )
         assert d.verdict == SupervisorVerdict.VETO
         assert d.rule == "min_stop_distance"
@@ -465,13 +495,23 @@ class TestRule10MinStopDistance:
     def test_stop_far_enough(self, tight_supervisor: HardRiskSupervisor) -> None:
         # 50 pips distance
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.10000, 1.09500, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.10000,
+            1.09500,
+            10_000.0,
         )
         assert d.rule != "min_stop_distance"
 
     def test_no_stop_loss_passes(self, tight_supervisor: HardRiskSupervisor) -> None:
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.10000, None, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.10000,
+            None,
+            10_000.0,
         )
         assert d.rule != "min_stop_distance"
 
@@ -485,7 +525,12 @@ class TestRule11PerTradeRisk:
     def test_risk_exceeds_limit(self, tight_supervisor: HardRiskSupervisor) -> None:
         # 0.5 lot × 100 pip SL × $10/pip = $500 > $50 limit
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.5, 1.10000, 1.09000, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.5,
+            1.10000,
+            1.09000,
+            10_000.0,
         )
         assert d.verdict == SupervisorVerdict.VETO
         assert d.rule == "max_loss_per_trade"
@@ -493,7 +538,12 @@ class TestRule11PerTradeRisk:
     def test_risk_within_limit(self, tight_supervisor: HardRiskSupervisor) -> None:
         # 0.01 lot × 20 pip SL × $10/pip = $2 < $50 limit
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.01, 1.10000, 1.09800, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.01,
+            1.10000,
+            1.09800,
+            10_000.0,
         )
         assert d.rule != "max_loss_per_trade"
 
@@ -511,7 +561,12 @@ class TestRule12FatFingerVolume:
 
         # Now try a much larger volume (0.1 > 5.0 × 0.01)
         d = supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.10000, 1.09900, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.10000,
+            1.09900,
+            10_000.0,
         )
         assert d.verdict == SupervisorVerdict.VETO
         assert d.rule == "fat_finger_volume"
@@ -521,7 +576,12 @@ class TestRule12FatFingerVolume:
             supervisor.on_trade_opened(0.1)
 
         d = supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.10000, 1.09900, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.10000,
+            1.09900,
+            10_000.0,
         )
         assert d.rule != "fat_finger_volume"
 
@@ -529,7 +589,12 @@ class TestRule12FatFingerVolume:
         # Less than 3 trades — skip fat finger check
         supervisor.on_trade_opened(0.01)
         d = supervisor.veto(
-            "EURUSD", "BUY", 0.5, 1.10000, 1.09950, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.5,
+            1.10000,
+            1.09950,
+            10_000.0,
         )
         # May be vetoed by other rules, but not fat_finger_volume
         assert d.rule != "fat_finger_volume"
@@ -543,9 +608,7 @@ class TestRule12FatFingerVolume:
 class TestFailClosed:
     def test_error_during_veto_denies(self, supervisor: HardRiskSupervisor) -> None:
         """Any exception in veto evaluation → VETO (fail-closed)."""
-        with patch.object(
-            supervisor, "_evaluate_veto", side_effect=RuntimeError("boom")
-        ):
+        with patch.object(supervisor, "_evaluate_veto", side_effect=RuntimeError("boom")):
             d = supervisor.veto("EURUSD", "BUY", 0.1, 1.1, 1.09, 10_000.0)
             assert d.vetoed
             assert d.rule == "supervisor_error"
@@ -587,9 +650,7 @@ class TestPostTradeTracking:
 
 
 class TestCheckAccount:
-    def test_equity_floor_triggers_close_all(
-        self, supervisor: HardRiskSupervisor
-    ) -> None:
+    def test_equity_floor_triggers_close_all(self, supervisor: HardRiskSupervisor) -> None:
         positions = [_make_position(position_id="p1")]
         actions = supervisor.check_account(8_000.0, positions)
         assert len(actions) == 2
@@ -617,18 +678,14 @@ class TestEmergencyHalt:
         assert supervisor.halted
         assert supervisor.halt_reason == "test reason"
 
-    def test_halt_writes_kill_switch(
-        self, supervisor: HardRiskSupervisor, tmp_state: tuple[Path, Path]
-    ) -> None:
+    def test_halt_writes_kill_switch(self, supervisor: HardRiskSupervisor, tmp_state: tuple[Path, Path]) -> None:
         _, kill_dir = tmp_state
         supervisor.emergency_halt("test")
         kill_file = kill_dir / "nova-kill"
         assert kill_file.exists()
         assert kill_file.read_text() == "CONFIRM"
 
-    def test_halt_persists_state(
-        self, supervisor: HardRiskSupervisor, tmp_state: tuple[Path, Path]
-    ) -> None:
+    def test_halt_persists_state(self, supervisor: HardRiskSupervisor, tmp_state: tuple[Path, Path]) -> None:
         state_dir, _ = tmp_state
         supervisor.emergency_halt("persistence test")
         state_file = state_dir / "hard_supervisor_state.json"
@@ -823,9 +880,7 @@ class TestFullLifecycle:
         assert supervisor.consecutive_losses == 1
         assert not supervisor.halted
 
-    def test_losing_session_triggers_halt(
-        self, tight_supervisor: HardRiskSupervisor
-    ) -> None:
+    def test_losing_session_triggers_halt(self, tight_supervisor: HardRiskSupervisor) -> None:
         """Rapid losses should trigger emergency halt."""
         tight_supervisor.on_trade_closed(-10.0)
         tight_supervisor.on_trade_closed(-10.0)
@@ -840,7 +895,12 @@ class TestFullLifecycle:
         tight_supervisor.resume()
         # Use tiny risk: 0.01 lot × 20 pip SL × $10/pip = $2 < $50 limit
         d = tight_supervisor.veto(
-            "EURUSD", "BUY", 0.01, 1.10000, 1.09800, 10_000.0,
+            "EURUSD",
+            "BUY",
+            0.01,
+            1.10000,
+            1.09800,
+            10_000.0,
         )
         assert not d.vetoed
 
@@ -864,9 +924,7 @@ class TestEdgeCases:
         assert d.verdict == SupervisorVerdict.ALLOW
 
     def test_none_positions(self, supervisor: HardRiskSupervisor) -> None:
-        d = supervisor.veto(
-            "EURUSD", "BUY", 0.1, 1.1, 1.09, 10_000.0, open_positions=None
-        )
+        d = supervisor.veto("EURUSD", "BUY", 0.1, 1.1, 1.09, 10_000.0, open_positions=None)
         assert d.verdict == SupervisorVerdict.ALLOW
 
     def test_ftmo_symbol_suffix(self, supervisor: HardRiskSupervisor) -> None:
@@ -882,6 +940,11 @@ class TestEdgeCases:
         """JPY pairs use 0.01 pip value — stop distance should be correct."""
         # 0.500 yen distance = 50 pips (ok, > 10 pip min)
         d = tight_supervisor.veto(
-            "USDJPY", "BUY", 0.01, 150.000, 149.500, 10_000.0,
+            "USDJPY",
+            "BUY",
+            0.01,
+            150.000,
+            149.500,
+            10_000.0,
         )
         assert d.rule != "min_stop_distance"

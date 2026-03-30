@@ -4,10 +4,13 @@ Phase 2 of Self-Evolving Skills — analyzes skill execution outcomes
 to produce structured feedback and update version store stats.
 
 Tries LLM analysis first, falls back to deterministic scoring.
+Uses pattern-level dedup via cached_llm_call() and pattern_hash to
+avoid re-analyzing identical skill+outcome patterns.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -20,13 +23,53 @@ from skills.execution_analysis import (
 
 logger = logging.getLogger(__name__)
 
+# Default max age (hours) for pattern cache hits
+_PATTERN_CACHE_MAX_AGE_HOURS: float = 6.0
+
 
 class ExecutionAnalyzer:
     """Analyzes skill execution outcomes to produce structured feedback."""
 
-    def __init__(self, version_store=None, use_cache: bool = True):
+    def __init__(
+        self,
+        version_store=None,
+        use_cache: bool = True,
+        pattern_cache_max_age_hours: float = _PATTERN_CACHE_MAX_AGE_HOURS,
+    ):
         self.version_store = version_store  # SkillVersionStore instance
         self.use_cache = use_cache
+        self.pattern_cache_max_age_hours = pattern_cache_max_age_hours
+        self._last_pattern_hash: str = ""  # exposed for testing / watcher integration
+
+    @staticmethod
+    def compute_pattern_hash(
+        selected_skills: list[str],
+        outcome: dict,
+        execution_trace: str = "",
+    ) -> str:
+        """Compute a deterministic hash for a skill+outcome pattern.
+
+        The hash captures:
+        - Sorted skill names (order-independent)
+        - Success/failure flag
+        - Exit code
+        - Trace fingerprint (last 512 chars, whitespace-normalized)
+
+        Two executions with the same skills, same outcome type, and
+        similar tail traces will produce the same hash, enabling
+        pattern-level dedup of LLM analysis calls.
+        """
+        skills_key = "|".join(sorted(selected_skills))
+        success = outcome.get("success", False)
+        exit_code = outcome.get("exit_code", 1)
+
+        # Normalize trace tail into a fingerprint
+        trace_tail = (execution_trace or "")[-512:].strip()
+        # Collapse whitespace runs for stability
+        trace_fingerprint = " ".join(trace_tail.split())
+
+        payload = f"{skills_key}::{success}::{exit_code}::{trace_fingerprint}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
     def analyze(
         self,
@@ -38,27 +81,49 @@ class ExecutionAnalyzer:
     ) -> ExecutionAnalysis:
         """Analyze execution and produce structured feedback.
 
-        Tries LLM analysis first, falls back to deterministic scoring.
+        Flow:
+        1. Compute pattern hash from skills + outcome + trace tail
+        2. Check version store for recent analysis with same pattern hash
+        3. On cache hit: return cached analysis (with updated task_id)
+        4. On cache miss: try LLM analysis, fall back to deterministic
+        5. Store pattern_hash with the analysis for future lookups
         """
+        # Step 1: Compute pattern hash
+        pattern_hash = self.compute_pattern_hash(selected_skills, outcome, execution_trace)
+        self._last_pattern_hash = pattern_hash
+
+        # Step 2: Check pattern cache in version store
+        if self.use_cache and self.version_store:
+            try:
+                cached = self.version_store.get_cached_analysis_by_pattern(
+                    pattern_hash, max_age_hours=self.pattern_cache_max_age_hours
+                )
+                if cached is not None:
+                    logger.info(
+                        "Pattern cache hit for %s (hash=%s, original_task=%s)",
+                        task_id,
+                        pattern_hash,
+                        cached.task_id,
+                    )
+                    # Update task_id to current task but preserve judgments
+                    cached.task_id = task_id
+                    cached.task_description = task_description
+                    return cached
+            except Exception as e:
+                logger.debug("Pattern cache lookup failed (non-fatal): %s", e)
+
+        # Step 3: LLM analysis with cached_llm_call
         try:
-            return self._llm_analyze(
-                task_id, task_description, selected_skills, execution_trace, outcome
-            )
+            return self._llm_analyze(task_id, task_description, selected_skills, execution_trace, outcome)
         except Exception as e:
             logger.warning("LLM analysis failed, using deterministic fallback: %s", e)
-            return self._deterministic_analyze(
-                task_id, task_description, selected_skills, outcome
-            )
+            return self._deterministic_analyze(task_id, task_description, selected_skills, outcome)
 
-    def _llm_analyze(
-        self, task_id, task_description, selected_skills, execution_trace, outcome
-    ) -> ExecutionAnalysis:
+    def _llm_analyze(self, task_id, task_description, selected_skills, execution_trace, outcome) -> ExecutionAnalysis:
         """LLM-driven analysis with caching."""
         # Build prompts
         system_prompt = self._build_system_prompt()
-        user_prompt = self._build_user_prompt(
-            task_description, selected_skills, execution_trace, outcome
-        )
+        user_prompt = self._build_user_prompt(task_description, selected_skills, execution_trace, outcome)
 
         # C1 FIX: Prepend system prompt to user prompt so it is actually sent
         # to the LLM. The claude CLI --print mode uses a single prompt argument;
@@ -116,9 +181,7 @@ class ExecutionAnalyzer:
 
         return analysis
 
-    def _deterministic_analyze(
-        self, task_id, task_description, selected_skills, outcome
-    ) -> ExecutionAnalysis:
+    def _deterministic_analyze(self, task_id, task_description, selected_skills, outcome) -> ExecutionAnalysis:
         """Deterministic fallback when LLM is unavailable.
 
         H3 NOTE: Known limitation — the deterministic path has no per-skill
@@ -214,9 +277,7 @@ class ExecutionAnalyzer:
             "- priority 1 = urgent fix needed, 5 = minor enhancement"
         )
 
-    def _build_user_prompt(
-        self, task_description, selected_skills, execution_trace, outcome
-    ) -> str:
+    def _build_user_prompt(self, task_description, selected_skills, execution_trace, outcome) -> str:
         # M2 FIX: Take the LAST 4000 chars (tail) — the end of the trace
         # contains the most relevant information (final errors, exit status).
         trace_truncated = execution_trace[-4000:] if execution_trace else "(no trace)"
@@ -233,7 +294,7 @@ class ExecutionAnalyzer:
         )
 
     def update_stats(self, analysis: ExecutionAnalysis) -> None:
-        """Update SkillVersionStore counters from analysis results."""
+        """Update SkillVersionStore counters and persist analysis with pattern hash."""
         if not self.version_store:
             return
 
@@ -244,16 +305,19 @@ class ExecutionAnalyzer:
                 if judgment.applied:
                     self.version_store.increment_stat(judgment.skill_id, "executions")
                     if judgment.completed:
-                        self.version_store.increment_stat(
-                            judgment.skill_id, "completions"
-                        )
+                        self.version_store.increment_stat(judgment.skill_id, "completions")
                     else:
-                        self.version_store.increment_stat(
-                            judgment.skill_id, "failures"
-                        )
+                        self.version_store.increment_stat(judgment.skill_id, "failures")
                 else:
                     self.version_store.increment_stat(judgment.skill_id, "fallbacks")
             except Exception as e:
-                logger.warning(
-                    "Failed to update stats for %s: %s", judgment.skill_id, e
-                )
+                logger.warning("Failed to update stats for %s: %s", judgment.skill_id, e)
+
+    def store_analysis(self, analysis: ExecutionAnalysis) -> None:
+        """Persist analysis to version store with pattern hash for future dedup."""
+        if not self.version_store:
+            return
+        try:
+            self.version_store.store_analysis(analysis, pattern_hash=self._last_pattern_hash)
+        except Exception as e:
+            logger.warning("Failed to store analysis: %s", e)

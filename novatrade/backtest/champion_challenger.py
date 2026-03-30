@@ -21,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.tv_robustness_report import Trade, analyze_period, parse_tv_csv
 
-
 # ── Data Structures ─────────────────────────────────────────────────────────
 
 
@@ -154,20 +153,41 @@ def _build_verdict(
     criteria = []
 
     checks = [
-        ("Net P&L", chall_stats["net_pnl"] > champ_stats["net_pnl"],
-         f"{chall_label} ${chall_stats['net_pnl']:+,.0f} vs {champ_label} ${champ_stats['net_pnl']:+,.0f}"),
-        ("Consistency", chall_stats["consistency"] > champ_stats["consistency"],
-         f"{chall_label} {chall_stats['consistency']:.2f} vs {champ_label} {champ_stats['consistency']:.2f}"),
-        ("Year wins", yearly_chall_wins > yearly_champ_wins,
-         f"{chall_label} {yearly_chall_wins} vs {champ_label} {yearly_champ_wins}"),
-        ("Month wins", monthly_chall_wins > monthly_champ_wins,
-         f"{chall_label} {monthly_chall_wins} vs {champ_label} {monthly_champ_wins}"),
-        ("Lower max DD", chall_stats["max_dd"] < champ_stats["max_dd"],
-         f"{chall_label} ${chall_stats['max_dd']:,.0f} vs {champ_label} ${champ_stats['max_dd']:,.0f}"),
-        ("Fewer consec loss", chall_stats["max_consec_loss"] < champ_stats["max_consec_loss"],
-         f"{chall_label} {chall_stats['max_consec_loss']} vs {champ_label} {champ_stats['max_consec_loss']}"),
-        ("Higher trade WR", chall_stats["trade_win_rate"] > champ_stats["trade_win_rate"],
-         f"{chall_label} {chall_stats['trade_win_rate']:.1f}% vs {champ_label} {champ_stats['trade_win_rate']:.1f}%"),
+        (
+            "Net P&L",
+            chall_stats["net_pnl"] > champ_stats["net_pnl"],
+            f"{chall_label} ${chall_stats['net_pnl']:+,.0f} vs {champ_label} ${champ_stats['net_pnl']:+,.0f}",
+        ),
+        (
+            "Consistency",
+            chall_stats["consistency"] > champ_stats["consistency"],
+            f"{chall_label} {chall_stats['consistency']:.2f} vs {champ_label} {champ_stats['consistency']:.2f}",
+        ),
+        (
+            "Year wins",
+            yearly_chall_wins > yearly_champ_wins,
+            f"{chall_label} {yearly_chall_wins} vs {champ_label} {yearly_champ_wins}",
+        ),
+        (
+            "Month wins",
+            monthly_chall_wins > monthly_champ_wins,
+            f"{chall_label} {monthly_chall_wins} vs {champ_label} {monthly_champ_wins}",
+        ),
+        (
+            "Lower max DD",
+            chall_stats["max_dd"] < champ_stats["max_dd"],
+            f"{chall_label} ${chall_stats['max_dd']:,.0f} vs {champ_label} ${champ_stats['max_dd']:,.0f}",
+        ),
+        (
+            "Fewer consec loss",
+            chall_stats["max_consec_loss"] < champ_stats["max_consec_loss"],
+            f"{chall_label} {chall_stats['max_consec_loss']} vs {champ_label} {champ_stats['max_consec_loss']}",
+        ),
+        (
+            "Higher trade WR",
+            chall_stats["trade_win_rate"] > champ_stats["trade_win_rate"],
+            f"{chall_label} {chall_stats['trade_win_rate']:.1f}% vs {champ_label} {champ_stats['trade_win_rate']:.1f}%",
+        ),
     ]
 
     chall_score = 0
@@ -247,9 +267,9 @@ def compare(
     all_years = sorted(set(list(champ_yearly.keys()) + list(chall_yearly.keys())))
     yearly_champ_wins = yearly_chall_wins = 0
     for y in all_years:
-        cp = champ_yearly.get(y, 0)
-        cl = chall_yearly.get(y, 0)
-        delta = cl - cp
+        cp = champ_yearly.get(y, 0)  # type: ignore[assignment]
+        cl = chall_yearly.get(y, 0)  # type: ignore[assignment]
+        delta = cl - cp  # type: ignore[operator]
         winner = challenger_label if delta > 0 else champion_label if delta < 0 else "TIE"
         if delta > 0:
             yearly_chall_wins += 1
@@ -270,9 +290,9 @@ def compare(
     all_months = sorted(set(list(champ_monthly.keys()) + list(chall_monthly.keys())))
     monthly_champ_wins = monthly_chall_wins = ties = 0
     for m in all_months:
-        cp = champ_monthly.get(m, 0)
-        cl = chall_monthly.get(m, 0)
-        delta = cl - cp
+        cp = champ_monthly.get(m, 0)  # type: ignore[assignment]
+        cl = chall_monthly.get(m, 0)  # type: ignore[assignment]
+        delta = cl - cp  # type: ignore[operator]
         if delta > 0:
             winner = challenger_label
             monthly_chall_wins += 1
@@ -309,10 +329,14 @@ def compare(
 
     # Verdict
     result.verdict = _build_verdict(
-        champ_stats, chall_stats,
-        champion_label, challenger_label,
-        yearly_champ_wins, yearly_chall_wins,
-        monthly_champ_wins, monthly_chall_wins,
+        champ_stats,
+        chall_stats,
+        champion_label,
+        challenger_label,
+        yearly_champ_wins,
+        yearly_chall_wins,
+        monthly_champ_wins,
+        monthly_chall_wins,
     )
 
     return result
@@ -342,7 +366,9 @@ def format_report(r: ComparisonResult) -> str:
     w("  EXIT TYPE COMPARISON")
     w(f"{'─' * 90}")
     all_exits = sorted(set(list(r.champion_exits.keys()) + list(r.challenger_exits.keys())))
-    w(f"  {'Exit Type':>18} | {cl+' #':>8} {cl+' P&L':>10} {cl+' Avg':>8} | {ll+' #':>8} {ll+' P&L':>10} {ll+' Avg':>8} | {'Δ P&L':>10}")
+    hdr_c = f"{cl + ' #':>8} {cl + ' P&L':>10} {cl + ' Avg':>8}"
+    hdr_l = f"{ll + ' #':>8} {ll + ' P&L':>10} {ll + ' Avg':>8}"
+    w(f"  {'Exit Type':>18} | {hdr_c} | {hdr_l} | {'Δ P&L':>10}")
     w("  " + "-" * 86)
     for sig in all_exits:
         ce = r.champion_exits.get(sig)
@@ -353,7 +379,9 @@ def format_report(r: ComparisonResult) -> str:
         lc = le.count if le else 0
         lp = le.total_pnl if le else 0
         la = le.avg_pnl if le else 0
-        w(f"  {sig:>18} | {cc:>8} ${cp:>+9,.0f} ${ca:>+7,.0f} | {lc:>8} ${lp:>+9,.0f} ${la:>+7,.0f} | ${lp - cp:>+9,.0f}")
+        row_c = f"{cc:>8} ${cp:>+9,.0f} ${ca:>+7,.0f}"
+        row_l = f"{lc:>8} ${lp:>+9,.0f} ${la:>+7,.0f}"
+        w(f"  {sig:>18} | {row_c} | {row_l} | ${lp - cp:>+9,.0f}")
 
     # Direction comparison
     w(f"\n{'─' * 90}")
@@ -363,7 +391,10 @@ def format_report(r: ComparisonResult) -> str:
         cd = r.champion_directions.get(d)
         ld = r.challenger_directions.get(d)
         if cd and ld:
-            w(f"  {d.upper():>5} | {cl}: {cd.count:4d} trades ${cd.net_pnl:>+9,.0f} {cd.win_rate:.0f}% WR | {ll}: {ld.count:4d} trades ${ld.net_pnl:>+9,.0f} {ld.win_rate:.0f}% WR | Δ ${ld.net_pnl - cd.net_pnl:>+9,.0f}")
+            c_part = f"{cl}: {cd.count:4d} trades ${cd.net_pnl:>+9,.0f} {cd.win_rate:.0f}% WR"
+            l_part = f"{ll}: {ld.count:4d} trades ${ld.net_pnl:>+9,.0f} {ld.win_rate:.0f}% WR"
+            delta = f"Δ ${ld.net_pnl - cd.net_pnl:>+9,.0f}"
+            w(f"  {d.upper():>5} | {c_part} | {l_part} | {delta}")
 
     # Full period metrics table
     cs = r.champion_stats
@@ -414,10 +445,14 @@ def format_report(r: ComparisonResult) -> str:
         w(f"  {'':>22} | {cl:>12} | {ll:>12} | {'Winner':>8}")
         w("  " + "-" * 60)
         for label, key, higher_better in [
-            ("Net P&L", "net_pnl", True), ("Trades", "trades", None),
-            ("Trade Win Rate %", "trade_win_rate", True), ("Prof Months", "profitable_months", True),
-            ("Max DD", "max_dd", False), ("Consec Loss Mo", "max_consec_loss", False),
-            ("W/L Ratio", "wl_ratio", True), ("CONSISTENCY", "consistency", True),
+            ("Net P&L", "net_pnl", True),
+            ("Trades", "trades", None),
+            ("Trade Win Rate %", "trade_win_rate", True),
+            ("Prof Months", "profitable_months", True),
+            ("Max DD", "max_dd", False),
+            ("Consec Loss Mo", "max_consec_loss", False),
+            ("W/L Ratio", "wl_ratio", True),
+            ("CONSISTENCY", "consistency", True),
         ]:
             cv = pcs[key]
             lv = pls[key]
@@ -440,12 +475,17 @@ def format_report(r: ComparisonResult) -> str:
     w(f"\n{'─' * 90}")
     w("  YEAR-BY-YEAR COMPARISON")
     w(f"{'─' * 90}")
-    w(f"  {'Year':>6} | {cl+' Trades':>9} {cl+' P&L':>10} | {ll+' Trades':>9} {ll+' P&L':>10} | {'Δ P&L':>10} {'Winner':>8}")
+    yr_hdr_c = f"{cl + ' Trades':>9} {cl + ' P&L':>10}"
+    yr_hdr_l = f"{ll + ' Trades':>9} {ll + ' P&L':>10}"
+    w(f"  {'Year':>6} | {yr_hdr_c} | {yr_hdr_l} | {'Δ P&L':>10} {'Winner':>8}")
     w("  " + "-" * 78)
     champ_yr_wins = chall_yr_wins = 0
     for y in sorted(r.yearly_comparison.keys()):
         yc = r.yearly_comparison[y]
-        w(f"  {y:>6} | {yc['champion_trades']:>9} ${yc['champion_pnl']:>+9,.0f} | {yc['challenger_trades']:>9} ${yc['challenger_pnl']:>+9,.0f} | ${yc['delta']:>+9,.0f} {yc['winner']:>8}")
+        yr_c = f"{yc['champion_trades']:>9} ${yc['champion_pnl']:>+9,.0f}"
+        yr_l = f"{yc['challenger_trades']:>9} ${yc['challenger_pnl']:>+9,.0f}"
+        yr_d = f"${yc['delta']:>+9,.0f} {yc['winner']:>8}"
+        w(f"  {y:>6} | {yr_c} | {yr_l} | {yr_d}")
         if yc["delta"] > 0:
             chall_yr_wins += 1
         elif yc["delta"] < 0:
@@ -456,14 +496,17 @@ def format_report(r: ComparisonResult) -> str:
     w(f"\n{'─' * 90}")
     w("  MONTH-BY-MONTH COMPARISON")
     w(f"{'─' * 90}")
-    w(f"  {'Month':>8} | {cl+' P&L':>10} | {ll+' P&L':>10} | {'Δ':>10} | W")
+    w(f"  {'Month':>8} | {cl + ' P&L':>10} | {ll + ' P&L':>10} | {'Δ':>10} | W")
     w("  " + "-" * 55)
     champ_mo = chall_mo = ties = 0
     for m in sorted(r.monthly_comparison.keys()):
         mc = r.monthly_comparison[m]
         wn = mc["winner"]
         short_w = ll[:2] if wn == ll else cl[:2] if wn == cl else "="
-        w(f"  {m:>8} | ${mc['champion_pnl']:>+9,.0f} | ${mc['challenger_pnl']:>+9,.0f} | ${mc['delta']:>+9,.0f} | {short_w}")
+        cp_s = f"${mc['champion_pnl']:>+9,.0f}"
+        lp_s = f"${mc['challenger_pnl']:>+9,.0f}"
+        d_s = f"${mc['delta']:>+9,.0f}"
+        w(f"  {m:>8} | {cp_s} | {lp_s} | {d_s} | {short_w}")
         if mc["delta"] > 0:
             chall_mo += 1
         elif mc["delta"] < 0:
@@ -478,15 +521,24 @@ def format_report(r: ComparisonResult) -> str:
         w(f"\n{'─' * 90}")
         w("  STAGNATION GUARD IMPACT")
         w(f"{'─' * 90}")
-        w(f"  STAG_EXIT: {si['stag_count']} trades, ${si['stag_total_pnl']:>+,.0f} total, ${si['stag_avg_pnl']:>+,.0f} avg, {si['stag_win_rate']:.0f}% WR")
-        w(f"  TIME_STOP: {cl} {si['champion_timestop_count']} (${si['champion_timestop_pnl']:>+,.0f}) → {ll} {si['challenger_timestop_count']} (${si['challenger_timestop_pnl']:>+,.0f}) | Δ {si['timestop_delta']:+d} trades")
+        stag_pnl = f"${si['stag_total_pnl']:>+,.0f}"
+        stag_avg = f"${si['stag_avg_pnl']:>+,.0f}"
+        stag_wr = f"{si['stag_win_rate']:.0f}%"
+        w(f"  STAG_EXIT: {si['stag_count']} trades, {stag_pnl} total, {stag_avg} avg, {stag_wr} WR")
+        ts_c = f"{cl} {si['champion_timestop_count']} (${si['champion_timestop_pnl']:>+,.0f})"
+        ts_l = f"{ll} {si['challenger_timestop_count']} (${si['challenger_timestop_pnl']:>+,.0f})"
+        ts_d = f"Δ {si['timestop_delta']:+d} trades"
+        w(f"  TIME_STOP: {ts_c} → {ts_l} | {ts_d}")
         if si["timestop_delta"] >= 0:
-            w(f"  ✓ TIME_STOP preserved")
+            w("  ✓ TIME_STOP preserved")
         else:
             w(f"  ⚠ TIME_STOP DROPPED by {abs(si['timestop_delta'])} trades!")
 
     # Verdict
     v = r.verdict
+    if v is None:
+        w("\n  (No verdict available)")
+        return "\n".join(lines)
     w(f"\n{'─' * 90}")
     w("  FINAL VERDICT")
     w(f"{'─' * 90}")
@@ -495,7 +547,7 @@ def format_report(r: ComparisonResult) -> str:
         who = ll if c.challenger_wins else cl
         w(f"  {marker} {c.name:>25}: {who} — {c.detail}")
     w(f"\n  Score: {v.score}")
-    w(f"\n  ╔══════════════════════════════════════════════════╗")
+    w("\n  ╔══════════════════════════════════════════════════╗")
     if v.winner == "challenger":
         w(f"  ║  NEW CHAMPION: {ll:<35}║")
     elif v.winner == "draw":
@@ -503,7 +555,7 @@ def format_report(r: ComparisonResult) -> str:
     else:
         w(f"  ║  CHAMPION: {cl} (still king){' ' * 15}║")
     w(f"  ║  {v.recommendation[:48]:<48}║")
-    w(f"  ╚══════════════════════════════════════════════════╝")
+    w("  ╚══════════════════════════════════════════════════╝")
     w("")
 
     return "\n".join(lines)
@@ -516,8 +568,12 @@ def format_markdown(r: ComparisonResult) -> str:
     cs = r.champion_stats
     ls = r.challenger_stats
     v = r.verdict
+    if v is None:
+        return ""
 
-    winner_text = f"{ll} wins" if v.winner == "challenger" else f"{cl} remains champion" if v.winner == "champion" else "Draw"
+    winner_text = (
+        f"{ll} wins" if v.winner == "challenger" else f"{cl} remains champion" if v.winner == "champion" else "Draw"
+    )
 
     lines: list[str] = []
     w = lines.append
@@ -527,14 +583,17 @@ def format_markdown(r: ComparisonResult) -> str:
 
     # Head-to-head table
     w("## Head-to-Head (EURUSD H1, 10yr)\n")
-    w("| Metric | Champion ({}) | Challenger ({}) | Winner |".format(cl, ll))
+    w(f"| Metric | Champion ({cl}) | Challenger ({ll}) | Winner |")
     w("|--------|-------------|----------------|--------|")
     w(f"| Net P&L | ${cs['net_pnl']:+,.0f} | ${ls['net_pnl']:+,.0f} | {cl if cs['net_pnl'] > ls['net_pnl'] else ll} |")
     w(f"| Trades | {cs['trades']} | {ls['trades']} | — |")
-    w(f"| Consistency | {cs['consistency']:.2f} | {ls['consistency']:.2f} | {cl if cs['consistency'] > ls['consistency'] else ll} |")
-    w(f"| Trade Win Rate | {cs['trade_win_rate']:.1f}% | {ls['trade_win_rate']:.1f}% | {cl if cs['trade_win_rate'] > ls['trade_win_rate'] else ll} |")
+    cons_w = cl if cs["consistency"] > ls["consistency"] else ll
+    w(f"| Consistency | {cs['consistency']:.2f} | {ls['consistency']:.2f} | {cons_w} |")
+    twr_w = cl if cs["trade_win_rate"] > ls["trade_win_rate"] else ll
+    w(f"| Trade Win Rate | {cs['trade_win_rate']:.1f}% | {ls['trade_win_rate']:.1f}% | {twr_w} |")
     w(f"| Max Drawdown | ${cs['max_dd']:,.0f} | ${ls['max_dd']:,.0f} | {cl if cs['max_dd'] < ls['max_dd'] else ll} |")
-    w(f"| Max DD Duration | {cs['max_dd_months']} mo | {ls['max_dd_months']} mo | {cl if cs['max_dd_months'] < ls['max_dd_months'] else ll} |")
+    dd_dur_w = cl if cs["max_dd_months"] < ls["max_dd_months"] else ll
+    w(f"| Max DD Duration | {cs['max_dd_months']} mo | {ls['max_dd_months']} mo | {dd_dur_w} |")
 
     # Exit comparison
     all_exits = sorted(set(list(r.champion_exits.keys()) + list(r.challenger_exits.keys())))
@@ -559,7 +618,9 @@ def format_markdown(r: ComparisonResult) -> str:
         pcs = pc["champion"]
         pls = pc["challenger"]
         pw = ll if pls["net_pnl"] > pcs["net_pnl"] else cl
-        w(f"| {pl} | ${pcs['net_pnl']:+,.0f} | ${pls['net_pnl']:+,.0f} | {pcs['consistency']:.2f} | {pls['consistency']:.2f} | {pw} |")
+        pnl_part = f"${pcs['net_pnl']:+,.0f} | ${pls['net_pnl']:+,.0f}"
+        cs_part = f"{pcs['consistency']:.2f} | {pls['consistency']:.2f}"
+        w(f"| {pl} | {pnl_part} | {cs_part} | {pw} |")
 
     # Year-by-year
     w("\n## Year-by-Year\n")
@@ -580,7 +641,10 @@ def format_markdown(r: ComparisonResult) -> str:
         si = r.stagnation_impact
         w("\n## Stagnation Guard Impact\n")
         w(f"- STAG_EXIT: {si['stag_count']} trades, ${si['stag_total_pnl']:+,.0f} total, {si['stag_win_rate']:.0f}% WR")
-        w(f"- TIME_STOP: {si['champion_timestop_count']} → {si['challenger_timestop_count']} ({si['timestop_delta']:+d} trades)")
+        ts_from = si["champion_timestop_count"]
+        ts_to = si["challenger_timestop_count"]
+        ts_delta = si["timestop_delta"]
+        w(f"- TIME_STOP: {ts_from} → {ts_to} ({ts_delta:+d} trades)")
 
     # Verdict
     w("\n## Verdict\n")
@@ -595,6 +659,8 @@ def format_markdown(r: ComparisonResult) -> str:
 def format_telegram(r: ComparisonResult) -> str:
     """Concise Telegram notification."""
     v = r.verdict
+    if v is None:
+        return "(No verdict)"
     cs = r.champion_stats
     ls = r.challenger_stats
     cl = r.champion_label
@@ -617,13 +683,15 @@ def format_telegram(r: ComparisonResult) -> str:
 
 {headline} (Score: {v.score})
 
-{cl}: ${cs['net_pnl']:+,.0f} | C={cs['consistency']:.2f}
-{ll}: ${ls['net_pnl']:+,.0f} | C={ls['consistency']:.2f}
+{cl}: ${cs["net_pnl"]:+,.0f} | C={cs["consistency"]:.2f}
+{ll}: ${ls["net_pnl"]:+,.0f} | C={ls["consistency"]:.2f}
 
 Year wins: {cl}={champ_yr} | {ll}={chall_yr}"""
 
     if r.stagnation_impact:
         si = r.stagnation_impact
-        msg += f"\nTIME_STOP: {si['champion_timestop_count']}→{si['challenger_timestop_count']} ({si['timestop_delta']:+d})"
+        ts_from = si["champion_timestop_count"]
+        ts_to = si["challenger_timestop_count"]
+        msg += f"\nTIME_STOP: {ts_from}→{ts_to} ({si['timestop_delta']:+d})"
 
     return msg

@@ -301,6 +301,7 @@ class TestHeartbeatShutdownFlag:
                 "check_pip_audit",
                 "check_llm_cache",
                 "check_cost_router",
+                "check_scheduler",
             ]
             patchers = []
             for fn_name in check_fns:
@@ -326,6 +327,39 @@ class TestHeartbeatShutdownFlag:
             p1.start()
             p2.start()
             p3.start()
+
+            # Mock inline try/import blocks that can do real I/O
+            for mod_path in [
+                "utils.self_healing.check_self_healing",
+                "utils.self_healing.touch_dead_man_switch",
+                "utils.max_plan_guard.check_max_plan_usage",
+                "utils.drift_detector.detect_drift",
+                "utils.service_staleness.check_all_staleness",
+            ]:
+                p = mock.patch(mod_path, side_effect=ImportError("mocked"))
+                patchers.append(p)
+                p.start()
+
+            # Mock novatrade signals + tracing
+            p_nt = mock.patch.object(
+                heartbeat,
+                "check_novatrade_signals",
+                return_value={"name": "novatrade_signals", "ok": True, "detail": "mocked"},
+            )
+            p_tc = mock.patch("heartbeat.TraceContext", None)
+            p_slog = mock.patch("heartbeat.slog", None)
+            patchers.extend([p_nt, p_tc, p_slog])
+            p_nt.start()
+            p_tc.start()
+            p_slog.start()
+
+            # Mock skill evolution processor (calls LLM subprocess)
+            p_evo = mock.patch(
+                "skills.evolution_processor.EvolutionProcessor",
+                side_effect=ImportError("mocked"),
+            )
+            patchers.append(p_evo)
+            p_evo.start()
 
             # Mock the expensive operations we want to verify are NOT called
             mock_agent = mock.patch.object(heartbeat, "_run_heartbeat_agent")

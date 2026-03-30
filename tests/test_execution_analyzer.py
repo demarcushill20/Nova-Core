@@ -1016,9 +1016,9 @@ class TestVersionStoreAnalyses:
         tables = cursor.fetchall()
         assert len(tables) == 1, "execution_analyses table should exist after migration"
 
-        # Verify schema version is now 2
+        # Verify schema version is now current (v3 with pattern_hash)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 2
+        assert version == 3
         conn.close()
 
     def test_store_analysis_multiple_evolution_suggestions_per_skill(self, tmp_path):

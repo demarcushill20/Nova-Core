@@ -7,7 +7,6 @@ without killing TIME_STOP winners.
 from __future__ import annotations
 
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,7 +19,7 @@ def hours_held(t):
     return (t.exit_time - t.entry_time).total_seconds() / 3600
 
 
-def main():
+def main():  # noqa: C901
     trades = parse_tv_csv(V2_PATH)
 
     ts = [t for t in trades if t.exit_signal == "TIME_STOP"]
@@ -38,18 +37,24 @@ def main():
         shorts = len(group) - longs
         long_pnl = sum(t.pnl_usd for t in group if t.direction == "long")
         short_pnl = sum(t.pnl_usd for t in group if t.direction == "short")
-        print(f"  {label:>10}: LONG {longs} ({100*longs/len(group):.0f}%) ${long_pnl:>+,.0f} | SHORT {shorts} ({100*shorts/len(group):.0f}%) ${short_pnl:>+,.0f}")
+        long_pct = 100 * longs / len(group)
+        short_pct = 100 * shorts / len(group)
+        print(
+            f"  {label:>10}: LONG {longs} ({long_pct:.0f}%)"
+            f" ${long_pnl:>+,.0f} | SHORT {shorts}"
+            f" ({short_pct:.0f}%) ${short_pnl:>+,.0f}"
+        )
 
     # What if we only traded LONGS?
     long_ts = [t for t in ts if t.direction == "long"]
     long_reg = [t for t in reg if t.direction == "long"]
     short_ts = [t for t in ts if t.direction == "short"]
     short_reg = [t for t in reg if t.direction == "short"]
-    print(f"\n  LONG-ONLY scenario:")
+    print("\n  LONG-ONLY scenario:")
     print(f"    TIME_STOP: {len(long_ts)} trades, ${sum(t.pnl_usd for t in long_ts):>+,.0f}")
     print(f"    Regular exits: {len(long_reg)} trades, ${sum(t.pnl_usd for t in long_reg):>+,.0f}")
     print(f"    Net: ${sum(t.pnl_usd for t in long_ts) + sum(t.pnl_usd for t in long_reg):>+,.0f}")
-    print(f"  SHORT-ONLY scenario:")
+    print("  SHORT-ONLY scenario:")
     print(f"    TIME_STOP: {len(short_ts)} trades, ${sum(t.pnl_usd for t in short_ts):>+,.0f}")
     print(f"    Regular exits: {len(short_reg)} trades, ${sum(t.pnl_usd for t in short_reg):>+,.0f}")
     print(f"    Net: ${sum(t.pnl_usd for t in short_ts) + sum(t.pnl_usd for t in short_reg):>+,.0f}")
@@ -57,7 +62,11 @@ def main():
     # ── 2. DAY OF WEEK ──
     print("\n\n── 2. DAY OF WEEK (Entry Day) ───────────────────────────────")
     days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    print(f"  {'Day':>5} | {'TS Count':>8} {'TS %':>6} | {'Reg Count':>9} {'Reg %':>6} | {'TS Rate':>7} | {'Reg P&L':>9} | {'TS P&L':>9}")
+    print(
+        f"  {'Day':>5} | {'TS Count':>8} {'TS %':>6}"
+        f" | {'Reg Count':>9} {'Reg %':>6} | {'TS Rate':>7}"
+        f" | {'Reg P&L':>9} | {'TS P&L':>9}"
+    )
     print("  " + "-" * 80)
     for d in range(7):
         ts_d = [t for t in ts if t.entry_time.weekday() == d]
@@ -68,11 +77,20 @@ def main():
         reg_pnl = sum(t.pnl_usd for t in reg_d)
         ts_pct = 100 * len(ts_d) / len(ts) if ts else 0
         reg_pct = 100 * len(reg_d) / len(reg) if reg else 0
-        print(f"  {days[d]:>5} | {len(ts_d):>8} {ts_pct:>5.1f}% | {len(reg_d):>9} {reg_pct:>5.1f}% | {ts_rate:>5.1f}% | ${reg_pnl:>+8,.0f} | ${ts_pnl:>+8,.0f}")
+        print(
+            f"  {days[d]:>5} | {len(ts_d):>8} {ts_pct:>5.1f}%"
+            f" | {len(reg_d):>9} {reg_pct:>5.1f}%"
+            f" | {ts_rate:>5.1f}%"
+            f" | ${reg_pnl:>+8,.0f} | ${ts_pnl:>+8,.0f}"
+        )
 
     # ── 3. HOUR OF ENTRY ──
     print("\n\n── 3. HOUR OF ENTRY ─────────────────────────────────────────")
-    print(f"  {'Hour':>5} | {'TS':>4} {'TS%':>5} | {'Reg':>5} {'Reg%':>5} | {'TS Rate':>7} | {'Reg P&L':>9} | {'All P&L':>9}")
+    print(
+        f"  {'Hour':>5} | {'TS':>4} {'TS%':>5}"
+        f" | {'Reg':>5} {'Reg%':>5} | {'TS Rate':>7}"
+        f" | {'Reg P&L':>9} | {'All P&L':>9}"
+    )
     print("  " + "-" * 70)
     for h in range(24):
         ts_h = [t for t in ts if t.entry_time.hour == h]
@@ -85,7 +103,15 @@ def main():
         ts_pnl = sum(t.pnl_usd for t in ts_h)
         all_pnl = reg_pnl + ts_pnl
         marker = " ◀" if ts_rate > 12 else " ✗" if ts_rate < 5 else ""
-        print(f"  {h:>5} | {len(ts_h):>4} {100*len(ts_h)/max(len(ts),1):>4.1f}% | {len(reg_h):>5} {100*len(reg_h)/max(len(reg),1):>4.1f}% | {ts_rate:>5.1f}% | ${reg_pnl:>+8,.0f} | ${all_pnl:>+8,.0f}{marker}")
+        ts_pct = 100 * len(ts_h) / max(len(ts), 1)
+        reg_pct = 100 * len(reg_h) / max(len(reg), 1)
+        print(
+            f"  {h:>5} | {len(ts_h):>4} {ts_pct:>4.1f}%"
+            f" | {len(reg_h):>5} {reg_pct:>4.1f}%"
+            f" | {ts_rate:>5.1f}%"
+            f" | ${reg_pnl:>+8,.0f}"
+            f" | ${all_pnl:>+8,.0f}{marker}"
+        )
 
     # ── 4. HOUR BLOCKS ──
     print("\n\n── 4. SESSION BLOCKS ────────────────────────────────────────")
@@ -106,7 +132,12 @@ def main():
         reg_pnl = sum(t.pnl_usd for t in reg_s)
         ts_pnl = sum(t.pnl_usd for t in ts_s)
         all_pnl = reg_pnl + ts_pnl
-        print(f"  {label:>20} | TS: {len(ts_s):>3} Reg: {len(reg_s):>4} | TS Rate: {ts_rate:.1f}% | All P&L: ${all_pnl:>+9,.0f}")
+        print(
+            f"  {label:>20} | TS: {len(ts_s):>3}"
+            f" Reg: {len(reg_s):>4}"
+            f" | TS Rate: {ts_rate:.1f}%"
+            f" | All P&L: ${all_pnl:>+9,.0f}"
+        )
 
     # ── 5. MONTH OF YEAR ──
     print("\n\n── 5. MONTH OF YEAR (Seasonality) ───────────────────────────")
@@ -123,7 +154,13 @@ def main():
         reg_pnl = sum(t.pnl_usd for t in reg_m)
         ts_pnl = sum(t.pnl_usd for t in ts_m)
         marker = " ◀" if ts_rate > 12 else " ✗" if ts_rate < 6 else ""
-        print(f"  {month_names[m-1]:>5} | {len(ts_m):>4} | {len(reg_m):>5} | {ts_rate:>5.1f}% | ${reg_pnl:>+8,.0f} | ${ts_pnl:>+8,.0f} | ${reg_pnl+ts_pnl:>+8,.0f}{marker}")
+        net_pnl = reg_pnl + ts_pnl
+        print(
+            f"  {month_names[m - 1]:>5} | {len(ts_m):>4}"
+            f" | {len(reg_m):>5} | {ts_rate:>5.1f}%"
+            f" | ${reg_pnl:>+8,.0f} | ${ts_pnl:>+8,.0f}"
+            f" | ${net_pnl:>+8,.0f}{marker}"
+        )
 
     # ── 6. FAVORABLE EXCURSION (entry quality proxy) ──
     print("\n\n── 6. FAVORABLE EXCURSION (whole trade) ─────────────────────")
@@ -147,7 +184,12 @@ def main():
         ts_rate = 100 * len(ts_f) / total_f
         reg_avg = sum(t.pnl_usd for t in reg_f) / len(reg_f) if reg_f else 0
         ts_avg = sum(t.pnl_usd for t in ts_f) / len(ts_f) if ts_f else 0
-        print(f"  {label:>10} | {len(ts_f):>4} | {len(reg_f):>5} | {ts_rate:>5.1f}% | ${reg_avg:>+10,.0f} | ${ts_avg:>+10,.0f}")
+        print(
+            f"  {label:>10} | {len(ts_f):>4}"
+            f" | {len(reg_f):>5} | {ts_rate:>5.1f}%"
+            f" | ${reg_avg:>+10,.0f}"
+            f" | ${ts_avg:>+10,.0f}"
+        )
 
     # ── 7. YEARLY TS RATE ──
     print("\n\n── 7. YEARLY TIME_STOP RATE ─────────────────────────────────")
@@ -162,7 +204,13 @@ def main():
         ts_pnl = sum(t.pnl_usd for t in ts_y)
         reg_pnl = sum(t.pnl_usd for t in reg_y)
         net = sum(t.pnl_usd for t in all_y)
-        print(f"  {y} | {len(all_y):>4} trades | TS: {len(ts_y):>3} ({ts_rate:.1f}%) ${ts_pnl:>+8,.0f} | Reg: {len(reg_y):>3} ${reg_pnl:>+8,.0f} | Net: ${net:>+8,.0f}")
+        print(
+            f"  {y} | {len(all_y):>4} trades"
+            f" | TS: {len(ts_y):>3} ({ts_rate:.1f}%)"
+            f" ${ts_pnl:>+8,.0f}"
+            f" | Reg: {len(reg_y):>3} ${reg_pnl:>+8,.0f}"
+            f" | Net: ${net:>+8,.0f}"
+        )
 
     # ── 8. SIMULATION: FILTER OUT WORST HOURS ──
     print("\n\n── 8. SIMULATIONS ──────────────────────────────────────────")
@@ -205,7 +253,7 @@ def main():
     longs = [t for t in trades if t.direction == "long"]
     long_pnl = sum(t.pnl_usd for t in longs)
     long_ts_count = sum(1 for t in longs if t.exit_signal == "TIME_STOP")
-    print(f"\n  SIM C: LONG-ONLY")
+    print("\n  SIM C: LONG-ONLY")
     print(f"    {len(longs)} trades, {long_ts_count} TIME_STOP, ${long_pnl:>+,.0f}")
     print(f"    Δ vs v2: ${long_pnl - sum(t.pnl_usd for t in trades):>+,.0f}")
 
@@ -223,7 +271,7 @@ def main():
         kept_pnl = sum(t.pnl_usd for t in kept)
         print(f"\n  SIM D: Only hours with ≥10% TIME_STOP rate: {best_hours}")
         print(f"    {len(kept)} trades, {len(kept_ts)} TIME_STOP, ${kept_pnl:>+,.0f}")
-        print(f"    TIME_STOP preserved: {len(kept_ts)}/{len(ts)} ({100*len(kept_ts)/len(ts):.0f}%)")
+        print(f"    TIME_STOP preserved: {len(kept_ts)}/{len(ts)} ({100 * len(kept_ts) / len(ts):.0f}%)")
         print(f"    Δ vs v2: ${kept_pnl - sum(t.pnl_usd for t in trades):>+,.0f}")
 
     # Sim E: Block worst months
@@ -256,7 +304,9 @@ def main():
         delta = kept_pnl - v2_pnl
         ts_preserved = 100 * len(kept_ts) / len(ts)
         print(f"  {label}")
-        print(f"    {len(kept)} trades | {len(kept_ts)} TS ({ts_preserved:.0f}%) | ${kept_pnl:>+,.0f} | Δ${delta:>+,.0f}")
+        print(
+            f"    {len(kept)} trades | {len(kept_ts)} TS ({ts_preserved:.0f}%) | ${kept_pnl:>+,.0f} | Δ${delta:>+,.0f}"
+        )
 
     print()
 
