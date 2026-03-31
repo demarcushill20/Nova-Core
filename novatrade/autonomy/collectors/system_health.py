@@ -126,6 +126,7 @@ class SystemHealthCollector(BaseCollector):
     async def _check_services(self) -> tuple[float, float]:
         """Return (score, active_count) for systemd services."""
         active = 0
+        checked = 0  # tracks how many checks got a systemctl response
         for svc in _SERVICES:
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -136,6 +137,7 @@ class SystemHealthCollector(BaseCollector):
                     stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+                checked += 1
                 if stdout.decode().strip() == "active":
                     active += 1
             except (asyncio.TimeoutError, FileNotFoundError, OSError):
@@ -146,6 +148,21 @@ class SystemHealthCollector(BaseCollector):
                 # letting them abort the entire check
                 self.log.debug("service check for %s failed: %s", svc, svc_exc)
                 continue
+
+        # If no check completed (all threw exceptions), this is a transient
+        # resource issue (e.g. Errno 11) — not actual service failures.
+        # Use cached fallback to avoid false-positive score regression.
+        if checked == 0:
+            cached = SystemHealthCollector._last_good_svc
+            if cached is not None:
+                self.log.warning(
+                    "All service checks failed (resource issue) — using cached score: %s",
+                    cached[0],
+                )
+                return cached
+            # No cache — bubble up so top-level handler treats as failure
+            raise OSError("All service checks failed — no systemctl response")
+
         return active * 25.0, float(active)
 
     def _check_orphaned_tasks(self) -> tuple[float, float]:
