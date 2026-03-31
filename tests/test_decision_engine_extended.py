@@ -377,15 +377,23 @@ class TestCooldown:
 
     def test_daily_limit_research(self):
         """Exceeding daily research limit should trigger cooldown."""
+        from unittest.mock import patch
+
         engine = DecisionEngine(config=DecisionConfig(max_research_per_day=2))
         now = datetime.now(timezone.utc)
+        # Use today at noon to avoid midnight-boundary flakiness
+        today_noon = now.replace(hour=12, minute=0, second=0, microsecond=0)
         recent = [
-            {"mode": "research", "decided_at": (now - timedelta(hours=1)).isoformat()},
-            {"mode": "research", "decided_at": (now - timedelta(hours=2)).isoformat()},
-            {"mode": "monitor", "decided_at": (now - timedelta(hours=3)).isoformat()},
+            {"mode": "research", "decided_at": (today_noon - timedelta(minutes=10)).isoformat()},
+            {"mode": "research", "decided_at": (today_noon - timedelta(minutes=20)).isoformat()},
+            {"mode": "monitor", "decided_at": (today_noon - timedelta(minutes=30)).isoformat()},
         ]
         ctx = _ctx(_report({}), recent=recent)
-        assert engine._check_cooldown(ActionMode.RESEARCH, ctx) is True
+        with patch("novatrade.autonomy.decision_engine.datetime") as mock_dt:
+            mock_dt.now.return_value = today_noon
+            mock_dt.fromisoformat = datetime.fromisoformat
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert engine._check_cooldown(ActionMode.RESEARCH, ctx) is True
 
     def test_daily_limit_not_exceeded(self):
         """Under daily limit should be allowed."""

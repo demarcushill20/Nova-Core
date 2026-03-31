@@ -637,7 +637,7 @@ class TestRunSkillAnalysisWiring:
         # Verify full wiring: analyze -> update_stats -> store_analysis
         mock_analyzer_instance.analyze.assert_called_once()
         mock_analyzer_instance.update_stats.assert_called_once_with(mock_analysis)
-        mock_store.store_analysis.assert_called_once_with(mock_analysis)
+        mock_analyzer_instance.store_analysis.assert_called_once_with(mock_analysis)
         assert result is mock_analysis
 
     def test_run_skill_analysis_with_suggestions_enqueues(self):

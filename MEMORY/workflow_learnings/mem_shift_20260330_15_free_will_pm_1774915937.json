@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260330_15_free_will_pm_1774915937",
+  "workflow_id": "shift_20260330_15_free_will_pm",
+  "task_summary": "Fixed critical LiveLoop state machine desync bug \u2014 added broker reconciliation to prevent agent from getting stuck in LONG/SHORT after SL hits",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed critical LiveLoop state machine desync bug \u2014 added broker reconciliation to prevent agent from getting stuck in LONG/SHORT after SL hits"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260330_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed critical LiveLoop state machine desync bug \u2014 added broker reconciliation to prevent agent from getting stuck in LONG/SHORT after SL hits",
+  "created_at": "2026-03-31T00:12:17Z",
+  "confidence": "low"
+}

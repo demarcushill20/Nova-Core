@@ -34,6 +34,7 @@ from typing import Any
 from novatrade.data.bar_aggregator import BarAggregator
 from novatrade.data.price_feed import TickBatchPoller
 from novatrade.execution.live_trading_agent import LiveTradingAgent
+from novatrade.execution.trading_agent import AgentState
 from novatrade.monitor.enhanced_health import EnhancedHealthMonitor
 from novatrade.monitor.feed_health import FeedHealthSupervisor, FeedState
 from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor, SupervisorAction
@@ -529,6 +530,9 @@ class LiveLoop:
                     # Persist equity snapshot for performance_stability scoring
                     self._persist_equity_snapshot()
 
+                    # Broker ↔ Agent state reconciliation
+                    await self._reconcile_broker_state()
+
                     # Hard Risk Supervisor monitoring
                     await self._check_hard_risk_supervisor()
 
@@ -806,3 +810,99 @@ class LiveLoop:
                     log.debug("Enhanced diagnostics completed successfully")
         except Exception:
             log.warning("Enhanced diagnostics failed", exc_info=True)
+
+    async def _reconcile_broker_state(self) -> None:
+        """Compare TradingAgent state against broker reality and fix mismatches.
+
+        Detects three critical desync scenarios:
+          1. Agent LONG/SHORT but broker has no position → broker closed (SL hit)
+          2. Agent PENDING but broker has position → fill happened
+          3. Agent PENDING but broker has neither order nor position → stale pending
+
+        Without this, the agent can get stuck in LONG/SHORT after an SL hit
+        and reject all future entry signals indefinitely.
+        """
+        if self._adapter is None:
+            return
+
+        agent = self._live_agent.trading_agent
+        agent_state = agent.state
+
+        # Only reconcile when agent thinks it has an active order/position
+        if agent_state == AgentState.FLAT:
+            return
+
+        try:
+            positions = await self._adapter.get_positions()
+        except Exception:
+            log.warning("reconcile: cannot fetch positions", exc_info=True)
+            return
+
+        has_position = len(positions) > 0
+
+        # --- Case 1: Agent LONG/SHORT but broker has no position → SL hit ---
+        if agent_state in (AgentState.LONG, AgentState.SHORT) and not has_position:
+            position_id = agent.position_id or "unknown"
+            log.warning(
+                "RECONCILE: agent is %s but broker has no position — "
+                "broker-side close detected (SL/trailing stop). Syncing to FLAT.",
+                agent_state.value,
+            )
+            self._live_agent.on_broker_close(
+                position_id=position_id,
+                pnl=0.0,  # P&L unknown — will be resolved from equity delta
+                exit_reason="BROKER_CLOSE_RECONCILED",
+            )
+            log.info(
+                "RECONCILE: agent synced to FLAT (was %s, position=%s)",
+                agent_state.value,
+                position_id,
+            )
+            return
+
+        # --- Case 2: Agent PENDING but broker has position → fill happened ---
+        if agent_state in (AgentState.PENDING_LONG, AgentState.PENDING_SHORT) and has_position:
+            pos = positions[0]
+            log.warning(
+                "RECONCILE: agent is %s but broker has position %s — fill detected. Syncing.",
+                agent_state.value,
+                pos.position_id,
+            )
+            self._live_agent.on_fill(
+                position_id=pos.position_id,
+                fill_price=pos.open_price,
+                volume=pos.volume,
+                stop_loss=pos.stop_loss or 0.0,
+            )
+            log.info(
+                "RECONCILE: fill synced — position=%s price=%.5f",
+                pos.position_id,
+                pos.open_price,
+            )
+            return
+
+        # --- Case 3: Agent PENDING but no order and no position → stale ---
+        if agent_state in (AgentState.PENDING_LONG, AgentState.PENDING_SHORT) and not has_position:
+            try:
+                orders = await self._adapter.get_orders()
+            except Exception:
+                orders = []
+
+            if not orders:
+                pending_id = agent.pending_order_id or "unknown"
+                log.warning(
+                    "RECONCILE: agent is %s but broker has no order or position — "
+                    "stale pending detected. Forcing FLAT.",
+                    agent_state.value,
+                )
+                agent.force_flat(reason=f"reconcile_stale_pending:{pending_id}")
+                # Also reset the strategy engine to prevent phantom position
+                try:
+                    self._live_agent.strategy_engine.cancel_pending()
+                except Exception:
+                    log.warning("reconcile: strategy_engine.cancel_pending() failed", exc_info=True)
+                log.info(
+                    "RECONCILE: forced FLAT from %s (stale pending=%s)",
+                    agent_state.value,
+                    pending_id,
+                )

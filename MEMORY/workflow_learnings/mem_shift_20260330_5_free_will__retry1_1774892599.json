@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Verified original task contract was already valid - no repair needed",
   "created_at": "2026-03-30T17:43:19Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260330_5_free_will__retry1_1774893767"
 }

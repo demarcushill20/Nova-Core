@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0652_daily_summary_2026-03-30__retry1_1774936430",
+  "workflow_id": "0652_daily_summary_2026-03-30__retry1",
+  "task_summary": "Repaired CONTRACT block in daily summary output by removing invalid tools_used field, preserving all required validation fields",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Repaired CONTRACT block in daily summary output by removing invalid tools_used field, preserving all required validation fields"
+  ],
+  "successful_patterns": [
+    "task_completed: 0652_daily_summary_2026-03-30__retry1"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Repaired CONTRACT block in daily summary output by removing invalid tools_used field, preserving all required validation fields",
+  "created_at": "2026-03-31T05:53:50Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0652_daily_summary_2026-03-30_1774936945"
+}
