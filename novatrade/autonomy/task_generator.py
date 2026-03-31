@@ -44,6 +44,7 @@ class TaskSpecGenerator:
             ActionMode.EXECUTE: self._execute_spec,
             ActionMode.REPAIR: self._repair_spec,
             ActionMode.VALIDATE: self._validate_spec,
+            ActionMode.ESCALATE: self._escalate_spec,
         }
         generator = generators.get(decision.mode)
         if generator is None:
@@ -280,4 +281,29 @@ class TaskSpecGenerator:
             target_dimension=decision.target_dimension,
             goal_justification=decision.reason,
             estimated_effort="light",
+        )
+
+    def _escalate_spec(self, decision: Decision) -> TaskSpec:
+        dim = decision.target_dimension or "unknown"
+        actions = "\n".join(f"- {a}" for a in decision.suggested_actions)
+        return TaskSpec(
+            title=f"ESCALATE {dim.replace('_', ' ')} for human review",
+            body=(
+                f"## Objective\n"
+                f"This issue requires human attention — automated remediation has failed.\n\n"
+                f"## Context\n"
+                f"{decision.reason}\n\n"
+                f"## Actions\n{actions}\n\n"
+                f"## Escalation Note\n"
+                f"This task was auto-generated after repeated failed repairs.\n"
+                f"The autonomy system has exhausted its automated options.\n"
+                f"Human diagnosis and intervention is required.\n\n"
+                f"## Expected Outcome\n"
+                f"Root cause identified and fixed by human operator."
+            ),
+            priority="high",
+            category="escalate",
+            target_dimension=dim,
+            goal_justification=decision.reason,
+            estimated_effort="heavy",
         )

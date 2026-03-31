@@ -20,7 +20,7 @@ log = logging.getLogger("novatrade.autonomy.decision_engine")
 
 
 class ActionMode(str, Enum):
-    """The 6 possible action modes from the blueprint."""
+    """The 7 possible action modes from the blueprint."""
 
     RESEARCH = "research"
     PLAN = "plan"
@@ -28,6 +28,7 @@ class ActionMode(str, Enum):
     MONITOR = "monitor"
     VALIDATE = "validate"
     REPAIR = "repair"
+    ESCALATE = "escalate"
 
 
 class DecisionConfig(BaseModel):
@@ -100,7 +101,7 @@ class DecisionEngine:
         )
 
         # Rate-limit check: override to MONITOR if cooldown or daily limit hit
-        actionable = (ActionMode.RESEARCH, ActionMode.PLAN, ActionMode.EXECUTE, ActionMode.REPAIR)
+        actionable = (ActionMode.RESEARCH, ActionMode.PLAN, ActionMode.EXECUTE, ActionMode.REPAIR, ActionMode.ESCALATE)
         if decision.mode in actionable and self._check_cooldown(decision.mode, context):
             decision = Decision(
                 mode=ActionMode.MONITOR,
@@ -166,6 +167,21 @@ class DecisionEngine:
         pipeline_critical = self._detect_pipeline_broken(report)
         if pipeline_critical:
             return pipeline_critical
+
+        # --- Rule 0c: Repeated ineffective repairs → ESCALATE ---------------
+        futile_dim = self._detect_repair_futility(context)
+        if futile_dim:
+            return Decision(
+                mode=ActionMode.ESCALATE,
+                reason=f"Repeated REPAIR decisions for {futile_dim} have been ineffective — escalating for human review.",
+                target_dimension=futile_dim,
+                suggested_actions=[
+                    f"Human investigation required for persistent {futile_dim} failure",
+                    "Review recent repair actions and their outcomes",
+                    "Consider root cause analysis beyond automated remediation",
+                ],
+                confidence="high",
+            )
 
         # Rule 1: Knowledge gap + low-scoring dimension → RESEARCH
         if knowledge_gaps and weakest_dim and weakest_dim.score < self.config.research_threshold:
@@ -240,6 +256,51 @@ class DecisionEngine:
             suggested_actions=[],
             confidence="high",
         )
+
+    # -------------------------------------------------------------------
+    # Repair futility detection (Rule 0c)
+    # -------------------------------------------------------------------
+
+    def _detect_repair_futility(self, context: DecisionContext) -> str | None:
+        """Detect if repeated REPAIR decisions for the same dimension have been ineffective.
+
+        Checks the last 3 decisions targeting the same dimension. If all 3 were
+        REPAIR mode and none produced improvement (no VALIDATE or EXECUTE follow-up
+        for that dimension), return the dimension name. Return None otherwise.
+        """
+        if not context.recent_decisions:
+            return None
+
+        # Group recent decisions by target_dimension
+        dim_history: dict[str, list[dict]] = {}
+        for dec in context.recent_decisions:
+            dim = dec.get("target_dimension")
+            if dim:
+                dim_history.setdefault(dim, []).append(dec)
+
+        for dim, decisions in dim_history.items():
+            # Need at least 3 decisions for this dimension
+            if len(decisions) < 3:
+                continue
+
+            # Check the last 3 decisions for this dimension
+            last_3 = decisions[-3:]
+            all_repair = all(d.get("mode") == "repair" for d in last_3)
+            if not all_repair:
+                continue
+
+            # Check if any follow-up decision for this dimension was VALIDATE or EXECUTE
+            # (which would indicate the repair was effective and led to forward progress)
+            has_positive_followup = False
+            for dec in context.recent_decisions:
+                if dec.get("target_dimension") == dim and dec.get("mode") in ("validate", "execute"):
+                    has_positive_followup = True
+                    break
+
+            if not has_positive_followup:
+                return dim
+
+        return None
 
     # -------------------------------------------------------------------
     # NovaTrade-specific detectors (Priority Rule 0)

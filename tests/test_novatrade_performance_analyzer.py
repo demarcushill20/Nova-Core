@@ -2,7 +2,6 @@
 
 import json
 import time
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -24,36 +23,31 @@ class TestPerformanceMetrics:
         """Test performance level classification logic."""
         # Excellent performance
         metrics = PerformanceMetrics(
-            equity=101000, equity_change=1000, equity_change_pct=1.0,
-            total_signals=10, approval_rate=1.0
+            equity=101000, equity_change=1000, equity_change_pct=1.0, total_signals=10, approval_rate=1.0
         )
         assert metrics.performance_level() == PerformanceLevel.EXCELLENT
 
         # Good performance
         metrics = PerformanceMetrics(
-            equity=100200, equity_change=200, equity_change_pct=0.2,
-            total_signals=5, approval_rate=1.0
+            equity=100200, equity_change=200, equity_change_pct=0.2, total_signals=5, approval_rate=1.0
         )
         assert metrics.performance_level() == PerformanceLevel.GOOD
 
         # Average performance
         metrics = PerformanceMetrics(
-            equity=100050, equity_change=50, equity_change_pct=0.05,
-            total_signals=3, approval_rate=1.0
+            equity=100050, equity_change=50, equity_change_pct=0.05, total_signals=3, approval_rate=1.0
         )
         assert metrics.performance_level() == PerformanceLevel.AVERAGE
 
         # Poor performance
         metrics = PerformanceMetrics(
-            equity=99800, equity_change=-200, equity_change_pct=-0.2,
-            total_signals=8, approval_rate=0.9
+            equity=99800, equity_change=-200, equity_change_pct=-0.2, total_signals=8, approval_rate=0.9
         )
         assert metrics.performance_level() == PerformanceLevel.POOR
 
         # Critical performance
         metrics = PerformanceMetrics(
-            equity=99000, equity_change=-1000, equity_change_pct=-1.0,
-            total_signals=15, approval_rate=0.7
+            equity=99000, equity_change=-1000, equity_change_pct=-1.0, total_signals=15, approval_rate=0.7
         )
         assert metrics.performance_level() == PerformanceLevel.CRITICAL
 
@@ -61,9 +55,13 @@ class TestPerformanceMetrics:
         """Test execution quality score calculation."""
         # Perfect execution
         metrics = PerformanceMetrics(
-            equity=100000, equity_change=0, equity_change_pct=0,
-            total_signals=10, approval_rate=1.0,
-            feed_health_score=1.0, error_rate=0.0
+            equity=100000,
+            equity_change=0,
+            equity_change_pct=0,
+            total_signals=10,
+            approval_rate=1.0,
+            feed_health_score=1.0,
+            error_rate=0.0,
         )
         assert metrics.execution_quality_score() == 100.0
 
@@ -223,12 +221,15 @@ class TestPerformanceAnalyzer:
         """Test improving performance trend."""
         # Add mock history with improving trend
         analyzer.history = [
-            PerformanceMetrics(equity=100000, equity_change=0, equity_change_pct=0.0,
-                             total_signals=1, approval_rate=1.0),
-            PerformanceMetrics(equity=100050, equity_change=50, equity_change_pct=0.05,
-                             total_signals=2, approval_rate=1.0),
-            PerformanceMetrics(equity=100150, equity_change=150, equity_change_pct=0.15,
-                             total_signals=3, approval_rate=1.0),
+            PerformanceMetrics(
+                equity=100000, equity_change=0, equity_change_pct=0.0, total_signals=1, approval_rate=1.0
+            ),
+            PerformanceMetrics(
+                equity=100050, equity_change=50, equity_change_pct=0.05, total_signals=2, approval_rate=1.0
+            ),
+            PerformanceMetrics(
+                equity=100150, equity_change=150, equity_change_pct=0.15, total_signals=3, approval_rate=1.0
+            ),
         ]
 
         trend = analyzer.performance_trend()
@@ -237,12 +238,15 @@ class TestPerformanceAnalyzer:
     def test_performance_trend_declining(self, analyzer):
         """Test declining performance trend."""
         analyzer.history = [
-            PerformanceMetrics(equity=100000, equity_change=0, equity_change_pct=0.0,
-                             total_signals=1, approval_rate=1.0),
-            PerformanceMetrics(equity=99950, equity_change=-50, equity_change_pct=-0.05,
-                             total_signals=2, approval_rate=1.0),
-            PerformanceMetrics(equity=99850, equity_change=-150, equity_change_pct=-0.15,
-                             total_signals=3, approval_rate=1.0),
+            PerformanceMetrics(
+                equity=100000, equity_change=0, equity_change_pct=0.0, total_signals=1, approval_rate=1.0
+            ),
+            PerformanceMetrics(
+                equity=99950, equity_change=-50, equity_change_pct=-0.05, total_signals=2, approval_rate=1.0
+            ),
+            PerformanceMetrics(
+                equity=99850, equity_change=-150, equity_change_pct=-0.15, total_signals=3, approval_rate=1.0
+            ),
         ]
 
         trend = analyzer.performance_trend()
@@ -291,7 +295,7 @@ class TestPerformanceDashboard:
 
     def test_fetch_status_success(self, dashboard, mock_status_response):
         """Test successful status fetch."""
-        with patch('requests.get', return_value=mock_status_response):
+        with patch("requests.get", return_value=mock_status_response):
             status = dashboard.fetch_status()
 
         assert status is not None
@@ -300,14 +304,14 @@ class TestPerformanceDashboard:
 
     def test_fetch_status_failure(self, dashboard):
         """Test status fetch failure."""
-        with patch('requests.get', side_effect=requests.RequestException("Connection failed")):
+        with patch("requests.get", side_effect=requests.RequestException("Connection failed")):
             status = dashboard.fetch_status()
 
         assert status is None
 
     def test_run_analysis_success(self, dashboard, mock_status_response):
         """Test successful analysis run."""
-        with patch('requests.get', return_value=mock_status_response):
+        with patch("requests.get", return_value=mock_status_response):
             summary = dashboard.run_analysis()
 
         assert summary is not None
@@ -317,7 +321,7 @@ class TestPerformanceDashboard:
 
     def test_run_analysis_failure(self, dashboard):
         """Test analysis failure due to service unavailable."""
-        with patch('requests.get', side_effect=requests.RequestException("Connection failed")):
+        with patch("requests.get", side_effect=requests.RequestException("Connection failed")):
             summary = dashboard.run_analysis()
 
         assert summary is None
@@ -414,9 +418,17 @@ class TestIntegration:
             if summary is not None:  # Service is available
                 # Validate summary structure
                 required_fields = [
-                    "performance_level", "equity", "equity_change", "equity_change_pct",
-                    "total_signals", "approval_rate", "execution_quality_score",
-                    "feed_health_score", "uptime_hours", "trend", "alert_count"
+                    "performance_level",
+                    "equity",
+                    "equity_change",
+                    "equity_change_pct",
+                    "total_signals",
+                    "approval_rate",
+                    "execution_quality_score",
+                    "feed_health_score",
+                    "uptime_hours",
+                    "trend",
+                    "alert_count",
                 ]
 
                 for field in required_fields:
@@ -426,9 +438,7 @@ class TestIntegration:
                 assert isinstance(summary["equity"], (int, float))
                 assert isinstance(summary["approval_rate"], (int, float))
                 assert isinstance(summary["alerts"], list)
-                assert summary["performance_level"] in [
-                    "EXCELLENT", "GOOD", "AVERAGE", "POOR", "CRITICAL"
-                ]
+                assert summary["performance_level"] in ["EXCELLENT", "GOOD", "AVERAGE", "POOR", "CRITICAL"]
 
                 # Generate and validate text report
                 report = dashboard.generate_text_report(summary)

@@ -39,6 +39,7 @@ class WarningSeverity(IntEnum):
 
 class WarningCategory(str):
     """Semantic category tags."""
+
     HEARTBEAT = "heartbeat"
     CIRCUIT_BREAKER = "circuit_breaker"
     BUDGET = "budget"
@@ -55,21 +56,20 @@ class WarningCategory(str):
 @dataclass
 class Warning:
     """A single warning event queued for investigation."""
+
     timestamp: str
-    source: str          # e.g. "heartbeat", "circuit_breaker", "budget_enforcer"
-    severity: int        # WarningSeverity value
-    category: str        # WarningCategory value
-    message: str         # human-readable summary
-    context: dict = field(default_factory=dict)   # extra data for investigation
-    fingerprint: str = ""     # dedup key (auto-computed if empty)
+    source: str  # e.g. "heartbeat", "circuit_breaker", "budget_enforcer"
+    severity: int  # WarningSeverity value
+    category: str  # WarningCategory value
+    message: str  # human-readable summary
+    context: dict = field(default_factory=dict)  # extra data for investigation
+    fingerprint: str = ""  # dedup key (auto-computed if empty)
     investigated: bool = False
     investigation_id: str = ""
 
     def __post_init__(self):
         if not self.fingerprint:
-            self.fingerprint = _compute_fingerprint(
-                self.source, self.category, self.message
-            )
+            self.fingerprint = _compute_fingerprint(self.source, self.category, self.message)
 
 
 def _compute_fingerprint(source: str, category: str, message: str) -> str:
@@ -82,6 +82,7 @@ def _compute_fingerprint(source: str, category: str, message: str) -> str:
 # ---------------------------------------------------------------------------
 # Cooldown (dedup)
 # ---------------------------------------------------------------------------
+
 
 def _load_cooldowns() -> dict[str, float]:
     try:
@@ -115,6 +116,7 @@ def _mark_seen(fingerprint: str) -> None:
 # Queue operations
 # ---------------------------------------------------------------------------
 
+
 def _read_queue() -> list[dict]:
     try:
         lines = QUEUE_FILE.read_text().strip().splitlines()
@@ -147,6 +149,7 @@ def _append_archive(entries: list[dict]) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def emit_warning(warning: Warning, cooldown_secs: float = DEFAULT_COOLDOWN_SECONDS) -> bool:
     """Add a warning to the investigation queue.
 
@@ -172,6 +175,7 @@ def emit(
 ) -> bool:
     """Convenience shorthand for emit_warning."""
     from datetime import datetime, timezone
+
     w = Warning(
         timestamp=datetime.now(timezone.utc).isoformat(),
         source=source,
@@ -244,6 +248,7 @@ def clear_queue() -> int:
 # ---------------------------------------------------------------------------
 # Source-specific collectors — call from existing subsystems
 # ---------------------------------------------------------------------------
+
 
 def collect_from_heartbeat(checks: list[dict]) -> int:
     """Emit warnings for failed heartbeat checks."""
@@ -358,19 +363,27 @@ def collect_from_error_summary(summary: dict) -> int:
 def collect_from_memory(snapshot: dict) -> int:
     """Emit warning if memory usage is concerning."""
     if snapshot.get("critical"):
-        return 1 if emit(
-            source="memory_monitor",
-            category=WarningCategory.MEMORY,
-            message=f"CRITICAL memory: {snapshot.get('rss_mb', '?')}MB RSS",
-            severity=WarningSeverity.CRITICAL,
-            context=snapshot,
-        ) else 0
+        return (
+            1
+            if emit(
+                source="memory_monitor",
+                category=WarningCategory.MEMORY,
+                message=f"CRITICAL memory: {snapshot.get('rss_mb', '?')}MB RSS",
+                severity=WarningSeverity.CRITICAL,
+                context=snapshot,
+            )
+            else 0
+        )
     elif snapshot.get("warning"):
-        return 1 if emit(
-            source="memory_monitor",
-            category=WarningCategory.MEMORY,
-            message=f"High memory: {snapshot.get('rss_mb', '?')}MB RSS",
-            severity=WarningSeverity.WARNING,
-            context=snapshot,
-        ) else 0
+        return (
+            1
+            if emit(
+                source="memory_monitor",
+                category=WarningCategory.MEMORY,
+                message=f"High memory: {snapshot.get('rss_mb', '?')}MB RSS",
+                severity=WarningSeverity.WARNING,
+                context=snapshot,
+            )
+            else 0
+        )
     return 0

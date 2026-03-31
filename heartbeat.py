@@ -2202,8 +2202,11 @@ def main() -> int:
                 if _sh_get_tier is not None and _sh_set_tier is not None and _DegradationTier is not None:
                     try:
                         current_state = _sh_get_tier()
-                        if (current_state.tier == _DegradationTier.REDUCED and
-                            current_state.reason and "budget exceeded" in current_state.reason.lower()):
+                        if (
+                            current_state.tier == _DegradationTier.REDUCED
+                            and current_state.reason
+                            and "budget exceeded" in current_state.reason.lower()
+                        ):
                             print("[heartbeat] Budget now OK — clearing budget-triggered REDUCED tier")
                             _sh_set_tier(_DegradationTier.FULL, reason="budget constraints resolved")
                             _degradation_tier = 0  # Update local variable too
@@ -2395,23 +2398,12 @@ def main() -> int:
         except Exception as _cruise_exc:
             print(f"[cruise] State update failed (non-fatal): {_cruise_exc}")
 
-    write_heartbeat(checks, autonomy_snapshot=_autonomy_snapshot)
+    # NOTE: write_heartbeat() and metrics snapshot moved to end of cycle (Phase 1.3)
+    # so that all check-appending code completes first.
 
-    # Record metrics snapshot
+    # Preliminary all_ok / fail_names for blocks that reference them before final write
     all_ok = all(c["ok"] for c in checks)
     fail_names = [c["name"] for c in checks if not c["ok"]]
-    snapshot = HeartbeatSnapshot(
-        ts=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        epoch=int(datetime.now(timezone.utc).timestamp()),
-        status="healthy" if all_ok else "unhealthy",
-        total_checks=len(checks),
-        passed=len(checks) - len(fail_names),
-        failed=len(fail_names),
-        failed_names=fail_names,
-        duration_ms=round((time.monotonic() - _t0) * 1000, 1),
-        checks={c["name"]: {"ok": c["ok"], "detail": c["detail"]} for c in checks},
-    )
-    _append_metrics(snapshot)
 
     # --- Scheduler: create interrupt events for critical failures ---
     if _HAS_SCHEDULER and not all_ok:
@@ -2537,6 +2529,29 @@ def main() -> int:
     except Exception as e:
         print(f"[heartbeat] Production hardening failed (non-fatal): {e}")
 
+    # --- Resource cleanup: kill orphaned MCP processes, archive stale tasks ---
+    # Runs every 4th heartbeat (~2h if heartbeat is 30min) to prevent cgroup exhaustion.
+    try:
+        _cleanup_marker = STATE_DIR / "last_resource_cleanup.txt"
+        _cleanup_interval = 7200  # 2 hours in seconds
+        _run_cleanup = True
+        if _cleanup_marker.exists():
+            try:
+                _last_cleanup_ts = float(_cleanup_marker.read_text().strip())
+                _run_cleanup = (time.time() - _last_cleanup_ts) >= _cleanup_interval
+            except (ValueError, OSError):
+                pass
+        if _run_cleanup:
+            from scripts.cleanup_watcher_resources import main as _run_resource_cleanup
+
+            _run_resource_cleanup()
+            _cleanup_marker.write_text(str(time.time()), encoding="utf-8")
+            print("[heartbeat] Resource cleanup: ran successfully")
+        else:
+            print("[heartbeat] Resource cleanup: skipped (< 2h since last run)")
+    except Exception as e:
+        print(f"[heartbeat] Resource cleanup failed (non-fatal): {e}")
+
     # --- Skill Evolution: process queue + health scan ---
     try:
         from skills.evolution_audit import EvolutionAudit
@@ -2647,6 +2662,8 @@ def main() -> int:
     except Exception as e:
         print(f"[self-heal] Warning investigation failed (non-fatal): {e}")
 
+    # Recompute all_ok and fail_names after ALL checks have been appended
+    all_ok = all(c["ok"] for c in checks)
     fail_names = [c["name"] for c in checks if not c["ok"]]
     if all_ok:
         print("[heartbeat] All checks passed. HEALTHY.")
@@ -2783,6 +2800,27 @@ def main() -> int:
             _sh_record_mem()
         except Exception as e:
             print(f"[heartbeat] Memory snapshot recording failed (non-fatal): {e}")
+
+    # --- End-of-cycle state write (Phase 1.3) ---
+    # Write heartbeat state AFTER all checks have been appended, so the state
+    # file reflects the complete picture (not a mid-cycle snapshot).
+    write_heartbeat(checks, autonomy_snapshot=_autonomy_snapshot)
+
+    # Record metrics snapshot (also end-of-cycle for consistency)
+    _final_fail_names = [c["name"] for c in checks if not c["ok"]]
+    _final_all_ok = all(c["ok"] for c in checks)
+    snapshot = HeartbeatSnapshot(
+        ts=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        epoch=int(datetime.now(timezone.utc).timestamp()),
+        status="healthy" if _final_all_ok else "unhealthy",
+        total_checks=len(checks),
+        passed=len(checks) - len(_final_fail_names),
+        failed=len(_final_fail_names),
+        failed_names=_final_fail_names,
+        duration_ms=round((time.monotonic() - _t0) * 1000, 1),
+        checks={c["name"]: {"ok": c["ok"], "detail": c["detail"]} for c in checks},
+    )
+    _append_metrics(snapshot)
 
     # Append to heartbeat log
     LOGS_DIR.mkdir(parents=True, exist_ok=True)

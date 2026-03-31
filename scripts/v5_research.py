@@ -43,11 +43,13 @@ def main():
         adv = [t.adverse_usd for t in trades]
         fav = [t.favorable_usd for t in trades]
         wins = sum(1 for p in pnls if p >= 0)
-        print(f"\n  {sig} ({len(trades)} trades, {100*wins/len(trades):.0f}% WR, ${sum(pnls):+,.0f} total)")
-        print(f"    Duration:  min={min(durations):.0f}h  median={sorted(durations)[len(durations)//2]:.0f}h  max={max(durations):.0f}h")
-        print(f"    P&L:       min=${min(pnls):+,.0f}  avg=${sum(pnls)/len(pnls):+,.0f}  max=${max(pnls):+,.0f}")
-        print(f"    Adverse:   min=${min(adv):,.0f}  avg=${sum(adv)/len(adv):,.0f}  max=${max(adv):,.0f}")
-        print(f"    Favorable: min=${min(fav):,.0f}  avg=${sum(fav)/len(fav):,.0f}  max=${max(fav):,.0f}")
+        print(f"\n  {sig} ({len(trades)} trades, {100 * wins / len(trades):.0f}% WR, ${sum(pnls):+,.0f} total)")
+        print(
+            f"    Duration:  min={min(durations):.0f}h  median={sorted(durations)[len(durations) // 2]:.0f}h  max={max(durations):.0f}h"
+        )
+        print(f"    P&L:       min=${min(pnls):+,.0f}  avg=${sum(pnls) / len(pnls):+,.0f}  max=${max(pnls):+,.0f}")
+        print(f"    Adverse:   min=${min(adv):,.0f}  avg=${sum(adv) / len(adv):,.0f}  max=${max(adv):,.0f}")
+        print(f"    Favorable: min=${min(fav):,.0f}  avg=${sum(fav) / len(fav):,.0f}  max=${max(fav):,.0f}")
 
     # ── v2 Regular Exit Trades: Duration vs P&L ──
     print("\n\n── v2 REGULAR EXITS: P&L BY HOLD DURATION BUCKET ──────────")
@@ -64,7 +66,9 @@ def main():
         ("30-40h", 30, 40),
     ]
 
-    print(f"  {'Bucket':>8} | {'Count':>5} | {'Avg P&L':>8} | {'Total':>10} | {'WR':>5} | {'Avg Adv':>8} | {'Avg Fav':>8}")
+    print(
+        f"  {'Bucket':>8} | {'Count':>5} | {'Avg P&L':>8} | {'Total':>10} | {'WR':>5} | {'Avg Adv':>8} | {'Avg Fav':>8}"
+    )
     print("  " + "-" * 75)
     for label, lo, hi in buckets:
         bt = [t for t in regular if lo <= hours_held(t) < hi]
@@ -74,7 +78,9 @@ def main():
         adv = [t.adverse_usd for t in bt]
         fav = [t.favorable_usd for t in bt]
         wins = sum(1 for p in pnls if p >= 0)
-        print(f"  {label:>8} | {len(bt):>5} | ${sum(pnls)/len(pnls):>+7,.0f} | ${sum(pnls):>+9,.0f} | {100*wins/len(bt):4.0f}% | ${sum(adv)/len(adv):>7,.0f} | ${sum(fav)/len(fav):>7,.0f}")
+        print(
+            f"  {label:>8} | {len(bt):>5} | ${sum(pnls) / len(pnls):>+7,.0f} | ${sum(pnls):>+9,.0f} | {100 * wins / len(bt):4.0f}% | ${sum(adv) / len(adv):>7,.0f} | ${sum(fav) / len(fav):>7,.0f}"
+        )
 
     # ── v2 Regular Exits: Adverse Excursion Distribution ──
     print("\n\n── v2 REGULAR EXITS: P&L BY ADVERSE EXCURSION BUCKET ─────")
@@ -98,7 +104,9 @@ def main():
         pnls = [t.pnl_usd for t in bt]
         durs = [hours_held(t) for t in bt]
         wins = sum(1 for p in pnls if p >= 0)
-        print(f"  {label:>10} | {len(bt):>5} | ${sum(pnls)/len(pnls):>+7,.0f} | ${sum(pnls):>+9,.0f} | {100*wins/len(bt):4.0f}% | {sum(durs)/len(durs):>6.0f}h")
+        print(
+            f"  {label:>10} | {len(bt):>5} | ${sum(pnls) / len(pnls):>+7,.0f} | ${sum(pnls):>+9,.0f} | {100 * wins / len(bt):4.0f}% | {sum(durs) / len(durs):>6.0f}h"
+        )
 
     # ── v2 TIME_STOP: Favorable excursion at various bar checkpoints ──
     print("\n\n── v2 TIME_STOP: FAVORABLE EXCURSION STATS ─────────────────")
@@ -106,8 +114,8 @@ def main():
     print(f"  TIME_STOP trades: {len(ts)}")
     fav_ts = [t.favorable_usd for t in ts]
     adv_ts = [t.adverse_usd for t in ts]
-    print(f"    Favorable: min=${min(fav_ts):,.0f}  avg=${sum(fav_ts)/len(fav_ts):,.0f}  max=${max(fav_ts):,.0f}")
-    print(f"    Adverse:   min=${min(adv_ts):,.0f}  avg=${sum(adv_ts)/len(adv_ts):,.0f}  max=${max(adv_ts):,.0f}")
+    print(f"    Favorable: min=${min(fav_ts):,.0f}  avg=${sum(fav_ts) / len(fav_ts):,.0f}  max=${max(fav_ts):,.0f}")
+    print(f"    Adverse:   min=${min(adv_ts):,.0f}  avg=${sum(adv_ts) / len(adv_ts):,.0f}  max=${max(adv_ts):,.0f}")
 
     # How many TIME_STOP had high adverse excursion?
     print("\n  TIME_STOP by adverse excursion:")
@@ -121,7 +129,9 @@ def main():
     stag = [t for t in v4 if t.exit_signal == "STAG_EXIT"]
     print(f"  STAG_EXIT: {len(stag)} trades")
     for t in sorted(stag, key=lambda x: x.pnl_usd):
-        print(f"    #{t.number:4d} {t.direction:>5} {t.entry_time:%Y-%m-%d %H:%M} → {t.exit_time:%Y-%m-%d %H:%M} | ${t.pnl_usd:>+6,.0f} | fav=${t.favorable_usd:>4,.0f} adv=${t.adverse_usd:>4,.0f} | {hours_held(t):.0f}h")
+        print(
+            f"    #{t.number:4d} {t.direction:>5} {t.entry_time:%Y-%m-%d %H:%M} → {t.exit_time:%Y-%m-%d %H:%M} | ${t.pnl_usd:>+6,.0f} | fav=${t.favorable_usd:>4,.0f} adv=${t.adverse_usd:>4,.0f} | {hours_held(t):.0f}h"
+        )
 
     # ── What v2 exit happened at similar times? (trades that STAG_EXIT replaced) ──
     print("\n\n── STAG_EXIT vs WHAT V2 DID WITH SAME TRADES ───────────────")
@@ -149,7 +159,9 @@ def main():
                 stag_better += 1
             else:
                 stag_worse += 1
-            print(f"    #{st.number:4d} STAG=${st.pnl_usd:>+6,.0f} vs v2=${best_match.pnl_usd:>+6,.0f} (v2 exit: {best_match.exit_signal:>10}, held {hours_held(best_match):.0f}h) | Δ${delta:>+6,.0f} {marker}")
+            print(
+                f"    #{st.number:4d} STAG=${st.pnl_usd:>+6,.0f} vs v2=${best_match.pnl_usd:>+6,.0f} (v2 exit: {best_match.exit_signal:>10}, held {hours_held(best_match):.0f}h) | Δ${delta:>+6,.0f} {marker}"
+            )
 
     print(f"\n  Matched: {stag_matched}/{len(stag)}")
     print(f"  STAG better: {stag_better} | STAG worse: {stag_worse}")
@@ -160,12 +172,16 @@ def main():
     regular_sorted = sorted(regular, key=lambda t: t.pnl_usd)
     print("  Bottom 20 regular exit trades:")
     for t in regular_sorted[:20]:
-        print(f"    #{t.number:4d} {t.direction:>5} ${t.pnl_usd:>+6,.0f} | held {hours_held(t):>4.0f}h | adv=${t.adverse_usd:>4,.0f} fav=${t.favorable_usd:>4,.0f} | {t.exit_signal}")
+        print(
+            f"    #{t.number:4d} {t.direction:>5} ${t.pnl_usd:>+6,.0f} | held {hours_held(t):>4.0f}h | adv=${t.adverse_usd:>4,.0f} fav=${t.favorable_usd:>4,.0f} | {t.exit_signal}"
+        )
 
     # ── P&L if we cut all trades with adverse > threshold early ──
     print("\n\n── SIMULATION: CUT TRADES WITH HIGH ADVERSE EXCURSION ──────")
     print("  (What if we added a hard stop at various levels?)")
-    print(f"  {'Hard Stop':>10} | {'Would Cut':>9} | {'Cut P&L':>9} | {'TS Lost':>7} | {'TS P&L Lost':>11} | {'Net Impact':>10}")
+    print(
+        f"  {'Hard Stop':>10} | {'Would Cut':>9} | {'Cut P&L':>9} | {'TS Lost':>7} | {'TS P&L Lost':>11} | {'Net Impact':>10}"
+    )
     print("  " + "-" * 75)
 
     for stop_level in [50, 75, 100, 125, 150, 175, 200, 250, 300]:
@@ -179,7 +195,9 @@ def main():
         # Assume cut trades would have lost ~$stop_level instead of their actual P&L
         savings = sum(max(0, -t.pnl_usd - stop_level) for t in would_cut)  # how much we save
         net = savings - ts_pnl_lost if ts_killed else savings
-        print(f"  ${stop_level:>8} | {len(would_cut):>9} | ${cut_pnl:>+8,.0f} | {len(ts_killed):>7} | ${ts_pnl_lost:>+10,.0f} | ${net:>+9,.0f}")
+        print(
+            f"  ${stop_level:>8} | {len(would_cut):>9} | ${cut_pnl:>+8,.0f} | {len(ts_killed):>7} | ${ts_pnl_lost:>+10,.0f} | ${net:>+9,.0f}"
+        )
 
     print()
 

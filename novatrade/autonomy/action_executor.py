@@ -88,6 +88,22 @@ class DirectActionExecutor:
             result.summary = "MONITOR mode — no action needed"
             return result
 
+        # ESCALATE: skip remediation, gather evidence only, always alert
+        if decision.mode == ActionMode.ESCALATE:
+            if decision.target_dimension:
+                self._run_diagnostics(decision, report, result)
+            result.escalated = True
+            self._send_alert(decision, result)
+            # Build summary
+            critical = [f for f in result.findings if f.status == "critical"]
+            warnings = [f for f in result.findings if f.status == "warning"]
+            result.summary = (
+                f"ESCALATE on {decision.target_dimension or 'system'}: "
+                f"{len(critical)} critical, {len(warnings)} warnings — "
+                f"human intervention required"
+            )
+            return result
+
         # Always run dimension-specific diagnostics
         if decision.target_dimension:
             self._run_diagnostics(decision, report, result)
@@ -530,6 +546,7 @@ class DirectActionExecutor:
             "execute": "\u25b6\ufe0f",  # play button
             "research": "\U0001f50d",  # magnifying glass
             "plan": "\U0001f4cb",  # clipboard
+            "escalate": "\U0001f6a8",  # rotating light
         }
         icon = emoji.get(decision.mode.value, "\u2139\ufe0f")
 

@@ -18,6 +18,7 @@ log = logging.getLogger("novatrade.monitor.rate_limit_guardian")
 @dataclass
 class ConnectionHealth:
     """Track connection health metrics."""
+
     last_success: float = 0
     consecutive_failures: int = 0
     rate_limit_hits: int = 0
@@ -35,6 +36,7 @@ class ConnectionHealth:
 @dataclass
 class RateLimitConfig:
     """Configuration for rate limiting protection."""
+
     max_consecutive_failures: int = 3
     base_backoff_seconds: float = 30.0
     max_backoff_seconds: float = 300.0  # 5 minutes max
@@ -71,9 +73,13 @@ class RateLimitGuardian:
 
         # Check subscription quota exhaustion
         if self.connection_health.quota_exhausted:
-            quota_usage = (self.connection_health.subscription_quota_used /
-                          self.connection_health.subscription_quota_max) * 100
-            return False, f"Subscription quota exhausted: {self.connection_health.subscription_quota_used}/{self.connection_health.subscription_quota_max} ({quota_usage:.1f}%)"
+            quota_usage = (
+                self.connection_health.subscription_quota_used / self.connection_health.subscription_quota_max
+            ) * 100
+            return (
+                False,
+                f"Subscription quota exhausted: {self.connection_health.subscription_quota_used}/{self.connection_health.subscription_quota_max} ({quota_usage:.1f}%)",
+            )
 
         # Check if we're in backoff period
         if now < self.connection_health.backoff_until:
@@ -109,10 +115,7 @@ class RateLimitGuardian:
         self._notify_connection_listeners("success", {"timestamp": now})
 
     def record_subscription_quota_exceeded(
-        self,
-        max_subscriptions: int,
-        used_subscriptions: int,
-        recommended_retry_time: str | None = None
+        self, max_subscriptions: int, used_subscriptions: int, recommended_retry_time: str | None = None
     ) -> None:
         """Record subscription quota exceeded event.
 
@@ -127,40 +130,38 @@ class RateLimitGuardian:
         self.connection_health.quota_exhausted = True
         self.connection_health.last_quota_exceeded = now
 
-        log.error(
-            "Subscription quota exceeded: %d/%d subscriptions used",
-            used_subscriptions, max_subscriptions
-        )
+        log.error("Subscription quota exceeded: %d/%d subscriptions used", used_subscriptions, max_subscriptions)
 
         if recommended_retry_time:
             try:
                 # Parse broker retry time: "2026-03-30T13:17:57.996Z"
                 from datetime import datetime
-                retry_dt = datetime.fromisoformat(recommended_retry_time.replace('Z', '+00:00'))
+
+                retry_dt = datetime.fromisoformat(recommended_retry_time.replace("Z", "+00:00"))
                 retry_timestamp = retry_dt.timestamp()
 
                 # Set backoff to recommended retry time
-                self.connection_health.backoff_until = max(
-                    self.connection_health.backoff_until,
-                    retry_timestamp
-                )
+                self.connection_health.backoff_until = max(self.connection_health.backoff_until, retry_timestamp)
 
                 log.warning(
                     "Broker recommended retry time: %s (backoff extended to %s)",
                     recommended_retry_time,
-                    datetime.fromtimestamp(self.connection_health.backoff_until).isoformat()
+                    datetime.fromtimestamp(self.connection_health.backoff_until).isoformat(),
                 )
             except (ValueError, ImportError) as e:
                 log.error("Failed to parse broker retry time '%s': %s", recommended_retry_time, e)
                 # Default to 10-minute backoff for quota issues
                 self.connection_health.backoff_until = now + 600
 
-        self._notify_connection_listeners("quota_exceeded", {
-            "max_subscriptions": max_subscriptions,
-            "used_subscriptions": used_subscriptions,
-            "quota_usage_pct": (used_subscriptions / max_subscriptions) * 100,
-            "recommended_retry_time": recommended_retry_time
-        })
+        self._notify_connection_listeners(
+            "quota_exceeded",
+            {
+                "max_subscriptions": max_subscriptions,
+                "used_subscriptions": used_subscriptions,
+                "quota_usage_pct": (used_subscriptions / max_subscriptions) * 100,
+                "recommended_retry_time": recommended_retry_time,
+            },
+        )
 
     def record_connection_failure(self, error_code: int | None = None) -> float:
         """Record connection failure and calculate backoff.
@@ -183,12 +184,13 @@ class RateLimitGuardian:
             # Exponential backoff for regular failures
             backoff = min(
                 self.config.base_backoff_seconds * (2 ** (self.connection_health.consecutive_failures - 1)),
-                self.config.max_backoff_seconds
+                self.config.max_backoff_seconds,
             )
 
             # Add jitter to prevent thundering herd
             jitter_min, jitter_max = self.config.reconnect_jitter_range
             import random
+
             jitter = random.uniform(jitter_min, jitter_max)
             backoff += jitter
 
@@ -198,14 +200,17 @@ class RateLimitGuardian:
             "Connection failure %d recorded (error_code=%s) - backoff until %s",
             self.connection_health.consecutive_failures,
             error_code,
-            datetime.fromtimestamp(self.connection_health.backoff_until).isoformat()
+            datetime.fromtimestamp(self.connection_health.backoff_until).isoformat(),
         )
 
-        self._notify_connection_listeners("failure", {
-            "error_code": error_code,
-            "consecutive_failures": self.connection_health.consecutive_failures,
-            "backoff_seconds": backoff
-        })
+        self._notify_connection_listeners(
+            "failure",
+            {
+                "error_code": error_code,
+                "consecutive_failures": self.connection_health.consecutive_failures,
+                "backoff_seconds": backoff,
+            },
+        )
 
         return backoff
 
@@ -228,26 +233,36 @@ class RateLimitGuardian:
             return None
         elif last_tick_age_seconds < self.config.critical_staleness_threshold:
             # Feed is stale but recoverable
-            log.warning("Feed staleness detected: %ds old (threshold: %ds)",
-                       last_tick_age_seconds, self.config.stale_feed_threshold)
+            log.warning(
+                "Feed staleness detected: %ds old (threshold: %ds)",
+                last_tick_age_seconds,
+                self.config.stale_feed_threshold,
+            )
             self._notify_feed_listeners(last_tick_age_seconds)
             return "reconnect"
         else:
             # Feed is critically stale
-            log.error("Critical feed staleness: %ds old (threshold: %ds) - service restart may be required",
-                     last_tick_age_seconds, self.config.critical_staleness_threshold)
+            log.error(
+                "Critical feed staleness: %ds old (threshold: %ds) - service restart may be required",
+                last_tick_age_seconds,
+                self.config.critical_staleness_threshold,
+            )
             self._notify_feed_listeners(last_tick_age_seconds)
             return "restart_required"
 
     def get_connection_metrics(self) -> dict[str, Any]:
         """Get current connection health metrics."""
         now = time.time()
-        quota_usage_pct = (self.connection_health.subscription_quota_used /
-                          self.connection_health.subscription_quota_max * 100
-                          if self.connection_health.subscription_quota_max > 0 else 0)
+        quota_usage_pct = (
+            self.connection_health.subscription_quota_used / self.connection_health.subscription_quota_max * 100
+            if self.connection_health.subscription_quota_max > 0
+            else 0
+        )
 
         return {
-            "last_success_age": now - self.connection_health.last_success if self.connection_health.last_success else None,
+            "last_success_age": now - self.connection_health.last_success
+            if self.connection_health.last_success
+            else None,
             "consecutive_failures": self.connection_health.consecutive_failures,
             "rate_limit_hits": self.connection_health.rate_limit_hits,
             "in_backoff": now < self.connection_health.backoff_until,
@@ -260,8 +275,8 @@ class RateLimitGuardian:
                 "used": self.connection_health.subscription_quota_used,
                 "usage_pct": quota_usage_pct,
                 "exhausted": self.connection_health.quota_exhausted,
-                "last_exceeded": self.connection_health.last_quota_exceeded
-            }
+                "last_exceeded": self.connection_health.last_quota_exceeded,
+            },
         }
 
     def _get_feed_status(self) -> str:
@@ -313,7 +328,9 @@ class RateLimitGuardian:
         # Determine overall health status
         if self.connection_health.consecutive_failures == 0 and metrics["feed_status"] == "healthy":
             overall_status = "healthy"
-        elif self.connection_health.consecutive_failures < self.config.max_consecutive_failures and metrics["feed_status"] in ["healthy", "stale"]:
+        elif self.connection_health.consecutive_failures < self.config.max_consecutive_failures and metrics[
+            "feed_status"
+        ] in ["healthy", "stale"]:
             overall_status = "degraded"
         else:
             overall_status = "unhealthy"
@@ -330,7 +347,9 @@ class RateLimitGuardian:
             recommendations.append("CRITICAL: Feed critically stale - service restart may be required")
 
         if self.connection_health.consecutive_failures > 0:
-            recommendations.append(f"Connection failures detected ({self.connection_health.consecutive_failures}) - check broker connectivity")
+            recommendations.append(
+                f"Connection failures detected ({self.connection_health.consecutive_failures}) - check broker connectivity"
+            )
 
         return {
             "timestamp": datetime.now().isoformat(),
@@ -340,8 +359,8 @@ class RateLimitGuardian:
             "config": {
                 "stale_threshold": self.config.stale_feed_threshold,
                 "critical_threshold": self.config.critical_staleness_threshold,
-                "max_failures": self.config.max_consecutive_failures
-            }
+                "max_failures": self.config.max_consecutive_failures,
+            },
         }
 
 

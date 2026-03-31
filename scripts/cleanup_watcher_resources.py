@@ -12,9 +12,8 @@ Designed to run every 2 hours via systemd timer (novacore-cleanup.timer).
 import datetime
 import logging
 import os
-import signal
 import shutil
-import subprocess
+import signal
 import sys
 import time
 from pathlib import Path

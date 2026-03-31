@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0657_Let_s_restart_1774967820",
+  "workflow_id": "0657_Let_s_restart",
+  "task_summary": "Session restart briefing \u2014 gathered system state, checkpoint, pending tasks, and priorities",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Session restart briefing \u2014 gathered system state, checkpoint, pending tasks, and priorities"
+  ],
+  "successful_patterns": [
+    "task_completed: 0657_Let_s_restart"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Session restart briefing \u2014 gathered system state, checkpoint, pending tasks, and priorities",
+  "created_at": "2026-03-31T14:37:00Z",
+  "confidence": "high"
+}

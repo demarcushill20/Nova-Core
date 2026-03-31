@@ -112,12 +112,43 @@ class SystemHealthCollector(BaseCollector):
         # Dimension score = average of sub-metrics
         avg = sum(m.value for m in sub_metrics) / max(len(sub_metrics), 1)
 
+        # Compute confidence based on data freshness
+        confidence = self._compute_confidence(sub_metrics, warnings)
+
         return DimensionScore(
             name="System Health",
             score=round(avg, 1),
+            confidence=confidence,
             sub_metrics=sub_metrics,
             warnings=warnings,
         )
+
+    def _compute_confidence(
+        self, sub_metrics: list[SubMetric], warnings: list[str]
+    ) -> float:
+        """Compute confidence based on sub-metric collection success.
+
+        System health data is mostly real-time (systemctl, file checks),
+        so confidence is primarily about whether checks succeeded.
+        """
+        if not sub_metrics:
+            return 0.1
+
+        # Count how many sub-metrics have non-zero values (successful checks)
+        successful = sum(1 for m in sub_metrics if m.value > 0)
+        total = len(sub_metrics)
+
+        if successful == total:
+            return 1.0
+        elif successful > total * 0.5:
+            return 0.8
+        elif successful > 0:
+            return 0.6
+
+        # All sub-metrics zero — likely collection failures
+        if warnings:
+            return 0.3
+        return 0.1
 
     # ------------------------------------------------------------------
     # private helpers

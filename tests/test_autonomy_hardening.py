@@ -344,8 +344,11 @@ async def test_m3_no_equity_data_explicit_warning(tmp_path):
 
     result = await collector.collect()
     assert any("No equity data available" in w or "placeholder" in w for w in result.warnings)
-    # Score should be NO_DATA_SCORE (30.0) not 0.0
-    assert result.score == 30.0
+    # Score uses neutral 50.0 per metric (not pessimistic 30.0), averaged with
+    # insufficient_data sub-metric (0.0) → ~40.0 overall.
+    # Low confidence (0.1) prevents this from inflating the overall weighted score.
+    assert result.score == 40.0
+    assert result.confidence <= 0.2
 
 
 @pytest.mark.asyncio

@@ -94,9 +94,7 @@ class NovaEngineAdapter(BaseEngineAdapter):
         return out
 
     @staticmethod
-    def _compute_normalized_metrics(
-        result: BacktestResult, env: BacktestEnvironment
-    ) -> NormalizedMetrics:
+    def _compute_normalized_metrics(result: BacktestResult, env: BacktestEnvironment) -> NormalizedMetrics:
         window = EvaluationWindow("full", 9999, "Full dataset")
         bm: BacktestMetrics = compute_metrics(
             trades=result.trades,

@@ -130,9 +130,7 @@ class TestBM25Ranker:
         results = ranker.rank("git commit push", top_k=1)
         assert len(results) == 1
 
-    def test_rank_without_build_returns_empty(
-        self, empty_ranker: BM25Ranker
-    ) -> None:
+    def test_rank_without_build_returns_empty(self, empty_ranker: BM25Ranker) -> None:
         results = empty_ranker.rank("git commit")
         assert results == []
 
@@ -208,10 +206,7 @@ class TestIDF:
     def test_common_term_lower_idf(self) -> None:
         r = BM25Ranker()
         # Build corpus where "common" appears in all docs
-        skills = [
-            {"name": f"skill-{i}", "description": f"common term skill {i}", "path": f"/s/{i}"}
-            for i in range(5)
-        ]
+        skills = [{"name": f"skill-{i}", "description": f"common term skill {i}", "path": f"/s/{i}"} for i in range(5)]
         r.build_index(skills)
         # "common" appears in all 5 docs
         assert "common" in r._idf
@@ -298,9 +293,7 @@ class TestQualityFiltering:
         git_in_results = [r for r in results if r.name == "git-ops"]
         assert len(git_in_results) == 0
 
-    def test_no_exclusion_below_min_selections(
-        self, ranker: BM25Ranker
-    ) -> None:
+    def test_no_exclusion_below_min_selections(self, ranker: BM25Ranker) -> None:
         quality = {
             "git-ops": {
                 "completion_rate": 0.05,  # terrible but too few selections
@@ -327,9 +320,7 @@ class TestQualityFiltering:
         assert len(git_in_results) == 1
         assert git_in_results[0].excluded is False
 
-    def test_quality_score_affects_combined_score(
-        self, ranker: BM25Ranker
-    ) -> None:
+    def test_quality_score_affects_combined_score(self, ranker: BM25Ranker) -> None:
         quality_high = {
             "git-ops": {
                 "completion_rate": 0.9,
@@ -371,9 +362,7 @@ class TestQualityFiltering:
                 "selections": 10,
             },
         }
-        results = ranker.rank(
-            "git commit web search", quality_data=quality
-        )
+        results = ranker.rank("git commit web search", quality_data=quality)
         names = [r.name for r in results]
         assert "git-ops" not in names
         assert "web-research" in names
@@ -393,16 +382,12 @@ class TestQualityFiltering:
                 "selections": 10,
             },
         }
-        results = ranker.rank(
-            "git email web pine memory", quality_data=quality
-        )
+        results = ranker.rank("git email web pine memory", quality_data=quality)
         names = [r.name for r in results]
         assert "git-ops" not in names
         assert "email-triage" not in names
 
-    def test_quality_data_missing_for_some_skills(
-        self, ranker: BM25Ranker
-    ) -> None:
+    def test_quality_data_missing_for_some_skills(self, ranker: BM25Ranker) -> None:
         # Only provide quality data for git-ops, not others
         quality = {
             "git-ops": {
@@ -420,9 +405,7 @@ class TestQualityFiltering:
         web = next(r for r in results if r.name == "web-research")
         assert web.quality_score == 1.0
 
-    def test_exclusion_reason_set_for_completion(
-        self, ranker: BM25Ranker
-    ) -> None:
+    def test_exclusion_reason_set_for_completion(self, ranker: BM25Ranker) -> None:
         quality = {
             "git-ops": {
                 "completion_rate": 0.1,
@@ -457,8 +440,7 @@ class TestQualityFiltering:
                     if ranked.completion_rate < r2.COMPLETION_RATE_FLOOR:
                         ranked.excluded = True
                         ranked.exclusion_reason = (
-                            f"completion_rate={ranked.completion_rate:.2f}"
-                            f" < {r2.COMPLETION_RATE_FLOOR}"
+                            f"completion_rate={ranked.completion_rate:.2f} < {r2.COMPLETION_RATE_FLOOR}"
                         )
             scored.append(ranked)
 
@@ -466,9 +448,7 @@ class TestQualityFiltering:
         assert git_skill.excluded is True
         assert "completion_rate" in git_skill.exclusion_reason
 
-    def test_exclusion_reason_set_for_fallback(
-        self, ranker: BM25Ranker
-    ) -> None:
+    def test_exclusion_reason_set_for_fallback(self, ranker: BM25Ranker) -> None:
         quality = {
             "git-ops": {
                 "completion_rate": 0.8,
@@ -499,10 +479,7 @@ class TestQualityFiltering:
                 if qd["selections"] >= r2.MIN_SELECTIONS_FOR_EXCLUSION:
                     if ranked.fallback_rate > r2.FALLBACK_RATE_CEIL:
                         ranked.excluded = True
-                        ranked.exclusion_reason = (
-                            f"fallback_rate={ranked.fallback_rate:.2f}"
-                            f" > {r2.FALLBACK_RATE_CEIL}"
-                        )
+                        ranked.exclusion_reason = f"fallback_rate={ranked.fallback_rate:.2f} > {r2.FALLBACK_RATE_CEIL}"
             scored.append(ranked)
 
         git_skill = next(s for s in scored if s.name == "git-ops")
@@ -603,15 +580,11 @@ class TestIntegration:
             }
             for skill in SAMPLE_SKILLS
         }
-        results = ranker.rank(
-            "git email web pine memory", quality_data=quality
-        )
+        results = ranker.rank("git email web pine memory", quality_data=quality)
         # All excluded, so result should be empty
         assert len(results) == 0
 
-    def test_rank_with_mixed_excluded_nonexcluded(
-        self, ranker: BM25Ranker
-    ) -> None:
+    def test_rank_with_mixed_excluded_nonexcluded(self, ranker: BM25Ranker) -> None:
         quality = {
             "git-ops": {
                 "completion_rate": 0.05,  # excluded
@@ -626,9 +599,7 @@ class TestIntegration:
                 "selections": 10,
             },
         }
-        results = ranker.rank(
-            "git commit web search", quality_data=quality
-        )
+        results = ranker.rank("git commit web search", quality_data=quality)
         names = [r.name for r in results]
         assert "git-ops" not in names
         assert "web-research" in names
@@ -665,9 +636,7 @@ class TestIntegration:
         db_results = r.rank("run SQL query on postgres database")
         assert db_results[0].name == "skill-b"
 
-    def test_combined_score_is_bm25_times_quality(
-        self, ranker: BM25Ranker
-    ) -> None:
+    def test_combined_score_is_bm25_times_quality(self, ranker: BM25Ranker) -> None:
         quality = {
             "git-ops": {
                 "completion_rate": 0.9,
@@ -706,9 +675,7 @@ class TestIntegration:
         results = r.rank("deploy to kubernetes using helm")
         assert results[0].name == "kubernetes-deploy"
 
-    def test_repeated_query_terms_boost_score(
-        self, ranker: BM25Ranker
-    ) -> None:
+    def test_repeated_query_terms_boost_score(self, ranker: BM25Ranker) -> None:
         """BM25 should give similar results whether query has repeated terms."""
         r1 = ranker.rank("git")
         r2 = ranker.rank("git git git")

@@ -100,12 +100,59 @@ class StrategyCollector(BaseCollector):
 
         avg = sum(m.value for m in sub_metrics) / max(len(sub_metrics), 1)
 
+        # Compute confidence based on data freshness
+        confidence = self._compute_confidence()
+
         return DimensionScore(
             name="Strategy Validity",
             score=round(avg, 1),
+            confidence=confidence,
             sub_metrics=sub_metrics,
             warnings=warnings,
         )
+
+    def _compute_confidence(self) -> float:
+        """Compute confidence based on trade journal and signal data freshness.
+
+        - trade_journal exists and fresh (<30min) → 1.0
+        - trade_journal exists, slightly stale (30min-2h) → 0.8
+        - trade_journal exists but stale (2-6h) → 0.6
+        - trade_journal exists but very stale (>6h) → 0.3
+        - no trade_journal but signal_log exists → 0.5
+        - no data at all → 0.1
+        """
+        now = time.time()
+
+        # Check trade_journal.jsonl
+        journal_path = Path(self.base_path) / "STATE" / "novatrade" / "trade_journal.jsonl"
+        if journal_path.exists():
+            try:
+                age_h = (now - journal_path.stat().st_mtime) / 3600.0
+                if age_h < 0.5:
+                    return 1.0
+                elif age_h < 2:
+                    return 0.8
+                elif age_h < 6:
+                    return 0.6
+                else:
+                    return 0.3
+            except OSError:
+                pass
+
+        # Fallback: check signal_log.json
+        signal_path = Path(self.base_path) / "STATE" / "novatrade" / "signal_log.json"
+        if signal_path.exists():
+            try:
+                age_h = (now - signal_path.stat().st_mtime) / 3600.0
+                if age_h < 2:
+                    return 0.5
+                else:
+                    return 0.3
+            except OSError:
+                pass
+
+        # No strategy data at all
+        return 0.1
 
     # ------------------------------------------------------------------
     # private helpers
@@ -217,41 +264,47 @@ class StrategyCollector(BaseCollector):
         return score, float(count)
 
     def _check_silent_failure(self) -> tuple[float, float]:
-        """Detect silent failure: market hours + no signals for 4+ hours."""
+        """Detect silent failure: market hours + no signals for 4+ hours.
+
+        Uses strategy-specific data (trade_journal.jsonl, signal_log.json)
+        instead of generic OUTPUT/ file activity.
+        """
         now = datetime.now(timezone.utc)
 
         # Simple market hours check (Mon-Fri, 07:00-21:00 UTC covers London+NY)
         if now.weekday() >= 5:
             # Weekend — no trading expected
-            return 100.0, 0.0
+            return 85.0, 0.0
 
         if now.hour < 7 or now.hour >= 21:
             # Off-hours
-            return 100.0, 0.0
+            return 85.0, 0.0
 
-        # During market hours — check signal freshness
-        output_dir = Path(self.base_path) / "OUTPUT"
-        if not output_dir.is_dir():
-            return 0.0, 1.0  # no output dir during market hours = failure
+        # During market hours — check strategy-specific signal freshness
+        cutoff_4h = time.time() - 4 * 3600
 
-        newest_mtime = 0.0
-        for p in output_dir.iterdir():
-            if not p.is_file():
-                continue
-            try:
-                mt = p.stat().st_mtime
-                if mt > newest_mtime:
-                    newest_mtime = mt
-            except OSError:
-                continue
+        # 1. Check trade_journal.jsonl for recent trade events
+        trades = self._load_trade_log()
+        recent_trades = [t for t in trades if t.get("timestamp", 0) >= cutoff_4h]
+        if recent_trades:
+            return 100.0, 0.0  # trades in last 4h — definitely not silent
 
-        if newest_mtime == 0.0:
-            return 0.0, 1.0
+        # 2. Check signal_log.json for recent signals
+        signals = self._load_signal_log()
+        recent_signals = 0
+        for s in signals:
+            ts = s.get("timestamp", 0)
+            if ts >= cutoff_4h:
+                recent_signals += 1
+            elif s.get("type") == "aggregate" and s.get("count", 0) > 0:
+                # Aggregate entries from live_metrics fallback
+                recent_signals += s.get("count", 0)
 
-        age_h = (time.time() - newest_mtime) / 3600.0
-        if age_h > 4:
-            return 0.0, age_h  # silent failure detected
-        return 100.0, 0.0
+        if recent_signals > 0:
+            return 100.0, 0.0  # signals in last 4h — not silent
+
+        # No strategy-specific activity during market hours → silent failure
+        return 0.0, 4.0  # raw_value = hours of silence
 
     def _check_backtest_alignment(self) -> tuple[float, float]:
         """Check backtest vs live performance alignment.

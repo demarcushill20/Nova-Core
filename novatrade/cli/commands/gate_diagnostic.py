@@ -37,7 +37,7 @@ class ExecutionGateDiagnostic:
             volume=0.01,  # Minimal volume
             order_type=OrderType.MARKET,
             stop_loss=None,
-            take_profit=None
+            take_profit=None,
         )
 
         # Get current state
@@ -56,20 +56,12 @@ class ExecutionGateDiagnostic:
             # Use mock data for diagnostic
             account = self._create_mock_account_state()
             positions = []
-            health = HealthStatus(
-                connected=True,
-                message="Mock health for diagnostic",
-                last_tick_age=30.0
-            )
+            health = HealthStatus(connected=True, message="Mock health for diagnostic", last_tick_age=30.0)
             price = None
 
         # Run full gate evaluation
         decision = self.gate.evaluate(
-            request=test_request,
-            account=account,
-            positions=positions,
-            health=health,
-            price=price
+            request=test_request, account=account, positions=positions, health=health, price=price
         )
 
         # Build detailed gate analysis
@@ -87,7 +79,7 @@ class ExecutionGateDiagnostic:
                 "verdict": decision.verdict.value,
                 "allowed": not decision.denied,
                 "reason": decision.reason,
-                "failed_gates": len([c for c in decision.checks if not c.passed])
+                "failed_gates": len([c for c in decision.checks if not c.passed]),
             },
             "gate_analysis": gate_analysis,
             "configuration_trace": config_trace,
@@ -96,7 +88,7 @@ class ExecutionGateDiagnostic:
                 "symbol": test_request.symbol,
                 "side": test_request.side.value,
                 "volume": test_request.volume,
-                "type": test_request.order_type.value
+                "type": test_request.order_type.value,
             },
             "system_state": {
                 "account_balance": account.balance if account else None,
@@ -104,8 +96,8 @@ class ExecutionGateDiagnostic:
                 "account_mode": account.mode.value if account else None,
                 "open_positions": len(positions),
                 "health_connected": health.connected if health else False,
-                "price_available": price is not None
-            }
+                "price_available": price is not None,
+            },
         }
 
     def _build_gate_analysis(
@@ -115,7 +107,7 @@ class ExecutionGateDiagnostic:
         account: AccountState,
         positions: list[Position],
         health: HealthStatus,
-        price: SymbolPrice
+        price: SymbolPrice,
     ) -> dict[str, dict[str, Any]]:
         """Build detailed analysis for each gate."""
 
@@ -145,7 +137,7 @@ class ExecutionGateDiagnostic:
             "gap_spread": "Gap Trading Prevention",
             "rollover": "Rollover Dead Zone",
             "london_fix": "London Fix Block",
-            "trading_days": "FTMO Trading Days"
+            "trading_days": "FTMO Trading Days",
         }
 
         analysis = {}
@@ -214,12 +206,12 @@ class ExecutionGateDiagnostic:
                 "rule": check.rule,
                 "passed": check.passed,
                 "status": "PASS" if check.passed else "FAIL",
-                "reason": check.reason if hasattr(check, 'reason') else None,
+                "reason": check.reason if hasattr(check, "reason") else None,
                 "impact": "BLOCKING" if not check.passed else "NONE",
                 "configuration_source": self._get_gate_config_source(gate_key),
                 "current_value": self._get_gate_current_value(gate_key, account, positions, health, price),
                 "threshold": self._get_gate_threshold(gate_key),
-                "remediation": self._get_gate_remediation(gate_key, check.passed)
+                "remediation": self._get_gate_remediation(gate_key, check.passed),
             }
 
         return analysis
@@ -239,12 +231,7 @@ class ExecutionGateDiagnostic:
         return source_map.get(gate_key, "config.* (check gate source)")
 
     def _get_gate_current_value(
-        self,
-        gate_key: str,
-        account: AccountState,
-        positions: list[Position],
-        health: HealthStatus,
-        price: SymbolPrice
+        self, gate_key: str, account: AccountState, positions: list[Position], health: HealthStatus, price: SymbolPrice
     ) -> Any:
         """Get current value for gate evaluation."""
         value_map = {
@@ -253,8 +240,10 @@ class ExecutionGateDiagnostic:
             "max_positions": len(positions),
             "health": health.connected if health else False,
             "feed_health": f"{health.last_tick_age:.1f}s ago" if health else "unknown",
-            "trade_allowed": account.trade_allowed if account and hasattr(account, 'trade_allowed') else "unknown",
-            "drawdown": f"{account.equity/account.balance*100:.1f}%" if account and account.balance > 0 else "unknown",
+            "trade_allowed": account.trade_allowed if account and hasattr(account, "trade_allowed") else "unknown",
+            "drawdown": f"{account.equity / account.balance * 100:.1f}%"
+            if account and account.balance > 0
+            else "unknown",
         }
         return value_map.get(gate_key, "dynamic")
 
@@ -298,61 +287,57 @@ class ExecutionGateDiagnostic:
         return {
             "config_file_sources": {
                 "primary": "/etc/novacore/novatrade.env",
-                "override": "configs/novatrade.override.env"
+                "override": "configs/novatrade.override.env",
             },
             "key_settings": {
                 "dry_run": {
                     "value": self.config.dry_run,
                     "source": "NovaTradeCfg.load()",
-                    "env_var": "NOVATRADE_DRY_RUN"
+                    "env_var": "NOVATRADE_DRY_RUN",
                 },
                 "launch_mode": {
-                    "value": getattr(self.config, 'launch_mode', 'unknown'),
+                    "value": getattr(self.config, "launch_mode", "unknown"),
                     "source": "NovaTradeCfg.load()",
-                    "env_var": "NOVATRADE_LAUNCH_MODE"
+                    "env_var": "NOVATRADE_LAUNCH_MODE",
                 },
                 "max_positions": {
                     "value": self.config.risk.max_positions,
                     "source": "config.risk.*",
-                    "env_var": "NOVATRADE_MAX_POSITIONS"
-                }
+                    "env_var": "NOVATRADE_MAX_POSITIONS",
+                },
             },
             "account_configuration": {
                 "metaapi_token_set": bool(self.config.metaapi.token),
                 "account_id_set": bool(self.config.metaapi.account_id),
                 "ftmo_enabled": self.config.ftmo.enabled,
-                "symbols": self.config.symbols
-            }
+                "symbols": self.config.symbols,
+            },
         }
 
     async def _get_runtime_status(self) -> dict[str, Any]:
         """Get real-time runtime status."""
         try:
             import requests
-            response = requests.get('http://localhost:8877/status', timeout=5)
+
+            response = requests.get("http://localhost:8877/status", timeout=5)
             if response.status_code == 200:
                 status = response.json()
                 return {
                     "service_responsive": True,
-                    "pipeline_state": status.get('pipeline', 'unknown'),
-                    "feed_health": status.get('feed_health', {}),
-                    "uptime": status.get('uptime', 0),
-                    "last_activity": status.get('last_activity', 'unknown')
+                    "pipeline_state": status.get("pipeline", "unknown"),
+                    "feed_health": status.get("feed_health", {}),
+                    "uptime": status.get("uptime", 0),
+                    "last_activity": status.get("last_activity", "unknown"),
                 }
             else:
-                return {
-                    "service_responsive": False,
-                    "error": f"HTTP {response.status_code}"
-                }
+                return {"service_responsive": False, "error": f"HTTP {response.status_code}"}
         except Exception as e:
-            return {
-                "service_responsive": False,
-                "error": str(e)
-            }
+            return {"service_responsive": False, "error": str(e)}
 
     def _create_mock_account_state(self) -> AccountState:
         """Create mock account state for diagnostic when adapter unavailable."""
         from novatrade.models import AccountMode
+
         return AccountState(
             balance=100000.0,
             equity=100000.0,
@@ -360,7 +345,7 @@ class ExecutionGateDiagnostic:
             free_margin=100000.0,
             mode=AccountMode.DEMO,
             trade_allowed=True,
-            currency="USD"
+            currency="USD",
         )
 
     async def generate_gate_status_endpoint_response(self) -> dict[str, Any]:
@@ -374,7 +359,7 @@ class ExecutionGateDiagnostic:
                     "gate": name,
                     "rule": info["rule"],
                     "reason": info.get("reason", "Failed"),
-                    "remediation": info["remediation"]
+                    "remediation": info["remediation"],
                 }
                 for name, info in diagnostic["gate_analysis"].items()
                 if info["status"] == "FAIL"
@@ -393,8 +378,8 @@ class ExecutionGateDiagnostic:
                     "account_mode": diagnostic["gate_analysis"].get("account_mode", {}).get("passed", True),
                     "health": diagnostic["gate_analysis"].get("health", {}).get("passed", True),
                     "feed_health": diagnostic["gate_analysis"].get("feed_health", {}).get("passed", True),
-                    "positions": diagnostic["system_state"]["open_positions"]
-                }
+                    "positions": diagnostic["system_state"]["open_positions"],
+                },
             }
         except Exception as e:
             log.error(f"Error generating gate status: {e}")
@@ -407,7 +392,7 @@ class ExecutionGateDiagnostic:
                 "failed_gates": [],
                 "service_health": False,
                 "feed_health": {},
-                "quick_summary": {}
+                "quick_summary": {},
             }
 
 
@@ -416,9 +401,9 @@ async def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="NovaTrade Execution Gate Diagnostic")
-    parser.add_argument('--symbol', default='EURUSD', help='Symbol to test (default: EURUSD)')
-    parser.add_argument('--json', action='store_true', help='Output JSON format')
-    parser.add_argument('--status-only', action='store_true', help='Show only gate status summary')
+    parser.add_argument("--symbol", default="EURUSD", help="Symbol to test (default: EURUSD)")
+    parser.add_argument("--json", action="store_true", help="Output JSON format")
+    parser.add_argument("--status-only", action="store_true", help="Show only gate status summary")
 
     args = parser.parse_args()
 
@@ -435,18 +420,18 @@ async def main():
             print(json.dumps(result, indent=2, default=str))
         else:
             # Human-readable format
-            print("\n" + "="*60)
+            print("\n" + "=" * 60)
             print("NovaTrade Execution Gate Diagnostic")
-            print("="*60)
+            print("=" * 60)
 
             if args.status_only:
                 print(f"\n⚡ Overall Status: {result['overall_status']}")
                 print(f"🎯 Execution Allowed: {result['execution_allowed']}")
                 print(f"❌ Failed Gates: {result['failed_gates_count']}")
 
-                if result['failed_gates']:
+                if result["failed_gates"]:
                     print("\n📋 BLOCKING ISSUES:")
-                    for i, gate in enumerate(result['failed_gates'], 1):
+                    for i, gate in enumerate(result["failed_gates"], 1):
                         print(f"  {i}. {gate['gate']}: {gate['reason']}")
                         print(f"     💡 Fix: {gate['remediation']}")
             else:
@@ -455,10 +440,10 @@ async def main():
                 print(f"❌ Failed Gates: {result['overall_decision']['failed_gates']}")
 
                 print("\n📊 GATE STATUS:")
-                for _name, info in result['gate_analysis'].items():
-                    status_icon = "✅" if info['passed'] else "❌"
+                for _name, info in result["gate_analysis"].items():
+                    status_icon = "✅" if info["passed"] else "❌"
                     print(f"  {status_icon} {info['name']}: {info['status']}")
-                    if not info['passed']:
+                    if not info["passed"]:
                         print(f"     💡 {info['remediation']}")
 
         return 0

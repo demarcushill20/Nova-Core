@@ -30,6 +30,7 @@ class DimensionScore(BaseModel):
 
     name: str  # e.g. "System Health"
     score: float = Field(ge=0.0, le=100.0)
+    confidence: float = Field(ge=0.0, le=1.0, default=1.0)  # 1.0 = full data, 0.0 = no data
     alert_level: AlertLevel = AlertLevel.RED
     sub_metrics: list[SubMetric] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -91,6 +92,10 @@ class ScoringConfig(BaseModel):
             "performance_stability": 0.1,
         }
     )
+    mission_critical: list[str] = Field(
+        default_factory=lambda: ["execution_pipeline", "strategy_validity"]
+    )
+    red_cap_overall: float = 45.0  # if any mission-critical dim is RED, cap overall at this
     # Alert thresholds are fixed at 40 (RED) / 70 (GREEN) in model validators
     # on DimensionScore and ProgressReport — not configurable here by design.
     history_retention_days: int = 7

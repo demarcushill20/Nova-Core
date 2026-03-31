@@ -563,7 +563,7 @@ async def test_strategy_no_trade_log_market_hours(strat_collector):
 
 @pytest.mark.asyncio
 async def test_strategy_silent_failure_weekend(strat_collector):
-    """Weekend = no silent failure expected = 100."""
+    """Weekend = no silent failure expected = 85 (off-hours, not 100 since no data)."""
     weekend = datetime(2026, 3, 28, 12, 0, 0, tzinfo=timezone.utc)  # Saturday
     with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
         mock_dt.now.return_value = weekend
@@ -571,7 +571,7 @@ async def test_strategy_silent_failure_weekend(strat_collector):
         result = await strat_collector.collect()
 
     sf = next(m for m in result.sub_metrics if m.name == "silent_failure_detected")
-    assert sf.value == 100.0
+    assert sf.value == 85.0  # off-hours: not a failure, but not verified either
 
 
 @pytest.mark.asyncio
@@ -929,7 +929,7 @@ async def test_risk_missing_state_dir(risk_collector):
 
 @pytest.mark.asyncio
 async def test_risk_halt_valid_json(risk_collector, tmp_path):
-    """Valid JSON state files = 100."""
+    """No halt_state.json but state dir has files = 80 (probably OK, uncertain)."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
     (state_dir / "daily_loss_tracker.json").write_text('{"limit": 500}')
@@ -937,7 +937,7 @@ async def test_risk_halt_valid_json(risk_collector, tmp_path):
 
     result = await risk_collector.collect()
     halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
-    assert halt.value == 100.0
+    assert halt.value == 80.0  # no halt file, but state dir active
 
 
 @pytest.mark.asyncio
@@ -972,11 +972,12 @@ def perf_collector(tmp_path):
 
 @pytest.mark.asyncio
 async def test_perf_no_data(perf_collector):
-    """No equity history = insufficient-data score (30) with warnings."""
+    """No equity history = neutral placeholder (50) with low confidence + warnings."""
     result = await perf_collector.collect()
     sharpe = next(m for m in result.sub_metrics if m.name == "sharpe_ratio_30d")
-    assert sharpe.value == 30.0
-    assert any("Insufficient equity data" in w for w in result.warnings)
+    assert sharpe.value == 50.0  # neutral, not pessimistic — confidence handles uncertainty
+    assert result.confidence <= 0.2  # very low confidence with no data
+    assert any("No equity data" in w for w in result.warnings)
 
 
 @pytest.mark.asyncio
@@ -1070,7 +1071,7 @@ async def test_perf_dict_format_empty_snapshots(perf_collector, tmp_path):
 
     result = await perf_collector.collect()
     sharpe = next(m for m in result.sub_metrics if m.name == "sharpe_ratio_30d")
-    assert sharpe.value == 30.0  # insufficient data, not neutral 50
+    assert sharpe.value == 50.0  # neutral placeholder — confidence handles uncertainty
 
 
 @pytest.mark.asyncio
@@ -1182,8 +1183,8 @@ async def test_scorer_custom_weights(tmp_path):
 
     scores = {
         "system_health": 90.0,
-        "execution_pipeline": 10.0,
-        "strategy_validity": 10.0,
+        "execution_pipeline": 40.0,  # YELLOW (above RED cap threshold)
+        "strategy_validity": 40.0,  # YELLOW (above RED cap threshold)
         "risk_engine": 10.0,
         "performance_stability": 10.0,
     }
@@ -1198,6 +1199,7 @@ async def test_scorer_custom_weights(tmp_path):
 
     report = await scorer.score()
     # Only system_health matters (weight 1.0), rest are 0
+    # Mission-critical dims are YELLOW (40), so no RED-cap applies
     assert report.overall_score == 90.0
 
 

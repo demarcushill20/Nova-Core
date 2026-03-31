@@ -281,14 +281,10 @@ class SkillDashboard:
         ]
 
         if health["frozen_skills"]:
-            lines.append(
-                f"\U0001f9ca Frozen: {', '.join(health['frozen_skills'])}"
-            )
+            lines.append(f"\U0001f9ca Frozen: {', '.join(health['frozen_skills'])}")
 
         # Top unhealthy skills (limit to 3)
-        unhealthy = [
-            s for s in health.get("skills", []) if not s.get("is_healthy", True)
-        ]
+        unhealthy = [s for s in health.get("skills", []) if not s.get("is_healthy", True)]
         for s in unhealthy[:3]:
             name = s.get("skill_name", "?")
             rate = s.get("completion_rate", 0)
@@ -312,15 +308,10 @@ class SkillDashboard:
 
         queue = evo.get("queue_status", {})
         if queue:
-            lines.append(
-                f"Queue: {queue.get('queued', 0)} pending, "
-                f"{queue.get('active_evolutions', 0)} active"
-            )
+            lines.append(f"Queue: {queue.get('queued', 0)} pending, {queue.get('active_evolutions', 0)} active")
             frozen = queue.get("frozen_skills", [])
             if frozen:
-                lines.append(
-                    f"\U0001f9ca Frozen: {', '.join(frozen)}"
-                )
+                lines.append(f"\U0001f9ca Frozen: {', '.join(frozen)}")
 
         return "\n".join(lines)
 

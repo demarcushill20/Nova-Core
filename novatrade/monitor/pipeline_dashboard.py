@@ -19,7 +19,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from novatrade.adapter.base import MT5Adapter
@@ -27,7 +26,6 @@ from novatrade.config import NovaTradeCfg
 from novatrade.execution.trading_agent import TradingAgent
 from novatrade.models import AccountState
 from novatrade.monitor.feed_health import FeedHealthSupervisor
-from novatrade.monitor.health import HealthSnapshot
 from novatrade.risk.risk_engine import RiskEngine
 
 log = logging.getLogger("novatrade.monitor.pipeline_dashboard")
@@ -105,7 +103,7 @@ class PipelineHealth:
                 "adapter_type": self.adapter_type,
                 "uptime_seconds": self.live_loop_uptime_seconds,
                 "errors_1h": self.errors_1h,
-            }
+            },
         }
 
 
@@ -192,7 +190,7 @@ class PipelineDashboard:
 
         # Trim to max size
         if len(self.health_history) > self.max_history_size:
-            self.health_history = self.health_history[-self.max_history_size:]
+            self.health_history = self.health_history[-self.max_history_size :]
 
     async def _persist_health(self, health: PipelineHealth) -> None:
         """Persist health snapshot to disk."""
@@ -261,9 +259,7 @@ class PipelineDashboard:
             health.feed_staleness_max_minutes = max_staleness
 
             if last_tick_time > 0:
-                health.feed_last_tick_utc = datetime.fromtimestamp(
-                    last_tick_time, tz=timezone.utc
-                ).isoformat()
+                health.feed_last_tick_utc = datetime.fromtimestamp(last_tick_time, tz=timezone.utc).isoformat()
 
         except Exception:
             log.debug("failed to collect feed health", exc_info=True)
@@ -272,11 +268,11 @@ class PipelineDashboard:
         """Collect execution pipeline health metrics."""
         try:
             # Get agent state and metrics
-            if hasattr(self.agent, 'get_metrics'):
+            if hasattr(self.agent, "get_metrics"):
                 metrics = await self.agent.get_metrics()
-                health.orders_pending = metrics.get('orders_pending', 0)
-                health.orders_filled_1h = metrics.get('orders_filled_1h', 0)
-                health.orders_rejected_1h = metrics.get('orders_rejected_1h', 0)
+                health.orders_pending = metrics.get("orders_pending", 0)
+                health.orders_filled_1h = metrics.get("orders_filled_1h", 0)
+                health.orders_rejected_1h = metrics.get("orders_rejected_1h", 0)
 
                 total_orders = health.orders_filled_1h + health.orders_rejected_1h
                 if total_orders > 0:
@@ -288,7 +284,7 @@ class PipelineDashboard:
     async def _collect_risk_health(self, health: PipelineHealth) -> None:
         """Collect risk engine health metrics."""
         try:
-            if hasattr(self.risk_engine, 'get_account_state'):
+            if hasattr(self.risk_engine, "get_account_state"):
                 account: AccountState = await self.risk_engine.get_account_state()
 
                 # Calculate drawdown
@@ -308,9 +304,9 @@ class PipelineDashboard:
             health.adapter_type = type(self.adapter).__name__
 
             # Check connection status
-            if hasattr(self.adapter, 'is_connected'):
+            if hasattr(self.adapter, "is_connected"):
                 health.adapter_connected = await self.adapter.is_connected()
-            elif hasattr(self.adapter, '_connected'):
+            elif hasattr(self.adapter, "_connected"):
                 health.adapter_connected = self.adapter._connected
 
         except Exception:

@@ -84,19 +84,69 @@ class RiskCollector(BaseCollector):
 
         avg = sum(m.value for m in sub_metrics) / max(len(sub_metrics), 1)
 
+        # Compute confidence based on risk data recency
+        confidence = self._compute_confidence(warnings)
+
         return DimensionScore(
             name="Risk Engine",
             score=round(avg, 1),
+            confidence=confidence,
             sub_metrics=sub_metrics,
             warnings=warnings,
         )
+
+    def _compute_confidence(self, warnings: list[str]) -> float:
+        """Compute confidence based on risk state file freshness.
+
+        Checks daily_loss_tracker.json and halt_state.json for recency.
+        """
+        now = time.time()
+        state_dir = Path(self.base_path) / "STATE" / "novatrade"
+
+        key_files = [
+            state_dir / "daily_loss_tracker.json",
+            state_dir / "halt_state.json",
+        ]
+
+        available = 0
+        fresh = 0  # updated within 30 min
+        slightly_stale = 0  # 30min-2h
+
+        for kf in key_files:
+            if kf.exists():
+                available += 1
+                try:
+                    age_h = (now - kf.stat().st_mtime) / 3600.0
+                    if age_h < 0.5:
+                        fresh += 1
+                    elif age_h < 2:
+                        slightly_stale += 1
+                except OSError:
+                    pass
+
+        if available == 0:
+            warnings.append("no risk state files — confidence very low")
+            return 0.1
+
+        if fresh == available:
+            return 1.0
+        elif fresh + slightly_stale == available:
+            return 0.8
+        elif available > 0:
+            return 0.6
+
+        return 0.3
 
     # ------------------------------------------------------------------
     # private helpers
     # ------------------------------------------------------------------
 
     def _check_drawdown_enforcement(self) -> tuple[float, float]:
-        """Check if risk engine state files exist with drawdown config."""
+        """Check if risk engine is actively tracking and enforcing drawdown limits.
+
+        Parses actual drawdown values and verifies the tracker is being updated,
+        not just that the file exists.
+        """
         state_dir = Path(self.base_path) / "STATE" / "novatrade"
 
         # Look for daily_loss_tracker.json (our FTMO compliance tracker)
@@ -106,38 +156,90 @@ class RiskCollector(BaseCollector):
 
         try:
             data = json.loads(tracker_path.read_text())
-            if isinstance(data, dict):
-                return 100.0, 1.0
-            return 50.0, 0.5
+            if not isinstance(data, dict):
+                return 30.0, 0.0  # file exists but not a dict
+
+            # Check data freshness — was this updated recently?
+            age_min = (time.time() - tracker_path.stat().st_mtime) / 60.0
+
+            # Parse actual drawdown values
+            daily_loss = data.get("daily_loss_pct", data.get("daily_loss", 0))
+            max_daily = data.get("max_daily_loss_pct", data.get("limit", 5.0))  # FTMO default 5%
+            try:
+                daily_loss = float(daily_loss)
+                max_daily = float(max_daily)
+            except (TypeError, ValueError):
+                daily_loss = 0.0
+                max_daily = 5.0
+
+            # Score based on drawdown proximity to FTMO limits
+            if max_daily > 0:
+                usage_ratio = abs(daily_loss) / max_daily
+            else:
+                usage_ratio = 0.0
+
+            if usage_ratio >= 1.0:
+                score = 0.0  # FTMO limit breached
+            elif usage_ratio >= 0.8:
+                score = 30.0  # dangerously close to limit
+            elif usage_ratio >= 0.5:
+                score = 70.0  # elevated but manageable
+            else:
+                score = 100.0  # well within limits
+
+            # Penalize stale tracking data
+            if age_min > 30:
+                score = min(score, 60.0)  # stale tracker is concerning
+            if age_min > 120:
+                score = min(score, 40.0)  # very stale
+
+            return score, round(usage_ratio, 3)
+
         except (json.JSONDecodeError, OSError):
             return 30.0, 0.0
 
     def _check_halt_state(self) -> tuple[float, float]:
-        """Check STATE/novatrade/ for halt state persistence."""
+        """Check STATE/novatrade/halt_state.json content for halt status.
+
+        Reads the actual halt state rather than just checking file existence.
+        - If halt_state shows active halt → score reflects halt appropriately
+        - If no halt (or no halt file) → score high
+        - If file is missing → assume not halted but with low confidence
+        """
         state_dir = Path(self.base_path) / "STATE" / "novatrade"
-        if not state_dir.is_dir():
-            return 0.0, 0.0
+        halt_path = state_dir / "halt_state.json"
 
-        # The halt state is typically in a risk state file or similar
-        # If the directory exists and has state files, it means persistence works
-        state_files = list(state_dir.glob("*.json"))
-        if not state_files:
-            return 0.0, 0.0
+        if not halt_path.exists():
+            # No halt file → assume not halted, but this is uncertain
+            # Check if state dir at least exists with some files
+            if state_dir.is_dir() and any(state_dir.glob("*.json")):
+                return 80.0, 0.0  # state dir active, no halt file = probably OK
+            return 50.0, -1.0  # no state dir at all — uncertain
 
-        # Validate each file is parseable JSON
-        valid = 0
-        for f in state_files:
-            try:
-                json.loads(f.read_text())
-                valid += 1
-            except (json.JSONDecodeError, OSError):
-                continue
+        try:
+            data = json.loads(halt_path.read_text())
+            if not isinstance(data, dict):
+                return 60.0, 0.0  # file exists but not proper format
 
-        if valid == len(state_files):
-            return 100.0, float(valid)
-        elif valid > 0:
-            return 70.0, float(valid)
-        return 0.0, 0.0
+            halted = data.get("halted", data.get("is_halted", False))
+            reason = data.get("reason", "unknown")
+
+            if halted:
+                # Trading is halted — this is a valid risk state
+                # Score depends on whether halt is protective (good) vs broken (bad)
+                halt_type = data.get("type", data.get("halt_type", ""))
+                if halt_type in ("manual", "protective", "scheduled"):
+                    # Intentional halt — risk engine is working correctly
+                    return 70.0, 1.0
+                else:
+                    # Unplanned halt — risk engine triggered on anomaly
+                    return 40.0, 1.0
+            else:
+                # Not halted — normal operation
+                return 100.0, 0.0
+
+        except (json.JSONDecodeError, OSError):
+            return 50.0, 0.0  # can't read halt file → uncertain
 
     def _check_capital_allocation(self) -> tuple[float, float]:
         """Check if position sizing / lot config exists."""

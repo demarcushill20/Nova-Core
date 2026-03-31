@@ -104,9 +104,7 @@ class SkillCache:
         except Exception as e:
             logger.warning("Failed to save skill token stats: %s", e)
 
-    def record_usage(
-        self, skill_name: str, tokens_used: int, was_cached: bool
-    ) -> None:
+    def record_usage(self, skill_name: str, tokens_used: int, was_cached: bool) -> None:
         """Record token usage for a skill execution."""
         if skill_name not in self._stats:
             self._stats[skill_name] = TokenStats(skill_name=skill_name)
@@ -144,17 +142,13 @@ class SkillCache:
             "total_warm_executions": total_warm_count,
             "total_tokens_saved": total_saved,
             "overall_savings_ratio": round(
-                1.0 - (total_warm / max(total_cold, 1))
-                if total_cold > 0
-                else 0.0,
+                1.0 - (total_warm / max(total_cold, 1)) if total_cold > 0 else 0.0,
                 4,
             ),
         }
 
     @staticmethod
-    def make_skill_cache_key(
-        skill_id: str, task_pattern: str, model: str = ""
-    ) -> str:
+    def make_skill_cache_key(skill_id: str, task_pattern: str, model: str = "") -> str:
         """Generate a cache key for skill-specific responses."""
         raw = f"skill:{skill_id}:{task_pattern}:{model}"
         return f"skill_cache:{hashlib.sha256(raw.encode()).hexdigest()}"
@@ -171,10 +165,7 @@ class SkillCache:
         Shows only name + description + quality stats during selection.
         Full SKILL.md body is loaded only AFTER selection.
         """
-        return (
-            f"[{skill_name}] {description} "
-            f"(quality={quality_score:.2f}, completion={completion_rate:.2f})"
-        )
+        return f"[{skill_name}] {description} (quality={quality_score:.2f}, completion={completion_rate:.2f})"
 
     @staticmethod
     def build_execution_template(
@@ -192,7 +183,5 @@ class SkillCache:
             "task_pattern": task_description[:500],
             "execution_template": execution_summary[:2000],
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "template_key": hashlib.sha256(
-                f"{skill_name}:{task_description[:500]}".encode()
-            ).hexdigest()[:16],
+            "template_key": hashlib.sha256(f"{skill_name}:{task_description[:500]}".encode()).hexdigest()[:16],
         }

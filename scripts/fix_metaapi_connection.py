@@ -41,7 +41,7 @@ class MetaAPIConnectionRecovery:
             "rate_limiting_status": {},
             "connection_test": {},
             "subscription_status": {},
-            "recommendations": []
+            "recommendations": [],
         }
 
         # 1. Config validation
@@ -52,7 +52,7 @@ class MetaAPIConnectionRecovery:
                 "errors": validation_errors,
                 "account_id": self.config.metaapi.account_id[:8] + "..." if self.config.metaapi.account_id else None,
                 "region": self.config.metaapi.region,
-                "token_set": bool(self.config.metaapi.token)
+                "token_set": bool(self.config.metaapi.token),
             }
         except Exception as e:
             diagnostics["config_validation"] = {"error": str(e)}
@@ -77,7 +77,7 @@ class MetaAPIConnectionRecovery:
                 "connected": status.connected,
                 "message": status.message,
                 "connect_time_seconds": round(connect_time, 2),
-                "adapter_connected": getattr(adapter, '_connected', False)
+                "adapter_connected": getattr(adapter, "_connected", False),
             }
 
             if status.connected:
@@ -246,7 +246,7 @@ class MetaAPIConnectionRecovery:
 
         try:
             # Step 1: Clean disconnect if connected
-            if self.adapter and hasattr(self.adapter, '_connection'):
+            if self.adapter and hasattr(self.adapter, "_connection"):
                 try:
                     await self.adapter._connection.close()
                     actions.append("Closed existing connection")
@@ -278,11 +278,11 @@ async def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="MetaAPI Connection Recovery Tool")
-    parser.add_argument('--diagnose', action='store_true', help='Run diagnostics only')
-    parser.add_argument('--recover', action='store_true', help='Attempt connection recovery')
-    parser.add_argument('--force', action='store_true', help='Force clean reconnection')
-    parser.add_argument('--reset-rate-limits', action='store_true', help='Reset rate limiting state')
-    parser.add_argument('--json', action='store_true', help='Output JSON format')
+    parser.add_argument("--diagnose", action="store_true", help="Run diagnostics only")
+    parser.add_argument("--recover", action="store_true", help="Attempt connection recovery")
+    parser.add_argument("--force", action="store_true", help="Force clean reconnection")
+    parser.add_argument("--reset-rate-limits", action="store_true", help="Reset rate limiting state")
+    parser.add_argument("--json", action="store_true", help="Output JSON format")
 
     args = parser.parse_args()
 
@@ -299,11 +299,12 @@ async def main():
 
             if args.json:
                 import json
+
                 print(json.dumps(diagnostics, indent=2, default=str))
             else:
-                print("\n" + "="*60)
+                print("\n" + "=" * 60)
                 print("MetaAPI Connection Diagnostics")
-                print("="*60)
+                print("=" * 60)
 
                 # Config validation
                 config_val = diagnostics["config_validation"]
@@ -363,6 +364,7 @@ async def main():
     except Exception as e:
         if args.json:
             import json
+
             print(json.dumps({"error": str(e)}, indent=2))
         else:
             print(f"❌ Error: {e}")
@@ -370,8 +372,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     exit(asyncio.run(main()))

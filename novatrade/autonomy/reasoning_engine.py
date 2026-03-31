@@ -87,7 +87,7 @@ class ReasoningEngine:
         self.config = config or ReasoningConfig()
         self._state_dir = Path(base_path) / "STATE"
         self._history_path = self._state_dir / "reasoning_history.json"
-        self._last_score: float | None = None
+        self._last_score: float | None = self._load_last_score()
 
     async def reason(
         self,
@@ -114,6 +114,7 @@ class ReasoningEngine:
                 return None
 
         self._last_score = report.overall_score
+        self._save_last_score(report.overall_score)
 
         # Build prompt
         prompt = self._build_prompt(context, report, recent_outcomes)
@@ -367,6 +368,27 @@ class ReasoningEngine:
             suggested_actions=[],
             confidence="high",
         )
+
+    # -------------------------------------------------------------------
+    # Last-score persistence (survives process restarts)
+    # -------------------------------------------------------------------
+
+    def _load_last_score(self) -> float | None:
+        """Load the last reasoning score from disk."""
+        path = self._state_dir / "reasoning_last_score.json"
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text())
+            return data.get("score")
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def _save_last_score(self, score: float) -> None:
+        """Save the current reasoning score to disk."""
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        path = self._state_dir / "reasoning_last_score.json"
+        path.write_text(json.dumps({"score": score, "updated_at": datetime.now(timezone.utc).isoformat()}))
 
     # -------------------------------------------------------------------
     # Budget tracking

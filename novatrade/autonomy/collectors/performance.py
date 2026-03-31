@@ -13,8 +13,13 @@ class PerformanceCollector(BaseCollector):
     """Measures performance stability: Sharpe, drawdown, win rate, PF trend."""
 
     # Sentinel returned by sub-metric helpers when data is insufficient.
-    _NO_DATA_SCORE = 30.0
+    # Use neutral 50.0 instead of pessimistic 30.0 — confidence handles uncertainty.
+    _NO_DATA_SCORE = 50.0
     _NO_DATA_RAW = -1.0
+
+    # Minimum trades for full confidence
+    _MIN_TRADES_FULL = 30
+    _MIN_TRADES_PARTIAL = 10
 
     async def collect(self) -> DimensionScore:
         warnings: list[str] = []
@@ -52,9 +57,10 @@ class PerformanceCollector(BaseCollector):
                 sub_metrics.append(SubMetric(name=metric_name, value=0.0))
 
         # Distinguish "no data available" from "low performance"
+        data_points = len(equity_data)
         if not has_data:
             warnings.append(
-                f"No equity data available — scores are placeholders "
+                f"No equity data available — scores are neutral placeholders "
                 f"({self._NO_DATA_SCORE:.0f}/100), not indicators of poor performance"
             )
         elif no_data_count > 0:
@@ -62,11 +68,32 @@ class PerformanceCollector(BaseCollector):
                 f"{no_data_count}/{len(_metrics)} metrics lack sufficient data — partial placeholder scores in effect"
             )
 
+        # Add insufficient_data sub-metric showing data availability
+        sub_metrics.append(
+            SubMetric(
+                name="insufficient_data",
+                value=min(100.0, (data_points / self._MIN_TRADES_FULL) * 100.0),
+                raw_value=float(data_points),
+                description=f"Data points: {data_points}/{self._MIN_TRADES_FULL} needed for full confidence",
+            )
+        )
+
         avg = sum(m.value for m in sub_metrics) / max(len(sub_metrics), 1)
+
+        # Set confidence based on data availability
+        if data_points >= self._MIN_TRADES_FULL:
+            confidence = 1.0
+        elif data_points >= self._MIN_TRADES_PARTIAL:
+            confidence = 0.5
+        elif data_points >= 2:
+            confidence = 0.3
+        else:
+            confidence = 0.1
 
         return DimensionScore(
             name="Performance Stability",
             score=round(avg, 1),
+            confidence=confidence,
             sub_metrics=sub_metrics,
             warnings=warnings,
         )

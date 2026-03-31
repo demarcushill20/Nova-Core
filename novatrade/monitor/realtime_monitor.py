@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,24 +36,24 @@ class SignalMetrics:
     # Signal Generation
     signals_generated_1h: int = 0
     signals_generated_today: int = 0
-    last_signal_timestamp: Optional[float] = None
-    last_signal_type: Optional[str] = None
+    last_signal_timestamp: float | None = None
+    last_signal_type: str | None = None
 
     # Strategy Processing
     strategy_cycles_1h: int = 0
     strategy_cycles_today: int = 0
     avg_processing_time_ms: float = 0.0
-    last_processing_timestamp: Optional[float] = None
+    last_processing_timestamp: float | None = None
 
     # Execution Status
     orders_placed_1h: int = 0
     orders_placed_today: int = 0
     order_success_rate: float = 100.0
-    last_execution_timestamp: Optional[float] = None
+    last_execution_timestamp: float | None = None
 
     # Market Data Health
     ticks_received_1h: int = 0
-    last_tick_timestamp: Optional[float] = None
+    last_tick_timestamp: float | None = None
     data_staleness_seconds: float = 0.0
 
     # Risk Interventions
@@ -80,12 +80,12 @@ class TradingHealthStatus:
     signals_per_hour_actual: int = 0
 
     # Alerts
-    critical_alerts: List[str] = field(default_factory=list)
-    warning_alerts: List[str] = field(default_factory=list)
+    critical_alerts: list[str] = field(default_factory=list)
+    warning_alerts: list[str] = field(default_factory=list)
 
     # Live Trading Readiness Score
     readiness_score: float = 0.0  # 0-100, where >80 is ready for live
-    readiness_factors: Dict[str, float] = field(default_factory=dict)
+    readiness_factors: dict[str, float] = field(default_factory=dict)
 
 
 class RealtimeMonitor:
@@ -100,15 +100,15 @@ class RealtimeMonitor:
         self.health_status = TradingHealthStatus()
 
         # Historical data (last 24 hours)
-        self.signal_history: List[Dict[str, Any]] = []
-        self.health_history: List[TradingHealthStatus] = []
+        self.signal_history: list[dict[str, Any]] = []
+        self.health_history: list[TradingHealthStatus] = []
 
         # Configuration
         self.monitor_interval = 30  # seconds
         self.alert_thresholds = {
             "data_staleness_max": 300,  # 5 minutes
-            "signal_drought_hours": 4,   # Alert if no signals for 4 hours
-            "order_failure_rate": 10,    # Alert if >10% order failures
+            "signal_drought_hours": 4,  # Alert if no signals for 4 hours
+            "order_failure_rate": 10,  # Alert if >10% order failures
         }
 
     async def start_monitoring(self):
@@ -163,9 +163,7 @@ class RealtimeMonitor:
             # In production, would check actual tick timestamps
             now = time.time()
             if self.current_metrics.last_tick_timestamp:
-                self.current_metrics.data_staleness_seconds = (
-                    now - self.current_metrics.last_tick_timestamp
-                )
+                self.current_metrics.data_staleness_seconds = now - self.current_metrics.last_tick_timestamp
 
             # Increment tick counter (simplified)
             self.current_metrics.ticks_received_1h += 1
@@ -202,8 +200,8 @@ class RealtimeMonitor:
 
         # Strategy Health (based on recent processing)
         strategy_active = (
-            self.current_metrics.last_processing_timestamp and
-            (now - self.current_metrics.last_processing_timestamp) < 300
+            self.current_metrics.last_processing_timestamp
+            and (now - self.current_metrics.last_processing_timestamp) < 300
         )
         self.health_status.strategy_status = "HEALTHY" if strategy_active else "DEGRADED"
 
@@ -306,7 +304,7 @@ class RealtimeMonitor:
             "alerts": {
                 "critical": self.health_status.critical_alerts,
                 "warnings": self.health_status.warning_alerts,
-            }
+            },
         }
 
         # Write to dashboard file
@@ -338,7 +336,7 @@ class MonitoringDashboard:
     def __init__(self, output_dir: Path = Path("OUTPUT/novatrade")):
         self.output_dir = output_dir
 
-    def generate_html_dashboard(self, dashboard_data: Dict[str, Any]) -> str:
+    def generate_html_dashboard(self, dashboard_data: dict[str, Any]) -> str:
         """Generate HTML dashboard"""
         html = f"""
         <!DOCTYPE html>
@@ -359,40 +357,40 @@ class MonitoringDashboard:
         </head>
         <body>
             <h1>NovaTrade Real-Time Monitor</h1>
-            <p>Last Update: {dashboard_data.get('timestamp', 'Unknown')}</p>
+            <p>Last Update: {dashboard_data.get("timestamp", "Unknown")}</p>
 
             <div class="section">
-                <h2>Overall Status: <span class="{dashboard_data.get('overall_status', '').lower()}">{dashboard_data.get('overall_status', 'UNKNOWN')}</span></h2>
-                <div class="metric">Confidence Score: {dashboard_data.get('confidence_score', 0):.1f}/100</div>
-                <div class="metric">Live Trading Readiness: {dashboard_data.get('readiness_score', 0):.1f}/100</div>
+                <h2>Overall Status: <span class="{dashboard_data.get("overall_status", "").lower()}">{dashboard_data.get("overall_status", "UNKNOWN")}</span></h2>
+                <div class="metric">Confidence Score: {dashboard_data.get("confidence_score", 0):.1f}/100</div>
+                <div class="metric">Live Trading Readiness: {dashboard_data.get("readiness_score", 0):.1f}/100</div>
             </div>
 
             <div class="section">
                 <h3>Signal Generation</h3>
-                <div class="metric">Signals (1h): {dashboard_data.get('signals', {}).get('generated_1h', 0)}</div>
-                <div class="metric">Signals (today): {dashboard_data.get('signals', {}).get('generated_today', 0)}</div>
-                <div class="metric">Last Signal Type: {dashboard_data.get('signals', {}).get('last_signal_type', 'None')}</div>
+                <div class="metric">Signals (1h): {dashboard_data.get("signals", {}).get("generated_1h", 0)}</div>
+                <div class="metric">Signals (today): {dashboard_data.get("signals", {}).get("generated_today", 0)}</div>
+                <div class="metric">Last Signal Type: {dashboard_data.get("signals", {}).get("last_signal_type", "None")}</div>
             </div>
 
             <div class="section">
                 <h3>Strategy Processing</h3>
-                <div class="metric">Status: <span class="{dashboard_data.get('strategy', {}).get('status', '').lower()}">{dashboard_data.get('strategy', {}).get('status', 'UNKNOWN')}</span></div>
-                <div class="metric">Cycles (1h): {dashboard_data.get('strategy', {}).get('cycles_1h', 0)}</div>
-                <div class="metric">Avg Processing: {dashboard_data.get('strategy', {}).get('avg_processing_ms', 0):.1f}ms</div>
+                <div class="metric">Status: <span class="{dashboard_data.get("strategy", {}).get("status", "").lower()}">{dashboard_data.get("strategy", {}).get("status", "UNKNOWN")}</span></div>
+                <div class="metric">Cycles (1h): {dashboard_data.get("strategy", {}).get("cycles_1h", 0)}</div>
+                <div class="metric">Avg Processing: {dashboard_data.get("strategy", {}).get("avg_processing_ms", 0):.1f}ms</div>
             </div>
 
             <div class="section">
                 <h3>Market Data</h3>
-                <div class="metric">Status: <span class="{dashboard_data.get('market_data', {}).get('status', '').lower()}">{dashboard_data.get('market_data', {}).get('status', 'UNKNOWN')}</span></div>
-                <div class="metric">Ticks (1h): {dashboard_data.get('market_data', {}).get('ticks_1h', 0)}</div>
-                <div class="metric">Data Staleness: {dashboard_data.get('market_data', {}).get('staleness_seconds', 0):.0f}s</div>
+                <div class="metric">Status: <span class="{dashboard_data.get("market_data", {}).get("status", "").lower()}">{dashboard_data.get("market_data", {}).get("status", "UNKNOWN")}</span></div>
+                <div class="metric">Ticks (1h): {dashboard_data.get("market_data", {}).get("ticks_1h", 0)}</div>
+                <div class="metric">Data Staleness: {dashboard_data.get("market_data", {}).get("staleness_seconds", 0):.0f}s</div>
             </div>
 
             <div class="section">
                 <h3>Order Execution</h3>
-                <div class="metric">Status: <span class="{dashboard_data.get('execution', {}).get('status', '').lower()}">{dashboard_data.get('execution', {}).get('status', 'UNKNOWN')}</span></div>
-                <div class="metric">Orders (1h): {dashboard_data.get('execution', {}).get('orders_1h', 0)}</div>
-                <div class="metric">Success Rate: {dashboard_data.get('execution', {}).get('success_rate', 0):.1f}%</div>
+                <div class="metric">Status: <span class="{dashboard_data.get("execution", {}).get("status", "").lower()}">{dashboard_data.get("execution", {}).get("status", "UNKNOWN")}</span></div>
+                <div class="metric">Orders (1h): {dashboard_data.get("execution", {}).get("orders_1h", 0)}</div>
+                <div class="metric">Success Rate: {dashboard_data.get("execution", {}).get("success_rate", 0):.1f}%</div>
             </div>
 
             <div class="section">
@@ -400,12 +398,12 @@ class MonitoringDashboard:
         """
 
         # Add critical alerts
-        critical_alerts = dashboard_data.get('alerts', {}).get('critical', [])
+        critical_alerts = dashboard_data.get("alerts", {}).get("critical", [])
         for alert in critical_alerts:
             html += f'<div class="alert">CRITICAL: {alert}</div>'
 
         # Add warnings
-        warnings = dashboard_data.get('alerts', {}).get('warnings', [])
+        warnings = dashboard_data.get("alerts", {}).get("warnings", [])
         for warning in warnings:
             html += f'<div class="warning">WARNING: {warning}</div>'
 

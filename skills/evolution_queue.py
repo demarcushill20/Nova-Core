@@ -100,17 +100,12 @@ class EvolutionQueue:
 
             # Check queue size
             if len(self._queue) >= MAX_QUEUE_SIZE:
-                logger.warning(
-                    "Evolution queue full (%d), rejecting", MAX_QUEUE_SIZE
-                )
+                logger.warning("Evolution queue full (%d), rejecting", MAX_QUEUE_SIZE)
                 return False
 
             # Dedup: skip if same skill + same type already queued
             for existing in self._queue:
-                if (
-                    existing.skill_name == request.skill_name
-                    and existing.evolution_type == request.evolution_type
-                ):
+                if existing.skill_name == request.skill_name and existing.evolution_type == request.evolution_type:
                     logger.info(
                         "Duplicate evolution request for %s/%s, skipping",
                         request.skill_name,
@@ -163,9 +158,7 @@ class EvolutionQueue:
 
             return None
 
-    def complete_evolution(
-        self, request: EvolutionRequest, success: bool
-    ) -> None:
+    def complete_evolution(self, request: EvolutionRequest, success: bool) -> None:
         """Mark an evolution as completed. Updates circuit breaker state."""
         with self._lock:
             self._active_evolutions = max(0, self._active_evolutions - 1)
@@ -190,9 +183,7 @@ class EvolutionQueue:
 
         # Clean old entries outside window
         cutoff = now - CIRCUIT_BREAKER_WINDOW
-        self._fix_timestamps[skill_name] = [
-            ts for ts in self._fix_timestamps[skill_name] if ts > cutoff
-        ]
+        self._fix_timestamps[skill_name] = [ts for ts in self._fix_timestamps[skill_name] if ts > cutoff]
 
         # Check circuit breaker
         if len(self._fix_timestamps[skill_name]) >= CIRCUIT_BREAKER_MAX_FIXES:
@@ -271,9 +262,7 @@ class EvolutionQueue:
         """Persist queue to disk."""
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)
-            self._queue_path.write_text(
-                json.dumps([r.to_dict() for r in self._queue], indent=2)
-            )
+            self._queue_path.write_text(json.dumps([r.to_dict() for r in self._queue], indent=2))
         except Exception as e:
             logger.warning("Failed to save evolution queue: %s", e)
 
@@ -282,13 +271,9 @@ class EvolutionQueue:
         try:
             if self._history_path.exists():
                 data = json.loads(self._history_path.read_text())
-                self._fix_timestamps = {
-                    k: v for k, v in data.get("fix_timestamps", {}).items()
-                }
+                self._fix_timestamps = {k: v for k, v in data.get("fix_timestamps", {}).items()}
                 self._frozen_skills = set(data.get("frozen_skills", []))
-                self._last_evolution = {
-                    k: v for k, v in data.get("last_evolution", {}).items()
-                }
+                self._last_evolution = {k: v for k, v in data.get("last_evolution", {}).items()}
         except Exception as e:
             logger.warning("Failed to load evolution history: %s", e)
 
@@ -305,9 +290,7 @@ class EvolutionQueue:
         except Exception as e:
             logger.warning("Failed to save evolution history: %s", e)
 
-    def _save_history_entry(
-        self, request: EvolutionRequest, success: bool
-    ) -> None:
+    def _save_history_entry(self, request: EvolutionRequest, success: bool) -> None:
         """Append a completed evolution to the audit trail."""
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)

@@ -22,7 +22,7 @@ import logging
 import random
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from novatrade.config import NovaTradeCfg
 from novatrade.execution.trading_agent import AgentResult, AgentState, TradingAgent
@@ -34,6 +34,7 @@ log = logging.getLogger("novatrade.execution.live_trading_agent")
 # Price normalization fix for MetaAPI broker compatibility
 # ---------------------------------------------------------------------------
 
+
 class PriceNormalizer:
     """Price normalization for MetaAPI broker compatibility.
 
@@ -41,15 +42,25 @@ class PriceNormalizer:
     formatted to the correct decimal precision for each symbol.
     """
 
-    SYMBOL_PRECISION = {
+    SYMBOL_PRECISION: ClassVar[dict[str, int]] = {
         # Major FX pairs (5 decimals)
-        "EURUSD": 5, "GBPUSD": 5, "USDCHF": 5, "AUDUSD": 5,
-        "NZDUSD": 5, "USDCAD": 5, "EURGBP": 5, "EURJPY": 3,
+        "EURUSD": 5,
+        "GBPUSD": 5,
+        "USDCHF": 5,
+        "AUDUSD": 5,
+        "NZDUSD": 5,
+        "USDCAD": 5,
+        "EURGBP": 5,
+        "EURJPY": 3,
         # JPY pairs (3 decimals)
-        "USDJPY": 3, "GBPJPY": 3, "AUDJPY": 3, "NZDJPY": 3,
-        "CADJPY": 3, "CHFJPY": 3,
+        "USDJPY": 3,
+        "GBPJPY": 3,
+        "AUDJPY": 3,
+        "NZDJPY": 3,
+        "CADJPY": 3,
+        "CHFJPY": 3,
         # Default for unknown symbols
-        "DEFAULT": 5
+        "DEFAULT": 5,
     }
 
     @classmethod
@@ -75,6 +86,7 @@ class PriceNormalizer:
                 payload[price_field] = normalized
 
         return payload
+
 
 # ---------------------------------------------------------------------------
 # Mapping helpers

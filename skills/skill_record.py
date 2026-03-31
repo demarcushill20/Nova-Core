@@ -66,9 +66,7 @@ class SkillVersion:
     is_active: bool = True
     version: str = "1.0.0"
     stats: ExecutionStats = field(default_factory=ExecutionStats)
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     created_by: str = "system"
 
     def to_dict(self) -> dict:
@@ -125,9 +123,7 @@ class SkillVersion:
                 failures=stats_d.get("failures", 0),
                 fallbacks=stats_d.get("fallbacks", 0),
             ),
-            created_at=d.get(
-                "created_at", datetime.now(timezone.utc).isoformat()
-            ),
+            created_at=d.get("created_at", datetime.now(timezone.utc).isoformat()),
             created_by=d.get("created_by", "system"),
         )
 

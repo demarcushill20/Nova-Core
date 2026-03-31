@@ -3,14 +3,13 @@
 
 import asyncio
 import sys
-import os
-from pathlib import Path
 
 # Add the fusion memory MCP to path
-sys.path.append('/home/nova/Nova_AI_Fusion_Memory_MCP')
+sys.path.append("/home/nova/Nova_AI_Fusion_Memory_MCP")
 
-from app.services.memory_service import MemoryService
 from app.config import Config
+from app.services.memory_service import MemoryService
+
 
 async def store_daily_summary():
     """Store the daily summary in Fusion Memory."""
@@ -20,8 +19,15 @@ async def store_daily_summary():
     metadata = {
         "memory_type": "daily_summary",
         "project": "nova-core",
-        "tags": ["daily-report", "2026-03-30", "production-fixes", "autonomy-peak", "novatrade-profit", "critical-breakthrough"],
-        "category": "daily_summary"
+        "tags": [
+            "daily-report",
+            "2026-03-30",
+            "production-fixes",
+            "autonomy-peak",
+            "novatrade-profit",
+            "critical-breakthrough",
+        ],
+        "category": "daily_summary",
     }
 
     try:
@@ -33,7 +39,7 @@ async def store_daily_summary():
         item_id = await memory_service.perform_upsert(
             content=content,
             metadata=metadata,
-            id=None  # Let it auto-generate
+            id=None,  # Let it auto-generate
         )
 
         print(f"✅ Daily summary stored successfully with ID: {item_id}")
@@ -42,8 +48,10 @@ async def store_daily_summary():
     except Exception as e:
         print(f"❌ Error storing daily summary: {e}")
         import traceback
+
         traceback.print_exc()
         return None
+
 
 if __name__ == "__main__":
     asyncio.run(store_daily_summary())

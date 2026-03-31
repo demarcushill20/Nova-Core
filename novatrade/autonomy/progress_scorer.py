@@ -22,6 +22,7 @@ from novatrade.autonomy.collectors.risk_engine import RiskCollector
 from novatrade.autonomy.collectors.strategy import StrategyCollector
 from novatrade.autonomy.collectors.system_health import SystemHealthCollector
 from novatrade.autonomy.schemas import (
+    AlertLevel,
     DimensionScore,
     ProgressReport,
     ScoreTrend,
@@ -98,11 +99,39 @@ class ProgressScorer:
                     warnings.append(f"Collector {name} failed: {exc}")
                     dimensions[name] = DimensionScore(name=name, score=0.0, warnings=[str(exc)])
 
-        # Weighted average
-        total_weight = sum(self.config.weights.get(k, 0.2) for k in dimensions)
+        # Confidence-adjusted weighted average: low-confidence dimensions
+        # contribute min(score, 50) to prevent inflation from unreliable data.
+        total_weight = 0.0
+        weighted_sum = 0.0
+        for k, dim in dimensions.items():
+            w = self.config.weights.get(k, 0.2)
+            # Low-confidence dimensions: use min(score, 50) to prevent inflation
+            effective_score = dim.score if dim.confidence >= 0.5 else min(dim.score, 50.0)
+            weighted_sum += effective_score * w
+            total_weight += w
         if total_weight == 0:
             total_weight = 1.0
-        overall = sum(dimensions[k].score * self.config.weights.get(k, 0.2) for k in dimensions) / total_weight
+        overall = weighted_sum / total_weight
+
+        # Mission guardrail: cap overall if any mission-critical dimension is RED
+        for critical_dim in self.config.mission_critical:
+            dim = dimensions.get(critical_dim)
+            if dim and dim.alert_level == AlertLevel.RED:
+                if overall > self.config.red_cap_overall:
+                    warnings.append(
+                        f"Overall capped at {self.config.red_cap_overall} — "
+                        f"{critical_dim} is RED ({dim.score:.0f})"
+                    )
+                    overall = self.config.red_cap_overall
+                    break
+
+        # Confidence penalty: low-confidence dimensions can only drag down, not inflate
+        for name, dim in dimensions.items():
+            if dim.confidence < 0.5:
+                warnings.append(
+                    f"{name} has low confidence ({dim.confidence:.1f}) — "
+                    "score may not reflect actual state"
+                )
 
         # Trend detection (reuses pre-loaded history)
         trends = self._compute_trends(dimensions, history)

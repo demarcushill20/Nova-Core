@@ -152,9 +152,7 @@ class TestEvolutionQueue:
         assert second is not None
         assert second.skill_name == "mid"
 
-    def test_enqueue_dedup_same_skill_and_type(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_enqueue_dedup_same_skill_and_type(self, queue: EvolutionQueue) -> None:
         req1 = _make_request(skill_name="dup-skill", evolution_type="FIX")
         req2 = _make_request(
             skill_name="dup-skill",
@@ -166,9 +164,7 @@ class TestEvolutionQueue:
         assert queue.enqueue(req2) is False
         assert queue.queue_size() == 1
 
-    def test_enqueue_allows_different_types_same_skill(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_enqueue_allows_different_types_same_skill(self, queue: EvolutionQueue) -> None:
         fix = _make_request(skill_name="multi", evolution_type="FIX")
         derived = _make_request(skill_name="multi", evolution_type="DERIVED")
 
@@ -185,14 +181,10 @@ class TestEvolutionQueue:
         assert queue.enqueue(overflow) is False
         assert queue.queue_size() == MAX_QUEUE_SIZE
 
-    def test_dequeue_returns_none_when_empty(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_dequeue_returns_none_when_empty(self, queue: EvolutionQueue) -> None:
         assert queue.dequeue() is None
 
-    def test_dequeue_respects_max_concurrent(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_dequeue_respects_max_concurrent(self, queue: EvolutionQueue) -> None:
         for i in range(MAX_CONCURRENT_EVOLUTIONS + 2):
             queue.enqueue(_make_request(skill_name=f"skill-{i}"))
 
@@ -212,9 +204,7 @@ class TestEvolutionQueue:
         next_item = queue.dequeue()
         assert next_item is not None
 
-    def test_complete_evolution_decrements_active_count(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_complete_evolution_decrements_active_count(self, queue: EvolutionQueue) -> None:
         req = _make_request()
         queue.enqueue(req)
         dequeued = queue.dequeue()
@@ -275,9 +265,7 @@ class TestQueuePersistence:
         q.enqueue(_make_request())
         assert (tmp_path / "evolution_queue.json").exists()
 
-    def test_history_file_created_on_complete(
-        self, tmp_path: Path
-    ) -> None:
+    def test_history_file_created_on_complete(self, tmp_path: Path) -> None:
         q = EvolutionQueue(state_dir=str(tmp_path))
         req = _make_request()
         q.enqueue(req)
@@ -306,9 +294,7 @@ class TestQueuePersistence:
 class TestCircuitBreaker:
     """Circuit breaker trips, freezes, unfreezes, persists."""
 
-    def test_circuit_breaker_trips_after_max_fixes(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_circuit_breaker_trips_after_max_fixes(self, queue: EvolutionQueue) -> None:
         skill = "fragile-skill"
         for i in range(CIRCUIT_BREAKER_MAX_FIXES):
             req = _make_request(
@@ -325,9 +311,7 @@ class TestCircuitBreaker:
 
         assert queue.is_frozen(skill) is True
 
-    def test_circuit_breaker_does_not_trip_before_threshold(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_circuit_breaker_does_not_trip_before_threshold(self, queue: EvolutionQueue) -> None:
         skill = "ok-skill"
         for i in range(CIRCUIT_BREAKER_MAX_FIXES - 1):
             req = _make_request(
@@ -342,9 +326,7 @@ class TestCircuitBreaker:
 
         assert queue.is_frozen(skill) is False
 
-    def test_circuit_breaker_cleans_old_timestamps(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_circuit_breaker_cleans_old_timestamps(self, queue: EvolutionQueue) -> None:
         skill = "aging-skill"
         old_time = time.time() - CIRCUIT_BREAKER_WINDOW - 100
 
@@ -362,9 +344,7 @@ class TestCircuitBreaker:
         assert len(queue._fix_timestamps.get(skill, [])) == 1
         assert queue.is_frozen(skill) is False
 
-    def test_is_frozen_returns_false_by_default(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_is_frozen_returns_false_by_default(self, queue: EvolutionQueue) -> None:
         assert queue.is_frozen("nonexistent") is False
 
     def test_unfreeze_skill(self, queue: EvolutionQueue) -> None:
@@ -376,14 +356,10 @@ class TestCircuitBreaker:
         assert queue.unfreeze_skill("frozen-skill") is True
         assert queue.is_frozen("frozen-skill") is False
 
-    def test_unfreeze_nonexistent_returns_false(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_unfreeze_nonexistent_returns_false(self, queue: EvolutionQueue) -> None:
         assert queue.unfreeze_skill("never-frozen") is False
 
-    def test_frozen_skill_rejects_new_enqueue(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_frozen_skill_rejects_new_enqueue(self, queue: EvolutionQueue) -> None:
         with queue._lock:
             queue._frozen_skills.add("blocked-skill")
 
@@ -391,9 +367,7 @@ class TestCircuitBreaker:
         assert queue.enqueue(req) is False
         assert queue.queue_size() == 0
 
-    def test_frozen_skill_skipped_during_dequeue(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_frozen_skill_skipped_during_dequeue(self, queue: EvolutionQueue) -> None:
         # Enqueue two skills, then freeze the first
         queue.enqueue(_make_request(skill_name="will-freeze", priority=1))
         queue.enqueue(_make_request(skill_name="will-work", priority=2))
@@ -405,9 +379,7 @@ class TestCircuitBreaker:
         assert dequeued is not None
         assert dequeued.skill_name == "will-work"
 
-    def test_circuit_breaker_persists_across_reload(
-        self, tmp_path: Path
-    ) -> None:
+    def test_circuit_breaker_persists_across_reload(self, tmp_path: Path) -> None:
         q1 = EvolutionQueue(state_dir=str(tmp_path))
         with q1._lock:
             q1._frozen_skills.add("persisted-freeze")
@@ -435,9 +407,7 @@ class TestCircuitBreaker:
 class TestCooldown:
     """Cooldown enforcement between evolutions of the same skill."""
 
-    def test_cooldown_rejects_immediate_re_enqueue(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_cooldown_rejects_immediate_re_enqueue(self, queue: EvolutionQueue) -> None:
         req = _make_request(skill_name="hot-skill")
         queue.enqueue(req)
         dequeued = queue.dequeue()
@@ -451,18 +421,14 @@ class TestCooldown:
         )
         assert queue.enqueue(req2) is False
 
-    def test_cooldown_allows_after_expiry(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_cooldown_allows_after_expiry(self, queue: EvolutionQueue) -> None:
         req = _make_request(skill_name="cooled-skill")
         queue.enqueue(req)
         dequeued = queue.dequeue()
         queue.complete_evolution(dequeued, success=True)
 
         # Simulate cooldown expiry
-        queue._last_evolution["cooled-skill"] = (
-            time.time() - COOLDOWN_BETWEEN_EVOLUTIONS - 1
-        )
+        queue._last_evolution["cooled-skill"] = time.time() - COOLDOWN_BETWEEN_EVOLUTIONS - 1
 
         req2 = _make_request(
             skill_name="cooled-skill",
@@ -477,14 +443,10 @@ class TestCooldown:
         queue._last_evolution["recent"] = time.time()
         assert queue.is_in_cooldown("recent") is True
 
-        queue._last_evolution["old"] = (
-            time.time() - COOLDOWN_BETWEEN_EVOLUTIONS - 1
-        )
+        queue._last_evolution["old"] = time.time() - COOLDOWN_BETWEEN_EVOLUTIONS - 1
         assert queue.is_in_cooldown("old") is False
 
-    def test_dequeue_skips_cooldown_skills(
-        self, queue: EvolutionQueue
-    ) -> None:
+    def test_dequeue_skips_cooldown_skills(self, queue: EvolutionQueue) -> None:
         queue.enqueue(_make_request(skill_name="cooling", priority=1))
         queue.enqueue(_make_request(skill_name="ready", priority=2))
 
@@ -504,9 +466,7 @@ class TestCooldown:
 class TestAuditTrail:
     """Audit trail JSONL persistence."""
 
-    def test_save_history_entry_writes_jsonl(
-        self, tmp_path: Path
-    ) -> None:
+    def test_save_history_entry_writes_jsonl(self, tmp_path: Path) -> None:
         q = EvolutionQueue(state_dir=str(tmp_path))
         req = _make_request(skill_name="audited-skill", task_id="task_audit")
         q.enqueue(req)
@@ -546,9 +506,7 @@ class TestAuditTrail:
         assert entries[1]["success"] is False
         assert entries[2]["success"] is True
 
-    def test_audit_entry_includes_attempt_count(
-        self, tmp_path: Path
-    ) -> None:
+    def test_audit_entry_includes_attempt_count(self, tmp_path: Path) -> None:
         q = EvolutionQueue(state_dir=str(tmp_path))
         req = _make_request(attempt_count=2)
         q.enqueue(req)

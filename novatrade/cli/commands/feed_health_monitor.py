@@ -21,9 +21,11 @@ from novatrade.monitor.rate_limit_guardian import get_global_guardian
 
 log = logging.getLogger("novatrade.cli.feed_health_monitor")
 
+
 @dataclass
 class FeedHealthReport:
     """Feed health diagnostic report."""
+
     timestamp: float
     overall_status: str  # HEALTHY, STALE, CRITICAL, ERROR
     symbols: dict[str, dict[str, Any]]
@@ -43,9 +45,9 @@ class FeedHealthMonitor:
     """Enhanced feed health monitoring and recovery system."""
 
     # Health thresholds
-    HEALTHY_THRESHOLD = 60.0      # < 60s = healthy
-    STALE_THRESHOLD = 300.0       # 60-300s = stale
-    CRITICAL_THRESHOLD = 1800.0   # > 1800s = critical
+    HEALTHY_THRESHOLD = 60.0  # < 60s = healthy
+    STALE_THRESHOLD = 300.0  # 60-300s = stale
+    CRITICAL_THRESHOLD = 1800.0  # > 1800s = critical
 
     def __init__(self, config: NovaTradeCfg):
         self.config = config
@@ -55,7 +57,7 @@ class FeedHealthMonitor:
     async def get_service_status(self) -> dict[str, Any]:
         """Get current service status from HTTP endpoint."""
         try:
-            response = requests.get('http://localhost:8877/status', timeout=5)
+            response = requests.get("http://localhost:8877/status", timeout=5)
             if response.status_code == 200:
                 return response.json()
             else:
@@ -85,27 +87,39 @@ class FeedHealthMonitor:
             return "HEALTHY", "Feed is current", []
 
         elif last_tick_age < self.STALE_THRESHOLD:
-            return "STALE", f"Feed age {last_tick_age:.1f}s - monitoring", [
-                "Monitor for improvement in next few minutes",
-                "Check network connectivity",
-            ]
+            return (
+                "STALE",
+                f"Feed age {last_tick_age:.1f}s - monitoring",
+                [
+                    "Monitor for improvement in next few minutes",
+                    "Check network connectivity",
+                ],
+            )
 
         elif last_tick_age < self.CRITICAL_THRESHOLD:
-            return "CRITICAL", f"Feed age {last_tick_age:.1f}s - needs attention", [
-                "Service restart recommended",
-                "Check MetaAPI subscription status",
-                "Verify broker connectivity",
-                "Check rate limiting status"
-            ]
+            return (
+                "CRITICAL",
+                f"Feed age {last_tick_age:.1f}s - needs attention",
+                [
+                    "Service restart recommended",
+                    "Check MetaAPI subscription status",
+                    "Verify broker connectivity",
+                    "Check rate limiting status",
+                ],
+            )
 
         else:
-            return "ERROR", f"Feed age {last_tick_age:.1f}s - immediate action required", [
-                "IMMEDIATE: Service restart required",
-                "Check MetaAPI account status",
-                "Verify network connectivity",
-                "Check for API quota exhaustion",
-                "Consider switching to backup data source"
-            ]
+            return (
+                "ERROR",
+                f"Feed age {last_tick_age:.1f}s - immediate action required",
+                [
+                    "IMMEDIATE: Service restart required",
+                    "Check MetaAPI account status",
+                    "Verify network connectivity",
+                    "Check for API quota exhaustion",
+                    "Consider switching to backup data source",
+                ],
+            )
 
     async def diagnose_feed_health(self) -> FeedHealthReport:
         """Run comprehensive feed health diagnostic."""
@@ -131,7 +145,7 @@ class FeedHealthMonitor:
                 rate_limiting_status={},
                 recovery_actions=recovery_actions,
                 recommendations=recommendations,
-                service_uptime=0
+                service_uptime=0,
             )
 
         # Extract feed health data
@@ -142,7 +156,7 @@ class FeedHealthMonitor:
         # Analyze each symbol
         worst_status = "HEALTHY"
         for symbol, symbol_data in symbols.items():
-            last_tick_age = symbol_data.get("last_tick_age", float('inf'))
+            last_tick_age = symbol_data.get("last_tick_age", float("inf"))
             current_state = symbol_data.get("state", "UNKNOWN")
 
             # Assess health
@@ -156,7 +170,7 @@ class FeedHealthMonitor:
                 "reason": reason,
                 "current_spread_pips": symbol_data.get("current_spread_pips"),
                 "tick_count": symbol_data.get("tick_count", 0),
-                "recommendations": symbol_recommendations
+                "recommendations": symbol_recommendations,
             }
 
             # Track worst status
@@ -179,24 +193,26 @@ class FeedHealthMonitor:
 
         # Generate recovery actions based on status
         if overall_status == "ERROR":
-            recovery_actions.extend([
-                "sudo systemctl restart novacore-novatrade.service",
-                "Check MetaAPI account status and quotas",
-                "Verify network connectivity to mt-client-api-v1.london-a.agiliumtrade.ai",
-                "Review logs in /var/log/novacore-novatrade/"
-            ])
+            recovery_actions.extend(
+                [
+                    "sudo systemctl restart novacore-novatrade.service",
+                    "Check MetaAPI account status and quotas",
+                    "Verify network connectivity to mt-client-api-v1.london-a.agiliumtrade.ai",
+                    "Review logs in /var/log/novacore-novatrade/",
+                ]
+            )
         elif overall_status == "CRITICAL":
-            recovery_actions.extend([
-                "Consider service restart if no improvement in 5 minutes",
-                "Check MetaAPI subscription usage",
-                "Monitor rate limiting guardian status"
-            ])
+            recovery_actions.extend(
+                [
+                    "Consider service restart if no improvement in 5 minutes",
+                    "Check MetaAPI subscription usage",
+                    "Monitor rate limiting guardian status",
+                ]
+            )
         elif overall_status == "STALE":
-            recovery_actions.extend([
-                "Monitor for auto-recovery",
-                "Check network stability",
-                "Verify broker trading hours"
-            ])
+            recovery_actions.extend(
+                ["Monitor for auto-recovery", "Check network stability", "Verify broker trading hours"]
+            )
 
         # Remove duplicates
         recommendations = list(set(recommendations))
@@ -209,7 +225,7 @@ class FeedHealthMonitor:
             rate_limiting_status=rate_status,
             recovery_actions=recovery_actions,
             recommendations=recommendations,
-            service_uptime=uptime
+            service_uptime=uptime,
         )
 
     async def continuous_monitoring(self, interval: float = 30.0, alert_threshold: int = 3) -> None:
@@ -237,9 +253,7 @@ class FeedHealthMonitor:
 
                 # Alert if consistently critical
                 now = time.time()
-                if (consecutive_critical >= alert_threshold and
-                    now - last_alert_time > alert_cooldown):
-
+                if consecutive_critical >= alert_threshold and now - last_alert_time > alert_cooldown:
                     await self._send_alert(report)
                     last_alert_time = now
 
@@ -296,15 +310,19 @@ class FeedHealthMonitor:
         report = await self.diagnose_feed_health()
 
         if format == "json":
-            return json.dumps({
-                "timestamp": report.timestamp,
-                "overall_status": report.overall_status,
-                "symbols": report.symbols,
-                "rate_limiting_status": report.rate_limiting_status,
-                "recovery_actions": report.recovery_actions,
-                "recommendations": report.recommendations,
-                "service_uptime": report.service_uptime
-            }, indent=2, default=str)
+            return json.dumps(
+                {
+                    "timestamp": report.timestamp,
+                    "overall_status": report.overall_status,
+                    "symbols": report.symbols,
+                    "rate_limiting_status": report.rate_limiting_status,
+                    "recovery_actions": report.recovery_actions,
+                    "recommendations": report.recommendations,
+                    "service_uptime": report.service_uptime,
+                },
+                indent=2,
+                default=str,
+            )
 
         elif format == "text":
             lines = []
@@ -313,12 +331,14 @@ class FeedHealthMonitor:
             lines.append("=" * 60)
             lines.append(f"Timestamp: {datetime.fromtimestamp(report.timestamp).isoformat()}")
             lines.append(f"Overall Status: {report.overall_status}")
-            lines.append(f"Service Uptime: {report.service_uptime:.0f}s ({report.service_uptime/3600:.1f}h)")
+            lines.append(f"Service Uptime: {report.service_uptime:.0f}s ({report.service_uptime / 3600:.1f}h)")
             lines.append("")
 
             lines.append("SYMBOL HEALTH:")
             for symbol, data in report.symbols.items():
-                status_icon = {"HEALTHY": "✅", "STALE": "⚠️", "CRITICAL": "❌", "ERROR": "💥"}.get(data["health_status"], "❓")
+                status_icon = {"HEALTHY": "✅", "STALE": "⚠️", "CRITICAL": "❌", "ERROR": "💥"}.get(
+                    data["health_status"], "❓"
+                )
                 lines.append(f"  {status_icon} {symbol}: {data['health_status']} ({data['last_tick_age']:.1f}s)")
 
             if report.recovery_actions:
@@ -344,10 +364,10 @@ async def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="NovaTrade Feed Health Monitor")
-    parser.add_argument('--monitor', action='store_true', help='Run continuous monitoring')
-    parser.add_argument('--interval', type=float, default=30.0, help='Monitoring interval in seconds')
-    parser.add_argument('--format', choices=['json', 'text'], default='text', help='Output format')
-    parser.add_argument('--once', action='store_true', help='Run once and exit (default)')
+    parser.add_argument("--monitor", action="store_true", help="Run continuous monitoring")
+    parser.add_argument("--interval", type=float, default=30.0, help="Monitoring interval in seconds")
+    parser.add_argument("--format", choices=["json", "text"], default="text", help="Output format")
+    parser.add_argument("--once", action="store_true", help="Run once and exit (default)")
 
     args = parser.parse_args()
 
@@ -367,7 +387,7 @@ async def main():
 
     except Exception as e:
         log.error(f"Feed health monitoring failed: {e}")
-        if args.format == 'json':
+        if args.format == "json":
             print(json.dumps({"error": str(e)}, indent=2))
         else:
             print(f"❌ Feed health monitoring failed: {e}")

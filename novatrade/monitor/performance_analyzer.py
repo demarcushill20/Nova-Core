@@ -18,7 +18,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("novatrade.monitor.performance")
@@ -26,6 +25,7 @@ log = logging.getLogger("novatrade.monitor.performance")
 
 class PerformanceLevel(Enum):
     """Performance level classification."""
+
     EXCELLENT = "EXCELLENT"
     GOOD = "GOOD"
     AVERAGE = "AVERAGE"
@@ -35,6 +35,7 @@ class PerformanceLevel(Enum):
 
 class AlertSeverity(Enum):
     """Performance alert severity levels."""
+
     INFO = "INFO"
     WARNING = "WARNING"
     CRITICAL = "CRITICAL"
@@ -146,11 +147,11 @@ class PerformanceAnalyzer:
 
         # Default alert thresholds
         self.thresholds = {
-            "max_drawdown_pct": -2.0,       # Alert if drawdown > 2%
-            "min_approval_rate": 0.8,       # Alert if approval rate < 80%
-            "max_consecutive_losses": 5,    # Alert if 5+ consecutive losses
-            "min_feed_health": 0.9,         # Alert if feed health < 90%
-            "max_error_rate": 0.05,         # Alert if error rate > 5%
+            "max_drawdown_pct": -2.0,  # Alert if drawdown > 2%
+            "min_approval_rate": 0.8,  # Alert if approval rate < 80%
+            "max_consecutive_losses": 5,  # Alert if 5+ consecutive losses
+            "min_feed_health": 0.9,  # Alert if feed health < 90%
+            "max_error_rate": 0.05,  # Alert if error rate > 5%
             "min_execution_quality": 75.0,  # Alert if execution quality < 75
         }
 
@@ -169,9 +170,7 @@ class PerformanceAnalyzer:
         equity_change_pct = (equity_change / self.initial_equity) * 100
 
         total_signals = (
-            metrics.get("signals_entry", 0) +
-            metrics.get("signals_exit", 0) +
-            metrics.get("signals_modify_sl", 0)
+            metrics.get("signals_entry", 0) + metrics.get("signals_exit", 0) + metrics.get("signals_modify_sl", 0)
         )
 
         approval_rate = 1.0
@@ -216,64 +215,76 @@ class PerformanceAnalyzer:
 
         # Drawdown alert
         if metrics.equity_change_pct <= self.thresholds["max_drawdown_pct"]:
-            alerts.append(PerformanceAlert(
-                severity=AlertSeverity.WARNING if metrics.equity_change_pct > -5.0 else AlertSeverity.CRITICAL,
-                message=f"Account drawdown {metrics.equity_change_pct:.2f}% exceeds threshold",
-                metric_name="drawdown_pct",
-                current_value=metrics.equity_change_pct,
-                threshold=self.thresholds["max_drawdown_pct"],
-            ))
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING if metrics.equity_change_pct > -5.0 else AlertSeverity.CRITICAL,
+                    message=f"Account drawdown {metrics.equity_change_pct:.2f}% exceeds threshold",
+                    metric_name="drawdown_pct",
+                    current_value=metrics.equity_change_pct,
+                    threshold=self.thresholds["max_drawdown_pct"],
+                )
+            )
 
         # Approval rate alert
         if metrics.approval_rate < self.thresholds["min_approval_rate"]:
-            alerts.append(PerformanceAlert(
-                severity=AlertSeverity.WARNING,
-                message=f"Signal approval rate {metrics.approval_rate:.1%} below threshold",
-                metric_name="approval_rate",
-                current_value=metrics.approval_rate,
-                threshold=self.thresholds["min_approval_rate"],
-            ))
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"Signal approval rate {metrics.approval_rate:.1%} below threshold",
+                    metric_name="approval_rate",
+                    current_value=metrics.approval_rate,
+                    threshold=self.thresholds["min_approval_rate"],
+                )
+            )
 
         # Consecutive losses alert
         if metrics.consecutive_losses >= self.thresholds["max_consecutive_losses"]:
-            alerts.append(PerformanceAlert(
-                severity=AlertSeverity.WARNING,
-                message=f"Consecutive losses ({metrics.consecutive_losses}) exceed threshold",
-                metric_name="consecutive_losses",
-                current_value=metrics.consecutive_losses,
-                threshold=self.thresholds["max_consecutive_losses"],
-            ))
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"Consecutive losses ({metrics.consecutive_losses}) exceed threshold",
+                    metric_name="consecutive_losses",
+                    current_value=metrics.consecutive_losses,
+                    threshold=self.thresholds["max_consecutive_losses"],
+                )
+            )
 
         # Feed health alert
         if metrics.feed_health_score < self.thresholds["min_feed_health"]:
-            alerts.append(PerformanceAlert(
-                severity=AlertSeverity.CRITICAL,
-                message=f"Feed health score {metrics.feed_health_score:.1%} below threshold",
-                metric_name="feed_health_score",
-                current_value=metrics.feed_health_score,
-                threshold=self.thresholds["min_feed_health"],
-            ))
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.CRITICAL,
+                    message=f"Feed health score {metrics.feed_health_score:.1%} below threshold",
+                    metric_name="feed_health_score",
+                    current_value=metrics.feed_health_score,
+                    threshold=self.thresholds["min_feed_health"],
+                )
+            )
 
         # Error rate alert
         if metrics.error_rate > self.thresholds["max_error_rate"]:
-            alerts.append(PerformanceAlert(
-                severity=AlertSeverity.WARNING,
-                message=f"Error rate {metrics.error_rate:.1%} exceeds threshold",
-                metric_name="error_rate",
-                current_value=metrics.error_rate,
-                threshold=self.thresholds["max_error_rate"],
-            ))
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"Error rate {metrics.error_rate:.1%} exceeds threshold",
+                    metric_name="error_rate",
+                    current_value=metrics.error_rate,
+                    threshold=self.thresholds["max_error_rate"],
+                )
+            )
 
         # Execution quality alert
         exec_quality = metrics.execution_quality_score()
         if exec_quality < self.thresholds["min_execution_quality"]:
-            alerts.append(PerformanceAlert(
-                severity=AlertSeverity.WARNING,
-                message=f"Execution quality score {exec_quality:.1f} below threshold",
-                metric_name="execution_quality",
-                current_value=exec_quality,
-                threshold=self.thresholds["min_execution_quality"],
-            ))
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"Execution quality score {exec_quality:.1f} below threshold",
+                    metric_name="execution_quality",
+                    current_value=exec_quality,
+                    threshold=self.thresholds["min_execution_quality"],
+                )
+            )
 
         return alerts
 
@@ -282,7 +293,7 @@ class PerformanceAnalyzer:
         if len(self.history) < 2:
             return "INSUFFICIENT_DATA"
 
-        recent = self.history[-min(window, len(self.history)):]
+        recent = self.history[-min(window, len(self.history)) :]
 
         # Calculate trend in equity change percentage
         equity_changes = [m.equity_change_pct for m in recent]

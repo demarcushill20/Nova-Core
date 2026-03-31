@@ -14,9 +14,8 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from novatrade.config import NovaTradeCfg
-from novatrade.models import AccountState, AccountMode
-from novatrade.monitor.pipeline_dashboard import PipelineHealth, PipelineDashboard
-
+from novatrade.models import AccountMode, AccountState
+from novatrade.monitor.pipeline_dashboard import PipelineDashboard, PipelineHealth
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -55,9 +54,9 @@ def mock_agent():
     """Mock trading agent."""
     agent = AsyncMock()
     agent.get_metrics.return_value = {
-        'orders_pending': 2,
-        'orders_filled_1h': 5,
-        'orders_rejected_1h': 1,
+        "orders_pending": 2,
+        "orders_filled_1h": 5,
+        "orders_rejected_1h": 1,
     }
     return agent
 
@@ -91,9 +90,7 @@ def mock_feed_supervisor():
     stale_state.staleness_seconds = 300.0  # 5 minutes
     stale_state.last_tick_time = time.time() - 300
 
-    supervisor.get_feed_state.side_effect = lambda symbol: (
-        healthy_state if symbol == "EURUSD" else stale_state
-    )
+    supervisor.get_feed_state.side_effect = lambda symbol: healthy_state if symbol == "EURUSD" else stale_state
 
     return supervisor
 
@@ -183,7 +180,7 @@ async def test_collect_feed_health(mock_cfg, mock_feed_supervisor):
     await dashboard._collect_feed_health(health)
 
     assert health.feed_symbols_active == 1  # EURUSD healthy
-    assert health.feed_symbols_stale == 1   # GBPUSD stale
+    assert health.feed_symbols_stale == 1  # GBPUSD stale
     assert health.feed_staleness_max_minutes == 5.0
     assert health.feed_last_tick_utc != ""
 
@@ -199,7 +196,7 @@ async def test_collect_execution_health(mock_cfg, mock_agent):
     assert health.orders_pending == 2
     assert health.orders_filled_1h == 5
     assert health.orders_rejected_1h == 1
-    assert health.execution_success_rate == 5/6  # 5 filled out of 6 total
+    assert health.execution_success_rate == 5 / 6  # 5 filled out of 6 total
 
 
 @pytest.mark.asyncio
@@ -454,8 +451,7 @@ async def test_dashboard_monitoring_loop_error_handling(mock_cfg):
     dashboard = PipelineDashboard(mock_cfg)
 
     # Mock collect_health_snapshot to raise an exception
-    with patch.object(dashboard, 'collect_health_snapshot', side_effect=Exception("Mock error")):
-
+    with patch.object(dashboard, "collect_health_snapshot", side_effect=Exception("Mock error")):
         # Start dashboard for short duration
         await dashboard.start(interval_seconds=0.01)
         await asyncio.sleep(0.05)  # Let it run a few iterations

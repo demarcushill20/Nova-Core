@@ -207,7 +207,8 @@ def test_action_mode_values():
     assert ActionMode.MONITOR == "monitor"
     assert ActionMode.VALIDATE == "validate"
     assert ActionMode.REPAIR == "repair"
-    assert len(ActionMode) == 6
+    assert ActionMode.ESCALATE == "escalate"
+    assert len(ActionMode) == 7
 
 
 # =====================================================================

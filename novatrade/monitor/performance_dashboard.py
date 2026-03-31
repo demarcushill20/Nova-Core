@@ -21,7 +21,7 @@ from typing import Any
 
 import requests
 
-from novatrade.monitor.performance_analyzer import PerformanceAnalyzer, AlertSeverity
+from novatrade.monitor.performance_analyzer import PerformanceAnalyzer
 
 log = logging.getLogger("novatrade.monitor.dashboard")
 
@@ -78,33 +78,39 @@ class PerformanceDashboard:
         ]
 
         # Add alerts section
-        if summary['alert_count'] > 0:
-            lines.extend([
-                "⚠️  PERFORMANCE ALERTS",
-                "-" * 30,
-            ])
+        if summary["alert_count"] > 0:
+            lines.extend(
+                [
+                    "⚠️  PERFORMANCE ALERTS",
+                    "-" * 30,
+                ]
+            )
 
-            for alert in summary['alerts']:
+            for alert in summary["alerts"]:
                 severity_emoji = {
-                    'INFO': '💡',
-                    'WARNING': '⚠️',
-                    'CRITICAL': '🚨',
+                    "INFO": "💡",
+                    "WARNING": "⚠️",
+                    "CRITICAL": "🚨",
                 }
-                emoji = severity_emoji.get(alert['severity'], '⚠️')
+                emoji = severity_emoji.get(alert["severity"], "⚠️")
                 lines.append(f"{emoji} {alert['severity']}: {alert['message']}")
 
             lines.append("")
         else:
-            lines.extend([
-                "✅ No performance alerts",
-                "",
-            ])
+            lines.extend(
+                [
+                    "✅ No performance alerts",
+                    "",
+                ]
+            )
 
         # Add recommendations
-        lines.extend([
-            "💡 RECOMMENDATIONS",
-            "-" * 30,
-        ])
+        lines.extend(
+            [
+                "💡 RECOMMENDATIONS",
+                "-" * 30,
+            ]
+        )
 
         recommendations = self._generate_recommendations(summary)
         if recommendations:
@@ -113,11 +119,13 @@ class PerformanceDashboard:
         else:
             lines.append("• System performing optimally, no immediate actions needed")
 
-        lines.extend([
-            "",
-            f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S UTC')}",
-            "=" * 60,
-        ])
+        lines.extend(
+            [
+                "",
+                f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                "=" * 60,
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -126,37 +134,25 @@ class PerformanceDashboard:
         recommendations = []
 
         # Performance-based recommendations
-        if summary['performance_level'] in ['POOR', 'CRITICAL']:
-            recommendations.append(
-                "Consider reducing position size or pausing trading until performance improves"
-            )
+        if summary["performance_level"] in ["POOR", "CRITICAL"]:
+            recommendations.append("Consider reducing position size or pausing trading until performance improves")
 
-        if summary['consecutive_losses'] >= 3:
-            recommendations.append(
-                "Review recent market conditions and strategy parameters after consecutive losses"
-            )
+        if summary["consecutive_losses"] >= 3:
+            recommendations.append("Review recent market conditions and strategy parameters after consecutive losses")
 
-        if summary['approval_rate'] < 0.9:
-            recommendations.append(
-                "Low approval rate detected - check risk management settings and market conditions"
-            )
+        if summary["approval_rate"] < 0.9:
+            recommendations.append("Low approval rate detected - check risk management settings and market conditions")
 
-        if summary['execution_quality_score'] < 80:
-            recommendations.append(
-                "Execution quality below optimal - monitor spreads and latency"
-            )
+        if summary["execution_quality_score"] < 80:
+            recommendations.append("Execution quality below optimal - monitor spreads and latency")
 
-        if summary['trend'] == 'DECLINING':
-            recommendations.append(
-                "Performance trend declining - consider strategy parameter optimization"
-            )
+        if summary["trend"] == "DECLINING":
+            recommendations.append("Performance trend declining - consider strategy parameter optimization")
 
         # Alert-based recommendations
-        critical_alerts = [a for a in summary['alerts'] if a['severity'] == 'CRITICAL']
+        critical_alerts = [a for a in summary["alerts"] if a["severity"] == "CRITICAL"]
         if critical_alerts:
-            recommendations.append(
-                "Critical alerts present - immediate attention required"
-            )
+            recommendations.append("Critical alerts present - immediate attention required")
 
         return recommendations
 
@@ -182,7 +178,7 @@ class PerformanceDashboard:
 
         try:
             self.output_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.output_file.open('w') as f:
+            with self.output_file.open("w") as f:
                 json.dump(summary, f, indent=2)
             log.info("Analysis saved to %s", self.output_file)
         except OSError as e:
@@ -191,40 +187,24 @@ class PerformanceDashboard:
 
 def main() -> None:
     """Command-line interface for performance dashboard."""
-    parser = argparse.ArgumentParser(
-        description="NovaTrade Performance Dashboard - Real-time strategy analytics"
-    )
+    parser = argparse.ArgumentParser(description="NovaTrade Performance Dashboard - Real-time strategy analytics")
     parser.add_argument(
         "--service-url",
         default="http://localhost:8877",
-        help="URL of the running NovaTrade service (default: http://localhost:8877)"
+        help="URL of the running NovaTrade service (default: http://localhost:8877)",
     )
     parser.add_argument(
         "--initial-equity",
         type=float,
         default=100_000.0,
-        help="Starting account equity for calculations (default: 100000.0)"
+        help="Starting account equity for calculations (default: 100000.0)",
     )
     parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output results in JSON format instead of human-readable text"
+        "--json", action="store_true", help="Output results in JSON format instead of human-readable text"
     )
-    parser.add_argument(
-        "--alerts-only",
-        action="store_true",
-        help="Only show alerts, skip full dashboard"
-    )
-    parser.add_argument(
-        "--output-file",
-        type=Path,
-        help="Save analysis to JSON file"
-    )
-    parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress informational logging"
-    )
+    parser.add_argument("--alerts-only", action="store_true", help="Only show alerts, skip full dashboard")
+    parser.add_argument("--output-file", type=Path, help="Save analysis to JSON file")
+    parser.add_argument("--quiet", action="store_true", help="Suppress informational logging")
 
     args = parser.parse_args()
 
@@ -254,15 +234,15 @@ def main() -> None:
     if args.json:
         print(json.dumps(summary, indent=2))
     elif args.alerts_only:
-        alerts = summary.get('alerts', [])
+        alerts = summary.get("alerts", [])
         if alerts:
             print(f"Found {len(alerts)} performance alerts:")
             for alert in alerts:
                 severity_prefix = {
-                    'INFO': '[INFO]',
-                    'WARNING': '[WARN]',
-                    'CRITICAL': '[CRIT]',
-                }.get(alert['severity'], '[WARN]')
+                    "INFO": "[INFO]",
+                    "WARNING": "[WARN]",
+                    "CRITICAL": "[CRIT]",
+                }.get(alert["severity"], "[WARN]")
                 print(f"{severity_prefix} {alert['message']}")
         else:
             print("No performance alerts")

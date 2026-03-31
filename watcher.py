@@ -1295,6 +1295,9 @@ async def _dispatch_inner(task_path: Path):
     logger.info("TASK DETECTED: %s → renamed to %s", task_name, inprogress_path.name)
 
     # --- Phase 6B.14: Create checkpoint on dispatch ---
+    # Preserve retry_count from any prior checkpoint to prevent infinite re-dispatch loops
+    _prior_cp = load_checkpoint(stem)
+    _prior_retry = _prior_cp.retry_count if _prior_cp else 0
     save_checkpoint(
         TaskCheckpoint(
             task_id=stem,
@@ -1302,6 +1305,7 @@ async def _dispatch_inner(task_path: Path):
             status="dispatched",
             started_at=_cp_now_iso(),
             last_updated=_cp_now_iso(),
+            retry_count=_prior_retry,
         )
     )
 
@@ -1467,14 +1471,17 @@ async def _dispatch_inner(task_path: Path):
                     done_path = inprogress_path.with_name(f"{stem}.md.done")
                     inprogress_path.rename(done_path)
                     logger.info("TASK SUCCEEDED (orchestrator): %s → %s", stem, done_path.name)
-                    clear_checkpoint(stem)
                 else:
                     failed_path = inprogress_path.with_name(f"{stem}.md.failed")
                     inprogress_path.rename(failed_path)
                     logger.warning("TASK FAILED (orchestrator): %s → %s", stem, failed_path.name)
-                    increment_retry(stem)
             except FileNotFoundError:
                 logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
+            finally:
+                if passed:
+                    clear_checkpoint(stem)
+                else:
+                    increment_retry(stem)
             _session_mgr.record_task_completion(stem, success=passed)
             return
         except Exception as exc:
@@ -1754,8 +1761,6 @@ async def _dispatch_inner(task_path: Path):
                 "task.completed", {"task_stem": stem, "exit_code": exit_code}, correlation_id=task_correlation_id
             )
             slog.event("task.completed", trace_ctx, stem=stem, exit_code=exit_code, duration_ms=trace_ctx.elapsed_ms())
-            # Phase 6B.14: Clear checkpoint on success
-            clear_checkpoint(stem)
         else:
             failed_path = inprogress_path.with_name(f"{stem}.md.failed")
             inprogress_path.rename(failed_path)
@@ -1769,10 +1774,16 @@ async def _dispatch_inner(task_path: Path):
                 exit_code=exit_code,
                 duration_ms=trace_ctx.elapsed_ms(),
             )
-            # Phase 6B.14: Increment retry count on failure
-            increment_retry(stem)
     except FileNotFoundError:
         logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
+    finally:
+        # Phase 6B.14: Always manage checkpoint — even if rename threw FileNotFoundError.
+        # Previously, clear_checkpoint was inside the try block and skipped on race conditions,
+        # causing orphaned checkpoints that triggered infinite re-dispatch loops.
+        if passed:
+            clear_checkpoint(stem)
+        else:
+            increment_retry(stem)
 
     # --- Scheduler: record execution and lifecycle ---
     if _HAS_SCHEDULER:
@@ -2141,6 +2152,20 @@ def _resume_checkpointed_tasks() -> None:
             stem = cp.task_id
             inprogress = TASKS_DIR / f"{stem}.md.inprogress"
             task_file = TASKS_DIR / f"{stem}.md"
+            done_file = TASKS_DIR / f"{stem}.md.done"
+            failed_file = TASKS_DIR / f"{stem}.md.failed"
+
+            # If the task already completed (.done/.failed exists), clear stale checkpoint
+            if done_file.exists() or failed_file.exists():
+                terminal = ".done" if done_file.exists() else ".failed"
+                logger.info(
+                    "CHECKPOINT RESUME: %s already %s — clearing stale checkpoint",
+                    stem,
+                    terminal,
+                )
+                clear_checkpoint(stem)
+                slog.event("checkpoint.stale_cleared", stem=stem, reason=f"already_{terminal}")
+                continue
 
             # If the task file is already pending, just log and skip
             if task_file.exists():
