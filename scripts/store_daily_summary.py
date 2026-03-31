@@ -14,7 +14,15 @@ from app.services.memory_service import MemoryService
 async def store_daily_summary():
     """Store the daily summary in Fusion Memory."""
 
-    content = "2026-03-30: Critical operational breakthrough day with 5 major production fixes (scheduler feedback loop crisis resolved, MetaAPI rate limiting system deployed 930+ lines, LiveLoop state machine desync fixed, data feed staleness recovery with 4-tier diagnostics, feed health monitoring enhancement). Achieved peak autonomy performance at 86.5/100 with all 5 dimensions GREEN. Completed 15+ autonomous shifts, 12,852+ tests passing (100% pass rate). NovaTrade live trading profitable with +$75 profit. System reached watershed operational maturity with comprehensive stability improvements. 10 production commits deployed."
+    content = (
+        "2026-03-30: Critical operational breakthrough day with 5 major production fixes "
+        "(scheduler feedback loop crisis resolved, MetaAPI rate limiting system deployed 930+ lines, "
+        "LiveLoop state machine desync fixed, data feed staleness recovery with 4-tier diagnostics, "
+        "feed health monitoring enhancement). Achieved peak autonomy performance at 86.5/100 with all "
+        "5 dimensions GREEN. Completed 15+ autonomous shifts, 12,852+ tests passing (100% pass rate). "
+        "NovaTrade live trading profitable with +$75 profit. System reached watershed operational "
+        "maturity with comprehensive stability improvements. 10 production commits deployed."
+    )
 
     metadata = {
         "memory_type": "daily_summary",

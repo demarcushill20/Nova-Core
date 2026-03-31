@@ -16,5 +16,6 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Ran morning JIT shift generator \u2014 all blocks already existed, no new blocks created",
   "created_at": "2026-03-31T11:06:53Z",
-  "confidence": "low"
+  "confidence": "low",
+  "supersedes": "mem_shift_gen_am_20260331_1774954237"
 }

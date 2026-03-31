@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Implemented comprehensive OpenBLAS threading fix resolving critical system instability, 80/80 tests now passing",
   "created_at": "2026-03-31T13:12:57Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260331_3_implementation_1774966952"
 }

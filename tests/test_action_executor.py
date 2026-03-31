@@ -22,6 +22,9 @@ from novatrade.autonomy.action_executor import (
     DirectActionExecutor,
 )
 from novatrade.autonomy.decision_engine import ActionMode, Decision
+from novatrade.autonomy.investigation_executor import (
+    InvestigationReport,
+)
 from novatrade.autonomy.schemas import (
     DimensionScore,
     ProgressReport,
@@ -765,3 +768,255 @@ class TestGenericDiagnostics:
         dd_findings = [f for f in result.findings if f.check == "excessive_drawdown"]
         assert len(dd_findings) == 1
         assert dd_findings[0].status == "critical"
+
+
+# =====================================================================
+# Tests: Investigation chain integration (Phase 8)
+# =====================================================================
+
+
+class TestInvestigationChainOnUnresolved:
+    """Test that _verify_and_followup launches investigation when unresolved."""
+
+    def test_investigation_triggered_on_unresolved(self, tmp_path):
+        """When remediation fails verification, an investigation should run."""
+        (tmp_path / "STATE" / "novatrade").mkdir(parents=True)
+        (tmp_path / "LOGS").mkdir(parents=True)
+        executor = DirectActionExecutor(base_path=str(tmp_path))
+        decision = make_decision(mode=ActionMode.REPAIR, target="strategy_validity")
+        report = make_report()
+        result = ActionResult(
+            decision_mode="repair",
+            target_dimension="strategy_validity",
+            actions_taken=["Restarted novacore-novatrade.service successfully"],
+        )
+
+        fake_inv_report = InvestigationReport(
+            investigation_id="inv_test_001",
+            target_dimension="strategy_validity",
+            trigger_reason="test",
+            root_cause="Root cause: novacore-novatrade service is down",
+            root_cause_confidence="high",
+            recommended_action="Restart novacore-novatrade service (safe, idempotent).",
+        )
+
+        with (
+            patch.object(DirectActionExecutor, "_verify_dimension", return_value=(False, "still failing")),
+            patch("novatrade.autonomy.action_executor.time.sleep"),
+            patch("novatrade.autonomy.action_executor._InvestigationExecutor") as mock_inv_cls,
+        ):
+            mock_investigator = mock_inv_cls.return_value
+            mock_investigator.investigate.return_value = fake_inv_report
+            executor._verify_and_followup(decision, report, result)
+
+        assert result.escalated is True
+        assert result.root_cause == "Root cause: novacore-novatrade service is down"
+        assert result.investigation_summary == "Restart novacore-novatrade service (safe, idempotent)."
+
+    def test_no_investigation_when_resolved(self, tmp_path):
+        """When remediation succeeds, no investigation should run."""
+        (tmp_path / "LOGS").mkdir(parents=True)
+        executor = DirectActionExecutor(base_path=str(tmp_path))
+        decision = make_decision(mode=ActionMode.REPAIR, target="strategy_validity")
+        report = make_report()
+        result = ActionResult(
+            decision_mode="repair",
+            target_dimension="strategy_validity",
+            actions_taken=["Restarted novacore-novatrade.service successfully"],
+        )
+
+        with (
+            patch.object(DirectActionExecutor, "_verify_dimension", return_value=(True, "service active")),
+            patch("novatrade.autonomy.action_executor.time.sleep"),
+            patch("novatrade.autonomy.action_executor._InvestigationExecutor") as mock_inv_cls,
+        ):
+            executor._verify_and_followup(decision, report, result)
+            mock_inv_cls.assert_not_called()
+
+        assert result.investigation_summary is None
+        assert result.root_cause is None
+
+    def test_investigation_failure_is_non_fatal(self, tmp_path):
+        """Investigation exceptions should be caught and not crash the executor."""
+        (tmp_path / "STATE" / "novatrade").mkdir(parents=True)
+        (tmp_path / "LOGS").mkdir(parents=True)
+        executor = DirectActionExecutor(base_path=str(tmp_path))
+        decision = make_decision(mode=ActionMode.REPAIR, target="strategy_validity")
+        report = make_report()
+        result = ActionResult(
+            decision_mode="repair",
+            target_dimension="strategy_validity",
+            actions_taken=["Restarted novacore-novatrade.service successfully"],
+        )
+
+        with (
+            patch.object(DirectActionExecutor, "_verify_dimension", return_value=(False, "still failing")),
+            patch("novatrade.autonomy.action_executor.time.sleep"),
+            patch("novatrade.autonomy.action_executor._InvestigationExecutor") as mock_inv_cls,
+        ):
+            mock_investigator = mock_inv_cls.return_value
+            mock_investigator.investigate.side_effect = RuntimeError("investigation exploded")
+            executor._verify_and_followup(decision, report, result)
+
+        # Should still be escalated but no investigation results
+        assert result.escalated is True
+        assert result.investigation_summary is None
+        assert result.root_cause is None
+
+
+class TestInvestigationChainOnEscalate:
+    """Test that ESCALATE mode triggers investigation."""
+
+    def test_escalate_runs_investigation(self, tmp_path):
+        """ESCALATE decisions should trigger an investigation for root cause."""
+        (tmp_path / "STATE" / "novatrade").mkdir(parents=True)
+        executor = DirectActionExecutor(base_path=str(tmp_path))
+        decision = make_decision(mode=ActionMode.ESCALATE, target="strategy_validity")
+        report = make_report()
+
+        fake_inv_report = InvestigationReport(
+            investigation_id="inv_escalate_001",
+            target_dimension="strategy_validity",
+            trigger_reason="test escalation",
+            root_cause="MetaApi connection failure",
+            root_cause_confidence="high",
+            recommended_action="Check MetaApi credentials and network.",
+        )
+
+        with (
+            patch.object(DirectActionExecutor, "_send_alert"),
+            patch("novatrade.autonomy.action_executor._InvestigationExecutor") as mock_inv_cls,
+        ):
+            mock_investigator = mock_inv_cls.return_value
+            mock_investigator.investigate.return_value = fake_inv_report
+            result = executor.execute(decision, report)
+
+        assert result.escalated is True
+        assert result.root_cause == "MetaApi connection failure"
+        assert result.investigation_summary == "Check MetaApi credentials and network."
+        assert "root cause: MetaApi connection failure" in result.summary
+
+    def test_escalate_investigation_failure_non_fatal(self, tmp_path):
+        """ESCALATE should still work even if investigation fails."""
+        (tmp_path / "STATE" / "novatrade").mkdir(parents=True)
+        executor = DirectActionExecutor(base_path=str(tmp_path))
+        decision = make_decision(mode=ActionMode.ESCALATE, target="strategy_validity")
+        report = make_report()
+
+        with (
+            patch.object(DirectActionExecutor, "_send_alert"),
+            patch("novatrade.autonomy.action_executor._InvestigationExecutor") as mock_inv_cls,
+        ):
+            mock_investigator = mock_inv_cls.return_value
+            mock_investigator.investigate.side_effect = OSError("disk full")
+            result = executor.execute(decision, report)
+
+        assert result.escalated is True
+        assert result.root_cause is None
+        assert "ESCALATE" in result.summary
+
+
+class TestActionResultInvestigationFields:
+    """Test ActionResult investigation_summary and root_cause fields."""
+
+    def test_default_fields_are_none(self):
+        """Investigation fields should default to None."""
+        result = ActionResult(decision_mode="repair", target_dimension="system_health")
+        assert result.investigation_summary is None
+        assert result.root_cause is None
+
+    def test_fields_can_be_set(self):
+        """Investigation fields should be settable."""
+        result = ActionResult(
+            decision_mode="repair",
+            target_dimension="strategy_validity",
+            investigation_summary="Restart the service",
+            root_cause="Service crashed",
+        )
+        assert result.investigation_summary == "Restart the service"
+        assert result.root_cause == "Service crashed"
+
+
+class TestAlertIncludesInvestigation:
+    """Test that Telegram alerts include investigation context when present."""
+
+    def test_alert_includes_root_cause(self, tmp_path):
+        """Alert message should include root cause when investigation completed."""
+        (tmp_path / "LOGS").mkdir()
+        (tmp_path / "STATE").mkdir()
+        executor = DirectActionExecutor(base_path=str(tmp_path))
+        decision = make_decision(mode=ActionMode.ESCALATE, target="strategy_validity")
+
+        result = ActionResult(
+            decision_mode="escalate",
+            target_dimension="strategy_validity",
+            escalated=True,
+            root_cause="MetaApi connection failure — broker offline",
+            investigation_summary="Check MetaApi credentials and network, then restart service.",
+        )
+
+        with patch("novatrade.autonomy.action_executor.urllib.request.urlopen"):
+            executor._send_alert(decision, result)
+
+        log_path = tmp_path / "LOGS" / "autonomy_actions.log"
+        assert log_path.exists()
+        content = log_path.read_text()
+        assert "Root cause: MetaApi connection failure" in content
+        assert "Recommendation: Check MetaApi credentials" in content
+
+
+# =====================================================================
+# Tests: TaskSpec investigation_context (Phase 8)
+# =====================================================================
+
+
+class TestTaskSpecInvestigationContext:
+    """Test that investigation context flows into task files."""
+
+    def test_investigation_context_in_task_body(self, tmp_path):
+        """TaskSpec with investigation_context should include it in the task file."""
+        from novatrade.autonomy.task_generator import TaskSpec, TaskSpecGenerator
+
+        gen = TaskSpecGenerator(base_path=str(tmp_path))
+        spec = TaskSpec(
+            title="Repair strategy validity regression",
+            body="## Objective\nFix detected regression.",
+            priority="high",
+            category="repair",
+            target_dimension="strategy_validity",
+            investigation_context=(
+                "Root cause: novacore-novatrade service is down\n"
+                "Investigation: Restart novacore-novatrade service.\n"
+                "Prior remediation: Restarted service, still failing"
+            ),
+        )
+        path = gen.write_task_file(spec, skip_dedup=True)
+        assert path is not None
+        content = path.read_text()
+        assert "## Investigation Context" in content
+        assert "Root cause: novacore-novatrade service is down" in content
+        assert "Prior remediation: Restarted service" in content
+
+    def test_no_investigation_context_when_empty(self, tmp_path):
+        """TaskSpec without investigation_context should not include the section."""
+        from novatrade.autonomy.task_generator import TaskSpec, TaskSpecGenerator
+
+        gen = TaskSpecGenerator(base_path=str(tmp_path))
+        spec = TaskSpec(
+            title="Repair strategy validity regression",
+            body="## Objective\nFix detected regression.",
+            priority="high",
+            category="repair",
+            target_dimension="strategy_validity",
+        )
+        path = gen.write_task_file(spec, skip_dedup=True)
+        assert path is not None
+        content = path.read_text()
+        assert "## Investigation Context" not in content
+
+    def test_investigation_context_field_default(self):
+        """investigation_context field should default to empty string."""
+        from novatrade.autonomy.task_generator import TaskSpec
+
+        spec = TaskSpec(title="test", body="test body")
+        assert spec.investigation_context == ""

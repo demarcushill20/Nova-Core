@@ -7,6 +7,7 @@ adaptive decision engine and goal decomposition framework.
 """
 
 from novatrade.autonomy.action_executor import ActionResult, DirectActionExecutor
+from novatrade.autonomy.causal_model import CausalModel, CausalRecord
 from novatrade.autonomy.decision_context import (
     ContextAssembler,
     DecisionContext,
@@ -36,6 +37,7 @@ from novatrade.autonomy.outcome_analyzer import (
     EffectivenessReport,
     OutcomeAnalyzer,
 )
+from novatrade.autonomy.pattern_library import LearnedPattern, PatternLibrary
 from novatrade.autonomy.progress_scorer import ProgressScorer
 from novatrade.autonomy.reasoning_engine import (
     ReasoningConfig,
@@ -51,11 +53,15 @@ from novatrade.autonomy.schemas import (
     SubMetric,
 )
 from novatrade.autonomy.task_generator import TaskSpec, TaskSpecGenerator
+from novatrade.autonomy.task_reconciler import TaskReconciler, TaskReconciliation
+from novatrade.autonomy.traceability import TraceabilityGraph, TraceEntry
 
 __all__ = [
     "ActionMode",
     "ActionResult",
     "AlertLevel",
+    "CausalModel",
+    "CausalRecord",
     "ContextAssembler",
     "Decision",
     "DecisionConfig",
@@ -71,7 +77,9 @@ __all__ = [
     "InvestigationExecutor",
     "InvestigationReport",
     "InvestigationStep",
+    "LearnedPattern",
     "OutcomeAnalyzer",
+    "PatternLibrary",
     "ProgressReport",
     "ProgressScorer",
     "ReasoningConfig",
@@ -82,8 +90,12 @@ __all__ = [
     "SubGoal",
     "SubGoalStatus",
     "SubMetric",
+    "TaskReconciler",
+    "TaskReconciliation",
     "TaskSpec",
     "TaskSpecGenerator",
     "TaskSummary",
+    "TraceEntry",
+    "TraceabilityGraph",
     "build_novatrade_tree",
 ]

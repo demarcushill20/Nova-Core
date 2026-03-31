@@ -80,11 +80,17 @@ class ProgressScorer:
                     dimensions[name] = DimensionScore(
                         name=name,
                         score=fallback,
+                        confidence=0.3,  # stale data — low confidence
                         warnings=["Timed out — cached score from last successful run"],
                     )
                 else:
                     warnings.append(f"Collector {name} timed out — no cached score, defaulting to 0")
-                    dimensions[name] = DimensionScore(name=name, score=0.0, warnings=["Timed out, no cache"])
+                    dimensions[name] = DimensionScore(
+                        name=name,
+                        score=0.0,
+                        confidence=0.1,
+                        warnings=["Timed out, no cache"],
+                    )
             except Exception as exc:
                 log.error("Collector %s failed: %s", name, exc)
                 fallback = cached_scores.get(name)
@@ -93,11 +99,12 @@ class ProgressScorer:
                     dimensions[name] = DimensionScore(
                         name=name,
                         score=fallback,
+                        confidence=0.3,  # stale data — low confidence
                         warnings=[f"Failed ({exc}) — cached score from last successful run"],
                     )
                 else:
                     warnings.append(f"Collector {name} failed: {exc}")
-                    dimensions[name] = DimensionScore(name=name, score=0.0, warnings=[str(exc)])
+                    dimensions[name] = DimensionScore(name=name, score=0.0, confidence=0.1, warnings=[str(exc)])
 
         # Confidence-adjusted weighted average: low-confidence dimensions
         # contribute min(score, 50) to prevent inflation from unreliable data.
@@ -115,22 +122,19 @@ class ProgressScorer:
 
         # Mission guardrail: cap overall if any mission-critical dimension is RED
         for critical_dim in self.config.mission_critical:
-            dim = dimensions.get(critical_dim)
-            if dim and dim.alert_level == AlertLevel.RED:
-                if overall > self.config.red_cap_overall:
-                    warnings.append(
-                        f"Overall capped at {self.config.red_cap_overall} — "
-                        f"{critical_dim} is RED ({dim.score:.0f})"
-                    )
-                    overall = self.config.red_cap_overall
-                    break
+            dim_check = dimensions.get(critical_dim)
+            if dim_check and dim_check.alert_level == AlertLevel.RED and overall > self.config.red_cap_overall:
+                warnings.append(
+                    f"Overall capped at {self.config.red_cap_overall} — {critical_dim} is RED ({dim_check.score:.0f})"
+                )
+                overall = self.config.red_cap_overall
+                break
 
         # Confidence penalty: low-confidence dimensions can only drag down, not inflate
         for name, dim in dimensions.items():
             if dim.confidence < 0.5:
                 warnings.append(
-                    f"{name} has low confidence ({dim.confidence:.1f}) — "
-                    "score may not reflect actual state"
+                    f"{name} has low confidence ({dim.confidence:.1f}) — score may not reflect actual state"
                 )
 
         # Trend detection (reuses pre-loaded history)

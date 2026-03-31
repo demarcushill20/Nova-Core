@@ -92,9 +92,7 @@ class ScoringConfig(BaseModel):
             "performance_stability": 0.1,
         }
     )
-    mission_critical: list[str] = Field(
-        default_factory=lambda: ["execution_pipeline", "strategy_validity"]
-    )
+    mission_critical: list[str] = Field(default_factory=lambda: ["execution_pipeline", "strategy_validity"])
     red_cap_overall: float = 45.0  # if any mission-critical dim is RED, cap overall at this
     # Alert thresholds are fixed at 40 (RED) / 70 (GREEN) in model validators
     # on DimensionScore and ProgressReport — not configurable here by design.

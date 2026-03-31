@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "JIT shift generator created 8 morning blocks for 2026-03-31 and archived 18 old tasks",
   "created_at": "2026-03-31T10:50:37Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_gen_am_20260331_1774955213"
 }

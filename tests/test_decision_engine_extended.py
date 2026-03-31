@@ -279,7 +279,9 @@ class TestPriorityRuleOverride:
         report = _report(dims)
         engine = DecisionEngine(base_path=str(tmp_path))
         (tmp_path / "STATE").mkdir()
-        decision = await engine.decide(_ctx(report))
+        ctx = _ctx(report)
+        ctx.market_session = "london"  # zero-trade alarm suppressed when market closed
+        decision = await engine.decide(ctx)
         assert decision.mode == ActionMode.REPAIR
         assert "ZERO trades" in decision.reason
 

@@ -125,6 +125,12 @@ try:
         ActionMode as _ActionMode,
     )
     from novatrade.autonomy import (
+        CausalModel as _CausalModel,
+    )
+    from novatrade.autonomy import (
+        CausalRecord as _CausalRecord,
+    )
+    from novatrade.autonomy import (
         ContextAssembler as _ContextAssembler,
     )
     from novatrade.autonomy import (
@@ -140,13 +146,25 @@ try:
         OutcomeAnalyzer as _OutcomeAnalyzer,
     )
     from novatrade.autonomy import (
+        PatternLibrary as _PatternLibrary,
+    )
+    from novatrade.autonomy import (
         ProgressScorer as _ProgressScorer,
     )
     from novatrade.autonomy import (
         ReasoningEngine as _ReasoningEngine,
     )
     from novatrade.autonomy import (
+        TaskReconciler as _TaskReconciler,
+    )
+    from novatrade.autonomy import (
         TaskSpecGenerator as _TaskSpecGenerator,
+    )
+    from novatrade.autonomy import (
+        TraceabilityGraph as _TraceabilityGraph,
+    )
+    from novatrade.autonomy import (
+        TraceEntry as _TraceEntry,
     )
     from novatrade.autonomy import (
         build_novatrade_tree as _build_novatrade_tree,
@@ -159,10 +177,16 @@ except ImportError:
     _DirectActionExecutor = None  # type: ignore[assignment,misc]
     _GoalDecomposer = None  # type: ignore[assignment,misc]
     _ProgressScorer = None  # type: ignore[assignment,misc]
+    _TaskReconciler = None  # type: ignore[assignment,misc]
     _TaskSpecGenerator = None  # type: ignore[assignment,misc]
     _build_novatrade_tree = None  # type: ignore[assignment,misc]
     _OutcomeAnalyzer = None  # type: ignore[assignment,misc]
     _ReasoningEngine = None  # type: ignore[assignment,misc]
+    _CausalModel = None  # type: ignore[assignment,misc]
+    _CausalRecord = None  # type: ignore[assignment,misc]
+    _PatternLibrary = None  # type: ignore[assignment,misc]
+    _TraceabilityGraph = None  # type: ignore[assignment,misc]
+    _TraceEntry = None  # type: ignore[assignment,misc]
 
 from prompts.heartbeat_prompts import (  # noqa: E402
     _build_planning_prompt,
@@ -1935,6 +1959,98 @@ def _run_autonomy_cycle() -> dict | None:
         report = await scorer.score()
         print(f"[autonomy] Progress score: {report.overall_score}/100 ({report.overall_alert.value})")
 
+        # Step 1.5: Resolve pending decision outcomes from prior cycles
+        _resolved_outcomes: list = []
+        _oa_instance = None
+        if _OutcomeAnalyzer is not None:
+            try:
+                _oa_instance = _OutcomeAnalyzer()
+                _resolved_outcomes = _oa_instance.resolve_pending(report)
+                if _resolved_outcomes:
+                    print(f"[autonomy] Resolved {len(_resolved_outcomes)} decision outcomes")
+                    for _ro in _resolved_outcomes[:3]:
+                        print(f"[autonomy]   {_ro.decision_id}: {_ro.effectiveness} (delta={_ro.delta:+.1f})")
+            except Exception as _oa_exc:
+                print(f"[autonomy] OutcomeAnalyzer resolve failed (non-fatal): {_oa_exc}")
+
+        # Step 1.6: Reconcile completed tasks from prior cycles
+        if _TaskReconciler is not None:
+            try:
+                _reconciler = _TaskReconciler(base_path=str(BASE))
+                _reconciliations = _reconciler.reconcile(report)
+                if _reconciliations:
+                    print(f"[autonomy] Reconciled {len(_reconciliations)} completed tasks")
+                    for _rec in _reconciliations[:3]:
+                        print(f"[autonomy]   {_rec.task_file}: metric_met={_rec.metric_met}, expired={_rec.expired}")
+            except Exception as _tr_exc:
+                print(f"[autonomy] TaskReconciler failed (non-fatal): {_tr_exc}")
+
+        # Step 1.7: Feed resolved outcomes into causal model + traceability graph
+        _causal_model = None
+        _pattern_lib = None
+        _trace_graph = None
+        if _CausalModel is not None:
+            try:
+                _causal_model = _CausalModel(base_path=str(BASE))
+                _pattern_lib = _PatternLibrary(base_path=str(BASE))
+                _trace_graph = _TraceabilityGraph(base_path=str(BASE))
+
+                # Record causal observations from resolved outcomes
+                for _ro in _resolved_outcomes:
+                    if _ro.target_dimension and _ro.delta is not None:
+                        _pre = _ro.scores_before.get(_ro.target_dimension, 0) if _ro.scores_before else 0
+                        _post = _ro.scores_after.get(_ro.target_dimension, 0) if _ro.scores_after else 0
+                        _cr = _CausalRecord(
+                            action=_ro.mode,
+                            target_dimension=_ro.target_dimension,
+                            pre_score=_pre,
+                            post_score=_post,
+                            delta=_post - _pre,
+                            effective=_ro.effectiveness == "effective",
+                            decision_id=_ro.decision_id,
+                        )
+                        _causal_model.record(_cr)
+
+                    # Record trace entry
+                    _trace_graph.record_trace(
+                        _TraceEntry(
+                            sub_goal_id=None,
+                            decision_id=_ro.decision_id,
+                            task_file="",
+                            outcome=_ro.effectiveness or "unknown",
+                            delta=_ro.delta or 0,
+                            pattern_id=None,
+                            dimension=_ro.target_dimension or "",
+                        )
+                    )
+
+                # Record traces from task reconciliations
+                if _reconciliations:
+                    for _rec in _reconciliations:
+                        _outcome = "effective" if _rec.metric_met else "ineffective"
+                        if _rec.expired:
+                            _outcome = "ineffective"
+                        _trace_graph.record_trace(
+                            _TraceEntry(
+                                sub_goal_id=_rec.sub_goal_id,
+                                decision_id=_rec.decision_id,
+                                task_file=_rec.task_file,
+                                outcome=_outcome,
+                                delta=0,
+                                pattern_id=None,
+                            )
+                        )
+
+                # Derive patterns periodically (every 6 cycles ≈ every ~1 hour)
+                _causal_recs = _causal_model.get_records()
+                if len(_causal_recs) % 6 < 2 and len(_causal_recs) >= 3:
+                    _new_patterns = _pattern_lib.derive_patterns(_causal_model)
+                    if _new_patterns:
+                        print(f"[autonomy] Derived {len(_new_patterns)} patterns from causal data")
+
+            except Exception as _cl_exc:
+                print(f"[autonomy] Causal learning failed (non-fatal): {_cl_exc}")
+
         # Step 2: Assemble decision context
         assembler = _ContextAssembler()
         context = await assembler.assemble(report)
@@ -1944,6 +2060,14 @@ def _run_autonomy_cycle() -> dict | None:
         decision = await engine.decide(context)
         print(f"[autonomy] Decision: {decision.mode.value} — {decision.reason[:100]}")
 
+        # Step 3a: Record this decision for outcome tracking
+        if _OutcomeAnalyzer is not None and _oa_instance is not None:
+            try:
+                _decision_snapshot = _oa_instance.record_decision(decision, report)
+                print(f"[autonomy] Recorded decision: {_decision_snapshot.decision_id}")
+            except Exception as _oa_exc:
+                print(f"[autonomy] OutcomeAnalyzer record failed (non-fatal): {_oa_exc}")
+
         # Step 3b: ReasoningEngine — LLM-powered gap analysis for novel situations
         # Called when rule-based engine returns MONITOR but something may be off,
         # or when multiple dimensions are degrading simultaneously.
@@ -1952,7 +2076,16 @@ def _run_autonomy_cycle() -> dict | None:
             try:
                 reasoning = _ReasoningEngine()
                 if reasoning.should_reason(decision, report):
-                    _reasoning_result = await reasoning.reason(context, report)
+                    # Pass recent outcomes so reasoning engine can consider decision effectiveness
+                    _recent_outcome_dicts: list[dict] = []
+                    if _oa_instance is not None:
+                        try:
+                            from dataclasses import asdict as _asdict
+
+                            _recent_outcome_dicts = [_asdict(o) for o in _oa_instance.get_recent_outcomes(5)]
+                        except Exception:
+                            pass
+                    _reasoning_result = await reasoning.reason(context, report, _recent_outcome_dicts or None)
                     if _reasoning_result is not None:
                         print(
                             f"[autonomy] Reasoning: {_reasoning_result.recommended_mode}"
@@ -1962,15 +2095,16 @@ def _run_autonomy_cycle() -> dict | None:
                             print(f"[autonomy]   Insight: {_reasoning_result.novel_insight[:120]}")
                         # If reasoning recommends a non-MONITOR action with high
                         # confidence, upgrade the decision so downstream steps act on it
+                        _rec_mode = _reasoning_result.recommended_mode.upper()
                         if (
-                            _reasoning_result.recommended_mode != "MONITOR"
+                            _rec_mode != "MONITOR"
                             and _reasoning_result.confidence in ("high", "medium")
                             and decision.mode == _ActionMode.MONITOR
                         ):
                             from novatrade.autonomy import Decision as _Decision
 
                             decision = _Decision(
-                                mode=_ActionMode[_reasoning_result.recommended_mode],
+                                mode=_ActionMode[_rec_mode],
                                 reason=f"[reasoning] {_reasoning_result.reasoning_chain[0]}"
                                 if _reasoning_result.reasoning_chain
                                 else "[reasoning] LLM-identified gap",
@@ -2024,6 +2158,21 @@ def _run_autonomy_cycle() -> dict | None:
             else:
                 gen = _TaskSpecGenerator()
                 spec = gen.from_decision(decision)
+                # Wire decision_id and sub_goal_id for task→outcome traceability
+                ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                dim = decision.target_dimension or "all"
+                spec.decision_id = f"{decision.mode.value}_{dim}_{ts}"
+                if actionable:
+                    spec.sub_goal_id = actionable[0].sub_goal_id
+                if decision.target_dimension:
+                    spec.success_metric = f"{decision.target_dimension} >= 70"
+                # Attach investigation context from direct action if available
+                if _action_result and _action_result.investigation_summary:
+                    spec.investigation_context = (
+                        f"Root cause: {_action_result.root_cause or 'Unknown'}\n"
+                        f"Investigation: {_action_result.investigation_summary}\n"
+                        f"Prior remediation: {'; '.join(_action_result.actions_taken[:3])}"
+                    )
                 task_path = gen.write_task_file(spec)
                 if task_path:
                     print(f"[autonomy] Generated task: {task_path.name}")
@@ -2059,6 +2208,8 @@ def _run_autonomy_cycle() -> dict | None:
                 "actions_taken": _action_result.actions_taken,
                 "alert_sent": _action_result.alert_sent,
                 "escalated": _action_result.escalated,
+                "investigation_summary": _action_result.investigation_summary,
+                "root_cause": _action_result.root_cause,
             }
         # Include reasoning engine results if any
         if _reasoning_result is not None:
@@ -2069,6 +2220,26 @@ def _run_autonomy_cycle() -> dict | None:
                 "novel_insight": _reasoning_result.novel_insight,
                 "suggested_actions": _reasoning_result.suggested_actions[:3],
             }
+        # Include resolved outcomes from feedback loop
+        if _resolved_outcomes:
+            _snap["resolved_outcomes"] = [
+                {"id": o.decision_id, "effectiveness": o.effectiveness, "delta": o.delta}
+                for o in _resolved_outcomes[:5]
+            ]
+        # Include causal learning insights
+        if _causal_model is not None and _pattern_lib is not None:
+            try:
+                _target_dim = decision.target_dimension
+                if _target_dim:
+                    _rec_action = _pattern_lib.get_recommendation(_target_dim)
+                    _avoid = _causal_model.avoid_list(_target_dim)
+                    if _rec_action or _avoid:
+                        _snap["causal_insights"] = {
+                            "recommended_action": _rec_action,
+                            "avoid_actions": _avoid[:5],
+                        }
+            except Exception:
+                pass  # non-fatal
         return _snap
 
     try:

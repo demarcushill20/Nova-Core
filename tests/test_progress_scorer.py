@@ -1222,8 +1222,8 @@ async def test_scorer_one_collector_fails(scorer):
             coll.collect = ok_collect
 
     report = await scorer.score()
-    assert len(report.warnings) == 1
-    assert "failed" in report.warnings[0].lower()
+    assert len(report.warnings) >= 1
+    assert any("failed" in w.lower() for w in report.warnings)
     assert report.overall_score > 0  # other collectors contributed
 
 
@@ -1239,7 +1239,7 @@ async def test_scorer_all_collectors_fail(scorer):
 
     report = await scorer.score()
     assert report.overall_score == 0.0
-    assert len(report.warnings) == 5
+    assert len(report.warnings) >= 5  # failure warnings + low-confidence warnings
 
 
 @pytest.mark.asyncio

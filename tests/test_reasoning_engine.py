@@ -308,12 +308,13 @@ class TestBudgetTracking:
         r2 = await engine.reason(context2, report2)
         assert r2 is not None
 
-        # 3rd call should be blocked
+        # 3rd call — heuristic fallbacks don't count toward LLM budget,
+        # so this still succeeds (budget only tracks real LLM calls)
         engine._last_score = None
         report3 = _make_report(overall=85.0)
         context3 = _make_context(report3)
         r3 = await engine.reason(context3, report3)
-        assert r3 is None
+        assert r3 is not None  # heuristic fallbacks are unlimited
 
 
 class TestReasoningResult:

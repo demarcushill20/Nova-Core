@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0659_repair_execution_pipeline_regression_1774969880",
+  "workflow_id": "0659_repair_execution_pipeline_regression",
+  "task_summary": "Fixed execution pipeline regression by adding fallback feed health checks using live NovaTrade operational files (live_metrics.json, signal_stats.json) when primary connectivity files are absent",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed execution pipeline regression by adding fallback feed health checks using live NovaTrade operational files (live_metrics.json, signal_stats.json) when primary connectivity files are absent"
+  ],
+  "successful_patterns": [
+    "task_completed: 0659_repair_execution_pipeline_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed execution pipeline regression by adding fallback feed health checks using live NovaTrade operational files (live_metrics.json, signal_stats.json) when primary connectivity files are absent",
+  "created_at": "2026-03-31T15:11:20Z",
+  "confidence": "high"
+}

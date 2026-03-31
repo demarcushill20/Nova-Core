@@ -100,6 +100,27 @@ class DecisionEngine:
             context=context,
         )
 
+        # Degradation tier suppression: if system is in MINIMAL or EMERGENCY
+        # degradation, suppress PLAN/EXECUTE decisions (system is firefighting).
+        degradation_tier = getattr(context, "degradation_tier", "FULL")
+        if degradation_tier in ("MINIMAL", "EMERGENCY") and decision.mode in (
+            ActionMode.PLAN,
+            ActionMode.EXECUTE,
+        ):
+            decision = Decision(
+                mode=ActionMode.MONITOR,
+                reason=(
+                    f"System in {degradation_tier} degradation — "
+                    f"suppressing {decision.mode.value} until system stabilizes."
+                ),
+                confidence="high",
+            )
+
+        # Enrich decision with sub-goal context
+        top_subgoal = self._find_top_actionable_subgoal(decision.target_dimension, context)
+        if top_subgoal:
+            decision.reason += f" \u2014 targeting: {top_subgoal}"
+
         # Rate-limit check: override to MONITOR if cooldown or daily limit hit
         actionable = (ActionMode.RESEARCH, ActionMode.PLAN, ActionMode.EXECUTE, ActionMode.REPAIR, ActionMode.ESCALATE)
         if decision.mode in actionable and self._check_cooldown(decision.mode, context):
@@ -113,6 +134,16 @@ class DecisionEngine:
         await self._persist_decision(decision)
 
         return decision
+
+    def _find_top_actionable_subgoal(self, dimension: str | None, context: DecisionContext) -> str | None:
+        """Find the highest-priority actionable sub-goal for a dimension.
+
+        The actionable_subgoals list from context is already filtered
+        (deps met, not completed) and priority-sorted.
+        """
+        if not dimension or not context.actionable_subgoals:
+            return None
+        return context.actionable_subgoals[0] if context.actionable_subgoals else None
 
     def _find_weakest_dimension(self, report) -> tuple[str | None, DimensionScore | None]:
         """Find the dimension with the lowest score."""
@@ -159,7 +190,9 @@ class DecisionEngine:
         # --- Priority Rule 0: NovaTrade not trading (critical) ----------------
         # If strategy_validity shows zero trades during market hours, escalate
         # immediately regardless of other dimension scores.
-        novatrade_critical = self._detect_novatrade_not_trading(report)
+        # Market-session aware: suppress zero-trade alarms when market is closed.
+        market_session = getattr(context, "market_session", "closed")
+        novatrade_critical = self._detect_novatrade_not_trading(report, market_session=market_session)
         if novatrade_critical:
             return novatrade_critical
 
@@ -173,7 +206,9 @@ class DecisionEngine:
         if futile_dim:
             return Decision(
                 mode=ActionMode.ESCALATE,
-                reason=f"Repeated REPAIR decisions for {futile_dim} have been ineffective — escalating for human review.",
+                reason=(
+                    f"Repeated REPAIR decisions for {futile_dim} have been ineffective — escalating for human review."
+                ),
                 target_dimension=futile_dim,
                 suggested_actions=[
                     f"Human investigation required for persistent {futile_dim} failure",
@@ -264,10 +299,37 @@ class DecisionEngine:
     def _detect_repair_futility(self, context: DecisionContext) -> str | None:
         """Detect if repeated REPAIR decisions for the same dimension have been ineffective.
 
-        Checks the last 3 decisions targeting the same dimension. If all 3 were
-        REPAIR mode and none produced improvement (no VALIDATE or EXECUTE follow-up
-        for that dimension), return the dimension name. Return None otherwise.
+        Two detection strategies (outcome-based is preferred when data is available):
+        1. Outcome-based: Check recent_outcomes for 3+ repair outcomes on the same
+           dimension where none were "effective".
+        2. Decision-based (fallback): Check last 3 decisions targeting the same
+           dimension — if all were REPAIR with no VALIDATE/EXECUTE follow-up.
         """
+        # --- Strategy 1: Outcome-based (more reliable signal) ---
+        _has_outcome_data = False
+        if getattr(context, "recent_outcomes", None):
+            dim_outcomes: dict[str, list[dict]] = {}
+            for o in context.recent_outcomes[-10:]:
+                dim = o.get("target_dimension")
+                mode = o.get("mode")
+                if dim and mode == "repair":
+                    dim_outcomes.setdefault(dim, []).append(o)
+
+            if dim_outcomes:
+                _has_outcome_data = True
+
+            for dim, outcomes in dim_outcomes.items():
+                if len(outcomes) >= 3:
+                    # Check the last 3 repair outcomes for this dimension
+                    effective_count = sum(1 for o in outcomes[-3:] if o.get("effectiveness") == "effective")
+                    if effective_count == 0:
+                        return dim
+
+            # If we had outcome data, trust it over decision-based heuristic
+            if _has_outcome_data:
+                return None
+
+        # --- Strategy 2: Decision-based (fallback — only when no outcome data) ---
         if not context.recent_decisions:
             return None
 
@@ -306,12 +368,19 @@ class DecisionEngine:
     # NovaTrade-specific detectors (Priority Rule 0)
     # -------------------------------------------------------------------
 
-    def _detect_novatrade_not_trading(self, report) -> Decision | None:
+    def _detect_novatrade_not_trading(self, report, *, market_session: str = "unknown") -> Decision | None:
         """Detect if NovaTrade is running but not placing trades.
 
         This is the #1 failure the operator cares about — the system should
         never silently fail to trade during market hours.
+
+        Market-session aware: when market is "closed", zero trades is expected
+        and should not trigger a critical alarm.
         """
+        # Suppress zero-trade alarm when market is closed
+        if market_session == "closed":
+            return None
+
         dim = report.dimensions.get("strategy_validity")
         if dim is None:
             return None

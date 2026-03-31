@@ -166,8 +166,8 @@ class RiskCollector(BaseCollector):
             daily_loss = data.get("daily_loss_pct", data.get("daily_loss", 0))
             max_daily = data.get("max_daily_loss_pct", data.get("limit", 5.0))  # FTMO default 5%
             try:
-                daily_loss = float(daily_loss)
-                max_daily = float(max_daily)
+                daily_loss = float(daily_loss or 0)
+                max_daily = float(max_daily or 5.0)
             except (TypeError, ValueError):
                 daily_loss = 0.0
                 max_daily = 5.0
@@ -222,7 +222,6 @@ class RiskCollector(BaseCollector):
                 return 60.0, 0.0  # file exists but not proper format
 
             halted = data.get("halted", data.get("is_halted", False))
-            reason = data.get("reason", "unknown")
 
             if halted:
                 # Trading is halted — this is a valid risk state

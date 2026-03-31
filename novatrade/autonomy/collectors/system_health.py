@@ -123,9 +123,7 @@ class SystemHealthCollector(BaseCollector):
             warnings=warnings,
         )
 
-    def _compute_confidence(
-        self, sub_metrics: list[SubMetric], warnings: list[str]
-    ) -> float:
+    def _compute_confidence(self, sub_metrics: list[SubMetric], warnings: list[str]) -> float:
         """Compute confidence based on sub-metric collection success.
 
         System health data is mostly real-time (systemctl, file checks),

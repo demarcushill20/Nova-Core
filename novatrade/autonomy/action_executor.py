@@ -27,6 +27,11 @@ from pathlib import Path
 from novatrade.autonomy.decision_engine import ActionMode, Decision
 from novatrade.autonomy.schemas import ProgressReport
 
+try:
+    from novatrade.autonomy.investigation_executor import InvestigationExecutor as _InvestigationExecutor
+except ImportError:
+    _InvestigationExecutor = None  # type: ignore[assignment,misc]
+
 log = logging.getLogger("novatrade.autonomy.action_executor")
 
 # ---------------------------------------------------------------------------
@@ -54,6 +59,8 @@ class ActionResult:
     alert_sent: bool = False
     escalated: bool = False
     summary: str = ""
+    investigation_summary: str | None = None
+    root_cause: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -93,14 +100,29 @@ class DirectActionExecutor:
             if decision.target_dimension:
                 self._run_diagnostics(decision, report, result)
             result.escalated = True
+            # Launch investigation to provide root cause context for escalation
+            if _InvestigationExecutor is not None:
+                try:
+                    investigator = _InvestigationExecutor(base_path=str(self.base_path))
+                    inv_report = investigator.investigate(decision=decision, report=report)
+                    result.investigation_summary = inv_report.recommended_action or ""
+                    result.root_cause = inv_report.root_cause or ""
+                    log.info(
+                        "Escalation investigation: %s (confidence=%s)",
+                        inv_report.root_cause or "no root cause",
+                        inv_report.root_cause_confidence,
+                    )
+                except Exception as inv_exc:
+                    log.warning("Escalation investigation failed (non-fatal): %s", inv_exc)
             self._send_alert(decision, result)
             # Build summary
             critical = [f for f in result.findings if f.status == "critical"]
             warnings = [f for f in result.findings if f.status == "warning"]
+            root_info = f" — root cause: {result.root_cause}" if result.root_cause else ""
             result.summary = (
                 f"ESCALATE on {decision.target_dimension or 'system'}: "
                 f"{len(critical)} critical, {len(warnings)} warnings — "
-                f"human intervention required"
+                f"human intervention required{root_info}"
             )
             return result
 
@@ -130,7 +152,7 @@ class DirectActionExecutor:
 
         # Verify remediation worked and send follow-up alert
         if decision.mode in (ActionMode.REPAIR, ActionMode.EXECUTE) and result.actions_taken:
-            self._verify_and_followup(decision, result)
+            self._verify_and_followup(decision, report, result)
 
         return result
 
@@ -574,6 +596,13 @@ class DirectActionExecutor:
                 lines.append(f"  \u2192 {a[:100]}")
             lines.append("")
 
+        if result.root_cause:
+            lines.append(f"Root cause: {result.root_cause[:150]}")
+        if result.investigation_summary:
+            lines.append(f"Recommendation: {result.investigation_summary[:150]}")
+        if result.root_cause or result.investigation_summary:
+            lines.append("")
+
         if result.escalated:
             lines.append("\U0001f6a8 ESCALATED — needs human attention")
 
@@ -648,12 +677,15 @@ class DirectActionExecutor:
             return False, f"services still down: {', '.join(failed)}"
         return True, "All services active"
 
-    def _verify_and_followup(self, decision: Decision, result: ActionResult) -> None:
+    def _verify_and_followup(self, decision: Decision, report: ProgressReport, result: ActionResult) -> None:
         """Wait briefly, re-check the remediated dimension, and log the result.
 
         Follow-ups are LOG-ONLY — never send to Telegram.  The initial alert
         already informed the operator; sending repeated "RESOLVED" messages is
         noise when the underlying condition (e.g. no trades) keeps recurring.
+
+        When unresolved and the InvestigationExecutor is available, launches a
+        multi-round investigation to identify the root cause.
         """
         # Brief wait for the service to come up
         time.sleep(5)
@@ -672,6 +704,23 @@ class DirectActionExecutor:
                 f"Escalating for human attention."
             )
             result.escalated = True
+
+            # Launch multi-round investigation for unresolved issues
+            if _InvestigationExecutor is not None:
+                try:
+                    investigator = _InvestigationExecutor(base_path=str(self.base_path))
+                    inv_report = investigator.investigate(decision=decision, report=report)
+                    result.investigation_summary = inv_report.recommended_action or ""
+                    result.root_cause = inv_report.root_cause or ""
+                    if inv_report.root_cause:
+                        text += f"\nRoot cause: {inv_report.root_cause}"
+                    log.info(
+                        "Investigation complete: %s (confidence=%s)",
+                        inv_report.root_cause or "no root cause identified",
+                        inv_report.root_cause_confidence,
+                    )
+                except Exception as inv_exc:
+                    log.warning("Investigation failed (non-fatal): %s", inv_exc)
 
         log.info("Follow-up verification: %s — %s", dim_label, "RESOLVED" if resolved else "UNRESOLVED")
 

@@ -184,6 +184,7 @@ module = [
     "tests.test_novatrade_live_loop",
     "tests.test_novatrade_live_e2e",
     "scripts.complexity_gate",
+    "scripts.cleanup_watcher_resources",
     "utils.quality_scorer",
 ]
 ignore_errors = true

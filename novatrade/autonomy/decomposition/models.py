@@ -34,6 +34,11 @@ class SubGoal(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
     priority: int = Field(default=5, ge=1, le=10)  # 1=highest
+    # Phase 6: per-subgoal evidence tracking
+    evidence: list[str] = Field(default_factory=list)  # what data proves this
+    last_checked: datetime | None = None  # when evidence was last gathered
+    failure_reason: str | None = None  # why this sub-goal is failing
+    last_decision_id: str | None = None  # link to decision that targeted this
 
     @model_validator(mode="after")
     def sync_status_progress(self) -> SubGoal:

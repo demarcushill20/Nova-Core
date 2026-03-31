@@ -88,6 +88,7 @@ class ReasoningEngine:
         self._state_dir = Path(base_path) / "STATE"
         self._history_path = self._state_dir / "reasoning_history.json"
         self._last_score: float | None = self._load_last_score()
+        self._was_heuristic_fallback: bool = False
 
     async def reason(
         self,
@@ -122,9 +123,10 @@ class ReasoningEngine:
         # Call LLM (or synthesize from rules if LLM unavailable)
         result = await self._call_llm(prompt, report, context)
 
-        # Persist
+        # Persist — only count toward daily budget if it was a real LLM call
+        # (heuristic fallbacks set novel_insight to None or don't include "[llm]")
         if result:
-            self._persist_result(result)
+            self._persist_result(result, is_llm_call=not self._was_heuristic_fallback)
 
         return result
 
@@ -188,12 +190,39 @@ class ReasoningEngine:
                     f"- {o.get('mode', '?')}: delta={o.get('delta', '?')}, effectiveness={o.get('effectiveness', '?')}"
                 )
 
+        # Market session
+        if context.market_session:
+            lines.append(f"\n## Market Session: {context.market_session}")
+
+        # Degradation tier
+        if context.degradation_tier and context.degradation_tier != "FULL":
+            lines.append(f"\n## Degradation Tier: {context.degradation_tier}")
+            lines.append("System is operating in degraded mode — some capabilities may be limited.")
+
+        # Open circuit breakers
+        if context.open_circuit_breakers:
+            lines.append("\n## Open Circuit Breakers")
+            for cb in context.open_circuit_breakers:
+                lines.append(f"- {cb}")
+
+        # Actionable sub-goals from goal tree
+        if context.actionable_subgoals:
+            lines.append("\n## Actionable Sub-Goals")
+            for sg in context.actionable_subgoals[:5]:
+                lines.append(f"- {sg}")
+
+        # Effectiveness summary
+        if context.effectiveness_summary:
+            lines.append("\n## Decision Effectiveness (avg score delta by mode)")
+            for mode, avg_delta in context.effectiveness_summary.items():
+                lines.append(f"- {mode}: {avg_delta:+.1f}")
+
         lines.extend(
             [
                 "",
                 "## Instructions",
                 "1. Identify the most impactful gap or risk in the current state",
-                "2. Recommend ONE action mode: RESEARCH, PLAN, EXECUTE, MONITOR, VALIDATE, or REPAIR",
+                "2. Recommend ONE action mode: RESEARCH, PLAN, EXECUTE, MONITOR, VALIDATE, REPAIR, or ESCALATE",
                 "3. Explain your reasoning step by step",
                 "4. Suggest 2-3 specific actions",
                 "5. Note any novel insight the rule-based system might miss",
@@ -212,15 +241,106 @@ class ReasoningEngine:
         report: ProgressReport,
         context: DecisionContext,
     ) -> ReasoningResult:
-        """Call the LLM or fall back to heuristic reasoning.
+        """Call LLM via cost_router, fall back to heuristic on failure."""
+        self._was_heuristic_fallback = False
+        try:
+            from utils.cost_router import MODEL_TIERS, route_task
 
-        In production, this would call Claude via the cost_router.
-        For now, we use structured heuristic reasoning that simulates
-        what the LLM would return — this can be swapped for a real
-        LLM call once the cost_router is wired.
+            # Use route_task to get the appropriate model for a reasoning task
+            routing = route_task(
+                task_text=prompt,
+                task_class="research",
+                priority="normal",
+            )
+            model = routing.model
+
+            # Override with config model preference if it maps to a known tier
+            if self.config.model in MODEL_TIERS:
+                model = MODEL_TIERS[self.config.model]
+
+            # Attempt the LLM call via subprocess (Claude CLI)
+            import asyncio
+            import subprocess
+
+            cmd = [
+                "claude",
+                "--model",
+                model,
+                "--max-tokens",
+                str(500),
+                "--output-format",
+                "json",
+                "-p",
+                prompt,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+
+            if proc.returncode != 0:
+                raise RuntimeError(f"claude CLI returned {proc.returncode}: {stderr.decode()[:200]}")
+
+            response_text = stdout.decode().strip()
+            return self._parse_llm_response(response_text, report, context)
+
+        except Exception as exc:
+            log.warning("LLM reasoning failed, falling back to heuristic: %s", exc)
+            self._was_heuristic_fallback = True
+            return self._heuristic_reason(report, context)
+
+    def _parse_llm_response(
+        self,
+        response_text: str,
+        report: ProgressReport,
+        context: DecisionContext,
+    ) -> ReasoningResult:
+        """Parse LLM JSON response into a ReasoningResult.
+
+        Falls back to heuristic if the response is malformed.
         """
-        # Heuristic reasoning (deterministic fallback)
-        return self._heuristic_reason(report, context)
+        try:
+            # The response may be wrapped in markdown code fences
+            text = response_text.strip()
+            if text.startswith("```"):
+                # Strip ```json ... ``` wrapper
+                lines = text.split("\n")
+                lines = [ln for ln in lines if not ln.strip().startswith("```")]
+                text = "\n".join(lines)
+
+            data = json.loads(text)
+
+            # Validate required fields
+            mode = data.get("mode", "")
+            valid_modes = {"research", "plan", "execute", "monitor", "validate", "repair", "escalate"}
+            if mode.lower() not in valid_modes:
+                raise ValueError(f"Invalid mode: {mode!r}")
+
+            reasoning = data.get("reasoning", [])
+            if isinstance(reasoning, str):
+                reasoning = [reasoning]
+
+            actions = data.get("actions", [])
+            if isinstance(actions, str):
+                actions = [actions]
+
+            confidence = data.get("confidence", "medium")
+            if confidence not in ("high", "medium", "low"):
+                confidence = "medium"
+
+            return ReasoningResult(
+                recommended_mode=mode.lower(),
+                target_dimension=data.get("target_dimension"),
+                reasoning_chain=reasoning,
+                suggested_actions=actions,
+                confidence=confidence,
+                novel_insight=data.get("novel_insight"),
+            )
+        except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
+            log.warning("Failed to parse LLM response, falling back to heuristic: %s", exc)
+            return self._heuristic_reason(report, context)
 
     def _heuristic_reason(
         self,
@@ -399,11 +519,14 @@ class ReasoningEngine:
         return self._count_today() >= self.config.max_calls_per_day
 
     def _count_today(self) -> int:
-        """Count reasoning calls made today."""
+        """Count real LLM reasoning calls made today (excludes heuristic fallbacks)."""
         history = self._load_history()
         today = datetime.now(timezone.utc).date()
         count = 0
         for entry in history:
+            # Only count entries that were real LLM calls (not heuristic fallbacks)
+            if not entry.get("is_llm_call", True):
+                continue
             ts = entry.get("timestamp", "")
             try:
                 dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -426,11 +549,17 @@ class ReasoningEngine:
         except (json.JSONDecodeError, OSError):
             return []
 
-    def _persist_result(self, result: ReasoningResult) -> None:
-        """Append result to reasoning history."""
+    def _persist_result(self, result: ReasoningResult, *, is_llm_call: bool = True) -> None:
+        """Append result to reasoning history.
+
+        Only entries with is_llm_call=True count toward the daily budget.
+        Heuristic fallbacks are stored for audit but tagged separately.
+        """
         self._state_dir.mkdir(parents=True, exist_ok=True)
         history = self._load_history()
-        history.append(asdict(result))
+        entry = asdict(result)
+        entry["is_llm_call"] = is_llm_call
+        history.append(entry)
         history = history[-100:]  # keep last 100
 
         fd, tmp_path = tempfile.mkstemp(dir=str(self._state_dir), suffix=".tmp")

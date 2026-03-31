@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
-from datetime import datetime, timezone
-
 import pytest
 from pydantic import ValidationError
 
@@ -13,10 +9,8 @@ from novatrade.autonomy.progress_scorer import ProgressScorer
 from novatrade.autonomy.schemas import (
     AlertLevel,
     DimensionScore,
-    ProgressReport,
     ScoringConfig,
 )
-
 
 # =====================================================================
 # Helper
@@ -39,7 +33,7 @@ def _wire_collectors(scorer: ProgressScorer, scores: dict[str, tuple[float, floa
         async def make_collect(score=s, conf=c):
             return DimensionScore(name="test", score=score, confidence=conf)
 
-        coll.collect = make_collect
+        coll.collect = make_collect  # type: ignore[method-assign]
 
 
 # =====================================================================
@@ -51,13 +45,16 @@ def _wire_collectors(scorer: ProgressScorer, scores: dict[str, tuple[float, floa
 async def test_red_cap_strategy_validity_red(tmp_path):
     """strategy_validity at 20 (RED) caps overall at 45 regardless of other scores."""
     scorer = _make_scorer(tmp_path)
-    _wire_collectors(scorer, {
-        "system_health": (100.0, 1.0),
-        "execution_pipeline": (100.0, 1.0),
-        "strategy_validity": (20.0, 1.0),  # RED
-        "risk_engine": (100.0, 1.0),
-        "performance_stability": (100.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (100.0, 1.0),
+            "execution_pipeline": (100.0, 1.0),
+            "strategy_validity": (20.0, 1.0),  # RED
+            "risk_engine": (100.0, 1.0),
+            "performance_stability": (100.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     assert report.overall_score == 45.0
@@ -67,13 +64,16 @@ async def test_red_cap_strategy_validity_red(tmp_path):
 async def test_red_cap_execution_pipeline_red(tmp_path):
     """execution_pipeline at 30 (RED) caps overall at 45."""
     scorer = _make_scorer(tmp_path)
-    _wire_collectors(scorer, {
-        "system_health": (100.0, 1.0),
-        "execution_pipeline": (30.0, 1.0),  # RED
-        "strategy_validity": (100.0, 1.0),
-        "risk_engine": (100.0, 1.0),
-        "performance_stability": (100.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (100.0, 1.0),
+            "execution_pipeline": (30.0, 1.0),  # RED
+            "strategy_validity": (100.0, 1.0),
+            "risk_engine": (100.0, 1.0),
+            "performance_stability": (100.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     assert report.overall_score == 45.0
@@ -83,13 +83,16 @@ async def test_red_cap_execution_pipeline_red(tmp_path):
 async def test_no_red_cap_when_non_critical_red(tmp_path):
     """risk_engine at 20 (RED) does NOT cap overall — it is not mission-critical."""
     scorer = _make_scorer(tmp_path)
-    _wire_collectors(scorer, {
-        "system_health": (100.0, 1.0),
-        "execution_pipeline": (100.0, 1.0),
-        "strategy_validity": (100.0, 1.0),
-        "risk_engine": (20.0, 1.0),  # RED but not mission-critical
-        "performance_stability": (100.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (100.0, 1.0),
+            "execution_pipeline": (100.0, 1.0),
+            "strategy_validity": (100.0, 1.0),
+            "risk_engine": (20.0, 1.0),  # RED but not mission-critical
+            "performance_stability": (100.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     # Weighted: 100*0.2 + 100*0.25 + 100*0.25 + 20*0.2 + 100*0.1 = 20+25+25+4+10 = 84
@@ -101,13 +104,16 @@ async def test_no_red_cap_when_non_critical_red(tmp_path):
 async def test_red_cap_warning_added(tmp_path):
     """When RED-cap triggers, a descriptive warning is appended."""
     scorer = _make_scorer(tmp_path)
-    _wire_collectors(scorer, {
-        "system_health": (100.0, 1.0),
-        "execution_pipeline": (100.0, 1.0),
-        "strategy_validity": (10.0, 1.0),  # RED
-        "risk_engine": (100.0, 1.0),
-        "performance_stability": (100.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (100.0, 1.0),
+            "execution_pipeline": (100.0, 1.0),
+            "strategy_validity": (10.0, 1.0),  # RED
+            "risk_engine": (100.0, 1.0),
+            "performance_stability": (100.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     red_cap_warnings = [w for w in report.warnings if "capped" in w.lower()]
@@ -120,13 +126,16 @@ async def test_red_cap_warning_added(tmp_path):
 async def test_red_cap_does_not_inflate(tmp_path):
     """If overall is already below red_cap_overall, RED-cap does not raise it."""
     scorer = _make_scorer(tmp_path)
-    _wire_collectors(scorer, {
-        "system_health": (10.0, 1.0),
-        "execution_pipeline": (10.0, 1.0),  # RED + mission-critical
-        "strategy_validity": (10.0, 1.0),   # RED + mission-critical
-        "risk_engine": (10.0, 1.0),
-        "performance_stability": (10.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (10.0, 1.0),
+            "execution_pipeline": (10.0, 1.0),  # RED + mission-critical
+            "strategy_validity": (10.0, 1.0),  # RED + mission-critical
+            "risk_engine": (10.0, 1.0),
+            "performance_stability": (10.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     # Overall = 10.0 already below 45 -> cap doesn't inflate
@@ -141,13 +150,16 @@ async def test_red_cap_custom_threshold(tmp_path):
     """Custom red_cap_overall value is respected."""
     config = ScoringConfig(red_cap_overall=30.0)
     scorer = _make_scorer(tmp_path, config=config)
-    _wire_collectors(scorer, {
-        "system_health": (100.0, 1.0),
-        "execution_pipeline": (100.0, 1.0),
-        "strategy_validity": (20.0, 1.0),  # RED
-        "risk_engine": (100.0, 1.0),
-        "performance_stability": (100.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (100.0, 1.0),
+            "execution_pipeline": (100.0, 1.0),
+            "strategy_validity": (20.0, 1.0),  # RED
+            "risk_engine": (100.0, 1.0),
+            "performance_stability": (100.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     assert report.overall_score == 30.0
@@ -186,13 +198,16 @@ async def test_low_confidence_capped_at_50(tmp_path):
         mission_critical=[],  # disable RED-cap for this test
     )
     scorer = _make_scorer(tmp_path, config=config)
-    _wire_collectors(scorer, {
-        "system_health": (90.0, 0.3),  # low confidence -> effective score capped at 50
-        "execution_pipeline": (50.0, 1.0),
-        "strategy_validity": (50.0, 1.0),
-        "risk_engine": (50.0, 1.0),
-        "performance_stability": (50.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (90.0, 0.3),  # low confidence -> effective score capped at 50
+            "execution_pipeline": (50.0, 1.0),
+            "strategy_validity": (50.0, 1.0),
+            "risk_engine": (50.0, 1.0),
+            "performance_stability": (50.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     # system_health: effective_score = min(90, 50) = 50, weight 1.0
@@ -214,13 +229,16 @@ async def test_high_confidence_uses_real_score(tmp_path):
         mission_critical=[],  # disable RED-cap for this test
     )
     scorer = _make_scorer(tmp_path, config=config)
-    _wire_collectors(scorer, {
-        "system_health": (90.0, 0.8),  # high confidence -> real score
-        "execution_pipeline": (50.0, 1.0),
-        "strategy_validity": (50.0, 1.0),
-        "risk_engine": (50.0, 1.0),
-        "performance_stability": (50.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (90.0, 0.8),  # high confidence -> real score
+            "execution_pipeline": (50.0, 1.0),
+            "strategy_validity": (50.0, 1.0),
+            "risk_engine": (50.0, 1.0),
+            "performance_stability": (50.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     assert report.overall_score == 90.0
@@ -230,13 +248,16 @@ async def test_high_confidence_uses_real_score(tmp_path):
 async def test_low_confidence_warning(tmp_path):
     """Low-confidence dimensions generate a warning message."""
     scorer = _make_scorer(tmp_path)
-    _wire_collectors(scorer, {
-        "system_health": (80.0, 0.3),  # low confidence
-        "execution_pipeline": (80.0, 1.0),
-        "strategy_validity": (80.0, 1.0),
-        "risk_engine": (80.0, 1.0),
-        "performance_stability": (80.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (80.0, 0.3),  # low confidence
+            "execution_pipeline": (80.0, 1.0),
+            "strategy_validity": (80.0, 1.0),
+            "risk_engine": (80.0, 1.0),
+            "performance_stability": (80.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     confidence_warnings = [w for w in report.warnings if "low confidence" in w.lower()]
@@ -259,13 +280,16 @@ async def test_confidence_at_boundary(tmp_path):
         mission_critical=[],
     )
     scorer = _make_scorer(tmp_path, config=config)
-    _wire_collectors(scorer, {
-        "system_health": (90.0, 0.5),  # exactly 0.5 -> should use real score
-        "execution_pipeline": (50.0, 1.0),
-        "strategy_validity": (50.0, 1.0),
-        "risk_engine": (50.0, 1.0),
-        "performance_stability": (50.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (90.0, 0.5),  # exactly 0.5 -> should use real score
+            "execution_pipeline": (50.0, 1.0),
+            "strategy_validity": (50.0, 1.0),
+            "risk_engine": (50.0, 1.0),
+            "performance_stability": (50.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     assert report.overall_score == 90.0
@@ -288,13 +312,16 @@ async def test_low_confidence_low_score_not_capped(tmp_path):
         mission_critical=[],
     )
     scorer = _make_scorer(tmp_path, config=config)
-    _wire_collectors(scorer, {
-        "system_health": (30.0, 0.2),  # low confidence, score 30 < 50 -> min(30, 50) = 30
-        "execution_pipeline": (50.0, 1.0),
-        "strategy_validity": (50.0, 1.0),
-        "risk_engine": (50.0, 1.0),
-        "performance_stability": (50.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (30.0, 0.2),  # low confidence, score 30 < 50 -> min(30, 50) = 30
+            "execution_pipeline": (50.0, 1.0),
+            "strategy_validity": (50.0, 1.0),
+            "risk_engine": (50.0, 1.0),
+            "performance_stability": (50.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     assert report.overall_score == 30.0
@@ -304,13 +331,16 @@ async def test_low_confidence_low_score_not_capped(tmp_path):
 async def test_red_cap_and_confidence_interact(tmp_path):
     """RED-cap and confidence interact correctly — both guardrails can fire."""
     scorer = _make_scorer(tmp_path)
-    _wire_collectors(scorer, {
-        "system_health": (90.0, 0.3),  # low confidence -> effective = 50
-        "execution_pipeline": (20.0, 1.0),  # RED + mission-critical
-        "strategy_validity": (80.0, 1.0),
-        "risk_engine": (80.0, 1.0),
-        "performance_stability": (80.0, 1.0),
-    })
+    _wire_collectors(
+        scorer,
+        {
+            "system_health": (90.0, 0.3),  # low confidence -> effective = 50
+            "execution_pipeline": (20.0, 1.0),  # RED + mission-critical
+            "strategy_validity": (80.0, 1.0),
+            "risk_engine": (80.0, 1.0),
+            "performance_stability": (80.0, 1.0),
+        },
+    )
 
     report = await scorer.score()
     # RED-cap triggers because execution_pipeline is RED

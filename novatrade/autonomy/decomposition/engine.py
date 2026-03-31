@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import subprocess
 import tempfile
+import time
 from collections import defaultdict, deque
+from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from novatrade.autonomy.decomposition.models import (
@@ -19,57 +24,279 @@ from novatrade.autonomy.schemas import ProgressReport
 log = logging.getLogger("novatrade.autonomy.decomposition.engine")
 
 
+# =====================================================================
+# Per-SubGoal Evaluators
+# =====================================================================
+# Each evaluator returns (progress: float, evidence: list[str], failure_reason: str | None)
+
+EvalResult = tuple[float, list[str], str | None]
+
+
+def _eval_services_running(base_path: Path) -> EvalResult:
+    """Check if core systemd services are running."""
+    services = [
+        "novacore-watcher",
+        "novacore-telegram",
+        "novacore-telegram-notifier",
+        "novacore-novatrade",
+    ]
+    running = 0
+    evidence: list[str] = []
+    for svc in services:
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", svc],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            status = result.stdout.strip()
+            if status == "active":
+                running += 1
+                evidence.append(f"{svc}: active")
+            else:
+                evidence.append(f"{svc}: {status}")
+        except (subprocess.TimeoutExpired, OSError):
+            evidence.append(f"{svc}: check failed")
+    progress = running / len(services) if services else 0.0
+    failure = None if running == len(services) else f"{len(services) - running} services not active"
+    return progress, evidence, failure
+
+
+def _eval_no_orphan_tasks(base_path: Path) -> EvalResult:
+    """Check for stale in-progress tasks."""
+    tasks_dir = base_path / "TASKS"
+    if not tasks_dir.exists():
+        return 1.0, ["No TASKS directory"], None
+    stale: list[str] = []
+    now = time.time()
+    for f in tasks_dir.iterdir():
+        if f.suffix == ".inprogress":
+            try:
+                age_h = (now - f.stat().st_mtime) / 3600
+                if age_h > 4:
+                    stale.append(f"{f.name} ({age_h:.1f}h old)")
+            except OSError:
+                continue
+    if not stale:
+        return 1.0, ["No stale in-progress tasks"], None
+    progress = max(0.0, 1.0 - len(stale) * 0.25)
+    return progress, [f"Stale tasks: {', '.join(stale[:5])}"], f"{len(stale)} stale tasks"
+
+
+def _eval_state_file(
+    base_path: Path,
+    rel_path: str,
+    *,
+    max_fresh_age: float = 300,
+    max_aging_age: float = 3600,
+) -> EvalResult:
+    """Generic evaluator: check if a state file exists and is recent."""
+    p = base_path / rel_path
+    if not p.exists():
+        return 0.0, [f"{rel_path} does not exist"], f"{rel_path} missing"
+    try:
+        age = time.time() - p.stat().st_mtime
+    except OSError:
+        return 0.0, [f"{rel_path} stat failed"], f"{rel_path} unreadable"
+    if age < max_fresh_age:
+        return 1.0, [f"{rel_path} exists and fresh ({age:.0f}s old)"], None
+    elif age < max_aging_age:
+        return 0.7, [f"{rel_path} exists but aging ({age / 60:.0f}min old)"], None
+    else:
+        return 0.3, [f"{rel_path} stale ({age / 3600:.1f}h old)"], f"{rel_path} is stale"
+
+
+def _eval_webhook_live(base_path: Path) -> EvalResult:
+    """Check if novacore-novatrade service is active (proxy for webhook)."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "novacore-novatrade"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.stdout.strip() == "active":
+            return 1.0, ["novacore-novatrade: active (webhook proxy)"], None
+        return 0.0, [f"novacore-novatrade: {result.stdout.strip()}"], "novacore-novatrade not active"
+    except (subprocess.TimeoutExpired, OSError):
+        return 0.0, ["novacore-novatrade: check failed"], "service check failed"
+
+
+def _eval_adapter_connected(base_path: Path) -> EvalResult:
+    """Check STATE/novatrade/connection_status.json."""
+    return _eval_state_file(base_path, "STATE/novatrade/connection_status.json")
+
+
+def _eval_feed_healthy(base_path: Path) -> EvalResult:
+    """Check STATE/novatrade/feed_health.json."""
+    return _eval_state_file(base_path, "STATE/novatrade/feed_health.json")
+
+
+def _eval_strategy_loaded(base_path: Path) -> EvalResult:
+    """Check STATE/novatrade/strategy_config.json exists."""
+    return _eval_state_file(
+        base_path,
+        "STATE/novatrade/strategy_config.json",
+        max_fresh_age=86400,  # strategy config is not frequently updated
+        max_aging_age=604800,
+    )
+
+
+def _eval_signals_generating(base_path: Path) -> EvalResult:
+    """Check STATE/novatrade/signal_log.json for recent entries."""
+    p = base_path / "STATE" / "novatrade" / "signal_log.json"
+    if not p.exists():
+        return 0.0, ["signal_log.json does not exist"], "No signal log"
+    try:
+        data = json.loads(p.read_text())
+        # Handle both list and dict forms (live_loop writes {"signals": [...], ...})
+        if isinstance(data, dict):
+            data = data.get("signals", [])
+        if not isinstance(data, list) or len(data) == 0:
+            return 0.0, ["signal_log.json is empty"], "No signals recorded"
+        # Check recency of last entry
+        age = time.time() - p.stat().st_mtime
+        if age < 3600:  # 1 hour
+            return 1.0, [f"signal_log.json has {len(data)} entries, last update {age:.0f}s ago"], None
+        elif age < 14400:  # 4 hours
+            return 0.5, [f"signal_log.json aging ({age / 3600:.1f}h since last update)"], "Signals may be stale"
+        else:
+            return 0.2, [f"signal_log.json stale ({age / 3600:.1f}h since last update)"], "Signals are stale"
+    except (json.JSONDecodeError, OSError) as exc:
+        return 0.0, [f"signal_log.json unreadable: {exc}"], "Signal log unreadable"
+
+
+def _eval_risk_not_halted(base_path: Path) -> EvalResult:
+    """Check STATE/novatrade/halt_state.json."""
+    p = base_path / "STATE" / "novatrade" / "halt_state.json"
+    if not p.exists():
+        # No halt file = not halted (good)
+        return 1.0, ["No halt_state.json (not halted)"], None
+    try:
+        data = json.loads(p.read_text())
+        if isinstance(data, dict) and data.get("halted"):
+            reason = data.get("reason", "unknown")
+            return 0.0, [f"Risk engine HALTED: {reason}"], f"Risk halted: {reason}"
+        return 1.0, ["halt_state.json exists, not halted"], None
+    except (json.JSONDecodeError, OSError):
+        return 0.5, ["halt_state.json unreadable"], "Halt state unknown"
+
+
+def _eval_drawdown_safe(base_path: Path) -> EvalResult:
+    """Check STATE/novatrade/daily_loss_tracker.json."""
+    p = base_path / "STATE" / "novatrade" / "daily_loss_tracker.json"
+    if not p.exists():
+        return 0.5, ["No daily_loss_tracker.json"], "Drawdown data unavailable"
+    try:
+        data = json.loads(p.read_text())
+        if not isinstance(data, dict):
+            return 0.5, ["daily_loss_tracker.json not a dict"], "Drawdown data malformed"
+        # Accept both field naming conventions (drawdown may be negative)
+        pct = abs(float(data.get("current_drawdown_pct", data.get("current_loss_pct", 0.0)) or 0.0))
+        limit = abs(float(data.get("daily_limit_pct", data.get("daily_loss_limit_pct", 5.0)) or 5.0))
+        ratio = pct / limit if limit > 0 else 0.0
+        if ratio < 0.5:
+            return 1.0, [f"Drawdown {pct:.2f}% of {limit:.1f}% limit ({ratio:.0%})"], None
+        elif ratio < 0.8:
+            return 0.5, [f"Drawdown {pct:.2f}% approaching limit ({ratio:.0%})"], f"Drawdown at {ratio:.0%} of limit"
+        else:
+            return 0.1, [f"Drawdown {pct:.2f}% near/at limit ({ratio:.0%})"], f"Drawdown critical: {ratio:.0%} of limit"
+    except (json.JSONDecodeError, OSError):
+        return 0.5, ["daily_loss_tracker.json unreadable"], "Drawdown data unreadable"
+
+
+# Registry mapping sub-goal IDs to their evaluator functions
+SUBGOAL_EVALUATORS: dict[str, Callable[[Path], EvalResult]] = {
+    "sg_services_running": _eval_services_running,
+    "sg_no_orphan_tasks": _eval_no_orphan_tasks,
+    "sg_webhook_live": _eval_webhook_live,
+    "sg_adapter_connected": _eval_adapter_connected,
+    "sg_feed_healthy": _eval_feed_healthy,
+    "sg_strategy_loaded": _eval_strategy_loaded,
+    "sg_signals_generating": _eval_signals_generating,
+    "sg_risk_not_halted": _eval_risk_not_halted,
+    "sg_drawdown_safe": _eval_drawdown_safe,
+}
+
+
 class GoalDecomposer:
     """Manages goal decomposition trees: progress updates, actionable sub-goals, topological sort."""
 
-    def __init__(self, base_path: str = "/home/nova/nova-core") -> None:
+    def __init__(
+        self,
+        base_path: str = "/home/nova/nova-core",
+        evaluators: dict[str, Callable[[Path], EvalResult]] | None = None,
+    ) -> None:
         self.base_path = Path(base_path)
         self._state_dir = self.base_path / "STATE" / "goal_trees"
+        self._evaluators: dict[str, Callable[[Path], EvalResult]] = (
+            evaluators if evaluators is not None else SUBGOAL_EVALUATORS
+        )
 
     def update_progress(
         self,
         decomposition: GoalDecomposition,
         report: ProgressReport,
     ) -> GoalDecomposition:
-        """Update sub-goal statuses based on current dimension scores.
+        """Update sub-goal statuses based on per-subgoal evaluators and dimension scores.
 
         WARNING: Mutates the decomposition object in-place and returns it.
         If you need the original state preserved, pass a deep copy.
 
-        Maps dimension scores to sub-goal progress:
-        - Score >= 70 (GREEN) → progress 1.0 (completed)
-        - Score 40-70 (YELLOW) → progress proportional
-        - Score < 40 (RED) → progress 0.0
+        Strategy:
+        1. Try per-subgoal evaluator first (specific, evidence-based)
+        2. Fall back to dimension-level scoring (generic):
+           - Score >= 70 (GREEN) → progress 1.0 (completed)
+           - Score 40-70 (YELLOW) → progress proportional
+           - Score < 40 (RED) → progress 0.0
         """
         dim_scores: dict[str, float] = {}
         for name, dim in report.dimensions.items():
             dim_scores[name] = dim.score
 
         for sg in decomposition.sub_goals:
-            dim_score = dim_scores.get(sg.dimension)
-            if dim_score is None:
+            if sg.status in (SubGoalStatus.COMPLETED, SubGoalStatus.SKIPPED):
                 continue
 
-            # Map dimension score to sub-goal progress
-            if dim_score >= 70:
-                new_progress = 1.0
-            elif dim_score >= 40:
-                new_progress = (dim_score - 40) / 30  # 0.0-1.0 within YELLOW
-            else:
-                new_progress = 0.0
+            # Try per-subgoal evaluator first
+            evaluator = self._evaluators.get(sg.sub_goal_id)
+            used_evaluator = False
+            if evaluator:
+                try:
+                    progress, evidence, failure = evaluator(self.base_path)
+                    sg.progress = round(max(0.0, min(1.0, progress)), 2)
+                    sg.evidence = evidence[-5:]  # keep last 5
+                    sg.failure_reason = failure
+                    sg.last_checked = datetime.now(timezone.utc)
+                    used_evaluator = True
+                except Exception as exc:
+                    log.warning("Evaluator for %s failed: %s", sg.sub_goal_id, exc)
+                    # Fall through to dimension-level scoring
 
-            # Only update if sub-goal isn't manually completed or skipped
-            if sg.status not in (SubGoalStatus.COMPLETED, SubGoalStatus.SKIPPED):
-                sg.progress = round(new_progress, 2)
-                if new_progress >= 1.0:
-                    sg.status = SubGoalStatus.COMPLETED
-                elif new_progress > 0:
-                    sg.status = SubGoalStatus.IN_PROGRESS
-                    sg.blockers = []  # Clear stale blockers
-                # Check if blocked by unmet dependencies
-                elif self._has_unmet_deps(sg, decomposition):
-                    sg.status = SubGoalStatus.BLOCKED
-                    sg.blockers = self._get_unmet_dep_names(sg, decomposition)
+            if not used_evaluator:
+                # Fallback: dimension-level scoring (existing logic)
+                dim_score = dim_scores.get(sg.dimension)
+                if dim_score is None:
+                    continue
+
+                if dim_score >= 70:
+                    sg.progress = 1.0
+                elif dim_score >= 40:
+                    sg.progress = round((dim_score - 40) / 30, 2)
+                else:
+                    sg.progress = 0.0
+
+            # Update status based on progress
+            if sg.progress >= 1.0:
+                sg.status = SubGoalStatus.COMPLETED
+            elif sg.progress > 0:
+                sg.status = SubGoalStatus.IN_PROGRESS
+                sg.blockers = []  # Clear stale blockers
+            # Check if blocked by unmet dependencies
+            elif self._has_unmet_deps(sg, decomposition):
+                sg.status = SubGoalStatus.BLOCKED
+                sg.blockers = self._get_unmet_dep_names(sg, decomposition)
 
         return decomposition
 

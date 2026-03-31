@@ -28,6 +28,12 @@ class TaskSpec(BaseModel):
     goal_justification: str = ""  # "Why am I doing this?"
     estimated_effort: str = "medium"  # light / medium / heavy
     auto_execute: bool = True  # autonomy-generated tasks execute without human gating
+    investigation_context: str = ""  # root cause + evidence from investigation chain
+    # Phase 6: link tasks to sub-goals and decisions
+    decision_id: str = ""  # link back to the decision that created this task
+    sub_goal_id: str | None = None  # which sub-goal this task serves
+    success_metric: str = ""  # how to measure if this task worked
+    expiry_window_minutes: int = 120  # task becomes stale after this
 
 
 class TaskSpecGenerator:
@@ -122,20 +128,28 @@ class TaskSpecGenerator:
         # Escape quotes in justification for YAML safety
         safe_justification = spec.goal_justification.replace('"', '\\"')
 
-        frontmatter = (
-            f"---\n"
-            f"priority: {spec.priority}\n"
-            f"category: {spec.category}\n"
-            f"target_dimension: {spec.target_dimension or 'none'}\n"
-            f'goal_justification: "{safe_justification}"\n'
-            f"estimated_effort: {spec.estimated_effort}\n"
-            f"auto_execute: {str(spec.auto_execute).lower()}\n"
-            f'generated_at: "{datetime.now(timezone.utc).isoformat()}"\n'
-            f"source: autonomy-decision-engine\n"
-            f"---\n\n"
-        )
+        frontmatter = "---\n"
+        frontmatter += f"priority: {spec.priority}\n"
+        frontmatter += f"category: {spec.category}\n"
+        frontmatter += f"target_dimension: {spec.target_dimension or 'none'}\n"
+        frontmatter += f'goal_justification: "{safe_justification}"\n'
+        frontmatter += f"estimated_effort: {spec.estimated_effort}\n"
+        frontmatter += f"auto_execute: {str(spec.auto_execute).lower()}\n"
+        if spec.decision_id:
+            frontmatter += f"decision_id: {spec.decision_id}\n"
+        if spec.sub_goal_id:
+            frontmatter += f"sub_goal_id: {spec.sub_goal_id}\n"
+        if spec.success_metric:
+            frontmatter += f'success_metric: "{spec.success_metric}"\n'
+        frontmatter += f"expiry_minutes: {spec.expiry_window_minutes}\n"
+        frontmatter += f'generated_at: "{datetime.now(timezone.utc).isoformat()}"\n'
+        frontmatter += "source: autonomy-decision-engine\n"
+        frontmatter += "---\n\n"
 
         content = frontmatter + f"# {spec.title}\n\n{spec.body}\n"
+
+        if spec.investigation_context:
+            content += f"\n## Investigation Context\n{spec.investigation_context}\n"
 
         # Atomic write via tempfile + os.replace
         fd, tmp_path = tempfile.mkstemp(dir=str(self.tasks_dir), suffix=".tmp")

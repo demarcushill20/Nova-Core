@@ -17,5 +17,7 @@
   "reusable_guidance": "Validated 10-phase skill evolution system \u2014 14/14 files present (4,847 LOC), 511 tests passing in 4.52s, all 6 risk mitigations confirmed",
   "created_at": "2026-03-31T03:12:26Z",
   "confidence": "high",
-  "supersedes": "mem_0651_After_Phase_3__Phases_4_and_5_in_parallel__Phase_6_can_start_after_Phase_2__Phas_1774907955"
+  "supersedes": "mem_0651_After_Phase_3__Phases_4_and_5_in_parallel__Phase_6_can_start_after_Phase_2__Phas_1774907955",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0651_After_Phase_3__Phases_4_and_5_in_parallel__Phase_6_can_start_after_Phase_2__Phas_1774902493"
 }

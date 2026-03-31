@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-31T14:57:17Z
+Generated: 2026-03-31T19:23:02Z
 
 ## Overall: HEALTHY
 
@@ -8,8 +8,8 @@ Generated: 2026-03-31T14:57:17Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 8 |
-| Failed workflows | 0 |
+| Completed workflows | 11 |
+| Failed workflows | 1 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
 | Completed delegations | 0 |
@@ -21,9 +21,9 @@ Generated: 2026-03-31T14:57:17Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 2072 |
+| Contract successes | 2077 |
 | Contract failures | 657 |
-| Contract failure rate | 24.1% |
+| Contract failure rate | 24.0% |
 | Budget exhaustions | 0 |
 | Policy violations | 0 |
 | Orphaned agents | 0 |
@@ -42,6 +42,10 @@ Generated: 2026-03-31T14:57:17Z
 | 0650_py____Extend_llm_cache_with_skill-specific_caching__Key__hash_skill_id___task_pa | ? | completed | - |
 | 0654_repair_system_health_regression | ? | completed | - |
 | 0658_I_m_getting_spammed_this_in_telegram_Nova___Mar_31__2026_at_8_41_AM_ | ? | completed | - |
+| 0660_repair_risk_engine_regression | ? | failed | verifier_rejected |
+| 0661_escalate_risk_engine_for_human_review | ? | completed | - |
+| 0662_Did_this_telegram_spam_chew_through_my_limit_it_was_doing_this_every_10_seconds_ | ? | completed | - |
+| hb_proactive_20260331_172312_research_metrics_failure_rate_diagnosis | ? | completed | - |
 | shift_20260330_14_novatrade_monitoring | ? | completed | - |
 | shift_20260331_1_system_health | ? | completed | - |
 | shift_20260331_4_deep_research | ? | completed | - |
@@ -49,4 +53,3 @@ Generated: 2026-03-31T14:57:17Z
 ## Health Findings
 
 No issues detected.
-

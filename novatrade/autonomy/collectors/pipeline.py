@@ -100,42 +100,64 @@ class PipelineCollector(BaseCollector):
     def _compute_confidence(self, warnings: list[str]) -> float:
         """Compute confidence based on how many state files are available and fresh.
 
-        Checks: connection_status.json, feed_health.json, last_order_attempt.json
-        Each present+fresh file adds confidence. Missing files reduce it.
+        Primary: connection_status.json, feed_health.json, last_order_attempt.json
+        Fallback: live_metrics.json, signal_stats.json (actually written by NovaTrade)
         """
         now = time.time()
         state_dir = Path(self.base_path) / "STATE" / "novatrade"
 
-        state_files = [
+        # Primary connectivity files
+        primary_files = [
             state_dir / "connection_status.json",
             state_dir / "feed_health.json",
             state_dir / "last_order_attempt.json",
         ]
+        # Fallback operational files (written by NovaTrade runtime)
+        fallback_files = [
+            state_dir / "live_metrics.json",
+            state_dir / "signal_stats.json",
+        ]
 
         available = 0
-        fresh = 0  # fresh = updated within 30 min
-        total = len(state_files)
+        fresh = 0
+        total = len(primary_files)
 
-        for sf in state_files:
+        for sf in primary_files:
             if sf.exists():
                 available += 1
                 try:
-                    age_h = (now - sf.stat().st_mtime) / 3600.0
-                    if age_h < 0.5:
+                    if (now - sf.stat().st_mtime) / 3600.0 < 0.5:
                         fresh += 1
                 except OSError:
                     pass
 
-        if available == 0:
-            warnings.append("no connectivity data — confidence very low")
-            return 0.1
+        # If primary files exist, use them for confidence
+        if available > 0:
+            freshness_ratio = fresh / total
+            availability_ratio = available / total
+            confidence = 0.3 * availability_ratio + 0.7 * freshness_ratio
+            return round(max(0.1, min(1.0, confidence)), 2)
 
-        # All present and fresh → 1.0; all present but stale → 0.6; partial → scaled
-        freshness_ratio = fresh / total
-        availability_ratio = available / total
+        # Check fallback operational files
+        fb_available = 0
+        fb_fresh = 0
+        for sf in fallback_files:
+            if sf.exists():
+                fb_available += 1
+                try:
+                    if (now - sf.stat().st_mtime) / 3600.0 < 0.5:
+                        fb_fresh += 1
+                except OSError:
+                    pass
 
-        confidence = 0.3 * availability_ratio + 0.7 * freshness_ratio
-        return round(max(0.1, min(1.0, confidence)), 2)
+        if fb_available > 0:
+            # Fallback files present — moderate confidence (capped at 0.7)
+            ratio = fb_fresh / len(fallback_files)
+            confidence = 0.2 + 0.5 * ratio
+            return round(max(0.2, min(0.7, confidence)), 2)
+
+        warnings.append("no connectivity data — confidence very low")
+        return 0.1
 
     # ------------------------------------------------------------------
     # private helpers
@@ -218,12 +240,16 @@ class PipelineCollector(BaseCollector):
         return score, round(age_h, 2)
 
     def _check_feed_health(self) -> tuple[float, float]:
-        """Score based on specific connectivity state files, not generic mtime.
+        """Score based on connectivity state files and live NovaTrade metrics.
 
-        Checks:
-        - connection_status.json → MetaApi connection state
-        - feed_health.json → per-symbol feed freshness
-        - last_order_attempt.json → recent order execution results
+        Primary checks (if available):
+        - connection_status.json → MetaApi connection state (40 pts)
+        - feed_health.json → per-symbol feed freshness (30 pts)
+        - last_order_attempt.json → recent order execution results (30 pts)
+
+        Fallback checks (used when primary files are absent):
+        - live_metrics.json → tick count, uptime, error rate (up to 50 pts)
+        - signal_stats.json → signal status, concern level (up to 50 pts)
         """
         state_dir = Path(self.base_path) / "STATE" / "novatrade"
         if not state_dir.is_dir():
@@ -231,7 +257,6 @@ class PipelineCollector(BaseCollector):
 
         score = 0.0
         checks = 0
-        total_checks = 3
 
         # 1. Check connection_status.json for MetaApi connection state
         conn_path = state_dir / "connection_status.json"
@@ -261,7 +286,7 @@ class PipelineCollector(BaseCollector):
                         stale_count = 0
                         total_symbols = 0
                         now = time.time()
-                        for sym, info in symbols.items():
+                        for _sym, info in symbols.items():
                             if not isinstance(info, dict):
                                 continue
                             total_symbols += 1
@@ -271,7 +296,7 @@ class PipelineCollector(BaseCollector):
                                     last_tick = datetime.fromisoformat(last_tick).timestamp()
                                 except (ValueError, TypeError):
                                     last_tick = 0
-                            if now - last_tick > 300:  # stale if >5 min
+                            if now - float(last_tick or 0) > 300:  # stale if >5 min
                                 stale_count += 1
 
                         if total_symbols > 0:
@@ -291,7 +316,7 @@ class PipelineCollector(BaseCollector):
             try:
                 data = json.loads(order_path.read_text())
                 if isinstance(data, dict):
-                    result = data.get("result", data.get("status", "")).lower()
+                    result = (data.get("result") or data.get("status") or "").lower()
                     if result in ("success", "filled", "executed"):
                         score += 30.0
                     elif result in ("partial", "pending"):
@@ -301,27 +326,83 @@ class PipelineCollector(BaseCollector):
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # Fallback: if no specific state files, fall back to generic mtime check
-        if checks == 0:
-            newest_mtime = 0.0
-            for p in state_dir.iterdir():
-                if not p.is_file():
-                    continue
-                try:
-                    mt = p.stat().st_mtime
-                    if mt > newest_mtime:
-                        newest_mtime = mt
-                except OSError:
-                    continue
+        # If primary files gave results, return them
+        if checks > 0:
+            return score, float(checks)
 
-            if newest_mtime == 0.0:
-                return 0.0, 0.0
+        # --- Fallback: use live NovaTrade operational files ---
+        # These files are actually written by the NovaTrade runtime.
 
-            age_h = (time.time() - newest_mtime) / 3600.0
-            if age_h < 1:
-                score = 50.0  # generic data, reduced score
-            elif age_h < 6:
-                score = 25.0
-            return score, round(age_h, 2)
+        # 4. live_metrics.json — tick activity and error rate (up to 50 pts)
+        live_path = state_dir / "live_metrics.json"
+        if live_path.exists():
+            try:
+                age_h = (time.time() - live_path.stat().st_mtime) / 3600.0
+                if age_h < 0.5:  # must be recently updated
+                    data = json.loads(live_path.read_text())
+                    if isinstance(data, dict):
+                        ticks = data.get("ticks", 0)
+                        errors = data.get("errors", 0)
+                        uptime = data.get("uptime_seconds", 0)
 
-        return score, float(checks)
+                        if uptime > 0 and ticks > 0:
+                            # Service is alive and receiving ticks
+                            error_ratio = errors / max(ticks, 1)
+                            if error_ratio < 0.05:
+                                score += 50.0  # healthy — low errors
+                            elif error_ratio < 0.2:
+                                score += 30.0  # some errors
+                            else:
+                                score += 10.0  # high error rate
+                            checks += 1
+                        elif uptime > 0:
+                            score += 20.0  # running but no ticks yet
+                            checks += 1
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # 5. signal_stats.json — signal status and concern level (up to 50 pts)
+        stats_path = state_dir / "signal_stats.json"
+        if stats_path.exists():
+            try:
+                data = json.loads(stats_path.read_text())
+                if isinstance(data, dict):
+                    status = data.get("status", "").upper()
+                    concern = data.get("concern_level", "").upper()
+
+                    if status == "OK" and concern == "GREEN":
+                        score += 50.0
+                    elif status == "OK":
+                        score += 35.0
+                    elif concern in ("GREEN", "YELLOW"):
+                        score += 20.0
+                    else:
+                        score += 5.0
+                    checks += 1
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        if checks > 0:
+            return score, float(checks)
+
+        # Last resort: generic mtime check on any file in the directory
+        newest_mtime = 0.0
+        for p in state_dir.iterdir():
+            if not p.is_file():
+                continue
+            try:
+                mt = p.stat().st_mtime
+                if mt > newest_mtime:
+                    newest_mtime = mt
+            except OSError:
+                continue
+
+        if newest_mtime == 0.0:
+            return 0.0, 0.0
+
+        age_h = (time.time() - newest_mtime) / 3600.0
+        if age_h < 1:
+            score = 50.0  # generic data, reduced score
+        elif age_h < 6:
+            score = 25.0
+        return score, round(age_h, 2)
