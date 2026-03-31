@@ -113,10 +113,7 @@ class DirectActionExecutor:
         )
 
         # Verify remediation worked and send follow-up alert
-        if (
-            decision.mode in (ActionMode.REPAIR, ActionMode.EXECUTE)
-            and result.actions_taken
-        ):
+        if decision.mode in (ActionMode.REPAIR, ActionMode.EXECUTE) and result.actions_taken:
             self._verify_and_followup(decision, result)
 
         return result
@@ -635,7 +632,12 @@ class DirectActionExecutor:
         return True, "All services active"
 
     def _verify_and_followup(self, decision: Decision, result: ActionResult) -> None:
-        """Wait briefly, re-check the remediated dimension, and send a follow-up alert."""
+        """Wait briefly, re-check the remediated dimension, and log the result.
+
+        Follow-ups are LOG-ONLY — never send to Telegram.  The initial alert
+        already informed the operator; sending repeated "RESOLVED" messages is
+        noise when the underlying condition (e.g. no trades) keeps recurring.
+        """
         # Brief wait for the service to come up
         time.sleep(5)
 
@@ -644,11 +646,7 @@ class DirectActionExecutor:
         action_summary = "; ".join(a[:100] for a in result.actions_taken[:3])
 
         if resolved:
-            text = (
-                f"\u2705 RESOLVED: {dim_label}\n"
-                f"Auto-fix: {action_summary}\n"
-                f"Status: {detail}"
-            )
+            text = f"\u2705 RESOLVED: {dim_label}\nAuto-fix: {action_summary}\nStatus: {detail}"
         else:
             text = (
                 f"\U0001f6a8 UNRESOLVED: {dim_label}\n"
@@ -658,56 +656,10 @@ class DirectActionExecutor:
             )
             result.escalated = True
 
-        # Dedup with a different prefix so it doesn't collide with the initial alert
-        followup_sig = f"followup:{decision.mode.value}:{dim_label}"
-        if self._is_duplicate_followup(followup_sig):
-            log.info("Suppressed duplicate follow-up for %s", followup_sig)
-            self._log_to_file(f"[FOLLOWUP-DEDUPED] {text}")
-            return
+        log.info("Follow-up verification: %s — %s", dim_label, "RESOLVED" if resolved else "UNRESOLVED")
 
-        # Send via Telegram
-        token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        chat_id = os.environ.get("ALLOWED_CHAT_ID", "")
-        if token and chat_id:
-            try:
-                data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
-                url = f"https://api.telegram.org/bot{token}/sendMessage"
-                req = urllib.request.Request(url, data=data, method="POST")  # noqa: S310
-                urllib.request.urlopen(req, timeout=15)  # noqa: S310
-                log.info("Sent follow-up alert to Telegram: %s", "RESOLVED" if resolved else "UNRESOLVED")
-            except Exception as exc:
-                log.warning("Failed to send follow-up Telegram alert: %s", exc)
-        else:
-            log.info("Telegram credentials not configured — follow-up not sent")
-
-        # Log to autonomy_actions.log
+        # Log to file only — no Telegram for follow-ups
         self._log_to_file(f"[FOLLOWUP] {text}")
-
-    def _is_duplicate_followup(self, sig: str) -> bool:
-        """Check if we already sent this follow-up recently (same dedup file, different prefix)."""
-        dedup_path = self._state_dir / "autonomy_alert_dedup.json"
-        now = time.time()
-        try:
-            if dedup_path.exists():
-                data = json.loads(dedup_path.read_text())
-            else:
-                data = {}
-        except (json.JSONDecodeError, OSError):
-            data = {}
-
-        last_ts = data.get(sig, 0)
-        if now - last_ts < self._ALERT_DEDUP_SECONDS:
-            return True
-
-        # Record this follow-up
-        data[sig] = now
-        data = {k: v for k, v in data.items() if now - v < self._ALERT_DEDUP_SECONDS}
-        try:
-            dedup_path.parent.mkdir(parents=True, exist_ok=True)
-            dedup_path.write_text(json.dumps(data))
-        except OSError:
-            pass
-        return False
 
     # -------------------------------------------------------------------
     # Logging
