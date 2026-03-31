@@ -1,0 +1,17 @@
+{
+  "name": "the-agent-autonomously-identified-a-critical-state-machine-d",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "The agent autonomously identified a critical state machine desync from recent signal rejections, diagnosed the root cause (missing broker reconciliation), implemented a 76-line fix with 11 tests, and verified 83/83 pass \u2014 all in under 10 minutes. This 'observe anomaly \u2192 diagnose \u2192 fix \u2192 test \u2192 verify' pattern in free-will blocks is highly effective and should be captured as a reusable skill for autonomous exploration shifts.",
+    "task_examples": [
+      "shift_20260330_15_free_will_pm",
+      "shift_20260330_15_free_will_pm"
+    ],
+    "task_id": "shift_20260330_15_free_will_pm"
+  },
+  "created_at": "2026-03-31T00:31:07.800430+00:00"
+}

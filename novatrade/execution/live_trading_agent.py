@@ -31,6 +31,52 @@ from novatrade.strategy.live_engine import LiveSignal, LiveStrategyEngine, Signa
 log = logging.getLogger("novatrade.execution.live_trading_agent")
 
 # ---------------------------------------------------------------------------
+# Price normalization fix for MetaAPI broker compatibility
+# ---------------------------------------------------------------------------
+
+class PriceNormalizer:
+    """Price normalization for MetaAPI broker compatibility.
+
+    Fixes TRADE_RETCODE_INVALID_PRICE errors by ensuring prices are
+    formatted to the correct decimal precision for each symbol.
+    """
+
+    SYMBOL_PRECISION = {
+        # Major FX pairs (5 decimals)
+        "EURUSD": 5, "GBPUSD": 5, "USDCHF": 5, "AUDUSD": 5,
+        "NZDUSD": 5, "USDCAD": 5, "EURGBP": 5, "EURJPY": 3,
+        # JPY pairs (3 decimals)
+        "USDJPY": 3, "GBPJPY": 3, "AUDJPY": 3, "NZDJPY": 3,
+        "CADJPY": 3, "CHFJPY": 3,
+        # Default for unknown symbols
+        "DEFAULT": 5
+    }
+
+    @classmethod
+    def normalize_price(cls, symbol: str, price: float) -> float:
+        """Normalize price to broker-required precision."""
+        precision = cls.SYMBOL_PRECISION.get(symbol, cls.SYMBOL_PRECISION["DEFAULT"])
+        return round(price, precision)
+
+    @classmethod
+    def normalize_payload_prices(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        """Normalize all prices in a trading payload."""
+        symbol = payload.get("symbol", "")
+
+        # All price fields that need normalization
+        price_fields = ["entry_price", "stop_loss", "take_profit", "old_stop", "new_stop"]
+
+        for price_field in price_fields:
+            if price_field in payload and isinstance(payload[price_field], (int, float)):
+                original = payload[price_field]
+                normalized = cls.normalize_price(symbol, original)
+                if original != normalized:
+                    log.debug("Normalized %s %s: %.8f -> %.8f", symbol, price_field, original, normalized)
+                payload[price_field] = normalized
+
+        return payload
+
+# ---------------------------------------------------------------------------
 # Mapping helpers
 # ---------------------------------------------------------------------------
 
@@ -339,7 +385,7 @@ class LiveTradingAgent:
             return None
         action = self._resolve_entry_action(signal.side)
 
-        return {
+        payload = {
             "strategy_name": _STRATEGY_NAME,
             "strategy_version": _STRATEGY_VERSION,
             "action": action,
@@ -354,6 +400,9 @@ class LiveTradingAgent:
             "bar_close_time": int(signal.timestamp),
             "campaign": self._campaign,
         }
+
+        # Apply price normalization to fix MetaAPI precision issues
+        return PriceNormalizer.normalize_payload_prices(payload)
 
     def _build_exit_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
         """Build CLOSE_POSITION payload."""
@@ -377,7 +426,7 @@ class LiveTradingAgent:
         if side_mapped is None:
             log.error("Unknown signal side %r — cannot build modify_sl payload", signal.side)
             return None
-        return {
+        payload = {
             "strategy_name": _STRATEGY_NAME,
             "strategy_version": _STRATEGY_VERSION,
             "action": "MODIFY_SL",
@@ -387,6 +436,9 @@ class LiveTradingAgent:
             "new_stop": signal.new_stop,
             "campaign": self._campaign,
         }
+
+        # Apply price normalization to fix MetaAPI precision issues
+        return PriceNormalizer.normalize_payload_prices(payload)
 
     def _build_cancel_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
         """Build CANCEL_ORDER payload."""

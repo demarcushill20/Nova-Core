@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0654_repair_system_health_regression_1774963327",
+  "workflow_id": "0654_repair_system_health_regression",
+  "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0654_repair_system_health_regression_1774962777 (done)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-03-31T13:22:07Z",
+  "confidence": "high"
+}

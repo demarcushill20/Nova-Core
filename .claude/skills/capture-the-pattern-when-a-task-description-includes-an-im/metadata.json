@@ -1,0 +1,17 @@
+{
+  "name": "capture-the-pattern-when-a-task-description-includes-an-im",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "Capture the pattern: when a task description includes an 'Implementation Complete' section with deliverable counts and test counts, the task is a verification-only workload. The successful pattern was: (1) glob for deliverable files and count, (2) run test suite and assert count/zero-failures, (3) spot-check risk mitigations from the risk register. This pattern completed in ~3 minutes with high confidence. Codify as a lightweight DERIVED skill from self-verification.",
+    "task_examples": [
+      "0651_After_Phase_3__Phases_4_and_5_in_parallel__Phase_6_can_start_after_Phase_2__Phas",
+      "0651_After_Phase_3__Phases_4_and_5_in_parallel__Phase_6_can_start_after_Phase_2__Phas"
+    ],
+    "task_id": "0651_After_Phase_3__Phases_4_and_5_in_parallel__Phase_6_can_start_after_Phase_2__Phas"
+  },
+  "created_at": "2026-03-30T20:40:36.888886+00:00"
+}

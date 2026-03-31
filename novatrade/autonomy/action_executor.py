@@ -112,6 +112,13 @@ class DirectActionExecutor:
             f"{len(result.actions_taken)} actions taken"
         )
 
+        # Verify remediation worked and send follow-up alert
+        if (
+            decision.mode in (ActionMode.REPAIR, ActionMode.EXECUTE)
+            and result.actions_taken
+        ):
+            self._verify_and_followup(decision, result)
+
         return result
 
     # -------------------------------------------------------------------
@@ -582,6 +589,129 @@ class DirectActionExecutor:
         text = f"[{decision.mode.value.upper()}] {decision.target_dimension or 'system'}: {decision.reason[:120]}"
         log.info("Autonomy %s (log-only): %s", decision.mode.value, decision.target_dimension)
         self._log_to_file(text)
+
+    # -------------------------------------------------------------------
+    # Resolution verification & follow-up
+    # -------------------------------------------------------------------
+
+    # Known core services to check for system-wide health verification
+    _CORE_SERVICES = (
+        "novacore-watcher",
+        "novacore-telegram",
+        "novacore-telegram-notifier",
+        "novacore-novatrade",
+    )
+
+    def _verify_dimension(self, dimension: str | None) -> tuple[bool, str]:
+        """Quick re-check of a dimension after remediation.
+
+        Returns (resolved: bool, detail: str).
+        """
+        dim = dimension or ""
+
+        if dim == "system_health":
+            # Re-check all core services
+            failed = []
+            for svc in self._CORE_SERVICES:
+                if not self._is_service_active(svc):
+                    failed.append(svc)
+            if failed:
+                return False, f"services still down: {', '.join(failed)}"
+            return True, "All services active"
+
+        if dim in ("strategy_validity", "execution_pipeline"):
+            # The most actionable check: is novacore-novatrade running?
+            if self._is_service_active("novacore-novatrade"):
+                return True, "novacore-novatrade is active"
+            return False, "novacore-novatrade is still inactive"
+
+        # Default: check all 4 core services
+        failed = []
+        for svc in self._CORE_SERVICES:
+            if not self._is_service_active(svc):
+                failed.append(svc)
+        if failed:
+            return False, f"services still down: {', '.join(failed)}"
+        return True, "All services active"
+
+    def _verify_and_followup(self, decision: Decision, result: ActionResult) -> None:
+        """Wait briefly, re-check the remediated dimension, and send a follow-up alert."""
+        # Brief wait for the service to come up
+        time.sleep(5)
+
+        resolved, detail = self._verify_dimension(decision.target_dimension)
+        dim_label = decision.target_dimension or "system"
+        action_summary = "; ".join(a[:100] for a in result.actions_taken[:3])
+
+        if resolved:
+            text = (
+                f"\u2705 RESOLVED: {dim_label}\n"
+                f"Auto-fix: {action_summary}\n"
+                f"Status: {detail}"
+            )
+        else:
+            text = (
+                f"\U0001f6a8 UNRESOLVED: {dim_label}\n"
+                f"Attempted: {action_summary}\n"
+                f"Still failing: {detail}\n"
+                f"Escalating for human attention."
+            )
+            result.escalated = True
+
+        # Dedup with a different prefix so it doesn't collide with the initial alert
+        followup_sig = f"followup:{decision.mode.value}:{dim_label}"
+        if self._is_duplicate_followup(followup_sig):
+            log.info("Suppressed duplicate follow-up for %s", followup_sig)
+            self._log_to_file(f"[FOLLOWUP-DEDUPED] {text}")
+            return
+
+        # Send via Telegram
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        chat_id = os.environ.get("ALLOWED_CHAT_ID", "")
+        if token and chat_id:
+            try:
+                data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
+                url = f"https://api.telegram.org/bot{token}/sendMessage"
+                req = urllib.request.Request(url, data=data, method="POST")  # noqa: S310
+                urllib.request.urlopen(req, timeout=15)  # noqa: S310
+                log.info("Sent follow-up alert to Telegram: %s", "RESOLVED" if resolved else "UNRESOLVED")
+            except Exception as exc:
+                log.warning("Failed to send follow-up Telegram alert: %s", exc)
+        else:
+            log.info("Telegram credentials not configured — follow-up not sent")
+
+        # Log to autonomy_actions.log
+        self._log_to_file(f"[FOLLOWUP] {text}")
+
+    def _is_duplicate_followup(self, sig: str) -> bool:
+        """Check if we already sent this follow-up recently (same dedup file, different prefix)."""
+        dedup_path = self._state_dir / "autonomy_alert_dedup.json"
+        now = time.time()
+        try:
+            if dedup_path.exists():
+                data = json.loads(dedup_path.read_text())
+            else:
+                data = {}
+        except (json.JSONDecodeError, OSError):
+            data = {}
+
+        last_ts = data.get(sig, 0)
+        if now - last_ts < self._ALERT_DEDUP_SECONDS:
+            return True
+
+        # Record this follow-up
+        data[sig] = now
+        data = {k: v for k, v in data.items() if now - v < self._ALERT_DEDUP_SECONDS}
+        try:
+            dedup_path.parent.mkdir(parents=True, exist_ok=True)
+            dedup_path.write_text(json.dumps(data))
+        except OSError:
+            pass
+        return False
+
+    # -------------------------------------------------------------------
+    # Logging
+    # -------------------------------------------------------------------
 
     def _log_to_file(self, text: str) -> None:
         """Append to autonomy_actions.log."""

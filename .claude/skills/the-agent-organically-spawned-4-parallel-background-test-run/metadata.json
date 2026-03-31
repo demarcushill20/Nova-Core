@@ -1,0 +1,17 @@
+{
+  "name": "the-agent-organically-spawned-4-parallel-background-test-run",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "The agent organically spawned 4 parallel background test runs and waited for all to complete \u2014 a useful pattern for validation tasks. Capture this as a reusable skill or sub-workflow: fan-out N test suites in parallel, collect results, assert consistency across runs.",
+    "task_examples": [
+      "0647_validate_recent_improvements",
+      "0647_validate_recent_improvements"
+    ],
+    "task_id": "0647_validate_recent_improvements"
+  },
+  "created_at": "2026-03-30T18:22:34.706672+00:00"
+}

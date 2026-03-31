@@ -1,0 +1,17 @@
+{
+  "name": "new-skill-a-lightweight-pre-post-guard-for-shift-block-exec",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "New skill: a lightweight pre/post guard for shift-block executions. Pre: assert last checkpoint was loaded, assert task body was parsed. Post: assert at minimum (a) relevant shell health checks ran, (b) an OUTPUT/ artifact was written, (c) a memory checkpoint was created. This pattern is not covered by any existing skill and would have prevented this vacuous run.",
+    "task_examples": [
+      "shift_20260330_1_system_health",
+      "shift_20260330_1_system_health"
+    ],
+    "task_id": "shift_20260330_1_system_health"
+  },
+  "created_at": "2026-03-30T12:33:31.664819+00:00"
+}
