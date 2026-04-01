@@ -1,14 +1,17 @@
-"""Tests for trade journal logging (v87 P2.4)."""
+"""Tests for trade journal logging (v87 P2.4) + rotation."""
 
 import json
 
 import pytest
 
 from novatrade.monitor.trade_journal import (
+    _count_lines,
+    _rotate_if_needed,
     get_journal_stats,
     log_trade_close,
     log_trade_open,
     log_trade_reject,
+    rotate_now,
 )
 
 
@@ -92,3 +95,83 @@ class TestJournalStats:
         assert stats["opens"] == 2
         assert stats["closes"] == 1
         assert stats["rejects"] == 1
+
+
+class TestJournalRotation:
+    def _write_n_lines(self, tmp_path, n):
+        """Write n dummy JSONL lines to the journal."""
+        journal_file = tmp_path / "trade_journal.jsonl"
+        with open(journal_file, "w") as f:
+            for i in range(n):
+                f.write(json.dumps({"event": "REJECT", "i": i, "logged_at": f"2026-01-01T00:00:{i:02d}"}) + "\n")
+        return journal_file
+
+    def test_count_lines(self, tmp_path):
+        jf = self._write_n_lines(tmp_path, 50)
+        assert _count_lines(jf) == 50
+
+    def test_count_lines_missing_file(self, tmp_path):
+        assert _count_lines(tmp_path / "nonexistent.jsonl") == 0
+
+    def test_rotate_if_needed_under_limit(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("novatrade.monitor.trade_journal.MAX_JOURNAL_LINES", 100)
+        self._write_n_lines(tmp_path, 50)
+        _rotate_if_needed()
+        # No rotation should occur — still 50 lines
+        assert _count_lines(tmp_path / "trade_journal.jsonl") == 50
+        archives = list(tmp_path.glob("trade_journal.*.jsonl"))
+        assert len(archives) == 0
+
+    def test_rotate_if_needed_over_limit(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("novatrade.monitor.trade_journal.MAX_JOURNAL_LINES", 100)
+        monkeypatch.setattr("novatrade.monitor.trade_journal.KEEP_AFTER_ROTATE", 20)
+        self._write_n_lines(tmp_path, 150)
+        _rotate_if_needed()
+        # Active file should have KEEP_AFTER_ROTATE lines
+        assert _count_lines(tmp_path / "trade_journal.jsonl") == 20
+        # Archive should exist with all 150 original lines
+        archives = list(tmp_path.glob("trade_journal.*.jsonl"))
+        assert len(archives) == 1
+        assert _count_lines(archives[0]) == 150
+
+    def test_rotate_keeps_newest_entries(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("novatrade.monitor.trade_journal.MAX_JOURNAL_LINES", 100)
+        monkeypatch.setattr("novatrade.monitor.trade_journal.KEEP_AFTER_ROTATE", 10)
+        self._write_n_lines(tmp_path, 150)
+        _rotate_if_needed()
+        # The kept entries should be the last 10 (i=140..149)
+        with open(tmp_path / "trade_journal.jsonl") as f:
+            entries = [json.loads(line) for line in f]
+        assert len(entries) == 10
+        assert entries[0]["i"] == 140
+        assert entries[-1]["i"] == 149
+
+    def test_rotate_now_forces_rotation(self, tmp_path, monkeypatch):
+        """rotate_now() should work even when under MAX_JOURNAL_LINES."""
+        monkeypatch.setattr("novatrade.monitor.trade_journal.MAX_JOURNAL_LINES", 10_000)
+        monkeypatch.setattr("novatrade.monitor.trade_journal.KEEP_AFTER_ROTATE", 5)
+        self._write_n_lines(tmp_path, 50)
+        result = rotate_now()
+        assert result["archived_lines"] == 50
+        assert result["kept_lines"] == 5
+        assert result["archive_path"] is not None
+        assert _count_lines(tmp_path / "trade_journal.jsonl") == 5
+
+    def test_rotate_now_empty_journal(self, tmp_path):
+        result = rotate_now()
+        assert result["archived_lines"] == 0
+
+    def test_auto_rotation_via_append(self, tmp_path, monkeypatch):
+        """Rotation triggers automatically after _ROTATE_CHECK_INTERVAL appends."""
+        monkeypatch.setattr("novatrade.monitor.trade_journal.MAX_JOURNAL_LINES", 50)
+        monkeypatch.setattr("novatrade.monitor.trade_journal.KEEP_AFTER_ROTATE", 10)
+        monkeypatch.setattr("novatrade.monitor.trade_journal._ROTATE_CHECK_INTERVAL", 5)
+        monkeypatch.setattr("novatrade.monitor.trade_journal._append_counter", 0)
+        # Pre-populate with 60 lines (over limit)
+        self._write_n_lines(tmp_path, 60)
+        # Now append 5 more to trigger the check interval
+        for _ in range(5):
+            log_trade_reject(symbol="EURUSD", side="BUY", reason="test")
+        # Rotation should have fired — active file should be small
+        line_count = _count_lines(tmp_path / "trade_journal.jsonl")
+        assert line_count <= 15  # 10 kept + 5 new appends at most
