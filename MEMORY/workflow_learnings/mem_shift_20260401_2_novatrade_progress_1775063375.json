@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_shift_20260401_2_novatrade_progress_1775063375",
+  "workflow_id": "shift_20260401_2_novatrade_progress",
+  "task_summary": "Repaired CONTRACT block in shift_20260401_2_novatrade_progress output by removing extra fields and keeping only required fields (summary, files_changed, verification, confidence)",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Repaired CONTRACT block in shift_20260401_2_novatrade_progress output by removing extra fields and keeping only required fields (summary, files_changed, verification, confidence)"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260401_2_novatrade_progress"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Repaired CONTRACT block in shift_20260401_2_novatrade_progress output by removing extra fields and keeping only required fields (summary, files_changed, verification, confidence)",
+  "created_at": "2026-04-01T17:09:35Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260401_2_novatrade_progress_1775053313"
+}

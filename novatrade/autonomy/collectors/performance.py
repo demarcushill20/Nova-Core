@@ -106,7 +106,9 @@ class PerformanceCollector(BaseCollector):
         """Load equity history from STATE/novatrade/equity_history.json.
 
         Handles both list format ``[{...}, ...]`` and dict format
-        ``{"snapshots": [...], ...}``.
+        ``{"snapshots": [...], ...}``.  Deduplicates entries with identical
+        timestamps (keeps the last occurrence per normalized timestamp) and
+        sorts chronologically.
         """
         path = Path(self.base_path) / "STATE" / "novatrade" / "equity_history.json"
         if not path.exists():
@@ -114,12 +116,53 @@ class PerformanceCollector(BaseCollector):
         try:
             data = json.loads(path.read_text())
             if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
-                return data.get("snapshots", [])
-            return []
+                entries = data
+            elif isinstance(data, dict):
+                entries = data.get("snapshots", [])
+            else:
+                return []
+            return self._deduplicate_and_sort(entries)
         except (json.JSONDecodeError, OSError):
             return []
+
+    @staticmethod
+    def _normalize_ts(ts: str) -> str:
+        """Normalize ISO timestamp for dedup: Z → +00:00, strip microseconds."""
+        return ts.replace("Z", "+00:00").split(".")[0]
+
+    # Maximum single-step equity change to consider valid (3%).
+    # Entries exceeding this are likely stale adapter returns or data corruption.
+    _MAX_STEP_CHANGE = 0.03
+
+    @classmethod
+    def _deduplicate_and_sort(cls, entries: list[dict]) -> list[dict]:
+        """Deduplicate by normalized timestamp, keeping last per timestamp, then sort."""
+        by_ts: dict[str, dict] = {}
+        for entry in entries:
+            raw_ts = entry.get("timestamp", "")
+            key = cls._normalize_ts(raw_ts) if raw_ts else f"_no_ts_{id(entry)}"
+            by_ts[key] = entry
+        result = list(by_ts.values())
+        result.sort(key=lambda e: cls._normalize_ts(e.get("timestamp", "")))
+        return cls._filter_anomalies(result)
+
+    @classmethod
+    def _filter_anomalies(cls, sorted_entries: list[dict]) -> list[dict]:
+        """Remove entries that create single-step equity changes beyond threshold.
+
+        Defence-in-depth: even if a bad value slips past the writer guard,
+        the collector will not let it distort drawdown/Sharpe calculations.
+        """
+        if len(sorted_entries) < 2:
+            return sorted_entries
+        clean: list[dict] = [sorted_entries[0]]
+        for entry in sorted_entries[1:]:
+            prev_eq = clean[-1].get("equity", clean[-1].get("value", 0))
+            cur_eq = entry.get("equity", entry.get("value", 0))
+            if prev_eq > 0 and abs(cur_eq - prev_eq) / prev_eq > cls._MAX_STEP_CHANGE:
+                continue  # skip anomalous entry
+            clean.append(entry)
+        return clean
 
     def _compute_sharpe(self, equity_data: list[dict]) -> tuple[float, float]:
         """Compute Sharpe ratio from equity history."""

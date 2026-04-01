@@ -133,15 +133,14 @@ class BrokerDiagnostic:
 
             # Extract key account properties
             account_data = {
-                "trade_allowed": getattr(account, "tradeAllowed", None),
-                "expert_allowed": getattr(account, "expertAllowed", None),
+                "trade_allowed": getattr(account, "trade_allowed", None),
                 "equity": getattr(account, "equity", None),
                 "balance": getattr(account, "balance", None),
                 "margin": getattr(account, "margin", None),
                 "leverage": getattr(account, "leverage", None),
                 "currency": getattr(account, "currency", None),
-                "state": getattr(account, "state", None),
-                "connection_status": getattr(account, "connectionStatus", None),
+                "mode": getattr(account, "mode", None),
+                "broker": getattr(account, "broker", None),
             }
 
             # Determine status
@@ -315,13 +314,13 @@ class BrokerDiagnostic:
         try:
             # Test order validation without execution
             # This tests the adapter's order preparation and validation logic
-            from novatrade.models import OrderRequest
+            from novatrade.models import OrderRequest, OrderSide, OrderType
 
             test_request = OrderRequest(
                 symbol="EURUSD",
-                action="buy",
+                side=OrderSide.BUY,
                 volume=0.01,  # Minimum volume
-                order_type="market",
+                order_type=OrderType.MARKET,
             )
 
             # Test if we can prepare the order (validate format, etc.)

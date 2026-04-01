@@ -208,6 +208,13 @@ class MetaApiAdapter(MT5Adapter):
         """Close connection and SDK resources."""
         log.info("metaapi disconnect: closing")
         try:
+            # Unsubscribe from market data before closing to free server-side quota
+            if self._connection is not None and self._subscribed_symbols:
+                for symbol in self._subscribed_symbols:
+                    try:
+                        await self._connection.unsubscribe_from_market_data(symbol)
+                    except Exception:  # noqa: S110
+                        pass  # best-effort cleanup
             if self._connection is not None:
                 await self._connection.close()
             if self._api is not None:
@@ -442,13 +449,19 @@ class MetaApiAdapter(MT5Adapter):
             len(self._subscribed_symbols),
             elapsed,
         )
+        # Unsubscribe old subscriptions first to prevent quota leak
+        for symbol in self._subscribed_symbols:
+            try:
+                await self._connection.unsubscribe_from_market_data(symbol)
+            except Exception:  # noqa: S110
+                pass  # best-effort cleanup
         await self.subscribe_to_market_data(self._subscribed_symbols)
         return True
 
     async def get_symbol_price(self, symbol: str) -> SymbolPrice:
         """Get current bid/ask for a symbol."""
         await self._ensure_connected_or_reconnect()
-        raw = await self._connection.get_symbol_price(symbol, keep_subscription=True)
+        raw = await self._connection.get_symbol_price(symbol, keep_subscription=False)
         log.debug(
             "metaapi get_symbol_price: %s bid=%.5f ask=%.5f",
             symbol,

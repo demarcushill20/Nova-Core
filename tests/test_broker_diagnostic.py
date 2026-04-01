@@ -104,17 +104,16 @@ class TestBrokerDiagnostic:
         diagnostic = BrokerDiagnostic("test_account", "test_token")
         diagnostic.adapter = AsyncMock()
 
-        # Mock account with trading enabled
+        # Use AccountState-compatible attributes (snake_case, matching the dataclass)
         account = MagicMock()
-        account.tradeAllowed = True
-        account.expertAllowed = True
+        account.trade_allowed = True
         account.equity = 10000.0
         account.balance = 10000.0
         account.margin = 0.0
         account.leverage = 100
         account.currency = "USD"
-        account.state = "CONNECTED"
-        account.connectionStatus = "CONNECTED"
+        account.mode = "DEMO"
+        account.broker = "FTMO"
         diagnostic.adapter.get_account.return_value = account
 
         await diagnostic._test_account_status()
@@ -131,17 +130,16 @@ class TestBrokerDiagnostic:
         diagnostic = BrokerDiagnostic("test_account", "test_token")
         diagnostic.adapter = AsyncMock()
 
-        # Mock account with trading disabled
+        # Use AccountState-compatible attributes (snake_case, matching the dataclass)
         account = MagicMock()
-        account.tradeAllowed = False
-        account.expertAllowed = True
+        account.trade_allowed = False
         account.equity = 10000.0
         account.balance = 10000.0
         account.margin = 0.0
         account.leverage = 100
         account.currency = "USD"
-        account.state = "CONNECTED"
-        account.connectionStatus = "CONNECTED"
+        account.mode = "DEMO"
+        account.broker = "FTMO"
         diagnostic.adapter.get_account.return_value = account
 
         await diagnostic._test_account_status()

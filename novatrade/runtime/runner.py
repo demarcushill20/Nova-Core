@@ -278,7 +278,9 @@ def _persist_strategy_config(
     """Write strategy_config.json so the autonomy collector can verify pipeline health."""
     import json as _json
 
-    state_dir = Path(cfg.data_dir).parent / "STATE" / "novatrade"
+    # data_dir is typically "OUTPUT/novatrade" (relative to project root).
+    # Navigate up 2 levels to project root, then into STATE/novatrade.
+    state_dir = Path(cfg.data_dir).parent.parent / "STATE" / "novatrade"
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
         config_path = state_dir / "strategy_config.json"

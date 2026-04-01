@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Repaired contract format in shift_20260401_2_novatrade_progress output \u2014 converted YAML-list files_changed to comma-separated single line.",
   "created_at": "2026-04-01T15:18:52Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260401_2_novatrade_progress_1775063375"
 }

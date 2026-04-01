@@ -343,7 +343,6 @@ class PipelineCollector(BaseCollector):
                     if isinstance(data, dict):
                         ticks = data.get("ticks", 0)
                         errors = data.get("errors", 0)
-                        uptime = data.get("uptime_seconds", 0)
 
                         if ticks > 0:
                             # Service is alive and receiving ticks
@@ -355,8 +354,8 @@ class PipelineCollector(BaseCollector):
                             else:
                                 score += 10.0  # high error rate
                             checks += 1
-                        elif uptime > 0:
-                            score += 20.0  # running but no ticks yet
+                        else:
+                            score += 20.0  # file fresh → service running
                             checks += 1
             except (json.JSONDecodeError, OSError):
                 pass

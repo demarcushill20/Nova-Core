@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_shift_20260401_3_implementation_1775064527",
+  "workflow_id": "shift_20260401_3_implementation",
+  "task_summary": "Fixed runner path bug causing stale strategy_config.json + added OpsMonitor equity capture and config refresh for autonomy scoring",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed runner path bug causing stale strategy_config.json + added OpsMonitor equity capture and config refresh for autonomy scoring"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260401_3_implementation"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed runner path bug causing stale strategy_config.json + added OpsMonitor equity capture and config refresh for autonomy scoring",
+  "created_at": "2026-04-01T17:28:47Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260401_3_implementation_1775054290"
+}

@@ -1509,11 +1509,15 @@ async def test_perf_drawdown_above_ftmo(perf_collector, tmp_path):
     """Drawdown > 5% = score 0."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    # Peak at 10000, then drop to 9000 = 10% dd
+    # Gradual decline from 10000 to 9400 (~6% drawdown) in realistic steps
     data = [
         {"equity": 10000},
-        {"equity": 10000},
-        {"equity": 9000},
+        {"equity": 9900},
+        {"equity": 9800},
+        {"equity": 9700},
+        {"equity": 9600},
+        {"equity": 9500},
+        {"equity": 9400},
     ]
     (state_dir / "equity_history.json").write_text(json.dumps(data))
 

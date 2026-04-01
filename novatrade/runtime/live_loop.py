@@ -637,12 +637,33 @@ class LiveLoop:
             snapshots = existing.get("snapshots", [])
 
             # Deduplicate: skip if the last snapshot has the same equity value
-            # and was written less than 30 minutes ago
             now_iso = datetime.now(timezone.utc).isoformat()
             if snapshots:
                 last = snapshots[-1]
                 if last.get("equity") == equity:
                     return  # no change — skip duplicate
+
+                # Anomaly guard: reject equity changes > 3% in a single step.
+                # Prevents stale/corrupt adapter values from creating synthetic drawdowns
+                # that trip FTMO safety limits (5% max drawdown).
+                last_eq = last.get("equity", 0)
+                if last_eq > 0:
+                    pct_change = abs(equity - last_eq) / last_eq
+                    if pct_change > 0.03:
+                        log.warning(
+                            "Equity anomaly rejected: %.2f -> %.2f (%.2f%% change)",
+                            last_eq,
+                            equity,
+                            pct_change * 100,
+                        )
+                        return
+
+            # Guard against re-appending duplicate (timestamp, equity) pairs
+            ts_norm = now_iso.replace("Z", "+00:00").split(".")[0]
+            for existing_snap in snapshots[-20:]:
+                existing_ts = existing_snap.get("timestamp", "").replace("Z", "+00:00").split(".")[0]
+                if existing_ts == ts_norm and existing_snap.get("equity") == equity:
+                    return
 
             snapshots.append(
                 {

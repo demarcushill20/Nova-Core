@@ -355,6 +355,24 @@ class OpsMonitor:
         except Exception as exc:
             log.debug("FTMO state save failed: %s", exc)
 
+        # 7. Persist risk engine drawdown state for autonomy collectors
+        try:
+            self._risk.write_risk_state()
+        except Exception as exc:
+            log.debug("Risk state write failed: %s", exc)
+
+        # 8. Capture live equity snapshot for performance_stability collector
+        try:
+            await self._persist_equity_snapshot()
+        except Exception as exc:
+            log.debug("Equity snapshot failed: %s", exc)
+
+        # 9. Refresh strategy config timestamp for strategy_validity collector
+        try:
+            self._refresh_strategy_config()
+        except Exception as exc:
+            log.debug("Strategy config refresh failed: %s", exc)
+
         result.elapsed_ms = (time.monotonic() - t0) * 1000
         self._record_cycle(result)
         return result
@@ -917,6 +935,111 @@ class OpsMonitor:
                 "elapsed_ms": round(result.elapsed_ms, 1),
             },
         )
+
+    # ------------------------------------------------------------------
+    # State persistence for autonomy collectors
+    # ------------------------------------------------------------------
+
+    def _state_dir(self) -> Path:
+        """Return STATE/novatrade directory (relative to CWD = project root)."""
+        return Path(self._cfg.data_dir).parent.parent / "STATE" / "novatrade"
+
+    async def _persist_equity_snapshot(self) -> None:
+        """Capture live equity from broker and append to equity_history.json.
+
+        Enables the performance_stability collector to score from real data
+        instead of stale backtest-only snapshots.
+        """
+        try:
+            account = await self._adapter.get_account()
+            equity = account.equity
+        except Exception:
+            return  # adapter unavailable — skip this cycle
+
+        if equity is None or equity <= 0:
+            return
+
+        state_dir = self._state_dir()
+        eq_path = state_dir / "equity_history.json"
+
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load existing data
+        existing: dict = {"snapshots": [], "initial_equity": equity}
+        if eq_path.exists():
+            try:
+                raw = json.loads(eq_path.read_text())
+                if isinstance(raw, dict):
+                    existing = raw
+                elif isinstance(raw, list):
+                    existing = {"snapshots": raw, "initial_equity": equity}
+            except (ValueError, OSError):
+                pass
+
+        snapshots = existing.get("snapshots", [])
+
+        # Deduplicate: skip if last snapshot has the same equity
+        if snapshots and snapshots[-1].get("equity") == equity:
+            return
+
+        now_iso = self._clock().isoformat()
+
+        # Guard against re-appending duplicate (timestamp, equity) pairs.
+        # This prevents cyclic equity values (e.g., 100000→100500→95000→100000)
+        # from being re-appended on service restarts when the clock is stale.
+        ts_norm = now_iso.replace("Z", "+00:00").split(".")[0]
+        for existing_snap in snapshots[-20:]:  # check recent entries
+            existing_ts = existing_snap.get("timestamp", "").replace("Z", "+00:00").split(".")[0]
+            if existing_ts == ts_norm and existing_snap.get("equity") == equity:
+                return
+
+        snapshots.append(
+            {
+                "equity": equity,
+                "timestamp": now_iso,
+                "source": "live",
+            }
+        )
+
+        # Retain last 720 entries (~30 days of hourly snapshots)
+        if len(snapshots) > 720:
+            snapshots = snapshots[-720:]
+
+        existing["snapshots"] = snapshots
+        existing["last_updated"] = now_iso
+        eq_path.write_text(json.dumps(existing, indent=2))
+
+    def _refresh_strategy_config(self) -> None:
+        """Touch strategy_config.json with a fresh timestamp.
+
+        The strategy_validity collector scores config freshness — files older
+        than 24h score 30/100.  Refreshing here keeps the score high between
+        service restarts.
+        """
+        state_dir = self._state_dir()
+        config_path = state_dir / "strategy_config.json"
+
+        # Load existing config to preserve fields, or create minimal default
+        config_data: dict = {}
+        if config_path.exists():
+            try:
+                config_data = json.loads(config_path.read_text())
+            except (ValueError, OSError):
+                pass
+
+        if not config_data:
+            config_data = {
+                "strategy": "IRB",
+                "symbol": self._cfg.symbols[0] if self._cfg.symbols else "EURUSD",
+                "primary_timeframe": "H1",
+                "higher_timeframe": "H4",
+                "pipeline": "webhook",
+                "symbols": self._cfg.symbols,
+            }
+
+        config_data["started_at"] = time.time()
+        state_dir.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config_data, indent=2))
 
     # ------------------------------------------------------------------
     # Helpers

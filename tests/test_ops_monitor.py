@@ -1,6 +1,7 @@
 """Tests for novatrade.monitor.ops_monitor — Phase 7 operational monitoring."""
 
 import datetime as dt
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -661,6 +662,16 @@ class TestRiskActionExecution:
 
 
 class TestRiskAlerts:
+    @pytest.fixture(autouse=True)
+    def _cleanup_risk_state(self):
+        """Remove risk state file written by write_risk_state() during tests."""
+        import pathlib
+
+        state_file = pathlib.Path(__file__).resolve().parents[1] / "STATE" / "novatrade_risk_state.json"
+        yield
+        if state_file.exists():
+            state_file.unlink()
+
     @pytest.mark.asyncio
     async def test_halt_emits_critical_alert(self):
         cfg = _cfg()
@@ -922,3 +933,234 @@ class TestPendingOrderModel:
         )
         assert order.stop_loss == 1.2550
         assert order.take_profit == 1.2400
+
+
+# ---------------------------------------------------------------------------
+# Risk state persistence during monitoring cycle
+# ---------------------------------------------------------------------------
+
+
+class TestRiskStatePersistence:
+    """Verify that OpsMonitor.run_cycle() persists risk engine drawdown state."""
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_calls_write_risk_state(self, tmp_path):
+        """run_cycle should call write_risk_state for autonomy collector visibility."""
+        from unittest.mock import patch
+
+        monitor = _build_monitor()
+        with patch.object(monitor._risk, "write_risk_state") as mock_write:
+            await monitor.run_cycle()
+            mock_write.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_write_risk_state_failure_does_not_crash_cycle(self):
+        """If write_risk_state raises, the cycle should still complete."""
+        from unittest.mock import patch
+
+        monitor = _build_monitor()
+        with patch.object(monitor._risk, "write_risk_state", side_effect=OSError("disk full")):
+            result = await monitor.run_cycle()
+            # Cycle should still return a result — the error is logged, not raised
+            assert result is not None
+            assert result.elapsed_ms > 0
+
+    @pytest.mark.asyncio
+    async def test_write_risk_state_creates_file(self, tmp_path):
+        """Integration: run_cycle writes novatrade_risk_state.json via risk engine."""
+        state_file = tmp_path / "novatrade_risk_state.json"
+        monitor = _build_monitor()
+
+        # Point the risk engine to write to our tmp dir
+        from unittest.mock import patch
+
+        original_write = monitor._risk.write_risk_state
+
+        def write_to_tmp():
+            original_write(state_file=state_file)
+
+        with patch.object(monitor._risk, "write_risk_state", side_effect=write_to_tmp):
+            await monitor.run_cycle()
+
+        assert state_file.exists()
+        import json
+
+        data = json.loads(state_file.read_text())
+        assert "breached" in data
+        assert "daily_drawdown_pct" in data
+        assert "last_updated" in data
+
+
+# ---------------------------------------------------------------------------
+# Equity snapshot persistence during monitoring cycle
+# ---------------------------------------------------------------------------
+
+
+class TestEquitySnapshotPersistence:
+    """Verify that OpsMonitor.run_cycle() captures live equity snapshots."""
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_writes_equity_snapshot(self, tmp_path):
+        """run_cycle should write equity snapshot to equity_history.json."""
+        state_dir = tmp_path / "STATE" / "novatrade"
+        state_dir.mkdir(parents=True)
+
+        # Point cfg.data_dir so _state_dir() resolves to our tmp dir
+        cfg = _cfg(data_dir=tmp_path / "OUTPUT" / "novatrade")
+        monitor = _build_monitor(cfg=cfg)
+
+        await monitor.run_cycle()
+
+        eq_path = state_dir / "equity_history.json"
+        assert eq_path.exists()
+
+        data = json.loads(eq_path.read_text())
+        snapshots = data.get("snapshots", [])
+        assert len(snapshots) >= 1
+        assert snapshots[-1]["source"] == "live"
+        assert snapshots[-1]["equity"] == 100000  # from _account() default
+
+    @pytest.mark.asyncio
+    async def test_equity_snapshot_deduplicates(self, tmp_path):
+        """Consecutive cycles with same equity should not duplicate snapshots."""
+        state_dir = tmp_path / "STATE" / "novatrade"
+        state_dir.mkdir(parents=True)
+
+        cfg = _cfg(data_dir=tmp_path / "OUTPUT" / "novatrade")
+        monitor = _build_monitor(cfg=cfg)
+
+        await monitor.run_cycle()
+        await monitor.run_cycle()
+
+        eq_path = state_dir / "equity_history.json"
+        data = json.loads(eq_path.read_text())
+        snapshots = data.get("snapshots", [])
+        # Same equity both cycles → should only have 1 snapshot
+        assert len(snapshots) == 1
+
+    @pytest.mark.asyncio
+    async def test_equity_snapshot_appends_on_change(self, tmp_path):
+        """Equity change should append a new snapshot."""
+        state_dir = tmp_path / "STATE" / "novatrade"
+        state_dir.mkdir(parents=True)
+
+        cfg = _cfg(data_dir=tmp_path / "OUTPUT" / "novatrade")
+        # First cycle: equity 10000
+        monitor = _build_monitor(cfg=cfg)
+        await monitor.run_cycle()
+
+        # Second cycle: equity changed to 10050
+        account2 = _account(equity=10050.0)
+        adapter2 = _mock_adapter(account=account2)
+        monitor2 = _build_monitor(cfg=cfg, adapter=adapter2)
+        await monitor2.run_cycle()
+
+        eq_path = state_dir / "equity_history.json"
+        data = json.loads(eq_path.read_text())
+        snapshots = data.get("snapshots", [])
+        assert len(snapshots) == 2
+        assert snapshots[0]["equity"] == 100000
+        assert snapshots[1]["equity"] == 10050.0
+
+    @pytest.mark.asyncio
+    async def test_equity_failure_does_not_crash_cycle(self):
+        """If get_account() fails, the cycle should still complete."""
+        adapter = _mock_adapter()
+        adapter.get_account = AsyncMock(side_effect=Exception("connection lost"))
+        monitor = _build_monitor(adapter=adapter)
+
+        result = await monitor.run_cycle()
+        assert result is not None
+        assert result.elapsed_ms > 0
+
+    @pytest.mark.asyncio
+    async def test_equity_preserves_existing_backtest_data(self, tmp_path):
+        """Live equity appends should not destroy existing backtest data."""
+        state_dir = tmp_path / "STATE" / "novatrade"
+        state_dir.mkdir(parents=True)
+
+        # Pre-populate with backtest data
+        eq_path = state_dir / "equity_history.json"
+        existing = {
+            "snapshots": [
+                {"equity": 100000.0, "timestamp": "2026-03-01T08:00:00Z", "source": "backtest"},
+                {"equity": 100050.0, "timestamp": "2026-03-02T08:00:00Z", "source": "backtest"},
+            ],
+            "initial_equity": 100000.0,
+        }
+        eq_path.write_text(json.dumps(existing))
+
+        cfg = _cfg(data_dir=tmp_path / "OUTPUT" / "novatrade")
+        monitor = _build_monitor(cfg=cfg)
+        await monitor.run_cycle()
+
+        data = json.loads(eq_path.read_text())
+        snapshots = data["snapshots"]
+        assert len(snapshots) == 3  # 2 backtest + 1 live
+        assert snapshots[0]["source"] == "backtest"
+        assert snapshots[1]["source"] == "backtest"
+        assert snapshots[2]["source"] == "live"
+
+
+# ---------------------------------------------------------------------------
+# Strategy config refresh during monitoring cycle
+# ---------------------------------------------------------------------------
+
+
+class TestStrategyConfigRefresh:
+    """Verify that OpsMonitor.run_cycle() refreshes strategy_config.json."""
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_creates_strategy_config(self, tmp_path):
+        """run_cycle should create strategy_config.json if it doesn't exist."""
+        state_dir = tmp_path / "STATE" / "novatrade"
+        state_dir.mkdir(parents=True)
+
+        cfg = _cfg(data_dir=tmp_path / "OUTPUT" / "novatrade")
+        monitor = _build_monitor(cfg=cfg)
+
+        await monitor.run_cycle()
+
+        config_path = state_dir / "strategy_config.json"
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert data["strategy"] == "IRB"
+        assert data["symbol"] == "EURUSD"
+        assert "started_at" in data
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_refreshes_existing_config(self, tmp_path):
+        """run_cycle should update started_at in existing strategy_config.json."""
+        state_dir = tmp_path / "STATE" / "novatrade"
+        state_dir.mkdir(parents=True)
+
+        # Pre-populate with stale config
+        config_path = state_dir / "strategy_config.json"
+        stale_config = {
+            "strategy": "IRB",
+            "symbol": "EURUSD",
+            "pipeline": "webhook",
+            "started_at": 1000000.0,  # very old timestamp
+            "version": "2.0.0",
+        }
+        config_path.write_text(json.dumps(stale_config))
+
+        cfg = _cfg(data_dir=tmp_path / "OUTPUT" / "novatrade")
+        monitor = _build_monitor(cfg=cfg)
+        await monitor.run_cycle()
+
+        data = json.loads(config_path.read_text())
+        assert data["started_at"] > 1000000.0  # timestamp was refreshed
+        assert data["version"] == "2.0.0"  # existing fields preserved
+        assert data["pipeline"] == "webhook"  # existing fields preserved
+
+    @pytest.mark.asyncio
+    async def test_strategy_config_failure_does_not_crash_cycle(self, tmp_path):
+        """If config refresh fails, the cycle should still complete."""
+        from unittest.mock import patch
+
+        monitor = _build_monitor()
+        with patch.object(monitor, "_refresh_strategy_config", side_effect=OSError("read-only")):
+            result = await monitor.run_cycle()
+            assert result is not None
+            assert result.elapsed_ms > 0
