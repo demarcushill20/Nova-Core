@@ -2229,3 +2229,220 @@ class TestEvolveCaptured:
         assert stored is not None
         assert stored.name == "data-pipeline-cleanup"
         assert stored.lineage.origin == Origin.CAPTURED
+
+
+# ===========================================================================
+# TestSanitizeLlmResponse — _sanitize_llm_response helper
+# ===========================================================================
+
+
+class TestSanitizeLlmResponse:
+    """Tests for SkillEvolver._sanitize_llm_response."""
+
+    def _make_evolver(self, store: SkillVersionStore, tmp_path: Path):
+        """Create a SkillEvolver with a test mutation policy."""
+        from skills.skill_evolver import SkillEvolver
+
+        policy_path = tmp_path / "mutation_policy.yaml"
+        policy_path.write_text(
+            "evolution_policy:\n"
+            "  forbidden_targets:\n"
+            "    - tool_permissions\n"
+            "    - output_contract\n"
+            "    - safety_rules\n"
+        )
+        return SkillEvolver(
+            version_store=store,
+            mutation_policy_path=str(policy_path),
+            skills_base_dir=str(tmp_path / "skills"),
+        )
+
+    def test_sanitize_strips_preamble(self, store: SkillVersionStore, tmp_path: Path):
+        """Preamble text before first --- line is stripped."""
+        evolver = self._make_evolver(store, tmp_path)
+        raw = "The sandbox is blocking something...\n\n---\nname: foo\n---\nbody"
+        result = evolver._sanitize_llm_response(raw)
+        assert result.startswith("---")
+        assert "sandbox" not in result
+        assert "name: foo" in result
+
+    def test_sanitize_clean_passthrough(self, store: SkillVersionStore, tmp_path: Path):
+        """Response already starting with --- is returned unchanged."""
+        evolver = self._make_evolver(store, tmp_path)
+        raw = "---\nname: foo\n---\nbody content"
+        result = evolver._sanitize_llm_response(raw)
+        assert result == raw
+
+    def test_sanitize_no_frontmatter_passthrough(self, store: SkillVersionStore, tmp_path: Path):
+        """Response with no --- at all is returned unchanged."""
+        evolver = self._make_evolver(store, tmp_path)
+        raw = "Just some plain text with no frontmatter at all"
+        result = evolver._sanitize_llm_response(raw)
+        assert result == raw
+
+    def test_sanitize_inline_dashes_not_matched(self, store: SkillVersionStore, tmp_path: Path):
+        """Inline --- (not on its own line) should not match; strips to the standalone line."""
+        evolver = self._make_evolver(store, tmp_path)
+        raw = "some text with --- in middle\n\n---\nname: foo\n---\nbody"
+        result = evolver._sanitize_llm_response(raw)
+        assert result.startswith("---")
+        assert "name: foo" in result
+        # The inline "--- in middle" should be gone
+        assert "in middle" not in result
+
+    def test_sanitize_empty_string(self, store: SkillVersionStore, tmp_path: Path):
+        """Empty string returns empty string."""
+        evolver = self._make_evolver(store, tmp_path)
+        result = evolver._sanitize_llm_response("")
+        assert result == ""
+
+
+# ===========================================================================
+# TestValidateCaptured — _validate_captured validation logic
+# ===========================================================================
+
+
+class TestValidateCaptured:
+    """Tests for SkillEvolver._validate_captured."""
+
+    def _make_evolver(self, store: SkillVersionStore, tmp_path: Path):
+        """Create a SkillEvolver with a test mutation policy."""
+        from skills.skill_evolver import SkillEvolver
+
+        policy_path = tmp_path / "mutation_policy.yaml"
+        policy_path.write_text(
+            "evolution_policy:\n"
+            "  forbidden_targets:\n"
+            "    - tool_permissions\n"
+            "    - output_contract\n"
+            "    - safety_rules\n"
+        )
+        return SkillEvolver(
+            version_store=store,
+            mutation_policy_path=str(policy_path),
+            skills_base_dir=str(tmp_path / "skills"),
+        )
+
+    def test_valid_captured_skill(self, store: SkillVersionStore, tmp_path: Path):
+        """SAMPLE_CAPTURED_SKILL_MD passes validation with no errors."""
+        evolver = self._make_evolver(store, tmp_path)
+        errors = evolver._validate_captured(SAMPLE_CAPTURED_SKILL_MD)
+        assert errors == []
+
+    def test_missing_frontmatter(self, store: SkillVersionStore, tmp_path: Path):
+        """Content without frontmatter triggers missing frontmatter error."""
+        evolver = self._make_evolver(store, tmp_path)
+        errors = evolver._validate_captured("Just some text without frontmatter")
+        assert any("Missing frontmatter" in e for e in errors)
+
+    def test_missing_closing_delimiter(self, store: SkillVersionStore, tmp_path: Path):
+        """Frontmatter without closing --- triggers malformed error."""
+        evolver = self._make_evolver(store, tmp_path)
+        errors = evolver._validate_captured("---\nname: foo\ndescription: bar")
+        assert any("missing closing" in e for e in errors)
+
+    def test_missing_name_field(self, store: SkillVersionStore, tmp_path: Path):
+        """Frontmatter without name: triggers name field missing error."""
+        evolver = self._make_evolver(store, tmp_path)
+        errors = evolver._validate_captured("---\ndescription: bar\n---\nSome body content here that is long enough")
+        assert any("name: field missing" in e for e in errors)
+
+    def test_missing_description_field(self, store: SkillVersionStore, tmp_path: Path):
+        """Frontmatter without description: triggers description field missing error."""
+        evolver = self._make_evolver(store, tmp_path)
+        errors = evolver._validate_captured("---\nname: foo\n---\nSome body content here that is long enough")
+        assert any("description: field missing" in e for e in errors)
+
+    def test_empty_body(self, store: SkillVersionStore, tmp_path: Path):
+        """Frontmatter with empty body triggers body too short error."""
+        evolver = self._make_evolver(store, tmp_path)
+        errors = evolver._validate_captured("---\nname: foo\ndescription: bar\n---\n")
+        assert any("Body after frontmatter is too short" in e for e in errors)
+
+    def test_empty_content(self, store: SkillVersionStore, tmp_path: Path):
+        """Empty string triggers empty content error."""
+        evolver = self._make_evolver(store, tmp_path)
+        errors = evolver._validate_captured("")
+        assert any("Captured content is empty" in e for e in errors)
+
+    def test_short_overall_content(self, store: SkillVersionStore, tmp_path: Path):
+        """Very short content triggers multiple errors."""
+        evolver = self._make_evolver(store, tmp_path)
+        errors = evolver._validate_captured("---\nn: x\nd: y\n---\n")
+        # Should have multiple errors (missing name/description fields, short body, etc.)
+        assert len(errors) > 1
+
+
+# ===========================================================================
+# TestEvolveCapturedSanitization — evolve_captured with sanitization wiring
+# ===========================================================================
+
+
+class TestEvolveCapturedSanitization:
+    """Tests for evolve_captured sanitization integration."""
+
+    def _make_evolver(self, store: SkillVersionStore, tmp_path: Path):
+        """Create a SkillEvolver with a test mutation policy."""
+        from skills.skill_evolver import SkillEvolver
+
+        policy_path = tmp_path / "mutation_policy.yaml"
+        policy_path.write_text(
+            "evolution_policy:\n"
+            "  forbidden_targets:\n"
+            "    - tool_permissions\n"
+            "    - output_contract\n"
+            "    - safety_rules\n"
+        )
+        return SkillEvolver(
+            version_store=store,
+            mutation_policy_path=str(policy_path),
+            skills_base_dir=str(tmp_path / "skills"),
+        )
+
+    def test_evolve_captured_strips_preamble_before_write(self, store: SkillVersionStore, tmp_path: Path):
+        """evolve_captured strips LLM preamble so written SKILL.md starts with ---."""
+        evolver = self._make_evolver(store, tmp_path)
+        preamble_response = "Sure, here is the skill definition:\n\n" + SAMPLE_CAPTURED_SKILL_MD
+
+        with patch.object(evolver, "_call_llm", return_value=preamble_response):
+            result = evolver.evolve_captured(
+                pattern_description="Pattern for sanitization write test",
+                task_examples=["Task san1", "Task san2"],
+                suggested_name="data-pipeline-cleanup",
+            )
+
+        assert result is not None
+        skill_md_path = tmp_path / "skills" / "data-pipeline-cleanup" / "SKILL.md"
+        content = skill_md_path.read_text(encoding="utf-8")
+        assert content.startswith("---")
+        assert "Sure, here is" not in content
+
+    def test_evolve_captured_rejects_no_frontmatter(self, store: SkillVersionStore, tmp_path: Path):
+        """evolve_captured returns None when LLM returns text with no frontmatter."""
+        evolver = self._make_evolver(store, tmp_path)
+        bad_response = "This is just some text with no frontmatter markers at all."
+
+        with patch.object(evolver, "_call_llm", return_value=bad_response):
+            result = evolver.evolve_captured(
+                pattern_description="Pattern for no frontmatter test",
+                task_examples=["Task nf1", "Task nf2"],
+                suggested_name="no-frontmatter-skill",
+            )
+
+        assert result is None
+
+    def test_evolve_captured_extracts_name_after_sanitization(self, store: SkillVersionStore, tmp_path: Path):
+        """evolve_captured extracts name from sanitized content correctly."""
+        evolver = self._make_evolver(store, tmp_path)
+        sanitized_skill = SAMPLE_CAPTURED_SKILL_MD.replace("data-pipeline-cleanup", "sanitized-skill")
+        preamble_response = "Here is the generated skill:\n\n" + sanitized_skill
+
+        with patch.object(evolver, "_call_llm", return_value=preamble_response):
+            result = evolver.evolve_captured(
+                pattern_description="Pattern for name extraction test",
+                task_examples=["Task ne1", "Task ne2"],
+                suggested_name="original-name",
+            )
+
+        assert result is not None
+        assert result.name == "sanitized-skill"

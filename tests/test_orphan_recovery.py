@@ -57,6 +57,8 @@ class TestWatcherOrphanRecovery:
         """Orphaned tasks at max retries are marked as .failed."""
         tasks_dir = tmp_path / "TASKS"
         tasks_dir.mkdir()
+        output_dir = tmp_path / "OUTPUT"
+        output_dir.mkdir()  # Empty — isolates from real OUTPUT
 
         ip = tasks_dir / "0001_maxed.md.inprogress"
         ip.write_text("task content")
@@ -68,6 +70,7 @@ class TestWatcherOrphanRecovery:
 
         with (
             patch("watcher.TASKS_DIR", tasks_dir),
+            patch("watcher.OUTPUT_DIR", output_dir),
             patch("watcher.increment_retry", return_value=FakeCheckpoint()),
             patch("watcher.MAX_TASK_RETRIES", 3),
             patch("watcher._last_orphan_recovery_time", 0),
@@ -103,6 +106,202 @@ class TestWatcherOrphanRecovery:
 
         assert len(result) == 0  # Throttled
         assert ip.exists()  # Not touched
+
+    def test_startup_grace_period_blocks_recovery(self, tmp_path):
+        """Orphan recovery is skipped during startup grace period."""
+        tasks_dir = tmp_path / "TASKS"
+        tasks_dir.mkdir()
+
+        ip = tasks_dir / "0001_grace.md.inprogress"
+        ip.write_text("task content")
+        old_ts = time.time() - 1800
+        os.utime(ip, (old_ts, old_ts))
+
+        import watcher
+
+        with (
+            patch("watcher.TASKS_DIR", tasks_dir),
+            patch("watcher.increment_retry", return_value=None),
+            patch("watcher.MAX_TASK_RETRIES", 3),
+            patch("watcher._last_orphan_recovery_time", 0),
+            # Simulate recent boot — grace period active
+            patch("watcher._watcher_boot_time", time.time()),
+        ):
+            result = watcher.recover_orphaned_tasks(force=False)
+
+        assert len(result) == 0  # Blocked by grace period
+        assert ip.exists()  # Not touched
+
+    def test_startup_grace_period_bypassed_by_force(self, tmp_path):
+        """force=True bypasses the startup grace period."""
+        tasks_dir = tmp_path / "TASKS"
+        tasks_dir.mkdir()
+
+        ip = tasks_dir / "0001_forced.md.inprogress"
+        ip.write_text("task content")
+        old_ts = time.time() - 1800
+        os.utime(ip, (old_ts, old_ts))
+
+        with (
+            patch("watcher.TASKS_DIR", tasks_dir),
+            patch("watcher.increment_retry", return_value=None),
+            patch("watcher.MAX_TASK_RETRIES", 3),
+            patch("watcher._last_orphan_recovery_time", 0),
+            # Simulate recent boot — grace period active
+            patch("watcher._watcher_boot_time", time.time()),
+        ):
+            from watcher import recover_orphaned_tasks
+
+            result = recover_orphaned_tasks(force=True)
+
+        assert len(result) == 1
+        assert not ip.exists()
+        assert (tasks_dir / "0001_forced.md").exists()
+
+    def test_rescues_orphan_with_output(self, tmp_path):
+        """Orphaned task with existing OUTPUT is marked .done, not .failed."""
+        tasks_dir = tmp_path / "TASKS"
+        tasks_dir.mkdir()
+        output_dir = tmp_path / "OUTPUT"
+        output_dir.mkdir()
+
+        stem = "0001_rescued"
+        ip = tasks_dir / f"{stem}.md.inprogress"
+        ip.write_text("task content")
+        old_ts = time.time() - 1800
+        os.utime(ip, (old_ts, old_ts))
+
+        # Create a matching OUTPUT file
+        output_file = output_dir / f"{stem}__20260331-120000.md"
+        output_file.write_text("## CONTRACT\nsummary: done\n")
+
+        class FakeCheckpoint:
+            retry_count = 3
+
+        with (
+            patch("watcher.TASKS_DIR", tasks_dir),
+            patch("watcher.OUTPUT_DIR", output_dir),
+            patch("watcher.increment_retry", return_value=FakeCheckpoint()),
+            patch("watcher.clear_checkpoint"),
+            patch("watcher.MAX_TASK_RETRIES", 3),
+            patch("watcher._last_orphan_recovery_time", 0),
+        ):
+            from watcher import recover_orphaned_tasks
+
+            result = recover_orphaned_tasks(force=True)
+
+        assert len(result) == 1
+        assert not ip.exists()
+        # Should be .done, not .failed — because OUTPUT exists
+        assert (tasks_dir / f"{stem}.md.done").exists()
+        assert not (tasks_dir / f"{stem}.md.failed").exists()
+
+    def test_marks_failed_when_no_output(self, tmp_path):
+        """Orphaned task at max retries with NO output is still marked .failed."""
+        tasks_dir = tmp_path / "TASKS"
+        tasks_dir.mkdir()
+        output_dir = tmp_path / "OUTPUT"
+        output_dir.mkdir()  # Empty — no matching files
+
+        stem = "0001_nooutput"
+        ip = tasks_dir / f"{stem}.md.inprogress"
+        ip.write_text("task content")
+        old_ts = time.time() - 1800
+        os.utime(ip, (old_ts, old_ts))
+
+        class FakeCheckpoint:
+            retry_count = 3
+
+        with (
+            patch("watcher.TASKS_DIR", tasks_dir),
+            patch("watcher.OUTPUT_DIR", output_dir),
+            patch("watcher.increment_retry", return_value=FakeCheckpoint()),
+            patch("watcher.MAX_TASK_RETRIES", 3),
+            patch("watcher._last_orphan_recovery_time", 0),
+        ):
+            from watcher import recover_orphaned_tasks
+
+            result = recover_orphaned_tasks(force=True)
+
+        assert len(result) == 1
+        assert not ip.exists()
+        assert (tasks_dir / f"{stem}.md.failed").exists()
+
+
+# ---- OUTPUT stem matching ----
+
+
+class TestOutputStemMatching:
+    """Test _output_matches_stem prevents false matches on similar stems."""
+
+    def test_exact_stem_with_timestamp(self):
+        """Standard output filename matches its stem."""
+        from watcher import _output_matches_stem
+
+        assert _output_matches_stem("shift_1_health__20260331-120000", "shift_1_health")
+
+    def test_stem_with_sub_workflow(self):
+        """Sub-workflow output matches parent stem."""
+        from watcher import _output_matches_stem
+
+        assert _output_matches_stem("shift_1_health_inspect__20260331-120000", "shift_1_health")
+
+    def test_rejects_numeric_prefix_collision(self):
+        """stem 'shift_1' must NOT match 'shift_10_foo'."""
+        from watcher import _output_matches_stem
+
+        assert not _output_matches_stem("shift_10_foo__20260331-120000", "shift_1")
+
+    def test_rejects_partial_word_match(self):
+        """stem 'deploy' must NOT match 'deployment_fix'."""
+        from watcher import _output_matches_stem
+
+        assert not _output_matches_stem("deployment_fix__20260331-120000", "deploy")
+
+    def test_exact_stem_name(self):
+        """Stem matching the entire filename (no timestamp) works."""
+        from watcher import _output_matches_stem
+
+        assert _output_matches_stem("task_done", "task_done")
+
+    def test_stem_with_retry_suffix(self):
+        """Retry outputs match their stem."""
+        from watcher import _output_matches_stem
+
+        assert _output_matches_stem("task_abc__retry1__20260331-120000", "task_abc")
+
+    def test_find_any_output_no_false_match(self, tmp_path):
+        """_find_any_output doesn't return outputs from a different stem."""
+        output_dir = tmp_path / "OUTPUT"
+        output_dir.mkdir()
+
+        # Create output for shift_10, NOT shift_1
+        (output_dir / "shift_10_foo__20260331-120000.md").write_text("content")
+
+        with patch("watcher.OUTPUT_DIR", output_dir):
+            from watcher import _find_any_output
+
+            result = _find_any_output("shift_1")
+
+        assert result is None  # Must NOT match shift_10_foo
+
+    def test_find_any_output_matches_correct_stem(self, tmp_path):
+        """_find_any_output returns output for the correct stem."""
+        output_dir = tmp_path / "OUTPUT"
+        output_dir.mkdir()
+
+        target = output_dir / "shift_1_health__20260331-120000.md"
+        target.write_text("content")
+        # Also create a similar but different stem
+        (output_dir / "shift_10_foo__20260331-120000.md").write_text("other")
+
+        with patch("watcher.OUTPUT_DIR", output_dir):
+            from watcher import _find_any_output
+
+            result = _find_any_output("shift_1_health")
+
+        assert result is not None
+        assert result.name == "shift_1_health__20260331-120000.md"
 
 
 # ---- Self-heal investigator orphan diagnosis ----

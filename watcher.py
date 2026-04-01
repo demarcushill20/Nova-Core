@@ -502,14 +502,29 @@ def _task_stem(task_name: str) -> str:
     return stem
 
 
+def _output_matches_stem(filename: str, stem: str) -> bool:
+    """Check if an OUTPUT filename matches a task stem with proper boundary.
+
+    Prevents false matches when one stem is a prefix of another:
+    e.g. stem 'shift_1' must NOT match 'shift_10_foo__ts.md'.
+
+    Valid matches after the stem: '__' (timestamp separator), '_' (sub-workflow),
+    '.' (extension), or end-of-string.
+    """
+    if not filename.startswith(stem):
+        return False
+    rest = filename[len(stem) :]
+    return rest == "" or (len(rest) > 0 and rest[0] in ("_", "."))
+
+
 def _find_recent_output(task_stem: str) -> Path | None:
-    """Return the newest OUTPUT file whose name contains task_stem,
+    """Return the newest OUTPUT file matching task_stem,
     created within the last ARTIFACT_WINDOW seconds. None if missing."""
     if not OUTPUT_DIR.exists():
         return None
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=ARTIFACT_WINDOW)
     matches = sorted(
-        (p for p in OUTPUT_DIR.iterdir() if task_stem in p.name and p.suffix == ".md"),
+        (p for p in OUTPUT_DIR.iterdir() if _output_matches_stem(p.stem, task_stem) and p.suffix == ".md"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -664,6 +679,7 @@ def reap_stale_tasks(*, force: bool = False) -> list[str]:
 ORPHAN_INPROGRESS_MINUTES = 15  # match heartbeat threshold
 ORPHAN_RECOVERY_INTERVAL = 300  # seconds between orphan recovery runs (5 min)
 _last_orphan_recovery_time: float = 0.0
+_watcher_boot_time: float = time.time()  # Track startup to prevent premature orphan recovery
 
 
 def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
@@ -671,7 +687,11 @@ def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
 
     Detects .inprogress files older than ORPHAN_INPROGRESS_MINUTES and:
     - If checkpoint retry count < MAX_TASK_RETRIES: reset to .md for re-dispatch
-    - If max retries exhausted: rename to .failed
+    - If max retries exhausted AND no OUTPUT exists: rename to .failed
+    - If max retries exhausted BUT OUTPUT exists: rename to .done (rescue)
+
+    Includes a startup grace period to prevent mass false-failures when the
+    watcher restarts while workers are still executing.
 
     Runs at most once per ORPHAN_RECOVERY_INTERVAL seconds unless force=True.
     Returns list of recovered/failed task filenames.
@@ -682,6 +702,20 @@ def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
     now_mono = _time.time()
     if not force and (now_mono - _last_orphan_recovery_time) < ORPHAN_RECOVERY_INTERVAL:
         return []
+
+    # Startup grace period: don't run orphan recovery for the first
+    # ORPHAN_INPROGRESS_MINUTES after watcher boot. This prevents marking
+    # actively-executing tasks as failed after a watcher restart.
+    uptime_s = now_mono - _watcher_boot_time
+    startup_grace_s = ORPHAN_INPROGRESS_MINUTES * 60
+    if not force and uptime_s < startup_grace_s:
+        logger.debug(
+            "ORPHAN RECOVERY: skipped — watcher uptime %.0fs < grace period %ds",
+            uptime_s,
+            startup_grace_s,
+        )
+        return []
+
     _last_orphan_recovery_time = now_mono
 
     if not TASKS_DIR.exists():
@@ -703,6 +737,7 @@ def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
         stem = ip.name.replace(".md.inprogress", "")
         task_file = TASKS_DIR / f"{stem}.md"
         failed_file = TASKS_DIR / f"{stem}.md.failed"
+        done_file = TASKS_DIR / f"{stem}.md.done"
 
         # Check if retry is possible via checkpoint system
         can_retry = True
@@ -729,21 +764,56 @@ def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
             except (OSError, FileNotFoundError) as exc:
                 logger.warning("ORPHAN RECOVERY: failed to reset %s: %s", ip.name, exc)
         else:
-            try:
-                ip.rename(failed_file)
-                logger.warning(
-                    "ORPHAN RECOVERY: %s → %s (max retries exhausted after %.1f min)",
-                    ip.name,
-                    failed_file.name,
-                    age_s / 60,
-                )
-                recovered.append(ip.name)
-            except (OSError, FileNotFoundError) as exc:
-                logger.warning("ORPHAN RECOVERY: failed to mark %s as failed: %s", ip.name, exc)
+            # Before marking failed, check if OUTPUT exists — the worker may
+            # have completed successfully but the watcher missed the lifecycle
+            # transition (e.g., watcher restarted during execution).
+            output_exists = _find_any_output(stem)
+            if output_exists:
+                try:
+                    ip.rename(done_file)
+                    clear_checkpoint(stem)
+                    logger.info(
+                        "ORPHAN RESCUE: %s → %s (OUTPUT exists at %s — task actually succeeded)",
+                        ip.name,
+                        done_file.name,
+                        output_exists.name,
+                    )
+                    recovered.append(ip.name)
+                except (OSError, FileNotFoundError) as exc:
+                    logger.warning("ORPHAN RESCUE: failed to mark %s as done: %s", ip.name, exc)
+            else:
+                try:
+                    ip.rename(failed_file)
+                    logger.warning(
+                        "ORPHAN RECOVERY: %s → %s (max retries exhausted after %.1f min, no OUTPUT found)",
+                        ip.name,
+                        failed_file.name,
+                        age_s / 60,
+                    )
+                    recovered.append(ip.name)
+                except (OSError, FileNotFoundError) as exc:
+                    logger.warning("ORPHAN RECOVERY: failed to mark %s as failed: %s", ip.name, exc)
 
     if recovered:
         slog.event("task.orphan_recovered", count=len(recovered), tasks=recovered)
     return recovered
+
+
+def _find_any_output(task_stem: str) -> Path | None:
+    """Return the newest OUTPUT file matching task_stem, regardless of age.
+
+    Unlike _find_recent_output() which enforces ARTIFACT_WINDOW, this checks
+    for any matching output file. Used by orphan recovery to rescue tasks that
+    completed but whose lifecycle transition was missed.
+    """
+    if not OUTPUT_DIR.exists():
+        return None
+    matches = sorted(
+        (p for p in OUTPUT_DIR.iterdir() if _output_matches_stem(p.stem, task_stem) and p.suffix == ".md"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return matches[0] if matches else None
 
 
 # --- JIT shift generation ---

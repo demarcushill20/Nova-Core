@@ -534,16 +534,44 @@ class TestMain:
 
     def test_unhealthy_run(self, tmp_path):
         _make_tmp_base(tmp_path)
-        with (
-            mock.patch("heartbeat.check_service") as m_svc,
-            mock.patch("heartbeat.check_disk") as m_disk,
-            mock.patch("heartbeat.check_claude_binary") as m_claude,
-            mock.patch("heartbeat.send_telegram_heartbeat") as m_hb,
-            mock.patch("heartbeat.inject_repair_task") as m_repair,
-        ):
+
+        def _ok(name):
+            return {"name": name, "ok": True, "detail": "ok"}
+
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            # Mock all environment-dependent health checks (same pattern as test_healthy_run)
+            m_svc = stack.enter_context(mock.patch("heartbeat.check_service"))
             m_svc.return_value = {"name": "svc", "ok": False, "detail": "dead"}
-            m_disk.return_value = {"name": "disk", "ok": True, "detail": "ok"}
-            m_claude.return_value = {"name": "claude", "ok": True, "detail": "ok"}
+            stack.enter_context(mock.patch("heartbeat.check_disk", return_value=_ok("disk")))
+            stack.enter_context(mock.patch("heartbeat.check_claude_binary", return_value=_ok("claude")))
+            stack.enter_context(mock.patch("heartbeat.check_backup", return_value=_ok("backup")))
+            stack.enter_context(mock.patch("heartbeat.check_memory_systems", return_value=_ok("memory_systems")))
+            stack.enter_context(mock.patch("heartbeat.check_google_workspace", return_value=_ok("google_workspace")))
+            stack.enter_context(mock.patch("heartbeat.check_pip_audit", return_value=_ok("pip_audit")))
+            stack.enter_context(mock.patch("heartbeat.check_ruff", return_value=_ok("ruff")))
+            stack.enter_context(mock.patch("heartbeat.check_task_queue", return_value=_ok("task_queue")))
+            stack.enter_context(mock.patch("heartbeat.check_last_output", return_value=_ok("last_output")))
+            stack.enter_context(mock.patch("heartbeat.check_stale_workers", return_value=_ok("stale_workers")))
+            stack.enter_context(mock.patch("heartbeat.check_state_files", return_value=_ok("state_files")))
+            stack.enter_context(mock.patch("heartbeat.check_metrics", return_value=_ok("metrics")))
+            stack.enter_context(mock.patch("heartbeat.check_log_sizes", return_value=_ok("log_sizes")))
+            stack.enter_context(mock.patch("heartbeat.check_state_bloat", return_value=_ok("state_bloat")))
+            stack.enter_context(mock.patch("heartbeat.check_llm_cache", return_value=_ok("llm_cache")))
+            stack.enter_context(mock.patch("heartbeat.check_cost_router", return_value=_ok("cost_router")))
+            stack.enter_context(mock.patch("heartbeat.check_scheduler", return_value=_ok("scheduler")))
+            stack.enter_context(
+                mock.patch("utils.max_plan_guard.check_max_plan_usage", return_value=_ok("max_plan_usage"))
+            )
+            stack.enter_context(mock.patch("heartbeat._mpg_allow", return_value=(False, "blocked: test")))
+            stack.enter_context(mock.patch("heartbeat._budget_enforcer", None))
+            stack.enter_context(mock.patch("heartbeat._sh_get_tier", None))
+            stack.enter_context(mock.patch("utils.self_healing.check_self_healing", return_value=_ok("self_healing")))
+            stack.enter_context(mock.patch("utils.self_healing.touch_dead_man_switch"))
+            stack.enter_context(mock.patch("utils.drift_detector.detect_drift", side_effect=ImportError("mocked")))
+            m_hb = stack.enter_context(mock.patch("heartbeat.send_telegram_heartbeat"))
+            m_repair = stack.enter_context(mock.patch("heartbeat.inject_repair_task"))
             code = heartbeat.main()
         # main() always returns 0 — health issues are reported via Telegram/repair tasks,
         # not via exit code (exit 1 confuses systemd oneshot status).

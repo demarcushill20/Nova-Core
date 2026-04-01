@@ -645,6 +645,58 @@ Output the complete enhanced SKILL.md content. Do NOT wrap in code fences."""
         """
         return self._validate_fix(new_content, expected_name)
 
+    def _validate_captured(self, content: str) -> list[str]:
+        """Validate a captured SKILL.md.
+
+        Stricter than ``_validate_fix`` — frontmatter is **required** for
+        new captured skills.
+
+        Returns list of validation errors.  Empty means valid.
+        """
+        errors: list[str] = []
+
+        if not content.strip():
+            errors.append("Captured content is empty")
+            return errors
+
+        # Frontmatter is required for captured skills
+        if not content.startswith("---"):
+            errors.append("Missing frontmatter (must start with ---)")
+            return errors
+
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            errors.append("Malformed frontmatter (missing closing ---)")
+            return errors
+
+        frontmatter = parts[1].strip()
+
+        # Check required fields
+        has_name = False
+        has_description = False
+        for line in frontmatter.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("name:"):
+                has_name = True
+            elif stripped.startswith("description:"):
+                has_description = True
+
+        if not has_name:
+            errors.append("name: field missing from frontmatter")
+        if not has_description:
+            errors.append("description: field missing from frontmatter")
+
+        # Check body after frontmatter
+        body = parts[2].strip()
+        if len(body) < 20:
+            errors.append(f"Body after frontmatter is too short ({len(body)} chars, need >= 20)")
+
+        # Overall length check
+        if len(content.strip()) < 50:
+            errors.append("Captured content is suspiciously short (< 50 chars)")
+
+        return errors
+
     def _format_success_history(self, analyses: list[dict]) -> str:
         """Format recent analyses into a readable success history."""
         if not analyses:
@@ -693,6 +745,26 @@ Output the complete enhanced SKILL.md content. Do NOT wrap in code fences."""
         except FileNotFoundError:
             logger.warning("claude binary not found")
             return ""
+
+    def _sanitize_llm_response(self, response: str) -> str:
+        """Strip conversational preamble before frontmatter.
+
+        LLM sometimes prepends text like 'The sandbox is blocking...'
+        before the actual SKILL.md content.  This strips everything
+        before the first ``---`` line (matched as a whole line).
+
+        Returns the response unchanged if it already starts with ``---``
+        or if no ``---`` line is found (let validation reject it).
+        """
+        if response.startswith("---"):
+            return response
+
+        match = re.search(r"^---\s*$", response, re.MULTILINE)
+        if match:
+            return response[match.start() :]
+
+        # No frontmatter delimiter found — return as-is
+        return response
 
     def _build_fix_prompt(
         self,
@@ -918,11 +990,16 @@ Fix these errors and try again."""
             logger.warning("AUTO-LEARN: LLM returned empty response for capture")
             return None
 
-        # Validate LLM output has minimum viable content
-        if len(llm_response.strip()) < 50:
+        # Sanitize LLM response (strip conversational preamble)
+        llm_response = self._sanitize_llm_response(llm_response)
+
+        # Validate LLM output has proper structure
+        errors = self._validate_captured(llm_response)
+        if errors:
             logger.warning(
-                "AUTO-LEARN: LLM response too short (%d chars) — skipping",
-                len(llm_response.strip()),
+                "AUTO-LEARN: LLM response failed validation for '%s': %s",
+                skill_name,
+                "; ".join(errors),
             )
             return None
 

@@ -267,12 +267,15 @@ class TestVerifyArtifacts(unittest.TestCase):
         import watcher
 
         self._orig_output = watcher.OUTPUT_DIR
+        self._orig_metrics = watcher.METRICS_FILE
         watcher.OUTPUT_DIR = self._output
+        watcher.METRICS_FILE = self._tmpdir / "metrics.json"
 
     def tearDown(self):
         import watcher
 
         watcher.OUTPUT_DIR = self._orig_output
+        watcher.METRICS_FILE = self._orig_metrics
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_verify_no_output_file(self):

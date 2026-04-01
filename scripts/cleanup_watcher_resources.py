@@ -278,6 +278,21 @@ def main():
     logger.info("--- Phase 2: Stale task file archival ---")
     archived = archive_old_task_files()
 
+    # Phase 3: Log and STATE retention
+    logger.info("--- Phase 3: Log and STATE retention ---")
+    retention_actions = []
+    try:
+        from scripts.log_retention import run as run_log_retention
+
+        result = run_log_retention()
+        retention_actions = result.get("actions", [])
+        for a in retention_actions:
+            logger.info("  %s", a)
+        if result.get("freed_mb", 0) > 0:
+            logger.info("  Freed %.1f MB", result["freed_mb"])
+    except Exception as exc:
+        logger.warning("Log retention failed (non-fatal): %s", exc)
+
     # Summary
     logger.info("--- Summary ---")
     logger.info("Processes killed: %d", len(killed))
@@ -291,11 +306,15 @@ def main():
     logger.info("Task files archived: %d", len(archived))
     for name in archived:
         logger.info("  %s", name)
+    logger.info("Retention actions: %d", len(retention_actions))
     logger.info("Resource cleanup complete")
     logger.info("")
 
     # Print summary to stdout (useful for systemd journal)
-    print(f"\nResource cleanup complete: {len(killed)} processes killed, {len(archived)} files archived.")
+    print(
+        f"\nResource cleanup complete: {len(killed)} processes killed, "
+        f"{len(archived)} files archived, {len(retention_actions)} retention actions."
+    )
 
 
 if __name__ == "__main__":

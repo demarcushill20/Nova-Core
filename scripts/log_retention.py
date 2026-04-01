@@ -32,6 +32,11 @@ BACKUP_DELETE_AGE = 30 * 86400  # 30 days → delete from backups
 PROGRESS_ROTATE_SIZE = 10 * 1024 * 1024  # 10 MB → rotate
 MYPY_CACHE_LIMIT = 200 * 1024 * 1024  # 200 MB → clear
 
+# STATE sub-directory retention (seconds)
+INVESTIGATIONS_MAX_AGE = 3 * 86400  # 3 days → compress & archive
+NOTIFIED_MAX_AGE = 7 * 86400  # 7 days → delete (tiny marker files)
+IMPROVEMENT_RUNS_MAX_AGE = 7 * 86400  # 7 days → delete
+
 
 def _file_age(p: Path) -> float:
     """Seconds since file was last modified."""
@@ -175,6 +180,120 @@ def clear_mypy_cache(dry_run: bool = False) -> list[str]:
     return actions
 
 
+def prune_old_investigations(dry_run: bool = False) -> list[str]:
+    """Archive investigation files older than INVESTIGATIONS_MAX_AGE.
+
+    Investigations accumulate at ~2 files per heartbeat (~every 10min).
+    After 3 days they have no debugging value. Compress into daily archives.
+    """
+    actions: list[str] = []
+    inv_dir = STATE_DIR / "investigations"
+    if not inv_dir.is_dir():
+        return actions
+
+    archive_dir = STATE_DIR / "_archive" / "investigations"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    # Group old files by date prefix
+    old_files: dict[str, list[Path]] = {}
+    for p in inv_dir.iterdir():
+        if not p.is_file() or not p.name.endswith(".json"):
+            continue
+        age = _file_age(p)
+        if age > INVESTIGATIONS_MAX_AGE:
+            # Extract date from mtime for grouping
+            mtime = p.stat().st_mtime
+            date_key = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y%m%d")
+            old_files.setdefault(date_key, []).append(p)
+
+    for date_key, files in sorted(old_files.items()):
+        dest = archive_dir / f"investigations_{date_key}.jsonl.gz"
+        total_kb = sum(f.stat().st_size for f in files) / 1024
+        if dry_run:
+            actions.append(f"[dry-run] archive {len(files)} investigations from {date_key} ({total_kb:.0f}KB)")
+            continue
+        # Append all JSON objects into a single JSONL gzip
+        with gzip.open(dest, "at") as gz:
+            for f in sorted(files, key=lambda x: x.name):
+                try:
+                    gz.write(f.read_text().strip() + "\n")
+                except OSError:
+                    pass
+        for f in files:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        actions.append(f"archived {len(files)} investigations from {date_key} ({total_kb:.0f}KB) → {dest.name}")
+
+    return actions
+
+
+def prune_old_notified(dry_run: bool = False) -> list[str]:
+    """Delete notification marker files older than NOTIFIED_MAX_AGE.
+
+    These are tiny files (~47 bytes) that track whether OUTPUT was sent to
+    Telegram. Once older than a week they serve no purpose.
+    """
+    actions: list[str] = []
+    notified_dir = STATE_DIR / "notified"
+    if not notified_dir.is_dir():
+        return actions
+
+    old_count = 0
+    for p in notified_dir.iterdir():
+        if not p.is_file():
+            continue
+        if _file_age(p) > NOTIFIED_MAX_AGE:
+            old_count += 1
+            if not dry_run:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+    if old_count > 0:
+        verb = "[dry-run] would delete" if dry_run else "deleted"
+        actions.append(f"{verb} {old_count} old notification markers (>{NOTIFIED_MAX_AGE // 86400}d)")
+    return actions
+
+
+def prune_old_improvement_runs(dry_run: bool = False) -> list[str]:
+    """Delete skill improvement run artifacts older than IMPROVEMENT_RUNS_MAX_AGE.
+
+    These are per-run JSON snapshots from the skill optimizer. After a week,
+    the optimizer has either succeeded or moved on.
+    """
+    actions: list[str] = []
+    imp_dir = STATE_DIR / "improvement_runs"
+    if not imp_dir.is_dir():
+        return actions
+
+    old_count = 0
+    total_kb: float = 0
+    for p in imp_dir.iterdir():
+        if not p.is_file():
+            continue
+        if _file_age(p) > IMPROVEMENT_RUNS_MAX_AGE:
+            old_count += 1
+            try:
+                total_kb += p.stat().st_size / 1024
+            except OSError:
+                pass
+            if not dry_run:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+    if old_count > 0:
+        verb = "[dry-run] would delete" if dry_run else "deleted"
+        actions.append(
+            f"{verb} {old_count} old improvement runs ({total_kb:.0f}KB, >{IMPROVEMENT_RUNS_MAX_AGE // 86400}d)"
+        )
+    return actions
+
+
 def run(dry_run: bool = False) -> dict:
     """Execute all retention policies. Returns summary dict."""
     all_actions = []
@@ -184,6 +303,9 @@ def run(dry_run: bool = False) -> dict:
     all_actions.extend(prune_old_backups(dry_run))
     all_actions.extend(rotate_progress_history(dry_run))
     all_actions.extend(clear_mypy_cache(dry_run))
+    all_actions.extend(prune_old_investigations(dry_run))
+    all_actions.extend(prune_old_notified(dry_run))
+    all_actions.extend(prune_old_improvement_runs(dry_run))
 
     freed_after = shutil.disk_usage("/").free
     freed_mb = (freed_after - freed_before) / (1024 * 1024) if not dry_run else 0

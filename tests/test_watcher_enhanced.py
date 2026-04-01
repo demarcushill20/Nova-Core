@@ -348,6 +348,7 @@ confidence: high
             patch("watcher.OUTPUT_DIR", output_dir),
             patch("watcher.LOGS_DIR", logs_dir),
             patch("watcher.STATE_DIR", state_dir),
+            patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
         ):
             valid, messages = verify_artifacts("test_task")
             assert valid is True
@@ -359,7 +360,11 @@ confidence: high
         output_dir.mkdir()
         state_dir.mkdir()
 
-        with patch("watcher.OUTPUT_DIR", output_dir), patch("watcher.STATE_DIR", state_dir):
+        with (
+            patch("watcher.OUTPUT_DIR", output_dir),
+            patch("watcher.STATE_DIR", state_dir),
+            patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
+        ):
             valid, errors = verify_artifacts("missing_task")
             assert valid is False
             assert any("OUTPUT missing" in msg for msg in errors)
@@ -385,6 +390,7 @@ Missing contract section.
             patch("watcher.OUTPUT_DIR", output_dir),
             patch("watcher.STATE_DIR", state_dir),
             patch("watcher.TASKS_DIR", tasks_dir),
+            patch("watcher.METRICS_FILE", tmp_path / "metrics.json"),
         ):
             valid, errors = verify_artifacts("test_task")
             assert valid is False
