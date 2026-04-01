@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from novatrade.risk.position_sizer import PositionSizer
+from novatrade.risk.position_sizer import DrawdownScaler, PositionSizer
 
 # ---------------------------------------------------------------------------
 # Calculation tests
@@ -237,3 +237,331 @@ class TestErrors:
         sizer = PositionSizer()
         with pytest.raises(ValueError, match="pip_value_per_lot"):
             sizer.calculate(equity=10000, entry=1.10, stop=1.09, pip_value_per_lot=0)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: $100K FTMO sizing tests (0.75% risk, max_lot=10.0)
+# ---------------------------------------------------------------------------
+
+
+class TestFTMO100KSizing:
+    """Verify correct lot sizing for $100K FTMO challenge accounts.
+
+    Kelly criterion validates 0.75% as optimal risk per trade.
+    With max_lot=10.0, the sizer should no longer under-risk by 5×.
+    """
+
+    def test_100k_15pip_stop_returns_5_lots(self):
+        """$100K, 0.75% risk, 15-pip stop → 5.00 lots (was capped at 1.00)."""
+        sizer = PositionSizer()  # defaults: max_lot=10.0, risk_pct=0.0075
+        # risk_dollars = 100000 * 0.0075 = 750
+        # stop_distance_pips = 15
+        # volume = 750 / (15 * 10) = 5.00
+        lot = sizer.calculate(
+            equity=100_000,
+            entry=1.10150,
+            stop=1.10000,
+        )
+        assert lot == 5.00
+
+    def test_100k_20pip_stop_returns_3_75_lots(self):
+        """$100K, 0.75% risk, 20-pip stop → 3.75 lots."""
+        sizer = PositionSizer()
+        # risk_dollars = 750, volume = 750 / (20 * 10) = 3.75
+        lot = sizer.calculate(
+            equity=100_000,
+            entry=1.10200,
+            stop=1.10000,
+        )
+        assert lot == 3.75
+
+    def test_100k_10pip_stop_returns_7_50_lots(self):
+        """$100K, 0.75% risk, 10-pip stop → 7.50 lots."""
+        sizer = PositionSizer()
+        # risk_dollars = 750, volume = 750 / (10 * 10) = 7.50
+        lot = sizer.calculate(
+            equity=100_000,
+            entry=1.10100,
+            stop=1.10000,
+        )
+        assert lot == 7.50
+
+    def test_100k_50pip_stop_returns_1_50_lots(self):
+        """$100K, 0.75% risk, 50-pip stop → 1.50 lots."""
+        sizer = PositionSizer()
+        # risk_dollars = 750, volume = 750 / (50 * 10) = 1.50
+        lot = sizer.calculate(
+            equity=100_000,
+            entry=1.10500,
+            stop=1.10000,
+        )
+        assert lot == 1.50
+
+    def test_default_risk_pct_is_075(self):
+        """Default risk_pct should be 0.75% (Kelly-optimal)."""
+        sizer = PositionSizer()
+        # With 0.75% risk (default), $10K, 50-pip stop:
+        # risk_dollars = 10000 * 0.0075 = 75
+        # volume = 75 / (50 * 10) = 0.15
+        lot = sizer.calculate(
+            equity=10_000,
+            entry=1.10500,
+            stop=1.10000,
+        )
+        assert lot == 0.15
+
+    def test_default_max_lot_is_10(self):
+        """Default max_lot should be 10.0 (supports $100K FTMO)."""
+        sizer = PositionSizer()
+        assert sizer.max_lot == 10.0
+
+    def test_clamp_at_10_lots(self):
+        """Verify clamping at 10.0 lots for very tight stops."""
+        sizer = PositionSizer()
+        # $100K, 0.75% risk, 5-pip stop → 750 / 50 = 15.0 → clamped to 10.0
+        lot = sizer.calculate(
+            equity=100_000,
+            entry=1.10050,
+            stop=1.10000,
+        )
+        assert lot == 10.0
+
+    def test_over_10_logs_warning(self, caplog):
+        """Calculated volume > 10.0 should log a warning."""
+        import logging
+
+        sizer = PositionSizer()
+        with caplog.at_level(logging.WARNING, logger="novatrade.risk.position_sizer"):
+            lot = sizer.calculate(
+                equity=100_000,
+                entry=1.10050,
+                stop=1.10000,
+            )
+        assert lot == 10.0
+        assert "exceeds 10.0 lots" in caplog.text
+
+    def test_backward_compat_explicit_1_lot_max(self):
+        """Callers can still explicitly set max_lot=1.0 for demo accounts."""
+        sizer = PositionSizer(max_lot=1.00)
+        lot = sizer.calculate(
+            equity=100_000,
+            entry=1.10150,
+            stop=1.10000,
+        )
+        assert lot == 1.00  # clamped to explicit max
+
+    def test_10k_demo_with_defaults(self):
+        """$10K demo with default 0.75% risk still works correctly."""
+        sizer = PositionSizer()
+        # risk=75, stop=30 pips → 75/300 = 0.25
+        lot = sizer.calculate(
+            equity=10_000,
+            entry=1.10300,
+            stop=1.10000,
+        )
+        assert lot == 0.25
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Drawdown-adaptive & consecutive-loss scaling
+# ---------------------------------------------------------------------------
+
+
+class TestDrawdownScaling:
+    """Drawdown-based position size reduction (4-tier)."""
+
+    def test_tier_full_size_at_0pct(self):
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(0.0) == 1.0
+
+    def test_tier_full_size_at_49pct(self):
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(0.49) == 1.0
+
+    def test_tier_75pct_at_50pct_dd(self):
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(0.50) == 0.75
+
+    def test_tier_75pct_at_69pct_dd(self):
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(0.69) == 0.75
+
+    def test_tier_50pct_at_70pct_dd(self):
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(0.70) == 0.50
+
+    def test_tier_50pct_at_84pct_dd(self):
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(0.84) == 0.50
+
+    def test_tier_survival_at_85pct_dd(self):
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(0.85) == 0.25
+
+    def test_tier_survival_at_100pct_dd(self):
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(1.0) == 0.25
+
+    def test_tier_survival_above_100pct(self):
+        """Even if DD exceeds limit, return survival mode (not crash)."""
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(1.5) == 0.25
+
+    def test_negative_dd_treated_as_zero(self):
+        scaler = DrawdownScaler()
+        assert scaler.drawdown_scale(-0.1) == 1.0
+
+
+class TestConsecutiveLossScaling:
+    """Consecutive-loss-based position size reduction."""
+
+    def test_zero_losses_full_size(self):
+        scaler = DrawdownScaler()
+        assert scaler.loss_streak_scale() == 1.0
+
+    def test_one_loss_full_size(self):
+        scaler = DrawdownScaler()
+        scaler.record_loss()
+        assert scaler.loss_streak_scale() == 1.0
+
+    def test_two_losses_75pct(self):
+        scaler = DrawdownScaler()
+        scaler.record_loss()
+        scaler.record_loss()
+        assert scaler.loss_streak_scale() == 0.75
+
+    def test_three_losses_50pct(self):
+        scaler = DrawdownScaler()
+        for _ in range(3):
+            scaler.record_loss()
+        assert scaler.loss_streak_scale() == 0.50
+
+    def test_four_losses_survival(self):
+        scaler = DrawdownScaler()
+        for _ in range(4):
+            scaler.record_loss()
+        assert scaler.loss_streak_scale() == 0.25
+
+    def test_five_losses_still_survival(self):
+        scaler = DrawdownScaler()
+        for _ in range(5):
+            scaler.record_loss()
+        assert scaler.loss_streak_scale() == 0.25
+
+    def test_win_resets_streak(self):
+        scaler = DrawdownScaler()
+        for _ in range(4):
+            scaler.record_loss()
+        assert scaler.loss_streak_scale() == 0.25
+        scaler.record_win()
+        assert scaler.loss_streak_scale() == 1.0
+        assert scaler.consecutive_losses == 0
+
+    def test_reset_clears_streak(self):
+        scaler = DrawdownScaler()
+        for _ in range(3):
+            scaler.record_loss()
+        scaler.reset()
+        assert scaler.consecutive_losses == 0
+        assert scaler.loss_streak_scale() == 1.0
+
+
+class TestCombinedScaling:
+    """Combined scaling takes the minimum of drawdown and loss streak."""
+
+    def test_both_full_returns_full(self):
+        scaler = DrawdownScaler()
+        assert scaler.combined_scale(0.0) == 1.0
+
+    def test_dd_more_restrictive(self):
+        """0 losses (1.0) vs 60% DD (0.75) → 0.75 wins."""
+        scaler = DrawdownScaler()
+        assert scaler.combined_scale(0.60) == 0.75
+
+    def test_losses_more_restrictive(self):
+        """3 losses (0.50) vs 30% DD (1.0) → 0.50 wins."""
+        scaler = DrawdownScaler()
+        for _ in range(3):
+            scaler.record_loss()
+        assert scaler.combined_scale(0.30) == 0.50
+
+    def test_both_restrictive_takes_min(self):
+        """4 losses (0.25) vs 72% DD (0.50) → 0.25 wins."""
+        scaler = DrawdownScaler()
+        for _ in range(4):
+            scaler.record_loss()
+        assert scaler.combined_scale(0.72) == 0.25
+
+    def test_equal_scales_returns_same(self):
+        """2 losses (0.75) vs 55% DD (0.75) → 0.75."""
+        scaler = DrawdownScaler()
+        scaler.record_loss()
+        scaler.record_loss()
+        assert scaler.combined_scale(0.55) == 0.75
+
+
+class TestScaleVolume:
+    """Integration: scale_volume applies combined scaling to base volume."""
+
+    def test_full_scale_no_reduction(self):
+        scaler = DrawdownScaler()
+        assert scaler.scale_volume(5.00, dd_used_pct=0.0) == 5.00
+
+    def test_75pct_scale(self):
+        scaler = DrawdownScaler()
+        # 5.00 × 0.75 = 3.75
+        assert scaler.scale_volume(5.00, dd_used_pct=0.55) == 3.75
+
+    def test_50pct_scale(self):
+        scaler = DrawdownScaler()
+        # 5.00 × 0.50 = 2.50
+        assert scaler.scale_volume(5.00, dd_used_pct=0.72) == 2.50
+
+    def test_survival_scale(self):
+        scaler = DrawdownScaler()
+        # 5.00 × 0.25 = 1.25
+        assert scaler.scale_volume(5.00, dd_used_pct=0.90) == 1.25
+
+    def test_min_lot_floor(self):
+        scaler = DrawdownScaler()
+        # 0.02 × 0.25 = 0.005 → clamped to min_lot=0.01
+        assert scaler.scale_volume(0.02, dd_used_pct=0.90) == 0.01
+
+    def test_rounding_to_2_decimals(self):
+        scaler = DrawdownScaler()
+        # 3.33 × 0.75 = 2.4975 → 2.50
+        assert scaler.scale_volume(3.33, dd_used_pct=0.55) == 2.50
+
+    def test_loss_streak_reduces_volume(self):
+        scaler = DrawdownScaler()
+        for _ in range(3):
+            scaler.record_loss()
+        # 5.00 × 0.50 (3 losses) → 2.50 (dd at 0% = 1.0, so loss streak wins)
+        assert scaler.scale_volume(5.00, dd_used_pct=0.0) == 2.50
+
+    def test_end_to_end_with_position_sizer(self):
+        """Full integration: PositionSizer → DrawdownScaler → final volume."""
+        sizer = PositionSizer()
+        scaler = DrawdownScaler()
+
+        # $100K, 0.75% risk, 15-pip stop → 5.00 lots base
+        base_lot = sizer.calculate(equity=100_000, entry=1.10150, stop=1.10000)
+        assert base_lot == 5.00
+
+        # After 60% DD used → 75% scale → 3.75 lots
+        scaled = scaler.scale_volume(base_lot, dd_used_pct=0.60)
+        assert scaled == 3.75
+
+    def test_end_to_end_survival_mode(self):
+        """Worst case: high DD + loss streak → 25% of base volume."""
+        sizer = PositionSizer()
+        scaler = DrawdownScaler()
+        for _ in range(4):
+            scaler.record_loss()
+
+        base_lot = sizer.calculate(equity=100_000, entry=1.10150, stop=1.10000)
+        assert base_lot == 5.00
+
+        # 90% DD + 4 losses → both at 0.25 → 5.00 × 0.25 = 1.25
+        scaled = scaler.scale_volume(base_lot, dd_used_pct=0.90)
+        assert scaled == 1.25

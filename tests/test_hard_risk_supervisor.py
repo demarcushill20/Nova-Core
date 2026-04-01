@@ -257,13 +257,14 @@ class TestRule3TotalLossCap:
 
 class TestRule4MaxLotSize:
     def test_volume_exceeds_max(self, supervisor: HardRiskSupervisor) -> None:
-        d = supervisor.veto("EURUSD", "BUY", 1.5, 1.1000, 1.0950, 10_000.0)
+        d = supervisor.veto("EURUSD", "BUY", 10.5, 1.1000, 1.0999, 100_000.0)
         assert d.verdict == SupervisorVerdict.VETO
         assert d.rule == "max_lot_size"
 
     def test_volume_at_max(self, supervisor: HardRiskSupervisor) -> None:
-        # 1.0 lot × 10 pip SL × $10/pip = $100 < $150 limit
-        d = supervisor.veto("EURUSD", "BUY", 1.0, 1.10000, 1.09900, 10_000.0)
+        # 10.0 lots at max — with loss safely under per-trade cap
+        # 10.0 lot × 1.4 pip SL × $10/pip = $140 < $150 limit
+        d = supervisor.veto("EURUSD", "BUY", 10.0, 1.10000, 1.09986, 100_000.0)
         assert d.verdict == SupervisorVerdict.ALLOW
 
     def test_volume_below_max(self, supervisor: HardRiskSupervisor) -> None:

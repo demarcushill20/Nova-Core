@@ -1,16 +1,16 @@
 """FTMO-compliant position sizer for NovaTrade live trading.
 
-Mirrors the Pine f_qty() model: 1% equity risk per trade, clamped to
-FTMO-safe lot-size bounds.  Provides both calculation and cross-check
+Mirrors the Pine f_qty() model: 0.75% equity risk per trade, clamped to
+FTMO-safe lot-size bounds (max 10.00 lots for $100K accounts).  Provides both calculation and cross-check
 validation for TradingView alert volumes.
 
 Usage::
 
     sizer = PositionSizer()
-    lot = sizer.calculate(equity=10000, entry=1.10500, stop=1.10000,
-                          risk_pct=0.01, pip_value=0.0001,
+    lot = sizer.calculate(equity=100000, entry=1.10150, stop=1.10000,
+                          risk_pct=0.0075, pip_value=0.0001,
                           pip_value_per_lot=10.0)
-    # lot = 0.20
+    # lot = 5.00
 
     ok, reason = sizer.validate(requested=0.22, calculated=0.20, tolerance=0.10)
     # ok = True (within 10% tolerance)
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import random
+from typing import ClassVar
 
 log = logging.getLogger("novatrade.risk.position_sizer")
 
@@ -35,7 +36,7 @@ class PositionSizer:
     def __init__(
         self,
         min_lot: float = 0.01,
-        max_lot: float = 1.00,
+        max_lot: float = 10.00,
         *,
         micro_variation_enabled: bool = False,
         micro_variation_step: float = 0.01,
@@ -50,7 +51,7 @@ class PositionSizer:
         equity: float,
         entry: float,
         stop: float,
-        risk_pct: float = 0.01,
+        risk_pct: float = 0.0075,
         pip_value: float = 0.0001,
         pip_value_per_lot: float = 10.0,
     ) -> float:
@@ -86,6 +87,16 @@ class PositionSizer:
         stop_distance_pips = stop_distance / pip_value
         risk_dollars = equity * risk_pct
         volume = risk_dollars / (stop_distance_pips * pip_value_per_lot)
+
+        # Guard: warn if calculated volume exceeds safety ceiling
+        if volume > 10.0:
+            log.warning(
+                "Calculated volume %.2f exceeds 10.0 lots — capping. equity=%.0f risk_pct=%.4f stop_pips=%.1f",
+                volume,
+                equity,
+                risk_pct,
+                stop_distance_pips,
+            )
 
         # Clamp and round
         volume = max(self._min_lot, min(self._max_lot, round(volume, 2)))
@@ -144,3 +155,110 @@ class PositionSizer:
     @property
     def max_lot(self) -> float:
         return self._max_lot
+
+
+class DrawdownScaler:
+    """Dynamically reduce position size based on drawdown proximity and loss streaks.
+
+    4-tier drawdown scaling (as % of daily DD limit used):
+        0-50%  → 100% size
+        50-70% → 75% size
+        70-85% → 50% size
+        85%+   → 25% size (survival mode)
+
+    Consecutive-loss scaling:
+        0-1 losses → 100% size
+        2 losses   → 75% size
+        3 losses   → 50% size
+        4+ losses  → 25% size (until a winner)
+
+    The final scale factor is the minimum of both — the more restrictive wins.
+    """
+
+    # Drawdown tiers: (threshold_pct, scale_factor)
+    DD_TIERS: ClassVar[list[tuple[float, float]]] = [
+        (0.85, 0.25),  # ≥85% of DD limit used → survival mode
+        (0.70, 0.50),  # ≥70% → half size
+        (0.50, 0.75),  # ≥50% → three-quarter size
+        (0.00, 1.00),  # <50% → full size
+    ]
+
+    # Consecutive-loss tiers: (consecutive_losses, scale_factor)
+    LOSS_TIERS: ClassVar[list[tuple[int, float]]] = [
+        (4, 0.25),  # 4+ consecutive losses → survival mode
+        (3, 0.50),  # 3 losses → half size
+        (2, 0.75),  # 2 losses → three-quarter size
+        (0, 1.00),  # 0-1 losses → full size
+    ]
+
+    def __init__(self) -> None:
+        self._consecutive_losses: int = 0
+
+    @property
+    def consecutive_losses(self) -> int:
+        return self._consecutive_losses
+
+    def record_loss(self) -> None:
+        """Record a losing trade."""
+        self._consecutive_losses += 1
+
+    def record_win(self) -> None:
+        """Record a winning trade — resets the consecutive loss counter."""
+        self._consecutive_losses = 0
+
+    def reset(self) -> None:
+        """Reset state (e.g., for a new trading day)."""
+        self._consecutive_losses = 0
+
+    def drawdown_scale(self, dd_used_pct: float) -> float:
+        """Return the scale factor based on how much of the daily DD limit is used.
+
+        Args:
+            dd_used_pct: Fraction of daily drawdown limit consumed (0.0–1.0+).
+                         E.g., 0.6 means 60% of the daily loss limit has been used.
+
+        Returns:
+            Scale factor in [0.25, 1.0].
+        """
+        dd_used_pct = max(0.0, dd_used_pct)
+        for threshold, scale in self.DD_TIERS:
+            if dd_used_pct >= threshold:
+                return scale
+        return 1.0  # unreachable but safe
+
+    def loss_streak_scale(self) -> float:
+        """Return the scale factor based on consecutive losses.
+
+        Returns:
+            Scale factor in [0.25, 1.0].
+        """
+        for threshold, scale in self.LOSS_TIERS:
+            if self._consecutive_losses >= threshold:
+                return scale
+        return 1.0  # unreachable but safe
+
+    def combined_scale(self, dd_used_pct: float) -> float:
+        """Return the most restrictive scale factor from both drawdown and loss streak.
+
+        Args:
+            dd_used_pct: Fraction of daily drawdown limit consumed (0.0–1.0+).
+
+        Returns:
+            Minimum of drawdown_scale and loss_streak_scale.
+        """
+        return min(self.drawdown_scale(dd_used_pct), self.loss_streak_scale())
+
+    def scale_volume(self, base_volume: float, dd_used_pct: float, min_lot: float = 0.01) -> float:
+        """Apply combined scaling to a base volume.
+
+        Args:
+            base_volume: The unscaled lot size from PositionSizer.calculate().
+            dd_used_pct: Fraction of daily drawdown limit consumed.
+            min_lot: Minimum lot size floor.
+
+        Returns:
+            Scaled volume, never below min_lot, rounded to 2 decimals.
+        """
+        scale = self.combined_scale(dd_used_pct)
+        scaled = round(base_volume * scale, 2)
+        return max(min_lot, scaled)

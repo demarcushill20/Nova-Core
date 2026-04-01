@@ -52,7 +52,7 @@ class HardLimits:
     or account state that violates any of them.  All dollar values are in
     the account currency (USD by default).
 
-    The defaults are conservative and suitable for a $10,000 FTMO demo.
+    The defaults are suitable for a $100,000 FTMO challenge account.
     Override via constructor for different account sizes.
     """
 
@@ -63,7 +63,7 @@ class HardLimits:
     max_loss_per_trade_usd: float = 150.0  # Max risk on a single trade ($)
 
     # --- Position limits ---
-    max_lot_size: float = 1.0  # Max lots per order (absolute)
+    max_lot_size: float = 10.0  # Max lots per order (absolute, supports $100K FTMO)
     max_concurrent_positions: int = 3  # Hard position cap
     max_trades_per_day: int = 30  # Hard daily trade cap
 
