@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260331_15_free_will_pm_1775018730",
+  "workflow_id": "shift_20260331_15_free_will_pm",
+  "task_summary": "Added 3 STATE retention policies (investigations, notified, improvement_runs) to log_retention.py, wired into automated 2-hour cleanup cycle, freed 40.3MB, added 11 tests",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added 3 STATE retention policies (investigations, notified, improvement_runs) to log_retention.py, wired into automated 2-hour cleanup cycle, freed 40.3MB, added 11 tests"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260331_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added 3 STATE retention policies (investigations, notified, improvement_runs) to log_retention.py, wired into automated 2-hour cleanup cycle, freed 40.3MB, added 11 tests",
+  "created_at": "2026-04-01T04:45:30Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260331_15_free_will_pm_1775019716"
+}

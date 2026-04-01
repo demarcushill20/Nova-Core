@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0663_daily_summary_2026-03-31__retry1_1775015239",
+  "workflow_id": "0663_daily_summary_2026-03-31__retry1",
+  "task_summary": "Repaired CONTRACT block format in daily summary output file by fixing field format and field names",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Repaired CONTRACT block format in daily summary output file by fixing field format and field names"
+  ],
+  "successful_patterns": [
+    "task_completed: 0663_daily_summary_2026-03-31__retry1"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Repaired CONTRACT block format in daily summary output file by fixing field format and field names",
+  "created_at": "2026-04-01T03:47:19Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0663_daily_summary_2026-03-31_1775015738"
+}

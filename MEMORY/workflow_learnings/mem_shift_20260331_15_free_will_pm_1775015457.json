@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260331_15_free_will_pm_1775015457",
+  "workflow_id": "shift_20260331_15_free_will_pm",
+  "task_summary": "Fixed failing test and corrected misleading 24%\u21922% contract failure rate by excluding test stems from metrics",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed failing test and corrected misleading 24%\u21922% contract failure rate by excluding test stems from metrics"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260331_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed failing test and corrected misleading 24%\u21922% contract failure rate by excluding test stems from metrics",
+  "created_at": "2026-04-01T03:50:57Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260331_15_free_will_pm_1775019716"
+}

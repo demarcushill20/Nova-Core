@@ -1,5 +1,3 @@
-The sandbox is blocking writes to `.claude/skills/`. Here's the complete SKILL.md — you can save it to `.claude/skills/parallel-test-fanout/SKILL.md`:
-
 ---
 name: parallel-test-fanout
 description: "Fan out N test suites as parallel background agents, collect all results, and assert cross-run consistency. Use for bulk validation, regression checks, or pre-merge confidence gates."

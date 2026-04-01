@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260331_15_free_will_pm_1775025352",
+  "workflow_id": "shift_20260331_15_free_will_pm",
+  "task_summary": "Fixed 3 test failures (1 timeout + 2 assertion errors) across heartbeat, self-healing wiring, and stage4 evaluation gate \u2014 full suite now 11,650/11,650 passing",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 3 test failures (1 timeout + 2 assertion errors) across heartbeat, self-healing wiring, and stage4 evaluation gate \u2014 full suite now 11,650/11,650 passing"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260331_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 3 test failures (1 timeout + 2 assertion errors) across heartbeat, self-healing wiring, and stage4 evaluation gate \u2014 full suite now 11,650/11,650 passing",
+  "created_at": "2026-04-01T06:35:52Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260331_15_free_will_pm_1775029716"
+}

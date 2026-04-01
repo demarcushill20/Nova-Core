@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260331_15_free_will_pm_1775028601",
+  "workflow_id": "shift_20260331_15_free_will_pm",
+  "task_summary": "Fixed OUTPUT stem matching bug (substring\u2192boundary-aware) in _find_recent_output and _find_any_output, added 8 tests, fixed test isolation gap",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed OUTPUT stem matching bug (substring\u2192boundary-aware) in _find_recent_output and _find_any_output, added 8 tests, fixed test isolation gap"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260331_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed OUTPUT stem matching bug (substring\u2192boundary-aware) in _find_recent_output and _find_any_output, added 8 tests, fixed test isolation gap",
+  "created_at": "2026-04-01T07:30:01Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260331_15_free_will_pm_1775029716"
+}

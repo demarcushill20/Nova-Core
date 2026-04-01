@@ -1,5 +1,3 @@
-The sandbox is blocking directory creation under `.claude/skills/`. Here's the complete SKILL.md — save it to `.claude/skills/autonomous-anomaly-repair/SKILL.md`:
-
 ---
 name: autonomous-anomaly-repair
 description: "Autonomous observe-diagnose-fix-test-verify cycle for free-will exploration shifts. Detects anomalies in logs, state machines, or signal pipelines, diagnoses root cause, implements a minimal fix, writes regression tests, and verifies full suite passes — all without human intervention."

@@ -1,0 +1,17 @@
+{
+  "name": "the-agent-demonstrated-an-excellent-pattern-read-collector",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "The agent demonstrated an excellent pattern: read collector code \u2192 identify config-vs-actual data confusion \u2192 fix with fallback chain (primary source \u2192 state file \u2192 safe default). This 3-bug diagnosis pattern (false breach from config misread, missing-file-as-normal, idle-market default) is reusable for any autonomy collector scoring below threshold.",
+    "task_examples": [
+      "0663_plan_risk_engine_improvement",
+      "0663_plan_risk_engine_improvement"
+    ],
+    "task_id": "0663_plan_risk_engine_improvement"
+  },
+  "created_at": "2026-04-01T02:08:01.134207+00:00"
+}

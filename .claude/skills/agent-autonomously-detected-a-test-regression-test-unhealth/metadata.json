@@ -1,0 +1,17 @@
+{
+  "name": "agent-autonomously-detected-a-test-regression-test-unhealth",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "Agent autonomously detected a test regression (test_unhealthy_run timeout), diagnosed root cause, applied fix, and verified full suite (11,650 tests, 0 failures). This detect\u2192fix\u2192verify loop for test health is a reusable pattern worth codifying as a skill, especially for free-will/exploration blocks where the agent self-selects work.",
+    "task_examples": [
+      "shift_20260331_15_free_will_pm",
+      "shift_20260331_15_free_will_pm"
+    ],
+    "task_id": "shift_20260331_15_free_will_pm"
+  },
+  "created_at": "2026-04-01T08:27:27.522597+00:00"
+}

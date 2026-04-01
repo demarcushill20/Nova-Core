@@ -1,0 +1,23 @@
+{
+  "artifact_id": "mem_shift_20260331_15_free_will_pm_1775019716",
+  "workflow_id": "shift_20260331_15_free_will_pm",
+  "task_summary": "Added 30 comprehensive tests for risk engine collector covering _try_risk_state, corrected drawdown calc, halt states, gate pass rate, div-by-zero, staleness penalties, and breach detection",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added 30 comprehensive tests for risk engine collector covering _try_risk_state, corrected drawdown calc, halt states, gate pass rate, div-by-zero, staleness penalties, and breach detection"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260331_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added 30 comprehensive tests for risk engine collector covering _try_risk_state, corrected drawdown calc, halt states, gate pass rate, div-by-zero, staleness penalties, and breach detection",
+  "created_at": "2026-04-01T05:01:56Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260331_15_free_will_pm_1775015457",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260331_15_free_will_pm_1775029716"
+}

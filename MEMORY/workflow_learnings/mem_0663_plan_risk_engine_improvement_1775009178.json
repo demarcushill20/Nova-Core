@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0663_plan_risk_engine_improvement_1775009178",
+  "workflow_id": "0663_plan_risk_engine_improvement",
+  "task_summary": "Fixed 3 bugs in risk_engine collector raising score from 58 to 76.2 (GREEN)",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 3 bugs in risk_engine collector raising score from 58 to 76.2 (GREEN)"
+  ],
+  "successful_patterns": [
+    "task_failed: 0663_plan_risk_engine_improvement"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 3 bugs in risk_engine collector raising score from 58 to 76.2 (GREEN)",
+  "created_at": "2026-04-01T02:06:18Z",
+  "confidence": "high"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "when-a-free-will-block-discovers-its-task-is-already-done-t",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "When a free-will block discovers its task is already done, the agent should pivot to autonomous discovery: scan TASKS/ for queued work, check system health, run overdue maintenance, or pursue NovaTrade research. The current pattern of 're-run tests and exit' wastes the exploration block entirely.",
+    "task_examples": [
+      "shift_20260331_15_free_will_pm",
+      "shift_20260331_15_free_will_pm"
+    ],
+    "task_id": "shift_20260331_15_free_will_pm"
+  },
+  "created_at": "2026-04-01T07:57:36.249800+00:00"
+}

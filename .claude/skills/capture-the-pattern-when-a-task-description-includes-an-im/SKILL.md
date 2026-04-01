@@ -1,5 +1,3 @@
-Sandbox is blocking writes to `.claude/skills/`. Here's the complete SKILL.md — save it to `.claude/skills/post-impl-verification/SKILL.md`:
-
 ---
 name: post-impl-verification
 description: "Fast verification of already-completed implementations by counting deliverables, running tests, and spot-checking risk mitigations."

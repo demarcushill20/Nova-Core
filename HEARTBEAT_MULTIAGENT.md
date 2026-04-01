@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-03-31T19:23:02Z
+Generated: 2026-04-01T16:33:27Z
 
 ## Overall: HEALTHY
 
@@ -8,7 +8,7 @@ Generated: 2026-03-31T19:23:02Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 11 |
+| Completed workflows | 12 |
 | Failed workflows | 1 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
@@ -21,9 +21,9 @@ Generated: 2026-03-31T19:23:02Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 2077 |
-| Contract failures | 657 |
-| Contract failure rate | 24.0% |
+| Contract successes | 854 |
+| Contract failures | 48 |
+| Contract failure rate | 5.3% |
 | Budget exhaustions | 0 |
 | Policy violations | 0 |
 | Orphaned agents | 0 |
@@ -37,18 +37,19 @@ Generated: 2026-03-31T19:23:02Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| 0648_Is_this_currently_wired_in_and_100__operational_ | ? | completed | - |
-| 0649_Use_cached_llm_call___to_avoid_re-analyzing_identical_patterns_ | ? | completed | - |
-| 0650_py____Extend_llm_cache_with_skill-specific_caching__Key__hash_skill_id___task_pa | ? | completed | - |
-| 0654_repair_system_health_regression | ? | completed | - |
-| 0658_I_m_getting_spammed_this_in_telegram_Nova___Mar_31__2026_at_8_41_AM_ | ? | completed | - |
-| 0660_repair_risk_engine_regression | ? | failed | verifier_rejected |
 | 0661_escalate_risk_engine_for_human_review | ? | completed | - |
 | 0662_Did_this_telegram_spam_chew_through_my_limit_it_was_doing_this_every_10_seconds_ | ? | completed | - |
+| 0664_research_execution_pipeline_gaps | ? | completed | - |
 | hb_proactive_20260331_172312_research_metrics_failure_rate_diagnosis | ? | completed | - |
-| shift_20260330_14_novatrade_monitoring | ? | completed | - |
-| shift_20260331_1_system_health | ? | completed | - |
-| shift_20260331_4_deep_research | ? | completed | - |
+| shift_20260331_10_novatrade_impl | ? | completed | - |
+| shift_20260331_11_novatrade_impl2 | ? | completed | - |
+| shift_20260331_12_novatrade_testing | ? | completed | - |
+| shift_20260331_13_novatrade_research | ? | completed | - |
+| shift_20260331_14_novatrade_monitoring | ? | completed | - |
+| shift_20260331_9_novatrade_status | ? | completed | - |
+| shift_20260401_1_system_health | ? | failed | verifier_rejected |
+| shift_20260401_4_deep_research | ? | completed | - |
+| shift_gen_pm_20260331 | ? | completed | - |
 
 ## Health Findings
 

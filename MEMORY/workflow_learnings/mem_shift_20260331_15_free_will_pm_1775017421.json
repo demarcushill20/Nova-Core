@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260331_15_free_will_pm_1775017421",
+  "workflow_id": "shift_20260331_15_free_will_pm",
+  "task_summary": "Rotated progress_history.json (14.5MB\u21923.1MB), added MAX_HISTORY_ENTRIES=1500 cap to progress scorer, verified all prior session work (trade journal rotation, test fixes, metrics accuracy, risk engine improvements)",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Rotated progress_history.json (14.5MB\u21923.1MB), added MAX_HISTORY_ENTRIES=1500 cap to progress scorer, verified all prior session work (trade journal rotation, test fixes, metrics accuracy, risk engine improvements)"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260331_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Rotated progress_history.json (14.5MB\u21923.1MB), added MAX_HISTORY_ENTRIES=1500 cap to progress scorer, verified all prior session work (trade journal rotation, test fixes, metrics accuracy, risk engine improvements)",
+  "created_at": "2026-04-01T04:23:41Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260331_15_free_will_pm_1775019716"
+}

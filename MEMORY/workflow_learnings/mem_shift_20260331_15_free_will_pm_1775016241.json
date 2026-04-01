@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260331_15_free_will_pm_1775016241",
+  "workflow_id": "shift_20260331_15_free_will_pm",
+  "task_summary": "Implemented trade journal rotation (54K\u21922K lines, 12MB\u2192416KB), fixed failing test, corrected misleading 24%\u21922% contract failure rate",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented trade journal rotation (54K\u21922K lines, 12MB\u2192416KB), fixed failing test, corrected misleading 24%\u21922% contract failure rate"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260331_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented trade journal rotation (54K\u21922K lines, 12MB\u2192416KB), fixed failing test, corrected misleading 24%\u21922% contract failure rate",
+  "created_at": "2026-04-01T04:04:01Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260331_15_free_will_pm_1775019716"
+}

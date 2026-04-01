@@ -1,5 +1,3 @@
-The sandbox is blocking directory creation under `.claude/skills/`. Here's the complete SKILL.md content:
-
 ---
 name: output-repair
 description: "Repair broken, truncated, or malformed output files, contract blocks, and local artifacts — purely local file surgery with zero remote/GitHub context."

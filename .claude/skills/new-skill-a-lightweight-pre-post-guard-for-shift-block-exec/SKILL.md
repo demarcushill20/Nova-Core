@@ -1,5 +1,3 @@
-It seems the sandbox is blocking writes to `.claude/skills/`. Let me output the complete SKILL.md content directly for you to place at `.claude/skills/shift-block-guard/SKILL.md`:
-
 ---
 name: shift-block-guard
 description: "Pre/post guard for shift-block executions — prevents vacuous runs by asserting checkpoint loaded, work done, and artifacts produced."
