@@ -146,8 +146,8 @@ def _make_lease(tmp_path, workflow_id="wf01", node_id="node01", holder="agent01"
 
 def _make_metrics_json(tmp_path, contract_success=0, contract_failure=0):
     data = {
-        "contract_success": {"_total": contract_success},
-        "contract_failure": {"_total": contract_failure},
+        "contract_success": {"_total": contract_success, "real_task": contract_success},
+        "contract_failure": {"_total": contract_failure, "real_task": contract_failure},
     }
     _write_json(tmp_path / "STATE" / "metrics.json", data)
     return data

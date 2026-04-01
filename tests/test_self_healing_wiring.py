@@ -81,8 +81,15 @@ class TestDegradationTierGating:
         monkeypatch.setattr(hb, "_append_metrics", lambda snap: None)
         monkeypatch.setattr(hb, "_telegram_cooldown_gate", lambda msg: False)
 
+        # Stub checks that were added after the original fixture was written
+        monkeypatch.setattr(hb, "check_scheduler", lambda: _make_fake_check("scheduler"))
+        monkeypatch.setattr(hb, "check_novatrade_signals", lambda: _make_fake_check("novatrade_signals"))
+
         # Stub kill switch
         monkeypatch.setattr(hb, "check_kill_switch", lambda: None, raising=False)
+
+        # Reset shutdown flag — it's a module-level global that can leak between tests
+        monkeypatch.setattr(hb, "_heartbeat_shutdown_requested", False)
 
         # Disable CRUISE mode so degradation tier logic is tested in isolation
         monkeypatch.setattr(hb, "_update_cruise_state", None)

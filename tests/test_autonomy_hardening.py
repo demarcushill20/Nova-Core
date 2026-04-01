@@ -421,4 +421,4 @@ async def test_mixed_failures_with_partial_cache(tmp_path):
     assert report.dimensions["system_health"].score == 90.0
     assert report.dimensions["execution_pipeline"].score == 75.0
     assert report.dimensions["strategy_validity"].score == 80.0
-    assert len(report.warnings) == 2  # Two failures
+    assert len(report.warnings) == 4  # Two failures + two low-confidence warnings

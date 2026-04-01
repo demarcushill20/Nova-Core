@@ -269,12 +269,25 @@ def collect_metrics(base: Path | None = None) -> MultiAgentMetrics:
         m.verifier_rejection_rate = round(m.verifier_rejection_count / total_verifications, 3)
 
     # --- Contract failure rate (from metrics.json) ---
+    # Exclude test stems (e.g. "test_task") that inflate the failure count
+    # from automated test runs writing to the production metrics file.
+    _TEST_STEMS = {"test_task", "test_stem", "test"}
     metrics_data = _read_json(state / "metrics.json")
     if metrics_data and isinstance(metrics_data, dict):
         cf = metrics_data.get("contract_failure", {})
         cs = metrics_data.get("contract_success", {})
-        m.contract_failure_count = cf.get("_total", 0) if isinstance(cf, dict) else int(cf or 0)
-        m.contract_success_count = cs.get("_total", 0) if isinstance(cs, dict) else int(cs or 0)
+        if isinstance(cf, dict):
+            m.contract_failure_count = sum(
+                v for k, v in cf.items() if k != "_total" and isinstance(v, int) and k not in _TEST_STEMS
+            )
+        else:
+            m.contract_failure_count = int(cf or 0)
+        if isinstance(cs, dict):
+            m.contract_success_count = sum(
+                v for k, v in cs.items() if k != "_total" and isinstance(v, int) and k not in _TEST_STEMS
+            )
+        else:
+            m.contract_success_count = int(cs or 0)
         total_contracts = m.contract_failure_count + m.contract_success_count
         if total_contracts > 0:
             m.contract_failure_rate = round(m.contract_failure_count / total_contracts, 3)

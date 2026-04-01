@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -929,7 +930,7 @@ async def test_risk_missing_state_dir(risk_collector):
 
 @pytest.mark.asyncio
 async def test_risk_halt_valid_json(risk_collector, tmp_path):
-    """No halt_state.json but state dir has files = 80 (probably OK, uncertain)."""
+    """No halt_state.json but state dir has files = 90 (never halted)."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
     (state_dir / "daily_loss_tracker.json").write_text('{"limit": 500}')
@@ -937,7 +938,7 @@ async def test_risk_halt_valid_json(risk_collector, tmp_path):
 
     result = await risk_collector.collect()
     halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
-    assert halt.value == 80.0  # no halt file, but state dir active
+    assert halt.value == 90.0  # no halt file, but state dir active (never halted)
 
 
 @pytest.mark.asyncio
@@ -958,6 +959,499 @@ async def test_risk_gate_no_logs(risk_collector):
     result = await risk_collector.collect()
     gate = next(m for m in result.sub_metrics if m.name == "risk_gate_pass_rate")
     assert gate.value == 50.0
+
+
+# =====================================================================
+# RiskCollector — _try_risk_state tests
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_risk_state_breached_flag(risk_collector, tmp_path):
+    """When risk_state has breached=True, drawdown score = 0.0 (limit breached)."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(json.dumps({"breached": True}))
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value == 0.0
+    assert dd.raw_value == 1.0  # usage_ratio = 1.0 when breached
+
+
+@pytest.mark.asyncio
+async def test_risk_state_low_drawdown(risk_collector, tmp_path):
+    """Low drawdown (20% of limit) = 100.0 score (well within limits)."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 1.0,
+                "max_daily_drawdown_pct": 5.0,
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value == 100.0
+    assert dd.raw_value == pytest.approx(0.2, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_risk_state_elevated_drawdown(risk_collector, tmp_path):
+    """Drawdown 60% of limit = 70.0 score (elevated but manageable)."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 3.0,
+                "max_daily_drawdown_pct": 5.0,
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value == 70.0
+
+
+@pytest.mark.asyncio
+async def test_risk_state_dangerous_drawdown(risk_collector, tmp_path):
+    """Drawdown 85% of limit = 30.0 score (dangerously close)."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 4.25,
+                "max_daily_drawdown_pct": 5.0,
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value == 30.0
+
+
+@pytest.mark.asyncio
+async def test_risk_state_zero_limit_no_division_error(risk_collector, tmp_path):
+    """Zero max_daily_drawdown_pct doesn't cause division-by-zero."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 2.0,
+                "max_daily_drawdown_pct": 0,
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    # usage_ratio = 0 when limit is 0, so score = 100
+    assert dd.value == 100.0
+
+
+@pytest.mark.asyncio
+async def test_risk_state_missing_fields_defaults(risk_collector, tmp_path):
+    """Missing drawdown fields default to safe values."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(json.dumps({"some_other_field": "value"}))
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    # daily_drawdown_pct defaults to 0, max_daily_drawdown_pct to 5.0
+    # usage_ratio = 0/5 = 0 → score = 100
+    assert dd.value == 100.0
+
+
+@pytest.mark.asyncio
+async def test_risk_state_invalid_json(risk_collector, tmp_path):
+    """Malformed JSON in risk_state falls through to tracker fallback."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text("NOT VALID JSON {{{")
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    # Falls through to tracker_path check, which also doesn't exist → 0.0
+    assert dd.value == 0.0
+
+
+@pytest.mark.asyncio
+async def test_risk_state_not_dict(risk_collector, tmp_path):
+    """Non-dict JSON in risk_state returns None (falls through to tracker)."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text('"just a string"')
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value == 0.0  # falls through to missing tracker
+
+
+@pytest.mark.asyncio
+async def test_risk_state_stale_penalized(risk_collector, tmp_path):
+    """Risk state older than 30 min gets score capped at 60."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 0.5,
+                "max_daily_drawdown_pct": 5.0,
+            }
+        )
+    )
+    # Set mtime to 45 minutes ago
+    stale_time = time.time() - 45 * 60
+    os.utime(risk_state, (stale_time, stale_time))
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value <= 60.0  # capped due to staleness
+
+
+@pytest.mark.asyncio
+async def test_risk_state_very_stale_penalized(risk_collector, tmp_path):
+    """Risk state older than 2 hours gets score capped at 40."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 0.5,
+                "max_daily_drawdown_pct": 5.0,
+            }
+        )
+    )
+    stale_time = time.time() - 150 * 60  # 2.5 hours ago
+    os.utime(risk_state, (stale_time, stale_time))
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value <= 40.0
+
+
+# =====================================================================
+# RiskCollector — corrected drawdown calculation (tracker fallback)
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_tracker_drawdown_calculation(risk_collector, tmp_path):
+    """Correct drawdown: actual_loss = day_reference - peak_equity_today."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "daily_loss_tracker.json").write_text(
+        json.dumps(
+            {
+                "day_reference": 100000.0,
+                "peak_equity_today": 99500.0,
+                "initial_account_size": 100000.0,
+                "daily_loss_pct": 5.0,
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    # actual_loss = 100000 - 99500 = 500
+    # daily_limit = 100000 * 0.05 = 5000
+    # usage_ratio = 500 / 5000 = 0.1 → score = 100.0
+    assert dd.value == 100.0
+    assert dd.raw_value == pytest.approx(0.1, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_tracker_near_breach(risk_collector, tmp_path):
+    """85% drawdown usage → score = 30 (dangerously close)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "daily_loss_tracker.json").write_text(
+        json.dumps(
+            {
+                "day_reference": 100000.0,
+                "peak_equity_today": 95750.0,  # loss = 4250
+                "initial_account_size": 100000.0,
+                "daily_loss_pct": 5.0,  # limit = 5000
+            }
+        )
+    )
+    # usage_ratio = 4250/5000 = 0.85 → score = 30 (>= 0.8)
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value == 30.0
+
+
+@pytest.mark.asyncio
+async def test_tracker_breach(risk_collector, tmp_path):
+    """usage_ratio >= 1.0 → score = 0 (FTMO limit breached)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "daily_loss_tracker.json").write_text(
+        json.dumps(
+            {
+                "day_reference": 100000.0,
+                "peak_equity_today": 94000.0,  # loss = 6000
+                "initial_account_size": 100000.0,
+                "daily_loss_pct": 5.0,  # limit = 5000
+            }
+        )
+    )
+    # usage_ratio = 6000/5000 = 1.2 → score = 0
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value == 0.0
+
+
+@pytest.mark.asyncio
+async def test_tracker_demo_idle_state(risk_collector, tmp_path):
+    """Tracker with initial=0 and day_ref=0 → idle, not breach."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "daily_loss_tracker.json").write_text(
+        json.dumps(
+            {
+                "day_reference": 0,
+                "peak_equity_today": 0,
+                "initial_account_size": 0,
+                "daily_loss_pct": 5.0,
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    # idle → usage_ratio = 0 → score = 100
+    assert dd.value == 100.0
+
+
+@pytest.mark.asyncio
+async def test_tracker_peak_above_reference(risk_collector, tmp_path):
+    """Peak equity above day reference → no loss → usage_ratio = 0."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "daily_loss_tracker.json").write_text(
+        json.dumps(
+            {
+                "day_reference": 100000.0,
+                "peak_equity_today": 101000.0,
+                "initial_account_size": 100000.0,
+                "daily_loss_pct": 5.0,
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    # actual_loss = max(100000 - 101000, 0) = 0 → score = 100
+    assert dd.value == 100.0
+    assert dd.raw_value == 0.0
+
+
+# =====================================================================
+# RiskCollector — halt state tests
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_halt_manual_halt(risk_collector, tmp_path):
+    """Manual halt → score 70 (intentional, risk engine working)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "halt_state.json").write_text(
+        json.dumps(
+            {
+                "halted": True,
+                "type": "manual",
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
+    assert halt.value == 70.0
+
+
+@pytest.mark.asyncio
+async def test_halt_protective_halt(risk_collector, tmp_path):
+    """Protective halt → score 70 (risk engine correctly triggered)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "halt_state.json").write_text(
+        json.dumps(
+            {
+                "halted": True,
+                "type": "protective",
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
+    assert halt.value == 70.0
+
+
+@pytest.mark.asyncio
+async def test_halt_unplanned(risk_collector, tmp_path):
+    """Unplanned halt (anomaly) → score 40."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "halt_state.json").write_text(
+        json.dumps(
+            {
+                "halted": True,
+                "type": "anomaly",
+            }
+        )
+    )
+
+    result = await risk_collector.collect()
+    halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
+    assert halt.value == 40.0
+
+
+@pytest.mark.asyncio
+async def test_halt_not_halted(risk_collector, tmp_path):
+    """halted=False → score 100 (normal operation)."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "halt_state.json").write_text(json.dumps({"halted": False}))
+
+    result = await risk_collector.collect()
+    halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
+    assert halt.value == 100.0
+
+
+@pytest.mark.asyncio
+async def test_halt_fallback_to_risk_state(risk_collector, tmp_path):
+    """No halt_state.json but risk_state.json exists and not breached → 100."""
+    (tmp_path / "STATE" / "novatrade").mkdir(parents=True)
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.write_text(json.dumps({"breached": False, "halted": False}))
+
+    result = await risk_collector.collect()
+    halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
+    assert halt.value == 100.0
+
+
+@pytest.mark.asyncio
+async def test_halt_fallback_to_risk_state_breached(risk_collector, tmp_path):
+    """No halt_state.json but risk_state shows breached → 40."""
+    (tmp_path / "STATE" / "novatrade").mkdir(parents=True)
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.write_text(json.dumps({"breached": True}))
+
+    result = await risk_collector.collect()
+    halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
+    assert halt.value == 40.0
+
+
+# =====================================================================
+# RiskCollector — gate pass rate tests
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_gate_all_passing(risk_collector, tmp_path):
+    """All gate events are PASS → score = 100."""
+    logs_dir = tmp_path / "LOGS"
+    logs_dir.mkdir()
+    (logs_dir / "trade.log").write_text("PreTradeGate: ALLOW\nPreTradeGate: PASS\npre-trade-gate: PASSED\n")
+
+    result = await risk_collector.collect()
+    gate = next(m for m in result.sub_metrics if m.name == "risk_gate_pass_rate")
+    assert gate.value == 100.0
+
+
+@pytest.mark.asyncio
+async def test_gate_mixed_pass_fail(risk_collector, tmp_path):
+    """50% pass rate → score = 50."""
+    logs_dir = tmp_path / "LOGS"
+    logs_dir.mkdir()
+    (logs_dir / "trade.log").write_text("PreTradeGate: ALLOW\nPreTradeGate: REJECT\n")
+
+    result = await risk_collector.collect()
+    gate = next(m for m in result.sub_metrics if m.name == "risk_gate_pass_rate")
+    assert gate.value == 50.0
+
+
+@pytest.mark.asyncio
+async def test_gate_infrastructure_present(risk_collector, tmp_path):
+    """No gate events but gate module + policy exist → healthy idle (75)."""
+    logs_dir = tmp_path / "LOGS"
+    logs_dir.mkdir()
+    (logs_dir / "empty.log").write_text("no gate events here\n")
+
+    gate_mod = tmp_path / "novatrade" / "risk" / "pre_trade_gate.py"
+    gate_mod.parent.mkdir(parents=True)
+    gate_mod.write_text("# gate")
+
+    docs_dir = tmp_path / "docs" / "demo_test_run"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "risk_policy.yaml").write_text("rules: []")
+
+    result = await risk_collector.collect()
+    gate = next(m for m in result.sub_metrics if m.name == "risk_gate_pass_rate")
+    assert gate.value == 75.0
+
+
+# =====================================================================
+# RiskCollector — _score_from_usage unit tests
+# =====================================================================
+
+
+def test_score_from_usage_well_within():
+    assert RiskCollector._score_from_usage(0.0) == 100.0
+    assert RiskCollector._score_from_usage(0.49) == 100.0
+
+
+def test_score_from_usage_elevated():
+    assert RiskCollector._score_from_usage(0.5) == 70.0
+    assert RiskCollector._score_from_usage(0.79) == 70.0
+
+
+def test_score_from_usage_dangerous():
+    assert RiskCollector._score_from_usage(0.8) == 30.0
+    assert RiskCollector._score_from_usage(0.99) == 30.0
+
+
+def test_score_from_usage_breached():
+    assert RiskCollector._score_from_usage(1.0) == 0.0
+    assert RiskCollector._score_from_usage(1.5) == 0.0
+
+
+# =====================================================================
+# RiskCollector — confidence scoring
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_risk_confidence_no_files(risk_collector):
+    """No risk state files → very low confidence."""
+    result = await risk_collector.collect()
+    assert result.confidence <= 0.2
+
+
+@pytest.mark.asyncio
+async def test_risk_confidence_fresh_files(risk_collector, tmp_path):
+    """Fresh risk state files → high confidence."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "daily_loss_tracker.json").write_text('{"limit": 500}')
+    (state_dir / "halt_state.json").write_text('{"halted": false}')
+
+    result = await risk_collector.collect()
+    assert result.confidence >= 0.8
 
 
 # =====================================================================
@@ -1427,6 +1921,42 @@ async def test_history_pruning(scorer, tmp_path):
         # Strip tzinfo for comparison — entries may have tz or not
         ts_naive = ts.replace(tzinfo=None)
         assert ts_naive > datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=8)
+
+
+@pytest.mark.asyncio
+async def test_history_max_entries_cap(tmp_path):
+    """History is capped at MAX_HISTORY_ENTRIES to prevent unbounded file growth."""
+    scorer = ProgressScorer(base_path=str(tmp_path))
+    scorer.MAX_HISTORY_ENTRIES = 5  # low cap for testing
+
+    state_dir = tmp_path / "STATE"
+    state_dir.mkdir(parents=True)
+
+    # Seed with 10 recent entries (all within retention window)
+    now = datetime.now(timezone.utc)
+    seed = [
+        {
+            "overall_score": float(i),
+            "generated_at": (now - timedelta(minutes=10 * (10 - i))).isoformat(),
+            "dimensions": {},
+        }
+        for i in range(10)
+    ]
+    (state_dir / "progress_history.json").write_text(json.dumps(seed))
+
+    async def stub():
+        return DimensionScore(name="test", score=99.0)
+
+    for coll in scorer._collectors.values():
+        coll.collect = stub
+
+    await scorer.score()
+
+    history = json.loads((state_dir / "progress_history.json").read_text())
+    # 10 seed + 1 new = 11, but capped to 5 — should keep the newest 5
+    assert len(history) <= 5
+    # The newest entry (score=99.0) should be present
+    assert history[-1]["overall_score"] == 99.0
 
 
 # =====================================================================

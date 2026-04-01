@@ -445,12 +445,22 @@ def collect_evidence(base: Path | None = None) -> dict:
     ev["verifier_rejection_rate"] = round(rejections / total_verifications, 3) if total_verifications > 0 else None
 
     # --- Contract metrics ---
+    # Exclude test stems that inflate counts from automated test runs.
+    _test_stems = {"test_task", "test_stem", "test"}
     metrics_data = _read_json(state / "metrics.json")
     if metrics_data:
         cf = metrics_data.get("contract_failure", {})
         cs = metrics_data.get("contract_success", {})
-        cf_count = cf.get("_total", 0) if isinstance(cf, dict) else int(cf or 0)
-        cs_count = cs.get("_total", 0) if isinstance(cs, dict) else int(cs or 0)
+        cf_count = (
+            sum(v for k, v in cf.items() if k != "_total" and isinstance(v, int) and k not in _test_stems)
+            if isinstance(cf, dict)
+            else int(cf or 0)
+        )
+        cs_count = (
+            sum(v for k, v in cs.items() if k != "_total" and isinstance(v, int) and k not in _test_stems)
+            if isinstance(cs, dict)
+            else int(cs or 0)
+        )
         total_contracts = cf_count + cs_count
         ev["contract_failures"] = cf_count
         ev["contract_successes"] = cs_count

@@ -306,9 +306,10 @@ class TestHoldStage4:
         _populate_healthy_stage4(stage4_root)
 
         # Update metrics with high contract failure rate
+        # Use task-specific keys (not just _total) because the code excludes _total from sums
         metrics = {
-            "contract_success": {"_total": 3},
-            "contract_failure": {"_total": 1},  # 25% > 20%
+            "contract_success": {"_total": 3, "task_a": 1, "task_b": 1, "task_c": 1},
+            "contract_failure": {"_total": 1, "task_d": 1},  # 25% > 20%
         }
         (stage4_root / "STATE" / "metrics.json").write_text(json.dumps(metrics))
 

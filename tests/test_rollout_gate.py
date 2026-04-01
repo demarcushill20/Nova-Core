@@ -92,8 +92,8 @@ def _write_verification(tmp_path, v_id, verdict, workflow_id="wf_1"):
 
 def _write_metrics(tmp_path, successes=0, failures=0):
     m = {
-        "contract_success": {"_total": successes},
-        "contract_failure": {"_total": failures},
+        "contract_success": {"_total": successes, "real_task": successes},
+        "contract_failure": {"_total": failures, "real_task": failures},
     }
     (tmp_path / "STATE" / "metrics.json").write_text(json.dumps(m, indent=2))
 
