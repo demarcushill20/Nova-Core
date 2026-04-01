@@ -42,7 +42,7 @@ from novatrade.data.bar_aggregator import BarAggregator
 from novatrade.data.price_feed import TickBatchPoller
 from novatrade.execution.live_trading_agent import LiveTradingAgent
 from novatrade.execution.trading_agent import TradingAgent
-from novatrade.models import AccountState
+from novatrade.models import AccountState, OrderSide
 from novatrade.monitor.feed_health import FeedHealthConfig, FeedHealthSupervisor
 from novatrade.monitor.ops_monitor import OpsMonitor
 from novatrade.risk.hard_risk_supervisor import HardLimits, HardRiskSupervisor
@@ -491,6 +491,79 @@ async def build_live_stack(
             "attempt on first poll, but initial ticks may be delayed",
             exc_info=True,
         )
+
+    # --- Startup reconciliation: sync agent state with broker reality ---
+    # After restart, agent restores persisted state from StateStore (may be
+    # LONG/SHORT/PENDING from a previous session).  Must reconcile against
+    # broker to prevent stale-state lockout where agent thinks it has a
+    # position but the broker closed it (SL hit, manual close, etc.).
+    try:
+        positions = await adapter.get_positions()
+        if positions:
+            pos = positions[0]  # single-position strategy
+            broker_side = "LONG" if getattr(pos, "type", "BUY") in ("BUY", "buy", "POSITION_TYPE_BUY") else "SHORT"
+            order_side = OrderSide.BUY if broker_side == "LONG" else OrderSide.SELL
+            agent.recover_position(
+                position_id=pos.position_id,
+                side=order_side,
+                symbol=symbol,
+                volume=pos.volume,
+                fill_price=pos.open_price,
+                stop_loss=getattr(pos, "stop_loss", 0.0) or 0.0,
+            )
+            strategy_engine.recover_position_state(
+                side=broker_side,
+                entry_price=pos.open_price,
+                stop_loss=getattr(pos, "stop_loss", 0.0) or 0.0,
+                volume=pos.volume,
+            )
+            log.info(
+                "build_live_stack: RECONCILED — adopted broker position %s %s %.2f lots at %.5f",
+                pos.position_id,
+                broker_side,
+                pos.volume,
+                pos.open_price,
+            )
+        else:
+            # Broker has NO positions — force agent to FLAT if it restored
+            # to a non-FLAT state from persistence (stale state from a prior
+            # session where the position was closed broker-side).
+            from novatrade.execution.trading_agent import AgentState
+
+            if agent.state != AgentState.FLAT:
+                old_state = agent.state
+                agent.force_flat(reason="startup_reconcile_no_broker_position")
+                strategy_engine.cancel_pending()
+                log.warning(
+                    "build_live_stack: RECONCILED — agent was %s (persisted) but broker "
+                    "has no positions. Forced FLAT to prevent stale-state lockout.",
+                    old_state.value,
+                )
+            else:
+                log.info("build_live_stack: reconciliation OK — agent FLAT, broker FLAT")
+    except Exception:
+        # Cannot reach broker — force FLAT as a safety measure.
+        # A stale LONG/SHORT state with no ability to verify broker reality
+        # is worse than starting FLAT and missing a position adoption (the
+        # health monitor will attempt periodic reconciliation later).
+        from novatrade.execution.trading_agent import AgentState
+
+        if agent.state != AgentState.FLAT:
+            old_state = agent.state
+            agent.force_flat(reason="startup_reconcile_broker_unreachable")
+            strategy_engine.cancel_pending()
+            log.warning(
+                "build_live_stack: startup reconciliation FAILED and agent was %s. "
+                "Forced FLAT to prevent stale-state lockout. "
+                "Health monitor will attempt reconciliation when broker is reachable.",
+                old_state.value,
+            )
+        else:
+            log.warning(
+                "build_live_stack: startup reconciliation failed — agent already FLAT. "
+                "Health monitor will attempt periodic reconciliation.",
+                exc_info=True,
+            )
 
     # --- Live Trading Agent ---
     live_agent = LiveTradingAgent(agent, strategy_engine, cfg, campaign="irb-live")

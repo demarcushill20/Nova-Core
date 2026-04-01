@@ -433,9 +433,11 @@ class LiveLoop:
                     elif result.rejected:
                         self._metrics.rejected += 1
                         log.warning(
-                            "order rejected: %s — %s",
+                            "order rejected: %s %s — reason=%s agent_state=%s",
                             signal.signal_type.value,
+                            signal.side,
                             result.rejected_reason,
+                            result.state_after.value if result.state_after else "?",
                         )
                         # Roll back strategy engine state on ENTRY rejection
                         # to prevent phantom position / EXIT spam.
@@ -814,23 +816,20 @@ class LiveLoop:
     async def _reconcile_broker_state(self) -> None:
         """Compare TradingAgent state against broker reality and fix mismatches.
 
-        Detects three critical desync scenarios:
+        Detects four critical desync scenarios:
           1. Agent LONG/SHORT but broker has no position → broker closed (SL hit)
           2. Agent PENDING but broker has position → fill happened
           3. Agent PENDING but broker has neither order nor position → stale pending
+          4. Agent FLAT but broker has position → orphan from restart (adopt it)
 
-        Without this, the agent can get stuck in LONG/SHORT after an SL hit
-        and reject all future entry signals indefinitely.
+        Without this, the agent can get stuck in a stale state after restarts
+        or SL hits and reject all future entry signals indefinitely.
         """
         if self._adapter is None:
             return
 
         agent = self._live_agent.trading_agent
         agent_state = agent.state
-
-        # Only reconcile when agent thinks it has an active order/position
-        if agent_state == AgentState.FLAT:
-            return
 
         try:
             positions = await self._adapter.get_positions()
@@ -839,6 +838,49 @@ class LiveLoop:
             return
 
         has_position = len(positions) > 0
+
+        # --- Case 4: Agent FLAT but broker has position → orphan adoption ---
+        if agent_state == AgentState.FLAT and has_position:
+            from novatrade.models import OrderSide
+
+            pos = positions[0]
+            broker_side = "LONG" if getattr(pos, "type", "BUY") in ("BUY", "buy", "POSITION_TYPE_BUY") else "SHORT"
+            order_side = OrderSide.BUY if broker_side == "LONG" else OrderSide.SELL
+            log.warning(
+                "RECONCILE: agent is FLAT but broker has position %s %s — adopting orphan.",
+                pos.position_id,
+                broker_side,
+            )
+            agent.recover_position(
+                position_id=pos.position_id,
+                side=order_side,
+                symbol=(
+                    pos.symbol
+                    if hasattr(pos, "symbol")
+                    else (self._live_agent._cfg.symbols[0] if self._live_agent._cfg.symbols else "EURUSD")
+                ),
+                volume=pos.volume,
+                fill_price=pos.open_price,
+                stop_loss=getattr(pos, "stop_loss", 0.0) or 0.0,
+            )
+            self._live_agent.strategy_engine.recover_position_state(
+                side=broker_side,
+                entry_price=pos.open_price,
+                stop_loss=getattr(pos, "stop_loss", 0.0) or 0.0,
+                volume=pos.volume,
+            )
+            log.info(
+                "RECONCILE: orphan adopted — position=%s %s %.2f lots at %.5f",
+                pos.position_id,
+                broker_side,
+                pos.volume,
+                pos.open_price,
+            )
+            return
+
+        # Only reconcile non-FLAT states below
+        if agent_state == AgentState.FLAT:
+            return
 
         # --- Case 1: Agent LONG/SHORT but broker has no position → SL hit ---
         if agent_state in (AgentState.LONG, AgentState.SHORT) and not has_position:

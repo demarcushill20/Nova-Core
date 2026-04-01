@@ -379,6 +379,37 @@ class LiveStrategyEngine:
         if self._state in (LiveState.PENDING_LONG, LiveState.PENDING_SHORT):
             self._state = LiveState.FLAT
 
+    def recover_position_state(
+        self,
+        side: str,
+        entry_price: float,
+        stop_loss: float,
+        volume: float,
+    ) -> None:
+        """Adopt a broker position discovered on startup.
+
+        Sets the engine to LONG/SHORT to match broker reality.
+        Called when the broker has an open position that the engine
+        doesn't know about (e.g. after service restart).
+        """
+        i = len(self._h1_candles) - 1
+        self._position = OpenPosition(
+            side=side,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            volume=volume,
+            entry_bar=max(i, 0),
+        )
+        self._state = LiveState.LONG if side == "LONG" else LiveState.SHORT
+        self._pending = None
+        log.info(
+            "recover_position_state: -> %s at %.5f sl=%.5f vol=%.2f",
+            self._state.value,
+            entry_price,
+            stop_loss,
+            volume,
+        )
+
     @property
     def state(self) -> LiveState:
         return self._state

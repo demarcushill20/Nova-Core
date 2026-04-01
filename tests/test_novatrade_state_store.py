@@ -85,7 +85,8 @@ def _make_agent(cfg, store=None):
     """Create a TradingAgent with mock adapter and optional state store."""
     adapter = _MockAdapter()
     risk = RiskEngine(cfg)
-    risk.initialize(AccountState(balance=100_000, equity=100_000))
+    # Use a non-existent state file so tests don't pick up real HALT state from disk
+    risk.initialize(AccountState(balance=100_000, equity=100_000), state_file="/tmp/nonexistent_risk_state.json")
     return TradingAgent(
         cfg=cfg,
         adapter=adapter,

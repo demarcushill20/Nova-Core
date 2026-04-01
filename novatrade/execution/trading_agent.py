@@ -1153,6 +1153,70 @@ class TradingAgent:
             },
         )
 
+    def recover_position(
+        self,
+        position_id: str,
+        side: OrderSide,
+        symbol: str,
+        volume: float,
+        fill_price: float,
+        stop_loss: float = 0.0,
+    ) -> None:
+        """Adopt a broker position discovered on startup.
+
+        Transitions FLAT → LONG/SHORT to reconcile with broker reality.
+        Called during startup when the broker has an open position but the
+        agent (freshly initialized) is FLAT.  Unlike ``notify_fill``, this
+        does NOT require a prior PENDING state.
+        """
+        if self._state != AgentState.FLAT:
+            log.warning(
+                "recover_position called in state %s — expected FLAT, ignoring",
+                self._state.value,
+            )
+            return
+
+        self._state = AgentState.LONG if side == OrderSide.BUY else AgentState.SHORT
+        self._position_id = position_id
+        self._position_side = side
+        self._position_symbol = symbol
+        self._position_volume = volume
+        self._pending_order_id = None
+        self._pending_side = None
+        self._pending_symbol = None
+        self._persist()
+
+        # Inform risk engine about the adopted position
+        resolved = self._resolve_symbol({"symbol": symbol})
+        self._risk.on_trade_fill(
+            position_id=position_id,
+            symbol=resolved,
+            side=side,
+            volume=volume,
+            fill_price=fill_price,
+            stop_loss=stop_loss,
+        )
+
+        log.info(
+            "recover_position: FLAT -> %s position=%s %s vol=%.2f at %.5f",
+            self._state.value,
+            position_id,
+            symbol,
+            volume,
+            fill_price,
+        )
+        self._record_event(
+            "POSITION_RECOVERED",
+            {
+                "position_id": position_id,
+                "side": side.value,
+                "symbol": symbol,
+                "volume": volume,
+                "fill_price": fill_price,
+                "stop_loss": stop_loss,
+            },
+        )
+
     # -- Internal helpers --------------------------------------------------
 
     def _resolve_symbol(self, payload: dict) -> str:
