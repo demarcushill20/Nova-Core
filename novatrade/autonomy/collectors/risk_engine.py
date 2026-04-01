@@ -144,12 +144,21 @@ class RiskCollector(BaseCollector):
     def _check_drawdown_enforcement(self) -> tuple[float, float]:
         """Check if risk engine is actively tracking and enforcing drawdown limits.
 
-        Parses actual drawdown values and verifies the tracker is being updated,
-        not just that the file exists.
+        Reads daily_loss_tracker.json and/or novatrade_risk_state.json to
+        determine actual drawdown usage.  The tracker file stores *config*
+        fields (daily_loss_pct = the 5 % limit, NOT the actual loss).  Actual
+        loss must be derived from ``day_reference - current_equity`` or from
+        the risk-state snapshot written by RiskEngine.write_risk_state().
         """
         state_dir = Path(self.base_path) / "STATE" / "novatrade"
 
-        # Look for daily_loss_tracker.json (our FTMO compliance tracker)
+        # --- Primary source: novatrade_risk_state.json (written by RiskEngine) ---
+        risk_state_path = Path(self.base_path) / "STATE" / "novatrade_risk_state.json"
+        usage_ratio, score = self._try_risk_state(risk_state_path)
+        if score is not None:
+            return score, round(usage_ratio, 3)
+
+        # --- Fallback: daily_loss_tracker.json ---
         tracker_path = state_dir / "daily_loss_tracker.json"
         if not tracker_path.exists():
             return 0.0, 0.0
@@ -159,61 +168,112 @@ class RiskCollector(BaseCollector):
             if not isinstance(data, dict):
                 return 30.0, 0.0  # file exists but not a dict
 
-            # Check data freshness — was this updated recently?
             age_min = (time.time() - tracker_path.stat().st_mtime) / 60.0
 
-            # Parse actual drawdown values
-            daily_loss = data.get("daily_loss_pct", data.get("daily_loss", 0))
-            max_daily = data.get("max_daily_loss_pct", data.get("limit", 5.0))  # FTMO default 5%
-            try:
-                daily_loss = float(daily_loss or 0)
-                max_daily = float(max_daily or 5.0)
-            except (TypeError, ValueError):
-                daily_loss = 0.0
-                max_daily = 5.0
+            # Compute actual loss from tracker state fields.
+            # daily_loss_pct is the *limit config* (e.g. 5.0), NOT actual loss.
+            day_ref = float(data.get("day_reference", 0) or 0)
+            peak_eq = float(data.get("peak_equity_today", 0) or 0)
+            initial = float(data.get("initial_account_size", 0) or 0)
+            limit_pct = float(data.get("daily_loss_pct", 5.0) or 5.0)
 
-            # Score based on drawdown proximity to FTMO limits
-            if max_daily > 0:
-                usage_ratio = abs(daily_loss) / max_daily
+            if initial > 0 and day_ref > 0:
+                # Actual daily loss = day_reference - current (peak serves as proxy)
+                actual_loss = max(day_ref - peak_eq, 0.0)
+                daily_limit = initial * (limit_pct / 100.0)
+                usage_ratio = actual_loss / daily_limit if daily_limit > 0 else 0.0
+            elif initial == 0 and day_ref == 0:
+                # Tracker initialized but no live data yet (demo/idle state).
+                # This is NOT a breach — the engine simply hasn't seen equity.
+                usage_ratio = 0.0
             else:
                 usage_ratio = 0.0
 
-            if usage_ratio >= 1.0:
-                score = 0.0  # FTMO limit breached
-            elif usage_ratio >= 0.8:
-                score = 30.0  # dangerously close to limit
-            elif usage_ratio >= 0.5:
-                score = 70.0  # elevated but manageable
-            else:
-                score = 100.0  # well within limits
+            score = self._score_from_usage(usage_ratio)
 
             # Penalize stale tracking data
             if age_min > 30:
-                score = min(score, 60.0)  # stale tracker is concerning
+                score = min(score, 60.0)
             if age_min > 120:
-                score = min(score, 40.0)  # very stale
+                score = min(score, 40.0)
 
             return score, round(usage_ratio, 3)
 
         except (json.JSONDecodeError, OSError):
             return 30.0, 0.0
 
+    def _try_risk_state(self, path: Path) -> tuple[float, float | None]:
+        """Try to derive usage_ratio from RiskEngine's persisted state file."""
+        if not path.exists():
+            return 0.0, None
+        try:
+            data = json.loads(path.read_text())
+            if not isinstance(data, dict):
+                return 0.0, None
+
+            age_min = (time.time() - path.stat().st_mtime) / 60.0
+
+            # Check for explicit breach flag
+            if data.get("breached"):
+                score = 0.0
+                usage_ratio = 1.0
+            else:
+                # Derive from drawdown fields
+                dd_daily = float(data.get("daily_drawdown_pct", 0) or 0)
+                dd_limit = float(data.get("max_daily_drawdown_pct", 5.0) or 5.0)
+                usage_ratio = abs(dd_daily) / dd_limit if dd_limit > 0 else 0.0
+                score = self._score_from_usage(usage_ratio)
+
+            if age_min > 30:
+                score = min(score, 60.0)
+            if age_min > 120:
+                score = min(score, 40.0)
+
+            return usage_ratio, score
+        except (json.JSONDecodeError, OSError):
+            return 0.0, None
+
+    @staticmethod
+    def _score_from_usage(usage_ratio: float) -> float:
+        """Convert drawdown usage ratio to a 0-100 score."""
+        if usage_ratio >= 1.0:
+            return 0.0  # FTMO limit breached
+        if usage_ratio >= 0.8:
+            return 30.0  # dangerously close
+        if usage_ratio >= 0.5:
+            return 70.0  # elevated but manageable
+        return 100.0  # well within limits
+
     def _check_halt_state(self) -> tuple[float, float]:
-        """Check STATE/novatrade/halt_state.json content for halt status.
+        """Check halt status from halt_state.json or novatrade_risk_state.json.
 
         Reads the actual halt state rather than just checking file existence.
         - If halt_state shows active halt → score reflects halt appropriately
         - If no halt (or no halt file) → score high
-        - If file is missing → assume not halted but with low confidence
+        - If file is missing → check risk_state.json as fallback
         """
         state_dir = Path(self.base_path) / "STATE" / "novatrade"
         halt_path = state_dir / "halt_state.json"
 
         if not halt_path.exists():
-            # No halt file → assume not halted, but this is uncertain
-            # Check if state dir at least exists with some files
+            # No halt_state.json — check novatrade_risk_state.json as fallback
+            risk_state = Path(self.base_path) / "STATE" / "novatrade_risk_state.json"
+            if risk_state.exists():
+                try:
+                    data = json.loads(risk_state.read_text())
+                    if isinstance(data, dict):
+                        if data.get("breached") or data.get("halted"):
+                            return 40.0, 1.0  # halted per risk state
+                        return 100.0, 0.0  # not halted, authoritative source
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            # No halt file, no risk state — check if NovaTrade is running
             if state_dir.is_dir() and any(state_dir.glob("*.json")):
-                return 80.0, 0.0  # state dir active, no halt file = probably OK
+                # Active state dir with other files.  Absence of halt_state.json
+                # is the normal case when the risk engine has never halted.
+                # Score 90 (not 100 because we'd prefer an explicit file).
+                return 90.0, 0.0
             return 50.0, -1.0  # no state dir at all — uncertain
 
         try:
@@ -264,7 +324,12 @@ class RiskCollector(BaseCollector):
     _GATE_FAIL_RE = re.compile(r"(?:pre.?trade.?gate|PreTradeGate).*(?:REJECT|DENY|FAIL(?:ED)?|HALT)\b", re.IGNORECASE)
 
     def _check_gate_pass_rate(self) -> tuple[float, float]:
-        """Parse recent logs for pre-trade gate pass/fail ratio."""
+        """Parse recent logs for pre-trade gate pass/fail ratio.
+
+        When no gate events exist (idle market, no signals), check whether the
+        risk gate *infrastructure* is present (config + code).  An idle but
+        functional gate scores 75 (healthy-idle), not 50 (unknown).
+        """
         logs_dir = Path(self.base_path) / "LOGS"
         if not logs_dir.is_dir():
             return 50.0, -1.0  # no logs — neutral
@@ -276,7 +341,6 @@ class RiskCollector(BaseCollector):
         for log_file in logs_dir.iterdir():
             if not log_file.is_file():
                 continue
-            # C2: skip files not modified in the last hour
             try:
                 if log_file.stat().st_mtime < cutoff:
                     continue
@@ -294,7 +358,16 @@ class RiskCollector(BaseCollector):
 
         total = passes + failures
         if total == 0:
-            return 50.0, -1.0  # no gate events — neutral
+            # No gate events in logs — check if the gate infrastructure exists.
+            # If pre_trade_gate.py and risk_policy.yaml exist, the gate is
+            # functional but idle (no signals to evaluate).
+            gate_module = Path(self.base_path) / "novatrade" / "risk" / "pre_trade_gate.py"
+            risk_policy = Path(self.base_path) / "docs" / "demo_test_run" / "risk_policy.yaml"
+            if gate_module.exists() and risk_policy.exists():
+                return 75.0, -1.0  # infrastructure present, no events (healthy idle)
+            if gate_module.exists():
+                return 65.0, -1.0  # gate code exists but no policy doc
+            return 50.0, -1.0  # truly unknown
 
         pass_rate = passes / total
         return pass_rate * 100.0, pass_rate

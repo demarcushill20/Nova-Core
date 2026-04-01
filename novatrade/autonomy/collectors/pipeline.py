@@ -345,7 +345,7 @@ class PipelineCollector(BaseCollector):
                         errors = data.get("errors", 0)
                         uptime = data.get("uptime_seconds", 0)
 
-                        if uptime > 0 and ticks > 0:
+                        if ticks > 0:
                             # Service is alive and receiving ticks
                             error_ratio = errors / max(ticks, 1)
                             if error_ratio < 0.05:

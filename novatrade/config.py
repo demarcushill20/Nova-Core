@@ -22,7 +22,7 @@ _OVERRIDE_ENV_FILE = Path("configs/novatrade.override.env")
 _DEFAULT_MAX_DAILY_DRAWDOWN_PCT = 5.0  # typical prop-firm limit
 _DEFAULT_MAX_TOTAL_DRAWDOWN_PCT = 10.0
 _DEFAULT_MAX_POSITIONS = 5
-_DEFAULT_MAX_VOLUME_PER_TRADE = 1.0  # lots
+_DEFAULT_MAX_VOLUME_PER_TRADE = 5.0  # lots — sized for $100K FTMO account
 _DEFAULT_SPREAD_CEILING_POINTS = 30.0
 
 
@@ -229,7 +229,11 @@ class NovaTradeCfg:
             symbols=[s.strip() for s in symbols_raw.split(",") if s.strip()],
             timeframes=[t.strip() for t in timeframes_raw.split(",") if t.strip()],
             metaapi=MetaApiConfig.from_env(),
-            risk=RiskConfig(),
+            risk=RiskConfig(
+                max_volume_per_trade=float(
+                    os.environ.get("NOVATRADE_MAX_VOLUME_PER_TRADE", str(_DEFAULT_MAX_VOLUME_PER_TRADE))
+                ),
+            ),
             ftmo=FtmoProfile.from_env(),
             dry_run=dry_run_raw.lower() in ("true", "1", "yes"),
         )

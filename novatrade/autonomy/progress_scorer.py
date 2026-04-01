@@ -35,6 +35,10 @@ log = logging.getLogger("novatrade.autonomy.progress_scorer")
 class ProgressScorer:
     """Orchestrates metric collection, scoring, trend detection, and persistence."""
 
+    # Cap history entries to prevent unbounded file growth.
+    # At ~44 entries/hour, 1500 gives ~34h of data — enough for 24h trends.
+    MAX_HISTORY_ENTRIES: int = 1500
+
     def __init__(
         self,
         config: ScoringConfig | None = None,
@@ -274,6 +278,10 @@ class ProgressScorer:
                 except (ValueError, TypeError):
                     # Keep entries with unparseable timestamps
                     pruned.append(h)
+
+            # Cap total entries to prevent unbounded file growth
+            if len(pruned) > self.MAX_HISTORY_ENTRIES:
+                pruned = pruned[-self.MAX_HISTORY_ENTRIES :]
 
             self._history_path.parent.mkdir(parents=True, exist_ok=True)
             # Atomic write: write to temp file, then os.replace()
