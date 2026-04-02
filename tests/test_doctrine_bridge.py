@@ -30,7 +30,7 @@ def _irb_doctrine(**kw) -> StrategyDoctrine:
             "atr_period": ParamBound(default=14, min=7, max=21, step=1),
             "adx_period": ParamBound(default=14, min=7, max=21, step=1),
             "trend_slope_threshold": ParamBound(default=0.4, min=0.1, max=1.0, step=0.05),
-            "adx_threshold": ParamBound(default=20.0, min=15.0, max=30.0, step=0.5),
+            "adx_threshold": ParamBound(default=25.0, min=15.0, max=30.0, step=0.5),
             "overextension_threshold": ParamBound(default=2.0, min=1.5, max=3.0, step=0.1),
             "trail_atr_multiplier": ParamBound(default=1.5, min=1.0, max=3.0, step=0.1),
             "trigger_window_bars": ParamBound(default=20, min=10, max=40, step=1),

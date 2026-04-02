@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Wired RiskEngine.write_risk_state() into OpsMonitor.run_cycle() \u2014 fixes missing novatrade_risk_state.json that caused risk dimension to score 40/100 on drawdown enforcement",
   "created_at": "2026-04-01T16:20:55Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260401_5_free_will_1775071567"
 }

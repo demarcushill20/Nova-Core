@@ -28,7 +28,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -43,6 +43,7 @@ from novatrade.models import (
     RiskAction,
 )
 from novatrade.monitor.health import take_health_snapshot
+from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor, SupervisorAction
 from novatrade.risk.risk_engine import RiskEngine
 from novatrade.validation.evidence import EvidenceRecorder
 
@@ -132,6 +133,7 @@ class CycleResult:
     health_error: str = ""
     reconciliation_actions: list[ReconciliationAction] = field(default_factory=list)
     risk_actions_executed: list[str] = field(default_factory=list)
+    supervisor_actions: list[str] = field(default_factory=list)
     daily_reset_performed: bool = False
     alerts: list[OpsAlert] = field(default_factory=list)
     elapsed_ms: float = 0.0
@@ -147,6 +149,7 @@ class CycleResult:
             "health_error": self.health_error,
             "reconciliation_actions": [a.to_dict() for a in self.reconciliation_actions],
             "risk_actions_executed": self.risk_actions_executed,
+            "supervisor_actions": self.supervisor_actions,
             "daily_reset_performed": self.daily_reset_performed,
             "alerts": [a.to_dict() for a in self.alerts],
             "elapsed_ms": round(self.elapsed_ms, 1),
@@ -261,6 +264,7 @@ class OpsMonitor:
         risk_engine: RiskEngine,
         recorder: EvidenceRecorder | None = None,
         *,
+        supervisor: HardRiskSupervisor | None = None,
         clock: _ClockFn | None = None,
     ) -> None:
         self._cfg = cfg
@@ -268,6 +272,7 @@ class OpsMonitor:
         self._agent = agent
         self._risk = risk_engine
         self._recorder = recorder
+        self._supervisor = supervisor
         self._clock = clock or _default_utc_now
 
         # FTMO daily reset uses Prague timezone (CET/CEST), not UTC.
@@ -289,10 +294,11 @@ class OpsMonitor:
 
         Order of operations:
         1. Health check
-        2. Daily reset check (before reconciliation)
-        3. Reconciliation + fill/close detection
-        4. Risk action execution
-        5. Alert generation
+        2. Hard Risk Supervisor continuous check (equity, daily loss, positions)
+        3. Daily reset check (before reconciliation)
+        4. Reconciliation + fill/close detection
+        5. Risk action execution
+        6. Alert generation
         """
         t0 = time.monotonic()
         result = CycleResult()
@@ -312,7 +318,18 @@ class OpsMonitor:
                 result,
             )
 
-        # 2. Daily reset
+        # 2. Hard Risk Supervisor continuous check
+        try:
+            await self._check_supervisor(result)
+        except Exception as exc:
+            self._emit_alert(
+                AlertSeverity.WARNING,
+                AlertCategory.RISK,
+                f"Supervisor check failed: {exc}",
+                result,
+            )
+
+        # 3. Daily reset
         try:
             await self._check_daily_reset(result)
         except Exception as exc:
@@ -323,7 +340,7 @@ class OpsMonitor:
                 result,
             )
 
-        # 3. Reconciliation (only if health is OK)
+        # 4. Reconciliation (only if health is OK)
         if result.health_ok:
             try:
                 await self._reconcile(result)
@@ -335,7 +352,7 @@ class OpsMonitor:
                     result,
                 )
 
-        # 4. Risk action execution
+        # 5. Risk action execution
         try:
             self._execute_risk_actions(result)
         except Exception as exc:
@@ -346,28 +363,28 @@ class OpsMonitor:
                 result,
             )
 
-        # 5. Risk state alert check
+        # 6. Risk state alert check
         self._check_risk_alerts(result)
 
-        # 6. Persist FTMO compliance state (crash recovery)
+        # 7. Persist FTMO compliance state (crash recovery)
         try:
             self._risk.save_ftmo_state()
         except Exception as exc:
             log.debug("FTMO state save failed: %s", exc)
 
-        # 7. Persist risk engine drawdown state for autonomy collectors
+        # 8. Persist risk engine drawdown state for autonomy collectors
         try:
             self._risk.write_risk_state()
         except Exception as exc:
             log.debug("Risk state write failed: %s", exc)
 
-        # 8. Capture live equity snapshot for performance_stability collector
+        # 9. Capture live equity snapshot for performance_stability collector
         try:
             await self._persist_equity_snapshot()
         except Exception as exc:
             log.debug("Equity snapshot failed: %s", exc)
 
-        # 9. Refresh strategy config timestamp for strategy_validity collector
+        # 10. Refresh strategy config timestamp for strategy_validity collector
         try:
             self._refresh_strategy_config()
         except Exception as exc:
@@ -409,6 +426,95 @@ class OpsMonitor:
         # Record to evidence
         if self._recorder:
             self._recorder.record_health(snapshot)
+
+    # ------------------------------------------------------------------
+    # Hard Risk Supervisor continuous monitoring
+    # ------------------------------------------------------------------
+
+    async def _check_supervisor(self, result: CycleResult) -> None:
+        """Run HardRiskSupervisor continuous account check.
+
+        This is the critical safety net for the webhook pipeline — between
+        TradingView alerts, the supervisor monitors equity, daily loss,
+        and position limits.  If any hard limit is breached, the supervisor
+        orders emergency actions (CLOSE_ALL, HALT).
+        """
+        if self._supervisor is None:
+            return
+
+        # Get current account state
+        account = None
+        positions: list = []
+
+        if hasattr(self._adapter, "get_account"):
+            try:
+                account = await self._adapter.get_account()
+            except Exception:
+                log.warning("supervisor: failed to get account", exc_info=True)
+                return
+
+        if hasattr(self._adapter, "get_positions"):
+            try:
+                positions = await self._adapter.get_positions()
+            except Exception:
+                log.warning("supervisor: failed to get positions", exc_info=True)
+                return
+
+        if account is None:
+            log.debug("supervisor: no account data for continuous check")
+            return
+
+        # Convert Position dataclasses to dicts for check_account()
+        pos_dicts = [asdict(p) if hasattr(p, "__dataclass_fields__") else p for p in positions]
+
+        # Check supervisor for emergency actions
+        actions = self._supervisor.check_account(account.equity, pos_dicts)
+
+        for action in actions:
+            result.supervisor_actions.append(f"{action.action}: {action.reason}")
+            await self._execute_supervisor_action(action, result)
+
+    async def _execute_supervisor_action(self, action: SupervisorAction, result: CycleResult) -> None:
+        """Execute a supervisor-ordered emergency action."""
+        log.critical("SUPERVISOR ACTION: %s — %s", action.action, action.reason)
+
+        try:
+            if action.action == "CLOSE_ALL":
+                if hasattr(self._adapter, "close_all_positions"):
+                    await self._adapter.close_all_positions()
+                    log.critical("supervisor: all positions closed by supervisor order")
+                else:
+                    log.error("supervisor: close_all requested but adapter lacks method")
+
+            elif action.action == "HALT":
+                log.critical("supervisor: HALT activated — %s", action.reason)
+                # Agent should stop accepting new signals
+                if hasattr(self._agent, "_halted"):
+                    self._agent._halted = True
+
+            elif action.action == "CLOSE_POSITION":
+                for pid in action.position_ids:
+                    if hasattr(self._adapter, "close_position"):
+                        await self._adapter.close_position(pid)
+                        log.critical("supervisor: closed position %s", pid)
+
+            self._emit_alert(
+                AlertSeverity.CRITICAL,
+                AlertCategory.RISK,
+                f"Supervisor action: {action.action} — {action.reason}",
+                result,
+                detail={"action": action.action, "position_ids": action.position_ids},
+            )
+            self._daily_summary.risk_halts_active += 1
+
+        except Exception:
+            log.exception("supervisor: failed to execute action %s", action.action)
+            self._emit_alert(
+                AlertSeverity.CRITICAL,
+                AlertCategory.RISK,
+                f"Supervisor action FAILED: {action.action} — {action.reason}",
+                result,
+            )
 
     # ------------------------------------------------------------------
     # Reconciliation + fill/close detection

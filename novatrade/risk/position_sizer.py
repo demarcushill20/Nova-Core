@@ -160,24 +160,49 @@ class PositionSizer:
 class DrawdownScaler:
     """Dynamically reduce position size based on drawdown proximity and loss streaks.
 
-    4-tier drawdown scaling (as % of daily DD limit used):
+    4-tier drawdown scaling (as % of daily DD limit used) with hysteresis:
+        Entry (tighten):  50% → 0.75, 70% → 0.50, 85% → 0.25
+        Exit  (recover):  45% → 1.00, 60% → 0.75, 75% → 0.50
+
+    Total-account DD scaling (as % of max overall loss limit):
         0-50%  → 100% size
         50-70% → 75% size
         70-85% → 50% size
-        85%+   → 25% size (survival mode)
+        85%+   → 10% size (hard survival)
 
     Consecutive-loss scaling:
         0-1 losses → 100% size
         2 losses   → 75% size
         3 losses   → 50% size
-        4+ losses  → 25% size (until a winner)
+        4+ losses  → 25% size
 
-    The final scale factor is the minimum of both — the more restrictive wins.
+    Loss-streak recovery modes:
+        instant  — first win resets to full size (default)
+        gradual  — each win steps up one tier
+
+    The final scale factor is the minimum of all active layers.
     """
 
-    # Drawdown tiers: (threshold_pct, scale_factor)
+    # Drawdown tiers: (entry_threshold, exit_threshold, scale_factor)
+    # Enter the tier when DD rises above entry_threshold.
+    # Exit the tier (recover) when DD drops below exit_threshold.
+    DD_TIERS_HYSTERESIS: ClassVar[list[tuple[float, float, float]]] = [
+        (0.85, 0.75, 0.25),  # ≥85% enter survival, recover below 75%
+        (0.70, 0.60, 0.50),  # ≥70% enter half, recover below 60%
+        (0.50, 0.45, 0.75),  # ≥50% enter 3/4, recover below 45%
+    ]
+
+    # Legacy non-hysteresis tiers (used when hysteresis is disabled)
     DD_TIERS: ClassVar[list[tuple[float, float]]] = [
-        (0.85, 0.25),  # ≥85% of DD limit used → survival mode
+        (0.85, 0.25),
+        (0.70, 0.50),
+        (0.50, 0.75),
+        (0.00, 1.00),
+    ]
+
+    # Total-account DD tiers (10% max overall loss limit)
+    TOTAL_DD_TIERS: ClassVar[list[tuple[float, float]]] = [
+        (0.85, 0.10),  # ≥85% of total limit → hard survival
         (0.70, 0.50),  # ≥70% → half size
         (0.50, 0.75),  # ≥50% → three-quarter size
         (0.00, 1.00),  # <50% → full size
@@ -191,74 +216,173 @@ class DrawdownScaler:
         (0, 1.00),  # 0-1 losses → full size
     ]
 
-    def __init__(self) -> None:
+    # Scale factors ordered for gradual recovery (worst → best)
+    _LOSS_SCALE_LADDER: ClassVar[list[float]] = [0.25, 0.50, 0.75, 1.00]
+
+    def __init__(
+        self,
+        *,
+        hysteresis: bool = True,
+        total_dd_enabled: bool = False,
+        loss_recovery_mode: str = "instant",
+    ) -> None:
         self._consecutive_losses: int = 0
+        self._hysteresis = hysteresis
+        self._total_dd_enabled = total_dd_enabled
+        self._loss_recovery_mode = loss_recovery_mode  # "instant" or "gradual"
+        # Track current DD tier scale for hysteresis (start at full size)
+        self._current_dd_scale: float = 1.0
+        # Track current loss-streak scale for gradual recovery
+        self._current_loss_scale: float = 1.0
 
     @property
     def consecutive_losses(self) -> int:
         return self._consecutive_losses
 
+    @property
+    def current_dd_scale(self) -> float:
+        """Current drawdown tier (reflects hysteresis state)."""
+        return self._current_dd_scale
+
     def record_loss(self) -> None:
         """Record a losing trade."""
         self._consecutive_losses += 1
+        # Update loss scale immediately on loss
+        self._current_loss_scale = self._compute_loss_scale()
 
     def record_win(self) -> None:
-        """Record a winning trade — resets the consecutive loss counter."""
-        self._consecutive_losses = 0
+        """Record a winning trade."""
+        if self._loss_recovery_mode == "gradual":
+            # Step up one tier in the scale ladder
+            try:
+                idx = self._LOSS_SCALE_LADDER.index(self._current_loss_scale)
+            except ValueError:
+                idx = 0
+            if idx < len(self._LOSS_SCALE_LADDER) - 1:
+                self._current_loss_scale = self._LOSS_SCALE_LADDER[idx + 1]
+            # Reduce consecutive_losses proportionally
+            if self._consecutive_losses > 0:
+                self._consecutive_losses = max(0, self._consecutive_losses - 1)
+        else:
+            # Instant reset
+            self._consecutive_losses = 0
+            self._current_loss_scale = 1.0
 
     def reset(self) -> None:
         """Reset state (e.g., for a new trading day)."""
         self._consecutive_losses = 0
+        self._current_dd_scale = 1.0
+        self._current_loss_scale = 1.0
 
     def drawdown_scale(self, dd_used_pct: float) -> float:
         """Return the scale factor based on how much of the daily DD limit is used.
 
+        With hysteresis enabled, uses asymmetric entry/exit thresholds to prevent
+        rapid tier oscillation when DD hovers near a boundary.
+
         Args:
             dd_used_pct: Fraction of daily drawdown limit consumed (0.0–1.0+).
-                         E.g., 0.6 means 60% of the daily loss limit has been used.
 
         Returns:
             Scale factor in [0.25, 1.0].
         """
         dd_used_pct = max(0.0, dd_used_pct)
-        for threshold, scale in self.DD_TIERS:
-            if dd_used_pct >= threshold:
+
+        if not self._hysteresis:
+            # Legacy mode: simple threshold matching
+            for threshold, scale in self.DD_TIERS:
+                if dd_used_pct >= threshold:
+                    return scale
+            return 1.0
+
+        # Hysteresis mode: direction-aware tier transitions
+        new_scale = 1.0  # default: full size
+
+        for entry_thresh, exit_thresh, tier_scale in self.DD_TIERS_HYSTERESIS:
+            if dd_used_pct >= entry_thresh:
+                # DD is above entry threshold → enter this tier
+                new_scale = tier_scale
+                break
+            if self._current_dd_scale <= tier_scale and dd_used_pct >= exit_thresh:
+                # Already in this tier and DD hasn't dropped below exit threshold
+                new_scale = tier_scale
+                break
+
+        self._current_dd_scale = new_scale
+        return new_scale
+
+    def total_dd_scale(self, total_dd_used_pct: float) -> float:
+        """Return scale factor based on total-account drawdown (max overall loss).
+
+        Args:
+            total_dd_used_pct: Fraction of total DD limit consumed (0.0–1.0+).
+
+        Returns:
+            Scale factor in [0.10, 1.0].
+        """
+        total_dd_used_pct = max(0.0, total_dd_used_pct)
+        for threshold, scale in self.TOTAL_DD_TIERS:
+            if total_dd_used_pct >= threshold:
                 return scale
-        return 1.0  # unreachable but safe
+        return 1.0
+
+    def _compute_loss_scale(self) -> float:
+        """Compute raw loss-streak scale from consecutive_losses."""
+        for threshold, scale in self.LOSS_TIERS:
+            if self._consecutive_losses >= threshold:
+                return scale
+        return 1.0
 
     def loss_streak_scale(self) -> float:
         """Return the scale factor based on consecutive losses.
 
+        In gradual recovery mode, returns the tracked scale (stepped up per win).
+        In instant mode, computes directly from consecutive_losses.
+
         Returns:
             Scale factor in [0.25, 1.0].
         """
-        for threshold, scale in self.LOSS_TIERS:
-            if self._consecutive_losses >= threshold:
-                return scale
-        return 1.0  # unreachable but safe
+        if self._loss_recovery_mode == "gradual":
+            return self._current_loss_scale
+        return self._compute_loss_scale()
 
-    def combined_scale(self, dd_used_pct: float) -> float:
-        """Return the most restrictive scale factor from both drawdown and loss streak.
+    def combined_scale(
+        self,
+        dd_used_pct: float,
+        total_dd_used_pct: float | None = None,
+    ) -> float:
+        """Return the most restrictive scale factor from all active layers.
 
         Args:
             dd_used_pct: Fraction of daily drawdown limit consumed (0.0–1.0+).
+            total_dd_used_pct: Fraction of total DD limit consumed (optional).
 
         Returns:
-            Minimum of drawdown_scale and loss_streak_scale.
+            Minimum of all active scale factors.
         """
-        return min(self.drawdown_scale(dd_used_pct), self.loss_streak_scale())
+        scales = [self.drawdown_scale(dd_used_pct), self.loss_streak_scale()]
+        if self._total_dd_enabled and total_dd_used_pct is not None:
+            scales.append(self.total_dd_scale(total_dd_used_pct))
+        return min(scales)
 
-    def scale_volume(self, base_volume: float, dd_used_pct: float, min_lot: float = 0.01) -> float:
+    def scale_volume(
+        self,
+        base_volume: float,
+        dd_used_pct: float,
+        min_lot: float = 0.01,
+        total_dd_used_pct: float | None = None,
+    ) -> float:
         """Apply combined scaling to a base volume.
 
         Args:
             base_volume: The unscaled lot size from PositionSizer.calculate().
             dd_used_pct: Fraction of daily drawdown limit consumed.
             min_lot: Minimum lot size floor.
+            total_dd_used_pct: Fraction of total DD limit consumed (optional).
 
         Returns:
             Scaled volume, never below min_lot, rounded to 2 decimals.
         """
-        scale = self.combined_scale(dd_used_pct)
+        scale = self.combined_scale(dd_used_pct, total_dd_used_pct)
         scaled = round(base_volume * scale, 2)
         return max(min_lot, scaled)

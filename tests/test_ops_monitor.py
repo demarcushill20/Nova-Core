@@ -1164,3 +1164,129 @@ class TestStrategyConfigRefresh:
             result = await monitor.run_cycle()
             assert result is not None
             assert result.elapsed_ms > 0
+
+
+# ---------------------------------------------------------------------------
+# Hard Risk Supervisor continuous monitoring
+# ---------------------------------------------------------------------------
+
+
+class TestSupervisorContinuousMonitoring:
+    """Tests for HardRiskSupervisor integration in OpsMonitor.run_cycle()."""
+
+    def _build_with_supervisor(self, adapter=None, equity=100_000.0, positions=None, supervisor=None):
+        from novatrade.risk.hard_risk_supervisor import HardLimits, HardRiskSupervisor
+
+        a = adapter or _mock_adapter(account=_account(equity=equity), positions=positions or [])
+        sup = supervisor or HardRiskSupervisor(limits=HardLimits())
+        sup.initialize(initial_equity=100_000.0)
+        c = _cfg()
+        re = RiskEngine(c)
+        re.initialize(_account())
+        agent = TradingAgent(c, a, re, None)
+        return OpsMonitor(c, a, agent, re, None, supervisor=sup, clock=_make_clock())
+
+    @pytest.mark.asyncio
+    async def test_no_supervisor_skips_check(self):
+        """When supervisor is None, run_cycle still works normally."""
+        monitor = _build_monitor()
+        result = await monitor.run_cycle()
+        assert result.supervisor_actions == []
+        assert result.ok is True
+
+    @pytest.mark.asyncio
+    async def test_healthy_equity_no_actions(self):
+        """Normal equity should produce zero supervisor actions."""
+        monitor = self._build_with_supervisor(equity=100_000.0)
+        result = await monitor.run_cycle()
+        assert result.supervisor_actions == []
+
+    @pytest.mark.asyncio
+    async def test_equity_floor_breach_triggers_halt(self):
+        """Equity below floor ($8,500) must trigger CLOSE_ALL + HALT."""
+        adapter = _mock_adapter(account=_account(equity=5_000.0), positions=[_position()])
+        adapter.close_all_positions = AsyncMock()
+        monitor = self._build_with_supervisor(adapter=adapter, equity=5_000.0)
+        result = await monitor.run_cycle()
+        assert len(result.supervisor_actions) >= 2
+        action_text = " ".join(result.supervisor_actions)
+        assert "CLOSE_ALL" in action_text
+        assert "HALT" in action_text
+        adapter.close_all_positions.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_daily_loss_breach_triggers_halt(self):
+        """Daily loss exceeding cap must trigger supervisor actions."""
+        from novatrade.risk.hard_risk_supervisor import HardLimits, HardRiskSupervisor
+
+        limits = HardLimits(max_daily_loss_usd=500.0)
+        sup = HardRiskSupervisor(limits=limits)
+        sup.initialize(initial_equity=100_000.0)
+
+        # Simulate equity drop of $600 (exceeds $500 daily cap)
+        adapter = _mock_adapter(account=_account(equity=99_400.0), positions=[_position()])
+        adapter.close_all_positions = AsyncMock()
+        monitor = self._build_with_supervisor(adapter=adapter, equity=99_400.0, supervisor=sup)
+        result = await monitor.run_cycle()
+        assert len(result.supervisor_actions) >= 1
+        action_text = " ".join(result.supervisor_actions)
+        assert "HALT" in action_text
+
+    @pytest.mark.asyncio
+    async def test_supervisor_actions_recorded_as_alerts(self):
+        """Supervisor actions must generate CRITICAL alerts."""
+        adapter = _mock_adapter(account=_account(equity=5_000.0), positions=[])
+        monitor = self._build_with_supervisor(adapter=adapter, equity=5_000.0)
+        result = await monitor.run_cycle()
+        critical_alerts = [a for a in result.alerts if a.severity == AlertSeverity.CRITICAL]
+        assert len(critical_alerts) >= 1
+        assert any("Supervisor" in a.message or "supervisor" in a.message.lower() for a in critical_alerts)
+
+    @pytest.mark.asyncio
+    async def test_supervisor_check_failure_does_not_crash_cycle(self):
+        """If supervisor check throws, the cycle should still complete."""
+        from unittest.mock import patch
+
+        monitor = self._build_with_supervisor(equity=100_000.0)
+        with patch.object(monitor, "_check_supervisor", side_effect=RuntimeError("test")):
+            result = await monitor.run_cycle()
+            assert result is not None
+            # Failure should produce a warning alert
+            assert any("Supervisor" in a.message or "supervisor" in a.message.lower() for a in result.alerts)
+
+    @pytest.mark.asyncio
+    async def test_adapter_get_account_failure_is_resilient(self):
+        """If adapter.get_account() fails, supervisor check gracefully skips."""
+        adapter = _mock_adapter()
+        adapter.get_account = AsyncMock(side_effect=ConnectionError("lost"))
+        adapter.close_all_positions = AsyncMock()
+        monitor = self._build_with_supervisor(adapter=adapter)
+        result = await monitor.run_cycle()
+        # Should not crash, no supervisor actions since account unavailable
+        assert result.supervisor_actions == []
+        adapter.close_all_positions.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_positions_converted_to_dicts(self):
+        """Position dataclasses must be converted to dicts for check_account."""
+        from unittest.mock import MagicMock
+
+        from novatrade.risk.hard_risk_supervisor import HardLimits, HardRiskSupervisor
+
+        sup = HardRiskSupervisor(limits=HardLimits())
+        sup.initialize(initial_equity=100_000.0)
+        sup.check_account = MagicMock(return_value=[])
+
+        pos = _position(position_id="test_pos")
+        adapter = _mock_adapter(account=_account(equity=100_000.0), positions=[pos])
+        monitor = self._build_with_supervisor(adapter=adapter, equity=100_000.0, supervisor=sup)
+        await monitor.run_cycle()
+
+        # check_account should have been called with dicts, not Position objects
+        sup.check_account.assert_called_once()
+        call_args = sup.check_account.call_args
+        pos_arg = call_args[0][1]  # second positional arg = positions
+        assert isinstance(pos_arg, list)
+        assert len(pos_arg) == 1
+        assert isinstance(pos_arg[0], dict)
+        assert pos_arg[0]["position_id"] == "test_pos"

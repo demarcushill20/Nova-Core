@@ -349,7 +349,7 @@ class TestEndToEndMutationFlow:
             "atr_period": 14,
             "adx_period": 14,
             "trend_slope_threshold": 0.4,
-            "adx_threshold": 20.0,
+            "adx_threshold": 25.0,
             "overextension_threshold": 2.0,
             "trail_atr_multiplier": 1.5,
             "trigger_window_bars": 20,

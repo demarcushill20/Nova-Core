@@ -166,7 +166,7 @@ class BacktestEnvironment:
     adx_period: int = 14
     trend_slope_threshold: float = 0.4
     mtf_lookback: int = 5
-    adx_threshold: float = 20.0
+    adx_threshold: float = 25.0
     overextension_threshold: float = 2.0
     trigger_window_bars: int = 20
     time_stop_bars: int = 40

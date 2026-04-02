@@ -342,6 +342,15 @@ class TestRunAutonomyCycle:
         monkeypatch.setattr(heartbeat, "TASKS_DIR", tmp_path / "TASKS")
         (tmp_path / "TASKS").mkdir(parents=True, exist_ok=True)
 
+        # Disable optional pipeline components that interact with real filesystem
+        # state and can non-deterministically override the mocked decision (e.g.,
+        # ReasoningEngine upgrades MONITOR → PLAN based on heuristic analysis).
+        monkeypatch.setattr(heartbeat, "_ReasoningEngine", None)
+        monkeypatch.setattr(heartbeat, "_OutcomeAnalyzer", None)
+        monkeypatch.setattr(heartbeat, "_TaskReconciler", None)
+        monkeypatch.setattr(heartbeat, "_CausalModel", None)
+        monkeypatch.setattr(heartbeat, "_DirectActionExecutor", None)
+
         report = report or make_report()
         base = str(tmp_path)
 

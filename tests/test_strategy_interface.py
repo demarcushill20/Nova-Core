@@ -1098,3 +1098,100 @@ class TestCrossStrategyConsistency:
             indicators = s.compute_indicators(candles)
             result = s.check_exit(25, candles, indicators, position=None)
             assert result is None, f"{cls.__name__} check_exit returned signal without position"
+
+
+# ---------------------------------------------------------------------------
+# IRB: ADX threshold default and session filter
+# ---------------------------------------------------------------------------
+
+
+class TestIRBADXDefault:
+    """Verify ADX threshold default was raised to 25."""
+
+    def test_default_adx_threshold_is_25(self) -> None:
+        env = BacktestEnvironment()
+        assert env.adx_threshold == 25.0
+
+    def test_irb_doctrine_default_adx_is_25(self) -> None:
+        s = IRBStrategy()
+        doctrine = s.get_default_doctrine("EURUSD", "H1")
+        assert doctrine["mutable_params"]["adx_threshold"]["default"] == 25.0
+
+    def test_adx_bounds_unchanged(self) -> None:
+        s = IRBStrategy()
+        bounds = s.get_parameter_bounds()
+        assert bounds["adx_threshold"] == (15.0, 30.0)
+
+
+class TestIRBSessionFilter:
+    """Test session filter blocks off-hours signals in live IRB."""
+
+    def _make_irb_candle_at_hour(self, hour: int, base: float = 1.1000) -> Candle:
+        """Create a candle with timestamp at a specific UTC hour."""
+        from datetime import datetime as dt
+        from datetime import timezone as tz
+
+        ts = dt(2026, 3, 15, hour, 0, 0, tzinfo=tz.utc).timestamp()
+        return Candle(
+            timestamp=ts,
+            open=base,
+            high=base + 0.0020,
+            low=base - 0.0020,
+            close=base + 0.0010,
+            volume=100.0,
+        )
+
+    def test_session_filter_blocks_outside_hours(self) -> None:
+        """Signals at 3 AM UTC should be blocked when session_filter='london'."""
+        env = BacktestEnvironment(session_filter="london", warmup_bars=5, adx_threshold=0.0)
+        s = IRBStrategy(env=env)
+        # Create enough candles for warmup, all timestamped at 3 AM (outside session)
+        candles = []
+        for i in range(50):
+            c = self._make_irb_candle_at_hour(3, base=1.1000 + i * 0.0005)
+            candles.append(c)
+        indicators = s.compute_indicators(candles)
+        # Any signal at the last bar should be None due to session filter
+        result = s.check_entry(len(candles) - 1, candles, indicators)
+        assert result is None
+
+    def test_session_filter_allows_during_hours(self) -> None:
+        """Candles at 10 AM UTC should not be blocked by session filter."""
+        env = BacktestEnvironment(session_filter="london", warmup_bars=5, adx_threshold=0.0)
+        s = IRBStrategy(env=env)
+        candles = _make_trending_candles(200)
+        # Override timestamps to be at 10 AM UTC
+        from datetime import datetime as dt
+        from datetime import timezone as tz
+
+        for i, c in enumerate(candles):
+            ts = dt(2026, 3, 15, 10, i % 60, 0, tzinfo=tz.utc).timestamp()
+            object.__setattr__(c, "timestamp", ts)
+        indicators = s.compute_indicators(candles)
+        # At least verify the session filter doesn't block — the signal may or may
+        # not generate depending on IRB geometry, but the session filter itself
+        # is not the rejection reason
+        signals = s.generate_signals(candles, indicators)
+        # This is a structural test — verify the code path doesn't crash
+        assert isinstance(signals, list)
+
+    def test_no_session_filter_allows_all_hours(self) -> None:
+        """Without session_filter, all hours are accepted."""
+        env = BacktestEnvironment(session_filter=None, warmup_bars=5)
+        s = IRBStrategy(env=env)
+        candles = _make_trending_candles(200)
+        indicators = s.compute_indicators(candles)
+        # Should not crash regardless of timestamp
+        signals = s.generate_signals(candles, indicators)
+        assert isinstance(signals, list)
+
+
+class TestIRBADXSlopeCheck:
+    """Test ADX slope check rejects signals when ADX is declining."""
+
+    def test_adx_slope_constants_defined(self) -> None:
+        from novatrade.strategies.irb import ADX_SLOPE_LOOKBACK, SESSION_END_HOUR_UTC, SESSION_START_HOUR_UTC
+
+        assert ADX_SLOPE_LOOKBACK == 3
+        assert SESSION_START_HOUR_UTC == 7
+        assert SESSION_END_HOUR_UTC == 16

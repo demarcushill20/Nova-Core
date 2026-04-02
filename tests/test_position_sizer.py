@@ -565,3 +565,168 @@ class TestScaleVolume:
         # 90% DD + 4 losses → both at 0.25 → 5.00 × 0.25 = 1.25
         scaled = scaler.scale_volume(base_lot, dd_used_pct=0.90)
         assert scaled == 1.25
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Hysteresis bands
+# ---------------------------------------------------------------------------
+
+
+class TestHysteresisScaling:
+    """Drawdown hysteresis prevents rapid tier oscillation at boundaries."""
+
+    def test_enter_tier_at_entry_threshold(self):
+        """DD rising above 50% enters 0.75 tier."""
+        scaler = DrawdownScaler(hysteresis=True)
+        assert scaler.drawdown_scale(0.51) == 0.75
+
+    def test_stay_in_tier_above_exit_threshold(self):
+        """Once in 0.75 tier, DD at 46% stays in tier (exit is 45%)."""
+        scaler = DrawdownScaler(hysteresis=True)
+        scaler.drawdown_scale(0.55)  # enter 0.75 tier
+        assert scaler.drawdown_scale(0.46) == 0.75  # still above 45% exit
+
+    def test_exit_tier_below_exit_threshold(self):
+        """DD dropping below 45% exits 0.75 tier → full size."""
+        scaler = DrawdownScaler(hysteresis=True)
+        scaler.drawdown_scale(0.55)  # enter 0.75 tier
+        assert scaler.drawdown_scale(0.44) == 1.0  # below 45% exit
+
+    def test_enter_half_size_tier(self):
+        """DD at 72% enters 0.50 tier."""
+        scaler = DrawdownScaler(hysteresis=True)
+        assert scaler.drawdown_scale(0.72) == 0.50
+
+    def test_half_size_stays_until_exit(self):
+        """In 0.50 tier, DD at 62% stays (exit is 60%)."""
+        scaler = DrawdownScaler(hysteresis=True)
+        scaler.drawdown_scale(0.72)  # enter 0.50 tier
+        assert scaler.drawdown_scale(0.62) == 0.50
+
+    def test_half_size_exits_below_60(self):
+        """DD below 60% exits 0.50 tier → 0.75 or 1.0."""
+        scaler = DrawdownScaler(hysteresis=True)
+        scaler.drawdown_scale(0.72)  # enter 0.50 tier
+        # DD at 58% is below 60% exit for half-size, but above 50% entry for 0.75
+        assert scaler.drawdown_scale(0.52) == 0.75
+
+    def test_survival_tier_hysteresis(self):
+        """DD at 87% enters survival, DD at 76% stays, DD at 74% exits."""
+        scaler = DrawdownScaler(hysteresis=True)
+        assert scaler.drawdown_scale(0.87) == 0.25
+        assert scaler.drawdown_scale(0.76) == 0.25  # above 75% exit
+        assert scaler.drawdown_scale(0.74) == 0.50  # below 75% exit → next lower tier (above 70% entry)
+
+    def test_no_hysteresis_mode_matches_legacy(self):
+        """hysteresis=False uses simple threshold matching."""
+        scaler = DrawdownScaler(hysteresis=False)
+        assert scaler.drawdown_scale(0.49) == 1.0
+        assert scaler.drawdown_scale(0.50) == 0.75
+        assert scaler.drawdown_scale(0.70) == 0.50
+        assert scaler.drawdown_scale(0.85) == 0.25
+
+    def test_hysteresis_prevents_oscillation(self):
+        """DD hovering around 50% doesn't cause rapid tier changes."""
+        scaler = DrawdownScaler(hysteresis=True)
+        results = []
+        # Simulate DD oscillating around 50%
+        for dd in [0.48, 0.51, 0.49, 0.50, 0.47, 0.46, 0.44]:
+            results.append(scaler.drawdown_scale(dd))
+        # Should enter tier at 0.51, stay until below 0.45
+        assert results == [1.0, 0.75, 0.75, 0.75, 0.75, 0.75, 1.0]
+
+    def test_reset_clears_hysteresis_state(self):
+        """Reset returns to full size regardless of prior tier."""
+        scaler = DrawdownScaler(hysteresis=True)
+        scaler.drawdown_scale(0.72)  # enter 0.50 tier
+        scaler.reset()
+        assert scaler.current_dd_scale == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Total-account DD scaling
+# ---------------------------------------------------------------------------
+
+
+class TestTotalAccountDDScaling:
+    """Total-account drawdown scaling (10% max overall loss)."""
+
+    def test_total_dd_below_50_full_size(self):
+        scaler = DrawdownScaler(total_dd_enabled=True)
+        assert scaler.total_dd_scale(0.30) == 1.0
+
+    def test_total_dd_at_50_three_quarter(self):
+        scaler = DrawdownScaler(total_dd_enabled=True)
+        assert scaler.total_dd_scale(0.50) == 0.75
+
+    def test_total_dd_at_70_half(self):
+        scaler = DrawdownScaler(total_dd_enabled=True)
+        assert scaler.total_dd_scale(0.70) == 0.50
+
+    def test_total_dd_at_85_hard_survival(self):
+        scaler = DrawdownScaler(total_dd_enabled=True)
+        assert scaler.total_dd_scale(0.85) == 0.10
+
+    def test_total_dd_combined_takes_minimum(self):
+        """Total DD at 85% (0.10) wins over daily DD at 0% (1.0)."""
+        scaler = DrawdownScaler(total_dd_enabled=True)
+        scale = scaler.combined_scale(dd_used_pct=0.0, total_dd_used_pct=0.85)
+        assert scale == 0.10
+
+    def test_total_dd_not_used_when_disabled(self):
+        """Total DD layer ignored when total_dd_enabled=False."""
+        scaler = DrawdownScaler(total_dd_enabled=False)
+        scale = scaler.combined_scale(dd_used_pct=0.0, total_dd_used_pct=0.95)
+        assert scale == 1.0
+
+    def test_scale_volume_with_total_dd(self):
+        scaler = DrawdownScaler(total_dd_enabled=True)
+        vol = scaler.scale_volume(5.00, dd_used_pct=0.0, total_dd_used_pct=0.85)
+        assert vol == 0.50  # 5.00 × 0.10 = 0.50
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Gradual loss-streak recovery
+# ---------------------------------------------------------------------------
+
+
+class TestGradualLossRecovery:
+    """Gradual recovery mode: each win steps up one tier."""
+
+    def test_instant_mode_resets_fully(self):
+        scaler = DrawdownScaler(loss_recovery_mode="instant")
+        for _ in range(4):
+            scaler.record_loss()
+        assert scaler.loss_streak_scale() == 0.25
+        scaler.record_win()
+        assert scaler.loss_streak_scale() == 1.0
+        assert scaler.consecutive_losses == 0
+
+    def test_gradual_mode_steps_up_one_tier(self):
+        scaler = DrawdownScaler(loss_recovery_mode="gradual")
+        for _ in range(4):
+            scaler.record_loss()
+        assert scaler.loss_streak_scale() == 0.25
+        scaler.record_win()
+        assert scaler.loss_streak_scale() == 0.50  # one step up
+        scaler.record_win()
+        assert scaler.loss_streak_scale() == 0.75  # another step
+        scaler.record_win()
+        assert scaler.loss_streak_scale() == 1.00  # fully recovered
+
+    def test_gradual_mode_loss_after_partial_recovery(self):
+        scaler = DrawdownScaler(loss_recovery_mode="gradual")
+        for _ in range(4):
+            scaler.record_loss()
+        scaler.record_win()  # 0.25 → 0.50
+        scaler.record_loss()  # back to loss
+        # Scale should be computed from consecutive_losses
+        assert scaler.loss_streak_scale() <= 0.50
+
+    def test_gradual_consecutive_losses_decrement(self):
+        scaler = DrawdownScaler(loss_recovery_mode="gradual")
+        for _ in range(4):
+            scaler.record_loss()
+        assert scaler.consecutive_losses == 4
+        scaler.record_win()
+        assert scaler.consecutive_losses == 3  # decremented by 1

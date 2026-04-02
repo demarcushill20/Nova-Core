@@ -41,7 +41,7 @@ class TestBacktestEnvironment:
         assert env.atr_period == 14
         assert env.adx_period == 14
         assert env.trend_slope_threshold == 0.4
-        assert env.adx_threshold == 20.0
+        assert env.adx_threshold == 25.0
         assert env.overextension_threshold == 2.0
         assert env.trigger_window_bars == 20
         assert env.time_stop_bars == 40

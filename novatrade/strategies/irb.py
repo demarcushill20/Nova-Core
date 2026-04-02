@@ -8,6 +8,7 @@ stays in the engine module to maintain zero regression risk.
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 from typing import Any
 
 from novatrade.backtest.engine import compute_adx, compute_atr, compute_bbw, compute_ema
@@ -15,6 +16,13 @@ from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
 from novatrade.monitor.signal_monitor import record_signal
 from novatrade.strategies.base import BaseStrategy, EntrySignal, ExitSignal
+
+# Session filter: London+NY overlap window (UTC hours)
+SESSION_START_HOUR_UTC = 7
+SESSION_END_HOUR_UTC = 16
+
+# ADX slope lookback for trend-strengthening check
+ADX_SLOPE_LOOKBACK = 3
 
 
 class IRBStrategy(BaseStrategy):
@@ -125,6 +133,20 @@ class IRBStrategy(BaseStrategy):
         # --- ADX sideways filter ---
         if math.isnan(adx[i]) or adx[i] < e.adx_threshold:
             return None
+
+        # --- ADX slope check: trend must be strengthening ---
+        if (
+            i >= ADX_SLOPE_LOOKBACK
+            and not math.isnan(adx[i - ADX_SLOPE_LOOKBACK])
+            and adx[i] < adx[i - ADX_SLOPE_LOOKBACK]
+        ):
+            return None  # ADX declining → trend weakening, skip
+
+        # --- Session filter: only trade during London+NY overlap (07-16 UTC) ---
+        if e.session_filter == "london" and bar.timestamp > 0:
+            bar_hour = datetime.fromtimestamp(bar.timestamp, tz=timezone.utc).hour
+            if not (SESSION_START_HOUR_UTC <= bar_hour < SESSION_END_HOUR_UTC):
+                return None
 
         # --- Overextension filter ---
         if rng / atr[i] > e.overextension_threshold:
@@ -248,7 +270,7 @@ class IRBStrategy(BaseStrategy):
                 "atr_period": {"default": 14, "min": 7, "max": 21, "step": 1},
                 "adx_period": {"default": 14, "min": 7, "max": 21, "step": 1},
                 "trend_slope_threshold": {"default": 0.4, "min": 0.1, "max": 1.0, "step": 0.05},
-                "adx_threshold": {"default": 20.0, "min": 15.0, "max": 30.0, "step": 0.5},
+                "adx_threshold": {"default": 25.0, "min": 15.0, "max": 30.0, "step": 0.5},
                 "overextension_threshold": {"default": 2.0, "min": 1.5, "max": 3.0, "step": 0.1},
                 "trail_atr_multiplier": {"default": 1.5, "min": 1.0, "max": 3.0, "step": 0.1},
                 "trigger_window_bars": {"default": 20, "min": 10, "max": 40, "step": 1},

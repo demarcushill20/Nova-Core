@@ -205,6 +205,7 @@ def build_stack(
         agent=agent,
         risk_engine=risk_engine,
         recorder=recorder,
+        supervisor=supervisor,
     )
 
     # --- Monitor Loop ---
