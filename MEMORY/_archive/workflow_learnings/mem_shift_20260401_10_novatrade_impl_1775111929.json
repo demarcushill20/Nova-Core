@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Repaired CONTRACT block field name mismatch (files_modified\u2192files_changed) and verified 12 tests still pass",
   "created_at": "2026-04-02T06:38:49Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260401_10_novatrade_impl__retry1_1775112040"
 }

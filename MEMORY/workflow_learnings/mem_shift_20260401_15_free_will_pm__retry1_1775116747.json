@@ -16,5 +16,6 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Verified CONTRACT block completeness and confirmed all work was done correctly via test execution and file verification",
   "created_at": "2026-04-02T07:59:07Z",
-  "confidence": "high"
+  "confidence": "high",
+  "supersedes": "mem_shift_20260401_15_free_will_pm__retry1_1775114992"
 }

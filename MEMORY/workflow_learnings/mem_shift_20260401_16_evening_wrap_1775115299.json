@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Final evening wrap for 2026-04-01 \u2014 13 commits, 7 bugs fixed, 150+ new tests, FTMO v3 shipped, progress 92.8/100 (all GREEN)",
   "created_at": "2026-04-02T07:34:59Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260401_16_evening_wrap_1775099562"
 }
