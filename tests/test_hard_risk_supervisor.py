@@ -297,7 +297,7 @@ class TestRule5MaxConcurrentPositions:
         assert d.rule == "max_concurrent_positions"
 
     def test_within_position_limit(self, supervisor: HardRiskSupervisor) -> None:
-        positions = [_make_position(position_id="p1"), _make_position(position_id="p2")]
+        # Default max_concurrent_positions=1 (FTMO-safe), so 0 open positions is within limit
         d = supervisor.veto(
             "EURUSD",
             "BUY",
@@ -305,9 +305,8 @@ class TestRule5MaxConcurrentPositions:
             1.1000,
             1.0950,
             10_000.0,
-            open_positions=positions,
+            open_positions=[],
         )
-        # Will pass positions check but may be vetoed by symbol concentration
         assert d.rule != "max_concurrent_positions"
 
 

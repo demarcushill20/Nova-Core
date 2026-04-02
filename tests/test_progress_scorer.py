@@ -1140,6 +1140,126 @@ async def test_risk_state_very_stale_penalized(risk_collector, tmp_path):
 
 
 # =====================================================================
+# RiskCollector — idle-aware freshness penalty tests
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_risk_state_idle_not_penalized_at_45min(risk_collector, tmp_path):
+    """Idle state (0% drawdown) should NOT be penalized at 45 minutes."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 0.0,
+                "max_daily_drawdown_pct": 5.0,
+                "breached": False,
+                "halted": False,
+            }
+        )
+    )
+    stale_time = time.time() - 45 * 60  # 45 min ago
+    os.utime(risk_state, (stale_time, stale_time))
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value == 100.0  # idle state: no penalty at 45 min
+
+
+@pytest.mark.asyncio
+async def test_risk_state_idle_not_penalized_at_2h(risk_collector, tmp_path):
+    """Idle state (0% drawdown) should NOT be penalized at 2 hours."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 0.0,
+                "max_daily_drawdown_pct": 5.0,
+                "breached": False,
+                "halted": False,
+            }
+        )
+    )
+    stale_time = time.time() - 150 * 60  # 2.5 hours ago
+    os.utime(risk_state, (stale_time, stale_time))
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value == 100.0  # idle state: no penalty at 2.5 hours
+
+
+@pytest.mark.asyncio
+async def test_risk_state_idle_penalized_at_4h(risk_collector, tmp_path):
+    """Idle state older than 4 hours gets mild penalty (cap at 80)."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 0.0,
+                "max_daily_drawdown_pct": 5.0,
+                "breached": False,
+                "halted": False,
+            }
+        )
+    )
+    stale_time = time.time() - 5 * 3600  # 5 hours ago
+    os.utime(risk_state, (stale_time, stale_time))
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value <= 80.0  # mild penalty after 4h idle
+
+
+@pytest.mark.asyncio
+async def test_risk_state_idle_severe_penalty_at_24h(risk_collector, tmp_path):
+    """Idle state older than 24 hours gets capped at 60."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 0.0,
+                "max_daily_drawdown_pct": 5.0,
+                "breached": False,
+                "halted": False,
+            }
+        )
+    )
+    stale_time = time.time() - 25 * 3600  # 25 hours ago
+    os.utime(risk_state, (stale_time, stale_time))
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value <= 60.0  # severe penalty after 24h idle
+
+
+@pytest.mark.asyncio
+async def test_risk_state_active_drawdown_still_penalized_at_45min(risk_collector, tmp_path):
+    """Active drawdown (>0%) still gets tight 30-min freshness penalty."""
+    risk_state = tmp_path / "STATE" / "novatrade_risk_state.json"
+    risk_state.parent.mkdir(parents=True, exist_ok=True)
+    risk_state.write_text(
+        json.dumps(
+            {
+                "daily_drawdown_pct": 1.0,
+                "max_daily_drawdown_pct": 5.0,
+                "breached": False,
+                "halted": False,
+            }
+        )
+    )
+    stale_time = time.time() - 45 * 60  # 45 min ago
+    os.utime(risk_state, (stale_time, stale_time))
+
+    result = await risk_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "drawdown_enforcement")
+    assert dd.value <= 60.0  # active drawdown: tight penalty still applies
+
+
+# =====================================================================
 # RiskCollector — corrected drawdown calculation (tracker fallback)
 # =====================================================================
 
@@ -1452,6 +1572,20 @@ async def test_risk_confidence_fresh_files(risk_collector, tmp_path):
 
     result = await risk_collector.collect()
     assert result.confidence >= 0.8
+
+
+@pytest.mark.asyncio
+async def test_risk_confidence_primary_source_fresh(risk_collector, tmp_path):
+    """Fresh primary novatrade_risk_state.json → high confidence even if fallback files are stale/missing."""
+    # Write fresh primary source
+    state_dir = tmp_path / "STATE"
+    state_dir.mkdir(parents=True)
+    (state_dir / "novatrade_risk_state.json").write_text(
+        '{"daily_drawdown_pct": 0, "max_daily_drawdown_pct": 5, "breached": false, "halted": false}'
+    )
+    # No fallback files at all — confidence should still be high
+    result = await risk_collector.collect()
+    assert result.confidence >= 1.0
 
 
 # =====================================================================

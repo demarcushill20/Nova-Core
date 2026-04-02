@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260401_15_free_will_pm_1775096773",
+  "workflow_id": "shift_20260401_15_free_will_pm",
+  "task_summary": "Fixed risk engine false alarm \u2014 context-aware freshness penalties prevent score degradation during idle operation",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed risk engine false alarm \u2014 context-aware freshness penalties prevent score degradation during idle operation"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260401_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed risk engine false alarm \u2014 context-aware freshness penalties prevent score degradation during idle operation",
+  "created_at": "2026-04-02T02:26:13Z",
+  "confidence": "high"
+}

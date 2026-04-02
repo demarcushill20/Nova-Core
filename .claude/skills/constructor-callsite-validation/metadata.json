@@ -1,0 +1,17 @@
+{
+  "name": "constructor-callsite-validation",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "Bug #2 (passing action='buy' instead of side=OrderSide.BUY to OrderRequest) is a constructor-call-site mismatch pattern common in diagnostic/test code that was written against an older or assumed API. Capture pattern: when diagnostic utilities instantiate domain objects, validate constructor kwargs match the current dataclass/model signature \u2014 ideally via a static check or a lightweight smoke test.",
+    "task_examples": [
+      "shift_20260401_2_novatrade_progress",
+      "shift_20260401_2_novatrade_progress"
+    ],
+    "task_id": "shift_20260401_2_novatrade_progress"
+  },
+  "created_at": "2026-04-02T01:03:05.107529+00:00"
+}

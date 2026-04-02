@@ -248,8 +248,15 @@ def validate_alert(payload: dict) -> tuple[str | None, str]:
 
     if payload.get("strategy_name") != "Rob Hoffman IRB":
         return f"unknown strategy: {payload.get('strategy_name')!r}", ""
-    if payload.get("strategy_version") != "5.0.0":
-        return f"version mismatch: {payload.get('strategy_version')!r}", ""
+
+    # Enhanced version validation with debugging info
+    expected_version = "5.0.0"
+    actual_version = payload.get("strategy_version")
+    if actual_version != expected_version:
+        return (
+            f"version mismatch: got {actual_version!r} (type {type(actual_version).__name__}), "
+            f"expected {expected_version!r} (type {type(expected_version).__name__})"
+        ), ""
 
     # Required-field check per action type
     if action in ("PLACE_STOP_ORDER", "REPLACE_STOP_ORDER"):
@@ -461,8 +468,48 @@ class TradingAgent:
         error, action = validate_alert(payload)
         if error:
             elapsed = (time.monotonic() - t0) * 1000
+
+            # Enhanced logging for validation failures
             log.warning("alert validation failed: %s", error)
-            self._record_error(f"validation: {error}", {"payload": _safe_payload(payload)})
+            log.warning("validation failure details - payload: %s", _safe_payload(payload))
+            log.warning(
+                "validation failure details - expected strategy_name: 'Rob Hoffman IRB', got: %r",
+                payload.get("strategy_name"),
+            )
+            log.warning(
+                "validation failure details - expected strategy_version: '5.0.0', got: %r (type: %s)",
+                payload.get("strategy_version"),
+                type(payload.get("strategy_version")).__name__,
+            )
+            log.warning(
+                "validation failure details - action: %r, expected one of: %s",
+                payload.get("action"),
+                sorted(_VALID_ACTIONS),
+            )
+
+            # Check for common validation failure patterns
+            if "version mismatch" in error:
+                actual_version = payload.get("strategy_version")
+                log.warning(
+                    "VERSION MISMATCH DEBUG - actual: %r, expected: '5.0.0', equal: %s, repr equal: %s",
+                    actual_version,
+                    actual_version == "5.0.0",
+                    repr(actual_version) == repr("5.0.0"),
+                )
+
+            self._record_error(
+                f"validation: {error}",
+                {
+                    "payload": _safe_payload(payload),
+                    "debug_info": {
+                        "strategy_name_match": payload.get("strategy_name") == "Rob Hoffman IRB",
+                        "strategy_version_match": payload.get("strategy_version") == "5.0.0",
+                        "strategy_version_type": type(payload.get("strategy_version")).__name__,
+                        "action_valid": payload.get("action") in _VALID_ACTIONS,
+                        "payload_keys": list(payload.keys()) if isinstance(payload, dict) else "not_dict",
+                    },
+                },
+            )
             return AgentResult(
                 success=False,
                 state_after=self._state,

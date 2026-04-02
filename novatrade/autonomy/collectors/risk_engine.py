@@ -98,14 +98,30 @@ class RiskCollector(BaseCollector):
     def _compute_confidence(self, warnings: list[str]) -> float:
         """Compute confidence based on risk state file freshness.
 
-        Checks daily_loss_tracker.json and halt_state.json for recency.
+        Prioritises the authoritative novatrade_risk_state.json (written by
+        RiskEngine every cycle) over fallback files.  If the primary source is
+        fresh the confidence is high regardless of stale fallbacks.
         """
         now = time.time()
-        state_dir = Path(self.base_path) / "STATE" / "novatrade"
 
+        # Primary source: novatrade_risk_state.json (authoritative, updated every cycle)
+        primary = Path(self.base_path) / "STATE" / "novatrade_risk_state.json"
+        if primary.exists():
+            try:
+                age_h = (now - primary.stat().st_mtime) / 3600.0
+                if age_h < 0.5:
+                    return 1.0  # primary source fresh — high confidence
+                elif age_h < 2:
+                    return 0.8
+            except OSError:
+                pass
+
+        # Fallback: check secondary files when primary is missing or stale
+        state_dir = Path(self.base_path) / "STATE" / "novatrade"
         key_files = [
             state_dir / "daily_loss_tracker.json",
             state_dir / "halt_state.json",
+            state_dir / "live_metrics.json",
         ]
 
         available = 0
@@ -130,10 +146,13 @@ class RiskCollector(BaseCollector):
 
         if fresh == available:
             return 1.0
-        elif fresh + slightly_stale == available:
+        elif fresh > 0:
+            # At least one source is fresh — good enough for decent confidence
             return 0.8
+        elif slightly_stale > 0:
+            return 0.7
         elif available > 0:
-            return 0.6
+            return 0.5
 
         return 0.3
 
@@ -177,25 +196,40 @@ class RiskCollector(BaseCollector):
             initial = float(data.get("initial_account_size", 0) or 0)
             limit_pct = float(data.get("daily_loss_pct", 5.0) or 5.0)
 
+            # Detect uninitialized tracker: never fed live data (primary source handles it)
+            tracker_uninit = initial == 0 and day_ref == 0
+
             if initial > 0 and day_ref > 0:
                 # Actual daily loss = day_reference - current (peak serves as proxy)
                 actual_loss = max(day_ref - peak_eq, 0.0)
                 daily_limit = initial * (limit_pct / 100.0)
                 usage_ratio = actual_loss / daily_limit if daily_limit > 0 else 0.0
-            elif initial == 0 and day_ref == 0:
-                # Tracker initialized but no live data yet (demo/idle state).
-                # This is NOT a breach — the engine simply hasn't seen equity.
-                usage_ratio = 0.0
             else:
+                # Tracker initialized but no live data, or partial state.
+                # This is NOT a breach — the engine simply hasn't seen equity.
                 usage_ratio = 0.0
 
             score = self._score_from_usage(usage_ratio)
 
-            # Penalize stale tracking data
-            if age_min > 30:
-                score = min(score, 60.0)
-            if age_min > 120:
-                score = min(score, 40.0)
+            if tracker_uninit:
+                # Uninitialized tracker — age is meaningless because the primary
+                # source (novatrade_risk_state.json) is the real authority.
+                # Give a healthy-idle score: system has risk tracking configured
+                # but this specific fallback file was never activated.
+                score = max(score, 80.0)
+            else:
+                # Context-aware freshness penalty (same logic as _try_risk_state)
+                idle = usage_ratio == 0.0
+                if idle:
+                    if age_min > 240:
+                        score = min(score, 80.0)
+                    if age_min > 1440:
+                        score = min(score, 60.0)
+                else:
+                    if age_min > 30:
+                        score = min(score, 60.0)
+                    if age_min > 120:
+                        score = min(score, 40.0)
 
             return score, round(usage_ratio, 3)
 
@@ -203,7 +237,15 @@ class RiskCollector(BaseCollector):
             return 30.0, 0.0
 
     def _try_risk_state(self, path: Path) -> tuple[float, float | None]:
-        """Try to derive usage_ratio from RiskEngine's persisted state file."""
+        """Try to derive usage_ratio from RiskEngine's persisted state file.
+
+        Freshness penalties are context-aware:
+        - Idle state (0% drawdown, no breach): relaxed thresholds (4h/24h)
+          because no money is at risk and the file legitimately doesn't update.
+        - Active drawdown (>0%): tight thresholds (30min/2h) because we need
+          fresh data when positions are open.
+        - Breached: always 0 regardless of freshness.
+        """
         if not path.exists():
             return 0.0, None
         try:
@@ -224,10 +266,20 @@ class RiskCollector(BaseCollector):
                 usage_ratio = abs(dd_daily) / dd_limit if dd_limit > 0 else 0.0
                 score = self._score_from_usage(usage_ratio)
 
-            if age_min > 30:
-                score = min(score, 60.0)
-            if age_min > 120:
-                score = min(score, 40.0)
+            # Context-aware freshness penalty
+            idle = usage_ratio == 0.0 and not data.get("breached") and not data.get("halted")
+            if idle:
+                # Idle state: relaxed thresholds — file doesn't update without activity
+                if age_min > 240:  # 4 hours
+                    score = min(score, 80.0)
+                if age_min > 1440:  # 24 hours
+                    score = min(score, 60.0)
+            else:
+                # Active drawdown: tight thresholds — need fresh data
+                if age_min > 30:
+                    score = min(score, 60.0)
+                if age_min > 120:
+                    score = min(score, 40.0)
 
             return usage_ratio, score
         except (json.JSONDecodeError, OSError):

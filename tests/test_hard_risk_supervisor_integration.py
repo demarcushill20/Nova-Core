@@ -4,7 +4,7 @@ Tests that the supervisor is properly wired into the trading flow
 and provides the expected safety controls.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -91,7 +91,9 @@ def trading_agent(cfg, mock_adapter, supervisor):
     )
 
     supervisor.initialize(initial_equity=10000.0)
-    return agent
+    # Mock system kill switch so tests aren't affected by VPS state
+    with patch("nova_kill_switch.check_kill_switch", return_value="run"):
+        yield agent
 
 
 class TestHardRiskSupervisorIntegration:

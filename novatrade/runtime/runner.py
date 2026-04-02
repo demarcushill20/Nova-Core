@@ -30,6 +30,9 @@ import logging
 import os
 import sys
 import time
+import traceback
+import types
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +70,93 @@ from novatrade.strategy.live_engine import LiveConfig, LiveStrategyEngine
 from novatrade.validation.evidence import EvidenceRecorder
 
 log = logging.getLogger("novatrade.runtime.runner")
+
+
+# ---------------------------------------------------------------------------
+# Crash logging and diagnostics
+# ---------------------------------------------------------------------------
+
+
+def log_crash(
+    exc_type: type[BaseException] | None,
+    exc_value: BaseException | None,
+    exc_traceback: types.TracebackType | None,
+    context: str = "",
+) -> None:
+    """Log comprehensive crash details to help diagnose restart cycles.
+
+    This function logs crash information to both the regular log and a dedicated
+    crash log file for post-mortem analysis.
+    """
+    timestamp = datetime.now().isoformat()
+
+    # Create crash log directory if it doesn't exist
+    crash_dir = Path("LOGS/crashes")
+    crash_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate crash report
+    exc_type_name = exc_type.__name__ if exc_type else "Unknown"
+    exc_msg = str(exc_value) if exc_value else "No exception info"
+    tb_lines = (
+        traceback.format_exception(exc_type, exc_value, exc_traceback) if exc_traceback else ["No traceback available"]
+    )
+    env_vars: dict[str, str] = {
+        "NOVATRADE_PIPELINE": os.environ.get("NOVATRADE_PIPELINE", "webhook"),
+        "NOVATRADE_LAUNCH_MODE": os.environ.get("NOVATRADE_LAUNCH_MODE", "dry_run"),
+        "NOVATRADE_PORT": os.environ.get("NOVATRADE_PORT", "8877"),
+    }
+
+    # Log to main logger
+    log.critical("CRASH DETECTED in %s: %s: %s", context, exc_type_name, exc_msg)
+    if exc_traceback:
+        log.critical("Traceback:\n%s", "".join(tb_lines))
+
+    # Write detailed crash report to file
+    crash_file = crash_dir / f"crash_{timestamp.replace(':', '-')}.log"
+    try:
+        with crash_file.open("w") as f:
+            f.write(f"NovaTrade Crash Report - {timestamp}\n")
+            f.write("=" * 50 + "\n\n")
+            f.write(f"Context: {context}\n")
+            f.write(f"Process ID: {os.getpid()}\n")
+            f.write(f"Working Directory: {os.getcwd()}\n")
+            f.write(f"Exception Type: {exc_type_name}\n")
+            f.write(f"Exception Message: {exc_msg}\n\n")
+
+            f.write("Environment Variables:\n")
+            for key, value in env_vars.items():
+                f.write(f"  {key}: {value}\n")
+            f.write("\n")
+
+            f.write("Traceback:\n")
+            for line in tb_lines:
+                f.write(line)
+            f.write("\n")
+
+        log.info("Crash report written to %s", crash_file)
+    except Exception as write_exc:
+        log.error("Failed to write crash report: %s", write_exc)
+
+
+def setup_crash_handler() -> None:
+    """Set up global exception handler to log crashes before exit."""
+
+    def handle_exception(
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        exc_traceback: types.TracebackType | None,
+    ) -> None:
+        # Don't catch KeyboardInterrupt
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+
+        log_crash(exc_type, exc_value, exc_traceback, "global_exception_handler")
+
+        # Call the default handler
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = handle_exception
 
 
 # ---------------------------------------------------------------------------
@@ -695,9 +785,17 @@ async def run_server(
     loop_task = asyncio.create_task(loop.start())
     try:
         await server.serve()
+    except Exception as exc:
+        log_crash(type(exc), exc, exc.__traceback__, "webhook_server_serve")
+        log.error("Webhook server failed: %s", exc)
+        raise
     finally:
         loop.stop()
-        await loop_task
+        try:
+            await loop_task
+        except Exception as exc:
+            log_crash(type(exc), exc, exc.__traceback__, "monitor_loop_cleanup")
+            log.error("Monitor loop cleanup failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -763,9 +861,17 @@ async def run_live(
     live_task = asyncio.create_task(live_loop.run())
     try:
         await server.serve()
+    except Exception as exc:
+        log_crash(type(exc), exc, exc.__traceback__, "live_server_serve")
+        log.error("Live server failed: %s", exc)
+        raise
     finally:
         live_loop.stop()
-        await live_task
+        try:
+            await live_task
+        except Exception as exc:
+            log_crash(type(exc), exc, exc.__traceback__, "live_loop_cleanup")
+            log.error("Live loop cleanup failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -785,6 +891,10 @@ def main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
+    # Set up crash handler for debugging restart cycles
+    setup_crash_handler()
+    log.info("NovaTrade runner starting with crash logging enabled")
+
     port = int(os.environ.get("NOVATRADE_PORT", "8877"))
     host = os.environ.get("NOVATRADE_HOST", "0.0.0.0")  # noqa: S104
     pipeline = os.environ.get("NOVATRADE_PIPELINE", "webhook").lower()
@@ -796,11 +906,27 @@ def main() -> None:
             try:
                 live_loop = await build_live_stack()
             except RuntimeError as exc:
+                log_crash(type(exc), exc, exc.__traceback__, "live_stack_build")
                 log.error("LIVE STARTUP FAILED: %s", exc)
                 sys.exit(1)
-            await run_live(live_loop, host=host, port=port)
+            except Exception as exc:
+                log_crash(type(exc), exc, exc.__traceback__, "live_stack_build_unexpected")
+                log.error("LIVE STARTUP FAILED with unexpected error: %s", exc)
+                sys.exit(1)
 
-        asyncio.run(_start_live())
+            try:
+                await run_live(live_loop, host=host, port=port)
+            except Exception as exc:
+                log_crash(type(exc), exc, exc.__traceback__, "live_pipeline_runtime")
+                log.error("LIVE PIPELINE CRASHED: %s", exc)
+                raise
+
+        try:
+            asyncio.run(_start_live())
+        except Exception as exc:
+            log_crash(type(exc), exc, exc.__traceback__, "asyncio_live_runner")
+            log.error("Live pipeline failed at asyncio level: %s", exc)
+            sys.exit(1)
     else:
         if pipeline != "webhook":
             log.warning("unknown pipeline %r — falling back to webhook", pipeline)
@@ -808,13 +934,23 @@ def main() -> None:
         try:
             ws, loop, readiness = build_stack()
         except RuntimeError as exc:
+            log_crash(type(exc), exc, exc.__traceback__, "webhook_stack_build")
             log.error("STARTUP FAILED: %s", exc)
+            sys.exit(1)
+        except Exception as exc:
+            log_crash(type(exc), exc, exc.__traceback__, "webhook_stack_build_unexpected")
+            log.error("STARTUP FAILED with unexpected error: %s", exc)
             sys.exit(1)
 
         report = generate_readiness_report(readiness)
         log.info("\n%s", report)
 
-        asyncio.run(run_server(ws, loop, host=host, port=port))
+        try:
+            asyncio.run(run_server(ws, loop, host=host, port=port))
+        except Exception as exc:
+            log_crash(type(exc), exc, exc.__traceback__, "webhook_pipeline_runtime")
+            log.error("Webhook pipeline failed at runtime: %s", exc)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

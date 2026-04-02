@@ -386,8 +386,8 @@ class TestConfigAlignment:
         limits = HardLimits()
         assert limits.max_trades_per_day == 10
 
-    def test_supervisor_vetoes_at_1_position(self):
-        supervisor = HardRiskSupervisor()
+    def test_supervisor_vetoes_at_1_position(self, tmp_path):
+        supervisor = HardRiskSupervisor(state_dir=str(tmp_path / "state"), kill_switch_dir=str(tmp_path / "kill"))
         supervisor.initialize(100_000.0)
         decision = supervisor.veto(
             symbol="EURUSD",
@@ -401,8 +401,8 @@ class TestConfigAlignment:
         assert decision.vetoed is True
         assert "max_concurrent_positions" in decision.rule or "symbol_concentration" in decision.rule
 
-    def test_supervisor_vetoes_at_10_daily_trades(self):
-        supervisor = HardRiskSupervisor()
+    def test_supervisor_vetoes_at_10_daily_trades(self, tmp_path):
+        supervisor = HardRiskSupervisor(state_dir=str(tmp_path / "state"), kill_switch_dir=str(tmp_path / "kill"))
         supervisor.initialize(100_000.0)
         # Record 10 trades
         for _ in range(10):

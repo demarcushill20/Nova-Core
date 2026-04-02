@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260401_11_novatrade_impl2_1775095433",
+  "workflow_id": "shift_20260401_11_novatrade_impl2",
+  "task_summary": "Implemented FTMO compliance suite v3 \u2014 weekly loss tracker, Friday force-close, config alignment (52 new tests, 1048 total passing)",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented FTMO compliance suite v3 \u2014 weekly loss tracker, Friday force-close, config alignment (52 new tests, 1048 total passing)"
+  ],
+  "successful_patterns": [
+    "task_failed: shift_20260401_11_novatrade_impl2"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented FTMO compliance suite v3 \u2014 weekly loss tracker, Friday force-close, config alignment (52 new tests, 1048 total passing)",
+  "created_at": "2026-04-02T02:03:53Z",
+  "confidence": "high"
+}
