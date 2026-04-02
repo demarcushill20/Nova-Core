@@ -64,8 +64,8 @@ class HardLimits:
 
     # --- Position limits ---
     max_lot_size: float = 10.0  # Max lots per order (absolute, supports $100K FTMO)
-    max_concurrent_positions: int = 3  # Hard position cap
-    max_trades_per_day: int = 30  # Hard daily trade cap
+    max_concurrent_positions: int = 1  # FTMO-safe: single position for IRB
+    max_trades_per_day: int = 10  # FTMO-safe: aligned with RiskConfig
 
     # --- Rapid-loss circuit breaker ---
     consecutive_loss_limit: int = 5  # After N consecutive losses → cooldown

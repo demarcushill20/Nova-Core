@@ -40,6 +40,7 @@ from novatrade.models import (  # noqa: E402
     SymbolPrice,
 )
 from novatrade.risk.ftmo_compliance import (  # noqa: E402
+    BestDayRuleTracker,
     FtmoDailyLossTracker,
     GapTradingPreventer,
     LotSizeConsistencyChecker,
@@ -48,6 +49,7 @@ from novatrade.risk.ftmo_compliance import (  # noqa: E402
     SlModificationCounter,
     TradingDaysTracker,
     WeekendAutoCloser,
+    WeeklyLossTracker,
 )
 from novatrade.risk.position_sizer import PositionSizer  # noqa: E402
 
@@ -116,6 +118,10 @@ class PreTradeGate:
         self._gap_preventer = GapTradingPreventer()
         # FTMO compliance: SL modification counter per trade
         self._sl_mod_counter = SlModificationCounter()
+        # FTMO compliance: weekly loss tracker (rolling 7-day cumulative loss)
+        self._weekly_loss_tracker = WeeklyLossTracker()
+        # FTMO compliance: best day rule tracker (funded account enforcement)
+        self._best_day_tracker = BestDayRuleTracker()
         # FTMO compliance: position sizer for volume cross-check
         self._sizer = PositionSizer(
             min_lot=self._risk.min_volume_per_trade,
@@ -129,6 +135,7 @@ class PreTradeGate:
         self._days_tracker.load_state()
         self._daily_loss_tracker.load_state()
         self._sl_mod_counter.load_state()
+        self._weekly_loss_tracker.load_state()
 
     # ------------------------------------------------------------------
     # Public API
@@ -176,6 +183,8 @@ class PreTradeGate:
         checks.append(self._check_gap_spread(price))
         checks.append(self._check_rollover_dead_zone(now))
         checks.append(self._check_london_fix(now))
+        checks.append(self._weekly_loss_tracker.check())
+        checks.append(self._check_best_day_rule())
         checks.append(self._days_tracker.check())
 
         failed = [c for c in checks if not c.passed]
@@ -233,6 +242,20 @@ class PreTradeGate:
         Call once at session start after fetching account balance from broker.
         """
         self._daily_loss_tracker.initialize(balance, equity)
+        self._weekly_loss_tracker.initialize(balance)
+
+    def record_closed_trade_pnl(self, pnl: float, date_str: str | None = None) -> None:
+        """Record a closed trade's P&L for weekly loss and best day tracking.
+
+        Call after each trade closure to keep rolling trackers up to date.
+        """
+        self._weekly_loss_tracker.record_daily_pnl(pnl, date_str)
+        if date_str is None:
+            from zoneinfo import ZoneInfo
+
+            _tz = ZoneInfo("Europe/Prague")
+            date_str = datetime.now(timezone.utc).astimezone(_tz).strftime("%Y-%m-%d")
+        self._best_day_tracker.record_daily_pnl(date_str, pnl)
 
     def record_trade(self, symbol: str, side_value: str, volume: float = 0.0) -> None:
         """Record a trade for cooldown, daily-count, and FTMO tracking.
@@ -265,6 +288,7 @@ class PreTradeGate:
         self._days_tracker.save_state()
         self._daily_loss_tracker.save_state()
         self._sl_mod_counter.save_state()
+        self._weekly_loss_tracker.save_state()
 
     def _day_start_prague_tz(self, ts: float) -> float:
         """Return midnight Prague timezone timestamp for the day containing *ts*.
@@ -796,6 +820,20 @@ class PreTradeGate:
                 f"-{self._risk.london_fix_end_hour_utc:02d}:{self._risk.london_fix_end_minute_utc:02d} UTC), "
                 f"current={utc_dt.hour:02d}:{utc_dt.minute:02d} UTC"
             ),
+        )
+
+    def _check_best_day_rule(self) -> RiskCheckResult:
+        """Deny if today's profit exceeds 50% of total cumulative profit.
+
+        FTMO Best Day Rule (funded accounts): no single day's profit may
+        account for more than 50% of total lifetime profit.  This prevents
+        concentration risk and ensures consistent performance.
+        """
+        ok, reason = self._best_day_tracker.check(max_pct=0.50)
+        return RiskCheckResult(
+            name="best_day_rule",
+            passed=ok,
+            detail=reason,
         )
 
     def _check_gap_spread(self, price: SymbolPrice | None) -> RiskCheckResult:

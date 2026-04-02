@@ -21,7 +21,7 @@ _DEFAULT_ENV_FILE = Path("/etc/novacore/novatrade.env")
 _OVERRIDE_ENV_FILE = Path("configs/novatrade.override.env")
 _DEFAULT_MAX_DAILY_DRAWDOWN_PCT = 5.0  # typical prop-firm limit
 _DEFAULT_MAX_TOTAL_DRAWDOWN_PCT = 10.0
-_DEFAULT_MAX_POSITIONS = 5
+_DEFAULT_MAX_POSITIONS = 1  # FTMO-safe: single position for IRB strategy
 _DEFAULT_MAX_VOLUME_PER_TRADE = 5.0  # lots — sized for $100K FTMO account
 _DEFAULT_SPREAD_CEILING_POINTS = 30.0
 
@@ -79,7 +79,7 @@ class RiskConfig:
     min_volume_per_trade: float = 0.01
     spread_ceiling_points: float = _DEFAULT_SPREAD_CEILING_POINTS
     cooldown_seconds: int = 60
-    max_trades_per_day: int = 20
+    max_trades_per_day: int = 10  # FTMO-safe: quality over quantity
     news_blackout_minutes: int = 15
     require_stop_loss: bool = True
     max_drawdown_equity_pct: float = _DEFAULT_MAX_DAILY_DRAWDOWN_PCT

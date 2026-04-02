@@ -31,7 +31,15 @@ pre-trade gate:
    relative to session average (gap/spike detection).
 
 8. **Best Day Rule Tracker** — Monitors whether any single day's profit
-   exceeds a percentage of total profit (FTMO best-day rule, monitoring only).
+   exceeds a percentage of total profit (FTMO best-day rule).  Now wired
+   into PreTradeGate for enforcement (50% threshold).
+
+9. **Weekly Loss Tracker** — Rolling 7-day cumulative loss tracker.  Blocks
+   new entries when weekly losses reach 5% of initial account (buffer at 80%).
+
+10. **SL Modification Counter** — Tracks per-trade and per-day SL modification
+    counts.  Prevents EA detection fingerprinting from excessive trailing-stop
+    updates.
 
 All components are stateful (in-memory with optional JSON persistence)
 and designed to integrate into the existing PreTradeGate pipeline.
@@ -812,6 +820,65 @@ class WeekendAutoCloser:
         # Sunday before open → weekend (open hour == close hour)
         return weekday == _SUNDAY and hour < close_hour
 
+    def should_force_close_all(self, timestamp: float) -> bool:
+        """Return True if all positions must be force-closed for weekend safety.
+
+        The force-close deadline is 20:00 UTC on Friday — 1-2 hours before
+        actual market close.  This gives ample time for orderly closure and
+        avoids the deteriorating liquidity near close.
+
+        This method is distinct from should_close_positions() which only
+        blocks NEW entries.  should_force_close_all() demands the runtime
+        CLOSE existing positions.
+        """
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        weekday = dt.weekday()
+        hour = dt.hour
+
+        # Force close at 20:00+ UTC on Friday
+        if weekday == _FRIDAY and hour >= 20:
+            return True
+
+        # Also force close during full weekend (should already be flat)
+        if weekday == _SATURDAY:
+            return True
+        if weekday == _SUNDAY:
+            close_hour = self._market_close_hour_utc(timestamp)
+            if hour < close_hour:
+                return True
+
+        return False
+
+    def friday_close_phase(self, timestamp: float) -> str:
+        """Return the current Friday close phase for graduated action.
+
+        Returns:
+            - "normal": No close action needed
+            - "warning": 19:45-19:50 UTC Friday — emit warning
+            - "partial": 19:50-20:00 UTC Friday — close largest positions first
+            - "force": 20:00+ UTC Friday — force-close everything
+            - "weekend": Saturday/Sunday — should already be flat
+        """
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        weekday = dt.weekday()
+
+        if weekday == _SATURDAY or (weekday == _SUNDAY and dt.hour < self._market_close_hour_utc(timestamp)):
+            return "weekend"
+
+        if weekday != _FRIDAY:
+            return "normal"
+
+        minutes = dt.hour * 60 + dt.minute
+
+        if minutes >= 20 * 60:  # 20:00+
+            return "force"
+        if minutes >= 19 * 60 + 50:  # 19:50-20:00
+            return "partial"
+        if minutes >= 19 * 60 + 45:  # 19:45-19:50
+            return "warning"
+
+        return "normal"
+
     def record_close_attempt(self, timestamp: float) -> None:
         """Record that a close attempt was made to prevent duplicates."""
         self.last_close_attempt_ts = timestamp
@@ -1115,6 +1182,211 @@ class BestDayRuleTracker:
             "days_traded": len(self._daily_pnl),
             "daily_breakdown": dict(self._daily_pnl),
         }
+
+
+# ---------------------------------------------------------------------------
+# Weekly Loss Tracker
+# ---------------------------------------------------------------------------
+
+_DEFAULT_WEEKLY_LOSS_PCT = 5.0  # Max cumulative loss per rolling 7-day window
+_DEFAULT_WEEKLY_LOSS_BUFFER_PCT = 80.0  # Pre-trade buffer at 80% of weekly limit
+
+
+@dataclass
+class WeeklyLossTracker:
+    """Tracks cumulative loss over a rolling 7-day window (Europe/Prague).
+
+    FTMO compliance: prevents consecutive losing days from draining the
+    account by enforcing a weekly loss ceiling.  When cumulative loss in
+    any 7-day window reaches the threshold, new entries are blocked (exits
+    still allowed).
+
+    The window uses calendar days in Europe/Prague timezone for FTMO
+    consistency.  Daily P&L is recorded per day and the rolling sum is
+    computed over the most recent 7 entries.
+
+    Args:
+        initial_account_size: Nominal initial balance (e.g. 100_000).
+        weekly_loss_pct: Maximum weekly loss as % of initial account (default 5.0).
+        buffer_pct: Percentage of weekly limit at which to deny new orders
+            (default 80.0, i.e. deny at 80% of the 5% limit = 4% of account).
+    """
+
+    initial_account_size: float = 0.0
+    weekly_loss_pct: float = _DEFAULT_WEEKLY_LOSS_PCT
+    buffer_pct: float = _DEFAULT_WEEKLY_LOSS_BUFFER_PCT
+    _daily_pnl: dict[str, float] = field(default_factory=dict)
+    _initialized: bool = field(default=False, repr=False)
+
+    # -- Derived limits ------------------------------------------------
+
+    @property
+    def weekly_limit_usd(self) -> float:
+        """Absolute weekly loss limit in USD."""
+        return self.initial_account_size * (self.weekly_loss_pct / 100.0)
+
+    @property
+    def buffer_limit_usd(self) -> float:
+        """Pre-trade buffer: deny new orders above this loss amount."""
+        return self.weekly_limit_usd * (self.buffer_pct / 100.0)
+
+    # -- Initialization ------------------------------------------------
+
+    def initialize(self, balance: float) -> None:
+        """Set initial account size.  Call once at session start."""
+        if self.initial_account_size <= 0:
+            self.initial_account_size = balance
+        self._initialized = True
+        log.info(
+            "WeeklyLossTracker initialized: account=$%.2f weekly_limit=$%.2f buffer=$%.2f",
+            self.initial_account_size,
+            self.weekly_limit_usd,
+            self.buffer_limit_usd,
+        )
+
+    # -- P&L recording -------------------------------------------------
+
+    def record_daily_pnl(self, pnl: float, date_str: str | None = None) -> None:
+        """Add to a day's running P&L total.
+
+        Args:
+            pnl: P&L amount (positive = profit, negative = loss).
+            date_str: ISO date (YYYY-MM-DD).  Defaults to today in Prague tz.
+        """
+        if date_str is None:
+            date_str = datetime.now(timezone.utc).astimezone(_FTMO_TZ).strftime("%Y-%m-%d")
+        self._daily_pnl[date_str] = self._daily_pnl.get(date_str, 0.0) + pnl
+
+    def _rolling_7day_loss(self) -> float:
+        """Compute cumulative loss over the most recent 7 calendar days.
+
+        Only sums negative daily P&L values (losses).  Positive days do NOT
+        offset losses — this is conservative and matches FTMO's approach.
+        """
+        today = datetime.now(timezone.utc).astimezone(_FTMO_TZ).date()
+        total_loss = 0.0
+        for i in range(7):
+            day = today - timedelta(days=i)
+            day_str = day.strftime("%Y-%m-%d")
+            daily = self._daily_pnl.get(day_str, 0.0)
+            if daily < 0:
+                total_loss += abs(daily)
+        return total_loss
+
+    def _rolling_7day_net(self) -> float:
+        """Compute net P&L over the most recent 7 calendar days.
+
+        This sums ALL daily P&L (positive and negative) for a net view.
+        """
+        today = datetime.now(timezone.utc).astimezone(_FTMO_TZ).date()
+        total = 0.0
+        for i in range(7):
+            day = today - timedelta(days=i)
+            day_str = day.strftime("%Y-%m-%d")
+            total += self._daily_pnl.get(day_str, 0.0)
+        return total
+
+    # -- Pre-trade check -----------------------------------------------
+
+    def check(self) -> RiskCheckResult:
+        """Check if weekly loss limit has been reached.
+
+        Returns:
+            RiskCheckResult.  Fails if rolling 7-day loss >= buffer_limit.
+        """
+        if not self._initialized:
+            return RiskCheckResult(
+                name="weekly_loss",
+                passed=True,
+                detail="weekly loss tracker not initialized — skipped",
+            )
+
+        rolling_loss = self._rolling_7day_loss()
+        weekly_limit = self.weekly_limit_usd
+        buffer_limit = self.buffer_limit_usd
+        utilization_pct = (rolling_loss / weekly_limit * 100.0) if weekly_limit > 0 else 0.0
+
+        if rolling_loss >= weekly_limit:
+            return RiskCheckResult(
+                name="weekly_loss",
+                passed=False,
+                detail=(
+                    f"WEEKLY LOSS BREACH: 7-day loss=${rolling_loss:.2f} >= "
+                    f"limit=${weekly_limit:.2f} ({self.weekly_loss_pct:.1f}% of "
+                    f"${self.initial_account_size:.0f}) — blocking all new entries"
+                ),
+            )
+
+        if rolling_loss >= buffer_limit:
+            return RiskCheckResult(
+                name="weekly_loss",
+                passed=False,
+                detail=(
+                    f"weekly loss buffer reached: 7-day loss=${rolling_loss:.2f} >= "
+                    f"buffer=${buffer_limit:.2f} ({self.buffer_pct:.0f}% of "
+                    f"${weekly_limit:.2f} limit) — {utilization_pct:.1f}% utilized"
+                ),
+            )
+
+        return RiskCheckResult(
+            name="weekly_loss",
+            passed=True,
+            detail=(
+                f"7day_loss=${rolling_loss:.2f}, buffer=${buffer_limit:.2f}, "
+                f"limit=${weekly_limit:.2f}, utilized={utilization_pct:.1f}%"
+            ),
+        )
+
+    # -- Snapshot -------------------------------------------------------
+
+    def snapshot(self) -> dict:
+        """Return a point-in-time snapshot of the tracker state."""
+        return {
+            "initialized": self._initialized,
+            "initial_account_size": self.initial_account_size,
+            "weekly_loss_pct": self.weekly_loss_pct,
+            "buffer_pct": self.buffer_pct,
+            "weekly_limit_usd": round(self.weekly_limit_usd, 2),
+            "buffer_limit_usd": round(self.buffer_limit_usd, 2),
+            "rolling_7day_loss": round(self._rolling_7day_loss(), 2),
+            "rolling_7day_net": round(self._rolling_7day_net(), 2),
+            "daily_pnl": dict(self._daily_pnl),
+        }
+
+    # -- State persistence ---------------------------------------------
+
+    def save_state(self, path: Path | None = None) -> None:
+        """Persist weekly loss tracker state for crash recovery."""
+        path = path or (_STATE_DIR / "weekly_loss_tracker.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "initial_account_size": self.initial_account_size,
+            "weekly_loss_pct": self.weekly_loss_pct,
+            "buffer_pct": self.buffer_pct,
+            "daily_pnl": dict(self._daily_pnl),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def load_state(self, path: Path | None = None) -> bool:
+        """Load weekly loss tracker state.  Returns True if loaded."""
+        path = path or (_STATE_DIR / "weekly_loss_tracker.json")
+        if not path.exists():
+            return False
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.initial_account_size = data.get("initial_account_size", self.initial_account_size)
+            self._daily_pnl = data.get("daily_pnl", {})
+            self._initialized = self.initial_account_size > 0
+            log.info(
+                "Loaded weekly loss tracker: account=$%.2f, %d daily entries",
+                self.initial_account_size,
+                len(self._daily_pnl),
+            )
+            return True
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            log.warning("Failed to load weekly loss tracker from %s: %s", path, exc)
+            return False
 
 
 # ---------------------------------------------------------------------------

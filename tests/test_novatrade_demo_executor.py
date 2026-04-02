@@ -124,7 +124,7 @@ class TestHappyPath:
         adapter.place_order.assert_called_once()
 
     def test_gate_sees_fresh_account_and_positions(self):
-        cfg = _cfg()
+        cfg = _cfg(risk={"require_stop_loss": True, "max_positions": 2})
         adapter = _mock_adapter(
             positions=[
                 Position(
