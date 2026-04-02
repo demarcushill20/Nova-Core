@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260401_16_evening_wrap_1775099562",
+  "workflow_id": "shift_20260401_16_evening_wrap",
+  "task_summary": "Full-day evening wrap \u2014 summarized 16 shift blocks, fixed 2 test isolation bugs, created checkpoint with open threads and priorities",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Full-day evening wrap \u2014 summarized 16 shift blocks, fixed 2 test isolation bugs, created checkpoint with open threads and priorities"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260401_16_evening_wrap"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Full-day evening wrap \u2014 summarized 16 shift blocks, fixed 2 test isolation bugs, created checkpoint with open threads and priorities",
+  "created_at": "2026-04-02T03:12:42Z",
+  "confidence": "high"
+}

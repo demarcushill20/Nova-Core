@@ -17,12 +17,14 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any
-
-from metaapi_cloud_sdk import MetaApi  # vendor SDK — confined to this file
+from typing import TYPE_CHECKING, Any
 
 from agents.circuit_breakers import CircuitBreakerError, SimpleCircuitBreaker
+
+if TYPE_CHECKING:
+    from metaapi_cloud_sdk import MetaApi  # vendor SDK — confined to this file
 from novatrade.adapter.base import MT5Adapter
+from novatrade.adapter.metaapi_sdk_singleton import get_metaapi_sdk
 from novatrade.config import MetaApiConfig
 from novatrade.models import (
     AccountMode,
@@ -134,13 +136,12 @@ class MetaApiAdapter(MT5Adapter):
         t0 = time.monotonic()
         try:
             log.info("metaapi connect: initializing SDK (account_id=%s)", self._config.account_id)
-            self._api = MetaApi(
-                self._config.token,
-                {
-                    "domain": self._config.domain,
-                    "region": self._config.region,
-                    "application": self._config.application,
-                },
+            # Use singleton MetaApi SDK to prevent per-cycle re-instantiation
+            self._api = get_metaapi_sdk(
+                token=self._config.token,
+                domain=self._config.domain,
+                region=self._config.region,
+                application=self._config.application,
             )
 
             self._account = await self._api.metatrader_account_api.get_account(
@@ -217,8 +218,9 @@ class MetaApiAdapter(MT5Adapter):
                         pass  # best-effort cleanup
             if self._connection is not None:
                 await self._connection.close()
-            if self._api is not None:
-                self._api.close()
+            # NOTE: Do not close self._api here — it's a shared singleton instance
+            # that may be used by other MetaApiAdapter instances. The singleton
+            # manager handles cleanup automatically via weak references.
         except Exception as exc:
             log.warning("metaapi disconnect: %s", _safe_error(exc))
         finally:
