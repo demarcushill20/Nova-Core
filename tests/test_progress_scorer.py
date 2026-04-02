@@ -252,7 +252,7 @@ async def test_sys_health_no_orphaned_tasks(sys_collector, tmp_path):
 
 @pytest.mark.asyncio
 async def test_sys_health_stale_tasks(sys_collector, tmp_path):
-    """3 stale tasks = 100 - 60 = 40."""
+    """3 stale tasks = 100 - 30 = 70."""
     tasks_dir = tmp_path / "TASKS"
     tasks_dir.mkdir()
     old_time = time.time() - 4 * 3600  # 4 hours ago
@@ -272,7 +272,7 @@ async def test_sys_health_stale_tasks(sys_collector, tmp_path):
         result = await sys_collector.collect()
 
     ot = next(m for m in result.sub_metrics if m.name == "orphaned_tasks")
-    assert ot.value == 40.0
+    assert ot.value == 70.0
 
 
 @pytest.mark.asyncio

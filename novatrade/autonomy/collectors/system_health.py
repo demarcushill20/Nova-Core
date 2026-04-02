@@ -215,13 +215,18 @@ class SystemHealthCollector(BaseCollector):
             # Skip scheduled shift files
             if any(name_lower.startswith(s) for s in _SKIP_PREFIXES):
                 continue
+            # Skip retry files (e.g. task__retry1.md) — active retries, not orphans
+            if "__retry" in name_lower:
+                continue
             try:
                 if p.stat().st_mtime < cutoff:
                     orphans += 1
             except OSError:
                 continue
 
-        score = max(0.0, 100.0 - orphans * 20.0)
+        # 10 pts per orphan (was 20) — avoids zeroing the metric on transient
+        # task backlogs while still signalling when cleanup is needed.
+        score = max(0.0, 100.0 - orphans * 10.0)
         return score, float(orphans)
 
     def _check_uptime(self) -> tuple[float, float]:
