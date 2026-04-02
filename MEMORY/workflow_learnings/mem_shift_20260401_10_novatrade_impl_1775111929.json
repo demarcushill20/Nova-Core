@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260401_10_novatrade_impl_1775111929",
+  "workflow_id": "shift_20260401_10_novatrade_impl",
+  "task_summary": "Repaired CONTRACT block field name mismatch (files_modified\u2192files_changed) and verified 12 tests still pass",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Repaired CONTRACT block field name mismatch (files_modified\u2192files_changed) and verified 12 tests still pass"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260401_10_novatrade_impl"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Repaired CONTRACT block field name mismatch (files_modified\u2192files_changed) and verified 12 tests still pass",
+  "created_at": "2026-04-02T06:38:49Z",
+  "confidence": "high"
+}

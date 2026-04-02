@@ -147,7 +147,7 @@ def rotate_progress_history(dry_run: bool = False) -> list[str]:
             else:
                 kept.append({"_rotated_at": ts, "_archived_to": str(dest)})
                 data = kept
-            ph.write_text(json.dumps(data, indent=2))
+            ph.write_text(json.dumps(data))
             actions.append(
                 f"rotated progress_history.json: {len(entries)}→{len(kept)} entries "
                 f"({size_mb:.1f}MB→{ph.stat().st_size / (1024 * 1024):.1f}MB), "

@@ -818,7 +818,10 @@ tags:
     log(f"Wrote vault diary: {vault_filename} ({len(note)} bytes)")
 
 
-_SKIP_PREFIXES = ("autonomous_report_",)
+_SKIP_PREFIXES = ("autonomous_report_", "hb_plan_", "heartbeat_report_")
+
+# Intermediate outputs: retries, research sub-steps, synthesis sub-steps
+_SKIP_SUBSTRINGS = ("__retry", "_research_", "_synthesize_")
 
 
 def maybe_notify(path: Path) -> None:
@@ -828,6 +831,12 @@ def maybe_notify(path: Path) -> None:
 
     # Skip internal system reports — already saved to vault by the report script
     if any(path.name.startswith(pfx) for pfx in _SKIP_PREFIXES):
+        log(f"Skipped diary noise (prefix): {path.name}")
+        return
+
+    # Skip intermediate outputs (retries, research/synthesis sub-steps)
+    if any(sub in path.name for sub in _SKIP_SUBSTRINGS):
+        log(f"Skipped diary noise (substring): {path.name}")
         return
 
     # Fast pre-check before expensive work

@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Verified risk_engine regression already fixed by commit 100daa9 \u2014 score recovered from 84 to 91.2",
   "created_at": "2026-04-02T04:05:18Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0672_repair_risk_engine_regression_1775099268"
 }

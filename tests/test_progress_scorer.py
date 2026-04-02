@@ -2228,3 +2228,190 @@ def test_truncated_json_history(tmp_path):
 
     result = scorer._load_history()
     assert result == []
+
+
+# ---------- History Compaction Tests ----------
+
+
+def test_compact_entry_strips_sub_metrics():
+    """Compact entry should keep only generated_at, overall_score, dimensions.*.score."""
+    full_entry = {
+        "generated_at": "2026-04-02T04:00:00+00:00",
+        "overall_score": 91.1,
+        "overall_alert": "GREEN",
+        "dimensions": {
+            "system_health": {
+                "name": "System Health",
+                "score": 100.0,
+                "confidence": 1.0,
+                "alert_level": "GREEN",
+                "sub_metrics": [
+                    {"name": "service_status", "value": 100.0, "raw_value": 4.0},
+                    {"name": "orphaned_tasks", "value": 100.0, "raw_value": 0.0},
+                ],
+                "warnings": [],
+                "collected_at": "2026-04-02T04:00:00+00:00",
+            },
+            "risk_engine": {
+                "name": "Risk Engine",
+                "score": 91.0,
+                "confidence": 0.9,
+                "alert_level": "GREEN",
+                "sub_metrics": [{"name": "drawdown", "value": 95.0}],
+                "warnings": ["stale data"],
+                "collected_at": "2026-04-02T04:00:00+00:00",
+            },
+        },
+        "trends": {"system_health": {"current": 100.0, "avg_1h": 99.0}},
+        "warnings": ["some warning"],
+    }
+
+    compact = ProgressScorer._compact_entry(full_entry)
+
+    assert compact == {
+        "generated_at": "2026-04-02T04:00:00+00:00",
+        "overall_score": 91.1,
+        "dimensions": {
+            "system_health": {"score": 100.0},
+            "risk_engine": {"score": 91.0},
+        },
+    }
+    # Verify stripped fields are absent
+    assert "trends" not in compact
+    assert "warnings" not in compact
+    assert "overall_alert" not in compact
+    for dim in compact["dimensions"].values():
+        assert "sub_metrics" not in dim
+        assert "confidence" not in dim
+        assert "alert_level" not in dim
+
+
+def test_compact_entry_handles_empty():
+    """Compact entry should handle entries with missing fields gracefully."""
+    assert ProgressScorer._compact_entry({}) == {
+        "generated_at": "",
+        "overall_score": 0.0,
+    }
+    assert ProgressScorer._compact_entry({"generated_at": "x"}) == {
+        "generated_at": "x",
+        "overall_score": 0.0,
+    }
+
+
+def test_compact_entry_size_reduction():
+    """Compact entry should be significantly smaller than the full entry."""
+    full_entry = {
+        "generated_at": "2026-04-02T04:00:00+00:00",
+        "overall_score": 91.1,
+        "overall_alert": "GREEN",
+        "dimensions": {
+            f"dim_{i}": {
+                "name": f"Dimension {i}",
+                "score": 80.0 + i,
+                "confidence": 0.9,
+                "alert_level": "GREEN",
+                "sub_metrics": [{"name": f"metric_{j}", "value": 90.0 + j, "raw_value": j} for j in range(5)],
+                "warnings": [f"warning {j}" for j in range(3)],
+                "collected_at": "2026-04-02T04:00:00+00:00",
+            }
+            for i in range(5)
+        },
+        "trends": {f"dim_{i}": {"current": 80.0 + i, "avg_1h": 79.0} for i in range(5)},
+        "warnings": ["global warning 1", "global warning 2"],
+    }
+
+    compact = ProgressScorer._compact_entry(full_entry)
+    full_size = len(json.dumps(full_entry))
+    compact_size = len(json.dumps(compact))
+    # Compact should be at least 80% smaller
+    assert compact_size < full_size * 0.2, f"Compact {compact_size} not <20% of full {full_size}"
+
+
+@pytest.mark.asyncio
+async def test_history_written_compact(tmp_path):
+    """After scoring, history entries should be compact (no sub_metrics, no trends)."""
+    scorer = ProgressScorer(base_path=str(tmp_path))
+    scorer.MAX_HISTORY_ENTRIES = 100
+
+    async def stub():
+        return DimensionScore(
+            name="test",
+            score=85.0,
+            confidence=0.9,
+            sub_metrics=[
+                {"name": "metric_a", "value": 90.0, "raw_value": 0.9},
+                {"name": "metric_b", "value": 80.0, "raw_value": 0.8},
+            ],
+            warnings=["test warning"],
+        )
+
+    for c in scorer._collectors.values():
+        c.collect = stub
+
+    await scorer.score()
+
+    history_path = tmp_path / "STATE" / "progress_history.json"
+    history = json.loads(history_path.read_text())
+    assert len(history) == 1
+    entry = history[0]
+
+    # Should have only compact fields
+    assert set(entry.keys()) == {"generated_at", "overall_score", "dimensions"}
+    for dim_data in entry["dimensions"].values():
+        assert set(dim_data.keys()) == {"score"}
+        assert "sub_metrics" not in dim_data
+        assert "warnings" not in dim_data
+        assert "confidence" not in dim_data
+
+
+@pytest.mark.asyncio
+async def test_existing_verbose_entries_compacted(tmp_path):
+    """Pre-existing verbose history entries should be compacted on next write."""
+    scorer = ProgressScorer(base_path=str(tmp_path))
+    scorer.MAX_HISTORY_ENTRIES = 100
+    state_dir = tmp_path / "STATE"
+    state_dir.mkdir(parents=True)
+
+    # Seed with a verbose entry
+    verbose_entry = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "overall_score": 70.0,
+        "overall_alert": "YELLOW",
+        "dimensions": {
+            "system_health": {
+                "name": "System Health",
+                "score": 80.0,
+                "confidence": 1.0,
+                "alert_level": "GREEN",
+                "sub_metrics": [{"name": "svc", "value": 100.0}],
+                "warnings": [],
+            },
+        },
+        "trends": {"system_health": {"current": 80.0}},
+        "warnings": ["old warning"],
+    }
+    (state_dir / "progress_history.json").write_text(json.dumps([verbose_entry]))
+
+    async def stub():
+        return DimensionScore(name="test", score=90.0)
+
+    for c in scorer._collectors.values():
+        c.collect = stub
+
+    await scorer.score()
+
+    history = json.loads((state_dir / "progress_history.json").read_text())
+    assert len(history) == 2
+
+    # Both entries (old verbose + new) should now be compact
+    for entry in history:
+        assert "trends" not in entry
+        assert "warnings" not in entry
+        assert "overall_alert" not in entry
+        for dim_data in entry.get("dimensions", {}).values():
+            assert "sub_metrics" not in dim_data
+            assert "confidence" not in dim_data
+
+    # Old entry's score should be preserved
+    assert history[0]["overall_score"] == 70.0
+    assert history[0]["dimensions"]["system_health"]["score"] == 80.0

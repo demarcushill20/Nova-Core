@@ -2,17 +2,25 @@
 # Updated manually or by promotion pipeline when a challenger wins
 
 current_champion:
-  version: "v2.0.0"
-  label: "IRB v2.0.0"
-  csv_path: "data/irb_v2_tv_1222trades_10yr.csv"
-  trades: 1222
-  consistency: 1.82
-  net_pnl: 10565
-  promoted_date: "2026-03-22"
-  notes: "10yr EURUSD H1, 100k lots, original champion"
+  version: "v5.0.0"
+  label: "IRB v5 M5 Champion"
+  csv_path: "data/irb_novatrade_irb_v5_results_extracted.csv"
+  trades: 1204
+  timeframe: "M5/H1"
+  net_pnl: 8887
+  net_pnl_pct: 8.89
+  promoted_date: "2026-04-02"
+  notes: "10yr EURUSD M5, partial exits enabled, better risk management"
+  config_path: "configs/strategies/irb_v5_m5_champion.yaml"
 
 # Past champions (append-only log)
 history:
+  - version: "v5.0.0"
+    promoted_date: "2026-04-02"
+    csv_path: "data/irb_novatrade_irb_v5_results_extracted.csv"
+    timeframe: "M5/H1"
+    net_pnl: 8887
+    notes: "Promoted due to better risk management and partial exits"
   - version: "v2.0.0"
     promoted_date: "2026-03-22"
     csv_path: "data/irb_v2_tv_1222trades_10yr.csv"

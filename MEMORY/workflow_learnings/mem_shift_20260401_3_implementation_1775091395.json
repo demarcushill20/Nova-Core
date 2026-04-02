@@ -16,5 +16,6 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Implemented DrawdownScaler hysteresis bands, total-account DD layer, gradual loss recovery, IRB session filter (07-16 UTC), ADX 25 default + slope check, and fixed flaky test \u2014 31 new tests, zero regressions",
   "created_at": "2026-04-02T00:56:35Z",
-  "confidence": "high"
+  "confidence": "high",
+  "supersedes": "mem_shift_20260401_3_implementation_1775064527"
 }

@@ -253,6 +253,23 @@ class ProgressScorer:
         except (json.JSONDecodeError, OSError):
             return []
 
+    @staticmethod
+    def _compact_entry(entry: dict) -> dict:
+        """Extract only the fields needed for trend analysis and cache fallback.
+
+        History entries only need: generated_at, overall_score, and per-dimension
+        score.  Stripping sub_metrics, warnings, confidence, alert_level, trends
+        reduces per-entry size from ~4KB to ~250 bytes (~96% reduction).
+        """
+        compact: dict = {
+            "generated_at": entry.get("generated_at", ""),
+            "overall_score": entry.get("overall_score", 0.0),
+        }
+        dims = entry.get("dimensions", {})
+        if dims:
+            compact["dimensions"] = {name: {"score": d.get("score", 0.0)} for name, d in dims.items()}
+        return compact
+
     async def _append_history(self, report: ProgressReport) -> None:
         """Append *report* to history, pruning entries older than retention.
 
@@ -283,12 +300,16 @@ class ProgressScorer:
             if len(pruned) > self.MAX_HISTORY_ENTRIES:
                 pruned = pruned[-self.MAX_HISTORY_ENTRIES :]
 
+            # Compact all entries — strip sub_metrics, warnings, trends etc.
+            # Only keep fields needed for trend analysis and cache fallback.
+            pruned = [self._compact_entry(h) for h in pruned]
+
             self._history_path.parent.mkdir(parents=True, exist_ok=True)
             # Atomic write: write to temp file, then os.replace()
             fd, tmp_path = tempfile.mkstemp(dir=str(self._history_path.parent), suffix=".tmp")
             try:
                 with os.fdopen(fd, "w") as f:
-                    json.dump(pruned, f, indent=2, default=str)
+                    json.dump(pruned, f, default=str)  # No indent — internal data file
                 os.replace(tmp_path, str(self._history_path))
             except BaseException:
                 # Clean up temp file on failure
