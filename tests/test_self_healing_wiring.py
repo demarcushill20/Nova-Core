@@ -79,7 +79,7 @@ class TestDegradationTierGating:
         monkeypatch.setattr(hb, "write_heartbeat", lambda checks, **kwargs: None)
         monkeypatch.setattr(hb, "inject_repair_task", lambda checks: None)
         monkeypatch.setattr(hb, "_append_metrics", lambda snap: None)
-        monkeypatch.setattr(hb, "_telegram_cooldown_gate", lambda msg: False)
+        monkeypatch.setattr(hb, "_telegram_cooldown_gate", lambda msg, **kw: False)
 
         # Stub checks that were added after the original fixture was written
         monkeypatch.setattr(hb, "check_scheduler", lambda: _make_fake_check("scheduler"))
@@ -310,7 +310,7 @@ class TestBudgetWatchdogWiring:
         monkeypatch.setattr(hb, "write_heartbeat", lambda checks, **kwargs: None)
         monkeypatch.setattr(hb, "inject_repair_task", lambda checks: None)
         monkeypatch.setattr(hb, "_append_metrics", lambda snap: None)
-        monkeypatch.setattr(hb, "_telegram_cooldown_gate", lambda msg: False)
+        monkeypatch.setattr(hb, "_telegram_cooldown_gate", lambda msg, **kw: False)
         monkeypatch.setattr(hb, "_sh_record_mem", lambda: None)
 
         # Disable CRUISE mode so budget tier logic is tested in isolation

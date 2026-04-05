@@ -133,6 +133,27 @@ class TestTelegramCooldownGate:
         data = json.loads(cooldown_file.read_text())
         assert len(data) == 1
 
+    def test_tier_alerts_dedupe_by_title_only(self, tmp_path, monkeypatch):
+        """Degradation-tier alerts should dedupe on the tier title regardless of
+        the varying reason in the detail field, with a 4-hour cooldown.
+
+        Regression guard for the 'REDUCED tier spams every 30 min' bug: the
+        reason field cycled between 'test', 'circuit breaker mcp opened', and
+        'budget exceeded: ...', producing a fresh fingerprint each heartbeat
+        and bypassing the cooldown.
+        """
+        _patch_cooldown_file(tmp_path, monkeypatch)
+        from heartbeat import TELEGRAM_COOLDOWN_TIER, _telegram_cooldown_gate
+
+        # Cooldown key used by main() — title only, no detail/reason
+        key = "Self-healing (warning): Degradation: REDUCED"
+        assert _telegram_cooldown_gate(key, cooldown_secs=TELEGRAM_COOLDOWN_TIER) is True
+        # Second call within the 4-hour window is suppressed, even though
+        # in the real code the 'detail' (reason) would have changed.
+        assert _telegram_cooldown_gate(key, cooldown_secs=TELEGRAM_COOLDOWN_TIER) is False
+        # And the cooldown is longer than the default 30-minute one.
+        assert TELEGRAM_COOLDOWN_TIER >= 4 * 3600
+
 
 # ---------------------------------------------------------------------------
 # 3. _ground_service_alert
