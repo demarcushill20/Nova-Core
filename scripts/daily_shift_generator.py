@@ -1028,6 +1028,25 @@ type: shift_block
 ## Output
 
 Write results to OUTPUT/shift_{shift_date:%Y%m%d}_{n}_{block["output_suffix"]}.md
+
+## Required Contract (mandatory — your output will be rejected without this)
+
+Your output report MUST end with a ## CONTRACT block containing ALL of these fields:
+
+```
+## CONTRACT
+summary: <one-line description of what was done>
+files_changed: <comma-separated list of files created or modified, or "none">
+verification: <how correctness was confirmed — e.g. "tests passed", "service status verified">
+confidence: <low | medium | high>
+```
+
+Rules:
+- The ## CONTRACT heading must appear at the END of your output report
+- Every field above is REQUIRED. Never omit a field
+- If no files were changed, write: files_changed: none
+- If verification was not possible, write: verification: not run
+- Do not fabricate data. Use honest values
 """
     return filename, content
 
