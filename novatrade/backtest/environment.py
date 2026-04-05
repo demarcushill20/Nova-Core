@@ -186,7 +186,7 @@ class BacktestEnvironment:
     # --- Enhanced filter parameters (v4) ---
     use_volatility_filter: bool = False  # Only trade when ATR > SMA(ATR, vol_atr_ma_period)
     volatility_atr_ma_period: int = 50  # Period for ATR moving average filter
-    use_regime_gate: bool = False  # Tier 1 regime gate: skip signals when BBW indicates ranging
+    use_regime_gate: bool = True  # Tier 1 regime gate: skip signals when BBW indicates ranging
     regime_bbw_period: int = 20  # Bollinger Band width lookback period
     regime_bbw_threshold: float = 0.005  # BBW below this = ranging → skip signal
 

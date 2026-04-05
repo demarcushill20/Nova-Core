@@ -205,7 +205,11 @@ class SystemHealthCollector(BaseCollector):
         # Prefixes for scheduled shifts (not task orphans)
         _SKIP_PREFIXES = ("shift_", "shift_gen_")
 
-        cutoff = time.time() - 2 * 3600  # 2 hours ago
+        cutoff_default = time.time() - 2 * 3600  # 2 hours ago
+        # Auto-generated tasks (NNNN_*) are queued sequentially by the
+        # autonomy engine — give them a longer grace period to avoid
+        # false orphan detection during busy repair/research bursts.
+        cutoff_auto = time.time() - 4 * 3600  # 4 hours for auto tasks
         orphans = 0
         for p in tasks_dir.glob("*.md*"):
             name_lower = p.name.lower()
@@ -218,6 +222,8 @@ class SystemHealthCollector(BaseCollector):
             # Skip retry files (e.g. task__retry1.md) — active retries, not orphans
             if "__retry" in name_lower:
                 continue
+            # Use longer cutoff for auto-generated numbered tasks
+            cutoff = cutoff_auto if re.match(r"\d{4}_", name_lower) else cutoff_default
             try:
                 if p.stat().st_mtime < cutoff:
                     orphans += 1
