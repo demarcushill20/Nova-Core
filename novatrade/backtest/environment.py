@@ -184,7 +184,7 @@ class BacktestEnvironment:
     trail_delay_bars: int = 0  # 0 = trail immediately; >0 = don't trail for first N bars
 
     # --- Enhanced filter parameters (v4) ---
-    use_volatility_filter: bool = False  # Only trade when ATR > SMA(ATR, vol_atr_ma_period)
+    use_volatility_filter: bool = True  # Only trade when ATR > SMA(ATR, vol_atr_ma_period)
     volatility_atr_ma_period: int = 50  # Period for ATR moving average filter
     use_regime_gate: bool = True  # Tier 1 regime gate: skip signals when BBW indicates ranging
     regime_bbw_period: int = 20  # Bollinger Band width lookback period
