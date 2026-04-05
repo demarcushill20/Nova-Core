@@ -169,17 +169,18 @@ class LotSizeConsistencyChecker:
                 detail="recent median volume is 0 — skipped",
             )
 
-        # DEFENSIVE: Check for obviously corrupted or test data in recent history
-        # If median is very small and proposed volume is standard FTMO size,
-        # this might be test data corruption. FTMO standard lots are typically 0.5-10.0
+        # DEFENSIVE: Check for obviously corrupted or test data in recent history.
+        # Only bypass when the history is clearly artificial: all volumes are
+        # identical (zero variance), which indicates test stubs or corruption.
+        # Real trading always has some lot-size variation.
         if med <= 0.15 and proposed_volume >= 0.50:
-            # Check if all recent history volumes are suspiciously small (likely test data)
-            all_small = all(v <= 0.15 for v in recent_volumes)
-            if all_small:
+            unique_volumes = set(recent_volumes)
+            if len(unique_volumes) == 1 and len(recent_volumes) >= self.window_size:
                 log.warning(
-                    "LotSizeConsistencyChecker: Detected suspicious recent history with median=%.2f "
-                    "and all volumes ≤0.15 (possibly test data corruption). "
-                    "Allowing proposed_volume=%.2f to proceed. Recent history: %s",
+                    "LotSizeConsistencyChecker: Detected artificial history — "
+                    "%d identical lots of %.2f (test data corruption). "
+                    "Allowing proposed_volume=%.2f. Recent history: %s",
+                    len(recent_volumes),
                     med,
                     proposed_volume,
                     recent_volumes,
@@ -188,7 +189,7 @@ class LotSizeConsistencyChecker:
                     name="lot_consistency",
                     passed=True,
                     detail=f"median={med:.2f} appears to be test data corruption "
-                    f"(all {len(recent_volumes)} recent lots ≤0.15) — allowing {proposed_volume:.2f}",
+                    f"({len(recent_volumes)} identical lots) — allowing {proposed_volume:.2f}",
                 )
 
         ratio = proposed_volume / med

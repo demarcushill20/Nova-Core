@@ -117,6 +117,7 @@ class MetaApiAdapter(MT5Adapter):
         self._reconnecting = False  # guard against concurrent reconnect
         self._subscribed_symbols: list[str] = []
         self._last_resubscribe: float = 0.0
+        self._cached_equity: float | None = None
 
         # Circuit breaker for broker operations.
         # Pass _NoRedis to prevent SimpleCircuitBreaker from auto-connecting
@@ -166,6 +167,7 @@ class MetaApiAdapter(MT5Adapter):
             # Query account info to check tradeAllowed status early
             try:
                 acct_info = await self._connection.get_account_information()
+                self._cached_equity = acct_info.get("equity")
                 trade_allowed = acct_info.get("tradeAllowed", True)
                 if not trade_allowed:
                     log.warning(
@@ -251,7 +253,8 @@ class MetaApiAdapter(MT5Adapter):
             )
         t0 = time.monotonic()
         try:
-            await self._connection.get_account_information()
+            info = await self._connection.get_account_information()
+            self._cached_equity = info.get("equity")
             latency = (time.monotonic() - t0) * 1000
             return HealthStatus(
                 state=HealthState.OK,
@@ -398,8 +401,18 @@ class MetaApiAdapter(MT5Adapter):
         """Fetch current account snapshot from MetaApi."""
         await self._ensure_connected_or_reconnect()
         info = await self._connection.get_account_information()
+        self._cached_equity = info.get("equity")
         log.debug("metaapi get_account: balance=%.2f equity=%.2f", info["balance"], info["equity"])
         return _translate_account(info)
+
+    def get_equity(self) -> float | None:
+        """Return the most recently observed equity value.
+
+        Updated on every ``connect()``, ``health_check()``, and
+        ``get_account()`` call.  Returns ``None`` only before the first
+        successful account-info fetch.
+        """
+        return self._cached_equity
 
     # --- positions -----------------------------------------------------------
 

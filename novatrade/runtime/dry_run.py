@@ -116,6 +116,11 @@ class DryRunAdapter(MT5Adapter):
             open_positions=len(self._state.positions),
         )
 
+    def get_equity(self) -> float | None:
+        if self._inner:
+            return self._inner.get_equity()
+        return 100_000.0
+
     async def get_positions(self) -> list[Position]:
         if self._inner:
             return await self._inner.get_positions()

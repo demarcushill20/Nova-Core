@@ -52,6 +52,14 @@ class MT5Adapter(ABC):
     async def get_account(self) -> AccountState:
         """Retrieve current account state snapshot."""
 
+    def get_equity(self) -> float | None:
+        """Return cached equity value, or ``None`` if unavailable.
+
+        Non-abstract — adapters that track equity should override this.
+        Used by the live-loop equity-history writer to persist snapshots.
+        """
+        return None
+
     # --- positions -----------------------------------------------------------
 
     @abstractmethod

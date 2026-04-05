@@ -42,25 +42,35 @@ class TestLotConsistencyRegression:
         assert "trades in history" in result.detail
         assert "need" in result.detail
 
-    def test_test_data_corruption_protection(self):
-        """Test protection against test data corruption (0.10 median blocking 1.0 trades)."""
+    def test_mixed_tiny_volumes_rejected(self):
+        """Non-identical tiny volumes should still enforce lot consistency (not corruption)."""
         checker = LotSizeConsistencyChecker(min_trades_for_enforcement=3)
 
-        # Simulate corrupted test data - all tiny volumes
-        checker.record(0.01, "EURUSD")  # Tiny test volume
-        checker.record(0.05, "EURUSD")  # Tiny test volume
-        checker.record(0.10, "EURUSD")  # Tiny test volume
+        # Mixed tiny volumes — these are NOT all identical, so NOT corruption
+        checker.record(0.01, "EURUSD")
+        checker.record(0.05, "EURUSD")
+        checker.record(0.10, "EURUSD")
 
-        # Median should be tiny (0.05)
         volumes = [r.volume for r in checker._history]
         assert median(volumes) == 0.05
 
-        # But normal FTMO volume (1.0) should be allowed due to corruption protection
+        # Normal enforcement: 1.0 is 20x median, exceeds 3x → reject
+        result = checker.check(1.0)
+        assert result.passed is False
+        assert "exceeds" in result.detail
+
+    def test_identical_full_window_triggers_corruption_bypass(self):
+        """Full window of identical tiny volumes triggers corruption bypass."""
+        # window_size=5 to keep the test compact
+        checker = LotSizeConsistencyChecker(min_trades_for_enforcement=3, window_size=5)
+        for _ in range(5):
+            checker.record(0.10, "EURUSD")
+
+        # All 5 identical values fill the window → corruption detected
         result = checker.check(1.0)
         assert result.passed is True
         assert "test data corruption" in result.detail
-        assert "0.05" in result.detail
-        assert "allowing 1.00" in result.detail
+        assert "identical" in result.detail
 
     def test_normal_lot_enforcement_still_works(self):
         """Test that normal lot size enforcement still works for legitimate data."""
@@ -103,27 +113,26 @@ class TestLotConsistencyRegression:
         assert "exceeds" in result.detail
 
     def test_boundary_corruption_threshold(self):
-        """Test the exact boundary conditions for corruption detection."""
+        """Non-identical tiny volumes don't trigger corruption bypass."""
         checker = LotSizeConsistencyChecker(min_trades_for_enforcement=3)
 
-        # Exactly at corruption threshold: all ≤0.15, median ≤0.15, volume ≥0.50
-        checker.record(0.15, "EURUSD")  # At threshold
-        checker.record(0.10, "EURUSD")  # Below threshold
-        checker.record(0.05, "EURUSD")  # Below threshold
+        # Mixed values: all ≤0.15 but NOT identical → no corruption bypass
+        checker.record(0.15, "EURUSD")
+        checker.record(0.10, "EURUSD")
+        checker.record(0.05, "EURUSD")
 
         volumes = [r.volume for r in checker._history]
-        assert median(volumes) == 0.10  # ≤ 0.15 ✓
-        assert all(v <= 0.15 for v in volumes)  # All ≤ 0.15 ✓
+        assert median(volumes) == 0.10
+        assert all(v <= 0.15 for v in volumes)
 
-        # Volume ≥ 0.50 should trigger protection
+        # 0.50 is 5x median — exceeds 3x limit, should be REJECTED
         result = checker.check(0.50)
-        assert result.passed is True
-        assert "test data corruption" in result.detail
+        assert result.passed is False
+        assert "exceeds" in result.detail
 
-        # Volume < 0.50 should NOT trigger protection (use normal enforcement)
-        # 0.35 is 3.5x median (0.10), which exceeds max_deviation_factor=3.0
-        result = checker.check(0.35)
-        assert result.passed is False  # Exceeds normal 3.0x limit without corruption protection
+        # 0.25 is 2.5x median — within 3x limit, should PASS
+        result = checker.check(0.25)
+        assert result.passed is True
 
     def test_zero_median_protection(self):
         """Test protection against zero median calculations."""

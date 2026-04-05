@@ -637,11 +637,25 @@ class LiveLoop:
             snapshots = existing.get("snapshots", [])
 
             # Deduplicate: skip if the last snapshot has the same equity value
+            # AND is recent (< 1 hour old).  This ensures the time series
+            # stays fresh even during flat-equity periods — critical for the
+            # performance_stability collector to know the system is alive.
             now_iso = datetime.now(timezone.utc).isoformat()
             if snapshots:
                 last = snapshots[-1]
                 if last.get("equity") == equity:
-                    return  # no change — skip duplicate
+                    # Allow one snapshot per hour even when equity is unchanged
+                    last_ts = last.get("timestamp", "")
+                    try:
+                        from datetime import datetime as _dt
+
+                        last_time = _dt.fromisoformat(last_ts.replace("Z", "+00:00"))
+                        now_time = datetime.now(timezone.utc)
+                        age_hours = (now_time - last_time).total_seconds() / 3600
+                        if age_hours < 1.0:
+                            return  # recent and unchanged — skip
+                    except (ValueError, TypeError):
+                        pass  # can't parse timestamp — write snapshot anyway
 
                 # Anomaly guard: reject equity changes > 3% in a single step.
                 # Prevents stale/corrupt adapter values from creating synthetic drawdowns
