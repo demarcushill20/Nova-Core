@@ -238,6 +238,7 @@ SERVICES = [
 # Telegram cooldown settings (seconds)
 TELEGRAM_COOLDOWN_DEFAULT = 1800  # 30 minutes for general agent alerts
 TELEGRAM_COOLDOWN_COST = 14400  # 4 hours for cost alerts
+TELEGRAM_COOLDOWN_TIER = 14400  # 4 hours for degradation tier alerts (same tier re-triggers aren't news)
 TELEGRAM_COOLDOWN_FILE = STATE_DIR / "telegram_cooldown.json"
 
 
@@ -2421,7 +2422,16 @@ def main() -> int:
         for alert in sh_alerts:
             if alert.get("severity") in ("warning", "critical"):
                 alert_msg = f"Self-healing ({alert['severity']}): {alert['title']}\n{alert['detail']}"
-                if _telegram_cooldown_gate(alert_msg):
+                # Degradation tier alerts repeat every cycle with varying reasons
+                # (budget exceeded, circuit breaker mcp opened, etc.), which each
+                # produce a distinct fingerprint and bypass the 30-min cooldown.
+                # Dedupe by the tier title only and use a longer cooldown so that
+                # "still REDUCED" doesn't spam the channel.
+                if str(alert.get("title", "")).startswith("Degradation:"):
+                    cooldown_key = f"Self-healing ({alert['severity']}): {alert['title']}"
+                    if _telegram_cooldown_gate(cooldown_key, cooldown_secs=TELEGRAM_COOLDOWN_TIER):
+                        _send_telegram(alert_msg)
+                elif _telegram_cooldown_gate(alert_msg):
                     _send_telegram(alert_msg)
     except Exception as e:
         checks.append({"name": "self_healing", "ok": True, "detail": f"check skipped: {e}"})
