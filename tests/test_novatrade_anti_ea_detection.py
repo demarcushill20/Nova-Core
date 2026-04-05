@@ -73,9 +73,9 @@ class TestRolloverDeadZone:
         return dt.timestamp()
 
     def test_blocks_during_rollover_window(self):
-        """Orders during 21:00-23:00 UTC should be denied."""
+        """Orders during 22:00-23:00 UTC should be denied (optimized from 21:00-23:00)."""
         gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": True}))
-        for hour in (21, 22):
+        for hour in (22,):  # Only 22:xx is blocked now (optimization applied)
             ts = self._make_ts(hour, 30)
             with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
                 decision = gate.evaluate(_order(), _account(), [])
@@ -91,6 +91,16 @@ class TestRolloverDeadZone:
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert len(rollover_checks) == 1
         assert rollover_checks[0].passed
+
+    def test_allows_optimized_early_rollover_window(self):
+        """Orders at 21:30 UTC should now pass (optimization: window narrowed from 21:00-23:00 to 22:00-23:00)."""
+        gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": True}))
+        ts = self._make_ts(21, 30)  # This was previously denied, now allowed
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
+            decision = gate.evaluate(_order(), _account(), [])
+        rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
+        assert len(rollover_checks) == 1
+        assert rollover_checks[0].passed, "21:30 UTC should be allowed after rollover optimization"
 
     def test_allows_after_rollover(self):
         """Orders at 23:00 UTC (end of window) should pass."""
@@ -180,13 +190,22 @@ class TestRolloverDeadZone:
         assert "22:15 UTC" in rollover_checks[0].detail
 
     def test_boundary_start_is_inclusive(self):
-        """The start hour should be inclusive (21:00 is inside the zone)."""
+        """The start hour should be inclusive (22:00 is inside the zone after optimization)."""
         gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": True}))
-        ts = self._make_ts(21, 0)
+        ts = self._make_ts(22, 0)  # Updated from 21:00 to 22:00 after rollover optimization
         with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
         assert not rollover_checks[0].passed
+
+    def test_boundary_optimization_allows_late_21_hour(self):
+        """21:59 UTC should now be allowed (benefit of rollover optimization)."""
+        gate = PreTradeGate(_cfg(risk={"rollover_dead_zone_enabled": True}))
+        ts = self._make_ts(21, 59)  # Just before the optimized rollover window
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
+            decision = gate.evaluate(_order(), _account(), [])
+        rollover_checks = [c for c in decision.checks if c.name == "rollover_dead_zone"]
+        assert rollover_checks[0].passed, "21:59 UTC should be allowed after optimization"
 
 
 # ===========================================================================
@@ -462,7 +481,7 @@ class TestConfigWiring:
     def test_rollover_config_defaults(self):
         cfg = RiskConfig()
         assert cfg.rollover_dead_zone_enabled is True
-        assert cfg.rollover_start_hour_utc == 21
+        assert cfg.rollover_start_hour_utc == 22  # Optimized from 21 to reduce denials
         assert cfg.rollover_end_hour_utc == 23
 
     def test_jitter_config_defaults(self):

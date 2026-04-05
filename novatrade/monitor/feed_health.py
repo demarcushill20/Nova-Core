@@ -324,10 +324,14 @@ class FeedHealthSupervisor:
         """Aggregate statistics."""
         snaps = {sym: self.get_snapshot(sym) for sym in self._symbols if ":" not in sym}
         healthy = sum(1 for s in snaps.values() if s.state == FeedState.HEALTHY)
+        market_closed = sum(1 for s in snaps.values() if s.state == FeedState.MARKET_CLOSED)
+        # Only count truly problematic states as unhealthy (excludes MARKET_CLOSED)
+        unhealthy = sum(1 for s in snaps.values() if s.state not in {FeedState.HEALTHY, FeedState.MARKET_CLOSED})
         return {
             "tracked_symbols": len(snaps),
             "healthy": healthy,
-            "unhealthy": len(snaps) - healthy,
+            "unhealthy": unhealthy,
+            "market_closed": market_closed,
             "disconnected": list(self._disconnected),
             "symbols": {sym: s.to_dict() for sym, s in snaps.items()},
         }

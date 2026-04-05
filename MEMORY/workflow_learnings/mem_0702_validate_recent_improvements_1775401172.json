@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Validated 11,904 tests pass (0 failures), all 5 autonomy dimensions GREEN (overall 90.6), no regressions from recent commits",
   "created_at": "2026-04-05T14:59:32Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0702_validate_recent_improvements_1775380531"
 }

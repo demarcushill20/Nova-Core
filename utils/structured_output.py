@@ -26,6 +26,13 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
+
+class StructuredOutputError(Exception):
+    """Exception raised when structured output parsing or validation fails."""
+
+    pass
+
+
 BASE = Path(__file__).resolve().parent.parent
 DEFAULT_CLAUDE_BIN = "/home/nova/.local/bin/claude"
 DEFAULT_MODEL = "sonnet"
@@ -127,6 +134,44 @@ def _extract_json(text: str) -> str | None:
                     break
 
     return None
+
+
+def safe_json_parse(text: str | None) -> dict | list | None:
+    """Safe JSON parsing that returns None instead of raising exceptions.
+
+    Args:
+        text: JSON string to parse, or None
+
+    Returns:
+        Parsed JSON object/array, or None if parsing fails or input is None/empty
+    """
+    if not text or not isinstance(text, str):
+        return None
+
+    text = text.strip()
+    if not text:
+        return None
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def validate_pydantic_response(data: dict | list, model_class: type[T]) -> T:
+    """Validate data against a Pydantic model.
+
+    Args:
+        data: Dictionary or list to validate
+        model_class: Pydantic model class to validate against
+
+    Returns:
+        Validated model instance
+
+    Raises:
+        ValidationError: If validation fails
+    """
+    return model_class.model_validate(data)
 
 
 def parse_and_validate(text: str, model_class: type[T]) -> T | None:

@@ -1107,6 +1107,12 @@ class OpsMonitor:
             }
         )
 
+        # Sort chronologically to prevent out-of-order entries from
+        # accumulating across sessions and causing collector score flicker.
+        snapshots.sort(
+            key=lambda s: s.get("timestamp", "").replace("Z", "+00:00").split(".")[0],
+        )
+
         # Retain last 720 entries (~30 days of hourly snapshots)
         if len(snapshots) > 720:
             snapshots = snapshots[-720:]

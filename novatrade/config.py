@@ -92,7 +92,7 @@ class RiskConfig:
     max_slippage_pips: float = 3.0  # max acceptable slippage in pips (0 = disabled)
     # Anti-EA-detection: rollover dead zone (spreads widen, fills degrade)
     rollover_dead_zone_enabled: bool = True
-    rollover_start_hour_utc: int = 21  # 21:00 UTC = daily FX rollover start
+    rollover_start_hour_utc: int = 22  # 22:00 UTC = daily FX rollover start (optimized from 21:00)
     rollover_end_hour_utc: int = 23  # 23:00 UTC = rollover window end
     # Anti-EA-detection: entry timing jitter (randomizes order timing)
     entry_jitter_min_seconds: float = 1.0

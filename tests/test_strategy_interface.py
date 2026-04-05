@@ -343,12 +343,14 @@ class TestIRBStrategy:
 
     def test_atr_sl_floor_widens_tight_stops(self) -> None:
         """ATR-adaptive SL floor widens candle-geometry stops when too tight."""
-        # Create candles with very small ranges (tight bars) but clear trend
+        # Create candles with very small ranges (tight bars) but clear trend.
+        # Use irb_threshold=0.33 so synthetic candles pass IRB geometry.
         candles = _make_trending_candles(200, direction="up")
-        env = BacktestEnvironment(atr_sl_floor_multiplier=0.5)
+        env = BacktestEnvironment(atr_sl_floor_multiplier=0.5, irb_threshold=0.33)
         s = IRBStrategy(env=env)
         indicators = s.compute_indicators(candles)
         signals = s.generate_signals(candles, indicators)
+        assert signals, "expected at least one signal to test ATR floor"
         for sig in signals:
             if sig.side == "LONG":
                 sl_dist = sig.entry_price - sig.stop_loss
@@ -360,11 +362,17 @@ class TestIRBStrategy:
         """Spread-buffer cushion widens SL distance by the configured pips."""
         candles = _make_trending_candles(200, direction="up")
         # Disable the ATR floor so the spread cushion is the only thing changing.
+        # Use irb_threshold=0.33 so the synthetic candle geometry (body ≈ 60%
+        # from low) satisfies the IRB filter and actually produces signals.
         env_no_buf = BacktestEnvironment(
-            atr_sl_floor_multiplier=0.0, sl_spread_buffer_pips=0.0
+            atr_sl_floor_multiplier=0.0,
+            sl_spread_buffer_pips=0.0,
+            irb_threshold=0.33,
         )
         env_with_buf = BacktestEnvironment(
-            atr_sl_floor_multiplier=0.0, sl_spread_buffer_pips=1.0
+            atr_sl_floor_multiplier=0.0,
+            sl_spread_buffer_pips=1.0,
+            irb_threshold=0.33,
         )
         s_no = IRBStrategy(env=env_no_buf)
         s_buf = IRBStrategy(env=env_with_buf)

@@ -69,7 +69,7 @@ class TestLotConsistencyRegression:
         # All 5 identical values fill the window → corruption detected
         result = checker.check(1.0)
         assert result.passed is True
-        assert "test data corruption" in result.detail
+        assert "suspected demo data" in result.detail
         assert "identical" in result.detail
 
     def test_normal_lot_enforcement_still_works(self):

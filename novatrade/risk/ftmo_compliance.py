@@ -169,30 +169,34 @@ class LotSizeConsistencyChecker:
                 detail="recent median volume is 0 — skipped",
             )
 
-        # DEFENSIVE: Check for obviously corrupted or test data in recent history.
-        # Only bypass when the history is clearly artificial: all volumes are
-        # identical (zero variance), which indicates test stubs or corruption.
-        # Real trading always has some lot-size variation.
-        if med <= 0.15 and proposed_volume >= 0.50:
-            unique_volumes = set(recent_volumes)
-            if len(unique_volumes) == 1 and len(recent_volumes) >= self.window_size:
-                log.warning(
-                    "LotSizeConsistencyChecker: Detected artificial history — "
-                    "%d identical lots of %.2f (test data corruption). "
-                    "Allowing proposed_volume=%.2f. Recent history: %s",
-                    len(recent_volumes),
-                    med,
-                    proposed_volume,
-                    recent_volumes,
-                )
-                return RiskCheckResult(
-                    name="lot_consistency",
-                    passed=True,
-                    detail=f"median={med:.2f} appears to be test data corruption "
-                    f"({len(recent_volumes)} identical lots) — allowing {proposed_volume:.2f}",
-                )
-
+        # DEFENSIVE: Check for suspected test/demo data contamination in production.
+        # Only bypass in extremely suspicious cases: tiny median (≤0.15) with
+        # all identical values AND extreme ratio (≥10x), which typically indicates
+        # demo/test lot sizes (0.01, 0.10) contaminating production trading of
+        # standard lots (1.00+). Real trading has natural lot size variation.
         ratio = proposed_volume / med
+        if med <= 0.15 and ratio >= 10.0 and len(set(recent_volumes)) == 1 and len(recent_volumes) >= self.window_size:
+            log.warning(
+                "LotSizeConsistencyChecker: Detected suspected demo/test data contamination — "
+                "%d identical lots of %.2f blocking production %.2f lot (%.1fx ratio). "
+                "Allowing trade but investigate lot history. Recent: %s",
+                len(recent_volumes),
+                med,
+                proposed_volume,
+                ratio,
+                recent_volumes,
+            )
+            return RiskCheckResult(
+                name="lot_consistency",
+                passed=True,
+                detail=(
+                    f"suspected demo data: median={med:.2f} "
+                    f"({len(recent_volumes)} identical) vs {proposed_volume:.2f} "
+                    f"(ratio={ratio:.1f}x) — allowing with warning"
+                ),
+            )
+
+        # ratio already calculated above for defensive logic
 
         # Add detailed logging for debugging
         log.info(
