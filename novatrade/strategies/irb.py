@@ -159,9 +159,13 @@ class IRBStrategy(BaseStrategy):
                 return None
 
         # --- Compute entry/stop levels ---
+        # Spread cushion: widen SL by the configured spread buffer so the
+        # broker's bid-side (long) / ask-side (short) trigger doesn't clip the
+        # stop inside the intended wick-plus-buffer distance.
+        spread_cushion = max(0.0, e.sl_spread_buffer_pips) * e.pip_value
         if side == "LONG":
             entry_price = bar.high + e.pip_buffer
-            stop_loss = bar.low - e.pip_buffer
+            stop_loss = bar.low - e.pip_buffer - spread_cushion
             # ATR-adaptive SL floor: widen SL if candle geometry is too tight
             if e.atr_sl_floor_multiplier > 0:
                 min_sl_dist = atr[i] * e.atr_sl_floor_multiplier
@@ -169,7 +173,7 @@ class IRBStrategy(BaseStrategy):
                     stop_loss = entry_price - min_sl_dist
         else:
             entry_price = bar.low - e.pip_buffer
-            stop_loss = bar.high + e.pip_buffer
+            stop_loss = bar.high + e.pip_buffer + spread_cushion
             # ATR-adaptive SL floor: widen SL if candle geometry is too tight
             if e.atr_sl_floor_multiplier > 0:
                 min_sl_dist = atr[i] * e.atr_sl_floor_multiplier
@@ -280,6 +284,7 @@ class IRBStrategy(BaseStrategy):
             },
             "immutable_params": {
                 "pip_buffer": 0.0001,
+                "sl_spread_buffer_pips": 1.0,
             },
             "filters_mandatory": ["irb_geometry", "trend_filter", "adx_filter"],
             "filters_optional": ["mtf_alignment", "overextension_filter"],

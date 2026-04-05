@@ -609,12 +609,16 @@ class IRBBacktester:
         )
 
         # --- Compute order levels ---
+        # Spread cushion: widen SL by the configured spread buffer so the
+        # broker's spread-adjusted trigger doesn't stop the trade out inside
+        # the intended wick-plus-buffer distance.
+        spread_cushion = max(0.0, e.sl_spread_buffer_pips) * e.pip_value
         if side == TradeSide.LONG:
             entry_price = bar.high + e.pip_buffer
-            stop_loss = bar.low - e.pip_buffer
+            stop_loss = bar.low - e.pip_buffer - spread_cushion
         else:
             entry_price = bar.low - e.pip_buffer
-            stop_loss = bar.high + e.pip_buffer
+            stop_loss = bar.high + e.pip_buffer + spread_cushion
 
         # --- Position sizing [A5][U7] ---
         stop_distance_pips = abs(entry_price - stop_loss) / e.pip_value
