@@ -66,6 +66,8 @@ INT_PARAMS = {
     "ema_slope_lookback",
     "max_trades_per_day",
     "cooldown_bars",
+    # stepped trailing stop
+    "trail_cooldown_bars",
 }
 
 

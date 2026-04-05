@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import math
+import random
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -211,6 +212,7 @@ class LiveStrategyEngine:
         self._total_bars: int = 0
         self._equity: float = env.initial_equity
         self._consecutive_losses: int = 0
+        self._last_sl_modification_bar: int | None = None
 
         # Cached indicators (recomputed each H1 bar)
         self._indicators: dict[str, list[float]] = {}
@@ -627,7 +629,7 @@ class LiveStrategyEngine:
     # ------------------------------------------------------------------
 
     def _update_trailing_stop(self, i: int, bar: Candle) -> LiveSignal | None:
-        """Update trailing stop and emit MODIFY_SL if it moves."""
+        """Update trailing stop with stepped threshold, cooldown, and jitter to reduce SL modification frequency."""
         pos = self._position
         if pos is None:
             return None
@@ -636,32 +638,61 @@ class LiveStrategyEngine:
         if i >= len(atr) or math.isnan(atr[i]) or atr[i] <= 0:
             return None
 
+        # Check cooldown period
+        if (
+            self._last_sl_modification_bar is not None
+            and i - self._last_sl_modification_bar < self._env.trail_cooldown_bars
+        ):
+            return None
+
         atr_val = atr[i]
         old_stop = pos.current_stop
 
         if pos.side == "LONG":
             pos.best_close = max(pos.best_close, bar.close)
             new_trail = pos.best_close - self._env.trail_atr_multiplier * atr_val
+
+            # Apply stepped threshold - only update if improvement exceeds step size
             if new_trail > pos.current_stop:
-                pos.current_stop = new_trail
+                step_improvement = new_trail - pos.current_stop
+                if step_improvement >= self._env.trail_step_pips * self._env.pip_value:
+                    pos.current_stop = new_trail
         else:
             pos.best_close = min(pos.best_close, bar.close)
             new_trail = pos.best_close + self._env.trail_atr_multiplier * atr_val
+
+            # Apply stepped threshold - only update if improvement exceeds step size
             if new_trail < pos.current_stop:
-                pos.current_stop = new_trail
+                step_improvement = pos.current_stop - new_trail
+                if step_improvement >= self._env.trail_step_pips * self._env.pip_value:
+                    pos.current_stop = new_trail
 
         if pos.current_stop != old_stop:
+            self._last_sl_modification_bar = i
+
             log.debug(
-                "Trailing stop moved: %.5f → %.5f",
+                "Trailing stop moved: %.5f → %.5f (step=%.1f pips, bars_since_last=%s)",
                 old_stop,
                 pos.current_stop,
+                abs(pos.current_stop - old_stop) / self._env.pip_value,
+                i - (self._last_sl_modification_bar or i) if self._last_sl_modification_bar else "first",
             )
+
+            # Add timing jitter (±5-15s) to avoid FTMO pattern detection
+            jitter_seconds = random.uniform(5.0, 15.0)  # noqa: S311
+
             return LiveSignal(
                 signal_type=SignalType.MODIFY_SL,
                 side=pos.side,
                 symbol=self._config.symbol,
                 new_stop=pos.current_stop,
-                metadata={"old_stop": old_stop, "atr": atr_val},
+                metadata={
+                    "old_stop": old_stop,
+                    "atr": atr_val,
+                    "step_pips": abs(pos.current_stop - old_stop) / self._env.pip_value,
+                    "jitter_seconds": jitter_seconds,
+                    "cooldown_bars": self._env.trail_cooldown_bars,
+                },
             )
 
         return None

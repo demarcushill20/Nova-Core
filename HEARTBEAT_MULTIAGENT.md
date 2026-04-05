@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-04-05T18:36:12Z
+Generated: 2026-04-05T21:08:13Z
 
 ## Overall: HEALTHY
 
@@ -8,7 +8,7 @@ Generated: 2026-04-05T18:36:12Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 2 |
+| Completed workflows | 3 |
 | Failed workflows | 4 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
@@ -21,7 +21,7 @@ Generated: 2026-04-05T18:36:12Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 970 |
+| Contract successes | 978 |
 | Contract failures | 51 |
 | Contract failure rate | 5.0% |
 | Budget exhaustions | 0 |
@@ -38,11 +38,12 @@ Generated: 2026-04-05T18:36:12Z
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
 | 0703_Can_you_investigate_theses_issues__Nova___Apr_5__2026_at_4_53_AM_ | ? | completed | - |
+| 0706_repair_performance_stability_regression | ? | failed | - |
 | shift_20260404_13_novatrade_research | ? | failed | - |
 | shift_20260404_14_novatrade_monitoring | ? | failed | - |
 | shift_20260405_1_system_health | ? | failed | verifier_rejected |
 | shift_20260405_4_deep_research | ? | completed | - |
-| shift_gen_pm_20260404 | ? | failed | verifier_rejected |
+| shift_gen_pm_20260405 | ? | completed | - |
 
 ## Health Findings
 

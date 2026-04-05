@@ -144,7 +144,37 @@ class PerformanceCollector(BaseCollector):
             by_ts[key] = entry
         result = list(by_ts.values())
         result.sort(key=lambda e: cls._normalize_ts(e.get("timestamp", "")))
-        return cls._filter_anomalies(result)
+        filtered = cls._filter_anomalies(result)
+        return cls._resample_hourly(filtered)
+
+    @classmethod
+    def _resample_hourly(cls, sorted_entries: list[dict]) -> list[dict]:
+        """Resample to hourly granularity, keeping the last entry per hour.
+
+        Sub-hour equity oscillations (e.g. balance vs equity-with-unrealized-PnL)
+        create artificial negative returns that degrade Sharpe, win-rate, and
+        profit-factor metrics.  Resampling to hourly intervals smooths this noise
+        while preserving the meaningful equity curve shape.
+
+        Entries without timestamps are kept as-is (no grouping possible).
+        """
+        if len(sorted_entries) <= 1:
+            return sorted_entries
+        by_hour: dict[str, dict] = {}
+        no_ts: list[dict] = []
+        for entry in sorted_entries:
+            raw_ts = entry.get("timestamp", "")
+            if not raw_ts:
+                no_ts.append(entry)
+                continue
+            # Truncate to hour: "2026-04-05T18:49:50+00:00" → "2026-04-05T18"
+            norm = cls._normalize_ts(raw_ts)
+            hour_key = norm[:13] if len(norm) >= 13 else norm
+            by_hour[hour_key] = entry  # last entry per hour wins
+        result = list(by_hour.values())
+        result.sort(key=lambda e: cls._normalize_ts(e.get("timestamp", "")))
+        # Timestamp-less entries go first (legacy/test data), preserving order
+        return no_ts + result
 
     @classmethod
     def _filter_anomalies(cls, sorted_entries: list[dict]) -> list[dict]:
@@ -236,6 +266,10 @@ class PerformanceCollector(BaseCollector):
 
         return score, round(dd_pct, 2)
 
+    # Minimum absolute return to count as a real trade movement.
+    # Returns below this are flat-market noise (weekends, holidays).
+    _MIN_RETURN_THRESHOLD = 1e-8
+
     def _compute_win_rate_stability(self, equity_data: list[dict]) -> tuple[float, float]:
         """Compute win rate variance across rolling windows."""
         if len(equity_data) < 2:
@@ -244,7 +278,10 @@ class PerformanceCollector(BaseCollector):
         values = [e.get("equity", e.get("value", 0)) for e in equity_data]
         returns = []
         for i in range(1, len(values)):
-            returns.append(values[i] - values[i - 1])
+            r = values[i] - values[i - 1]
+            # Skip near-zero returns (flat market / weekend snapshots)
+            if abs(r) > self._MIN_RETURN_THRESHOLD:
+                returns.append(r)
 
         if len(returns) < 4:
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
@@ -277,6 +314,10 @@ class PerformanceCollector(BaseCollector):
 
         return score, round(variance, 4)
 
+    # Cap PF trend comparison to recent data — old backtest data mixed with
+    # live data creates meaningless first-half / second-half comparisons.
+    _PF_TREND_MAX_RETURNS = 80
+
     def _compute_profit_factor_trend(self, equity_data: list[dict]) -> tuple[float, float]:
         """Is profit factor improving, stable, or declining?"""
         if len(equity_data) < 4:
@@ -290,6 +331,10 @@ class PerformanceCollector(BaseCollector):
         if len(returns) < 4:
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
+        # Focus on recent data to avoid stale backtest contamination
+        if len(returns) > self._PF_TREND_MAX_RETURNS:
+            returns = returns[-self._PF_TREND_MAX_RETURNS :]
+
         # Split into two halves and compute profit factor for each
         mid = len(returns) // 2
         pf_first = self._profit_factor(returns[:mid])
@@ -300,18 +345,20 @@ class PerformanceCollector(BaseCollector):
 
         if pf_second > pf_first * 1.1:
             score = 80.0  # improving
+        elif pf_second < pf_first * 0.75:
+            score = 30.0  # strongly declining
         elif pf_second < pf_first * 0.9:
-            score = 30.0  # declining
+            score = 45.0  # mildly declining
         else:
             score = 60.0  # stable
 
         return score, round(pf_second, 3)
 
-    @staticmethod
-    def _profit_factor(returns: list[float]) -> float | None:
-        """Gross profit / gross loss."""
-        gross_profit = sum(r for r in returns if r > 0)
-        gross_loss = abs(sum(r for r in returns if r < 0))
+    @classmethod
+    def _profit_factor(cls, returns: list[float]) -> float | None:
+        """Gross profit / gross loss (ignoring near-zero flat-market returns)."""
+        gross_profit = sum(r for r in returns if r > cls._MIN_RETURN_THRESHOLD)
+        gross_loss = abs(sum(r for r in returns if r < -cls._MIN_RETURN_THRESHOLD))
         if gross_loss == 0:
             return None
         return gross_profit / gross_loss

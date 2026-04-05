@@ -67,6 +67,8 @@ class StrategyConfig(BaseModel):
     adx_threshold: float = Field(default=20.0, ge=0.0, le=30.0)
     overextension_threshold: float = Field(default=2.0, ge=1.5, le=3.0)
     trail_atr_multiplier: float = Field(default=1.5, ge=1.0, le=3.0)
+    trail_step_pips: float = Field(default=10.0, ge=5.0, le=20.0)
+    trail_cooldown_bars: int = Field(default=4, ge=1, le=10)
     trail_ema_period: int = Field(default=0, ge=0, le=100)
     ema_confirm_bars: int = Field(default=0, ge=0, le=10)
     use_ema_stack_filter: bool = Field(default=False)
@@ -130,6 +132,8 @@ class StrategyConfig(BaseModel):
         "adx_threshold": ParameterBounds(min_val=15.0, max_val=30.0, step=0.5),
         "overextension_threshold": ParameterBounds(min_val=1.5, max_val=3.0, step=0.1),
         "trail_atr_multiplier": ParameterBounds(min_val=1.0, max_val=3.0, step=0.1),
+        "trail_step_pips": ParameterBounds(min_val=5.0, max_val=20.0, step=1.0),
+        "trail_cooldown_bars": ParameterBounds(min_val=1, max_val=10, step=1),
         "trail_ema_period": ParameterBounds(min_val=10, max_val=60, step=1),
         "ema_confirm_bars": ParameterBounds(min_val=1, max_val=5, step=1),
         "trigger_window_bars": ParameterBounds(min_val=10, max_val=40, step=1),
@@ -166,6 +170,8 @@ class StrategyConfig(BaseModel):
         "adx_threshold": ParameterBounds(min_val=15.0, max_val=30.0, step=0.5),
         "overextension_threshold": ParameterBounds(min_val=1.5, max_val=3.0, step=0.1),
         "trail_atr_multiplier": ParameterBounds(min_val=1.0, max_val=3.0, step=0.1),
+        "trail_step_pips": ParameterBounds(min_val=5.0, max_val=20.0, step=1.0),
+        "trail_cooldown_bars": ParameterBounds(min_val=1, max_val=10, step=1),
         "trail_ema_period": ParameterBounds(min_val=10, max_val=60, step=1),
         "ema_confirm_bars": ParameterBounds(min_val=1, max_val=5, step=1),
         # Bar-based params: ~6x scaling from H1 (half the calendar-time range
@@ -199,6 +205,8 @@ class StrategyConfig(BaseModel):
         "adx_threshold",
         "overextension_threshold",
         "trail_atr_multiplier",
+        "trail_step_pips",
+        "trail_cooldown_bars",
         "trail_ema_period",
         "ema_confirm_bars",
         "trigger_window_bars",
@@ -240,6 +248,8 @@ class StrategyConfig(BaseModel):
             "adx_threshold": self.adx_threshold,
             "overextension_threshold": self.overextension_threshold,
             "trail_atr_multiplier": self.trail_atr_multiplier,
+            "trail_step_pips": self.trail_step_pips,
+            "trail_cooldown_bars": self.trail_cooldown_bars,
             "trail_ema_period": self.trail_ema_period,
             "ema_confirm_bars": self.ema_confirm_bars,
             "use_ema_stack_filter": self.use_ema_stack_filter,

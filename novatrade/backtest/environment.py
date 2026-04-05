@@ -171,6 +171,8 @@ class BacktestEnvironment:
     trigger_window_bars: int = 20
     time_stop_bars: int = 40
     trail_atr_multiplier: float = 1.5
+    trail_step_pips: float = 10.0  # minimum distance to move before updating SL
+    trail_cooldown_bars: int = 4  # minimum bars between SL modifications
     trail_ema_period: int = 0  # 0 = use ATR trailing; >0 = use EMA trailing
     ema_confirm_bars: int = 0  # 0 = disabled; >0 = N bars closing above/below EMA fast
     use_ema_stack_filter: bool = False  # EMA 10 > 20 > 50 ordering
@@ -178,7 +180,7 @@ class BacktestEnvironment:
     pip_buffer: float = 0.0001
 
     # --- Enhanced exit parameters (v4) ---
-    breakeven_r: float = 0.0  # 0 = disabled; >0 = move SL to breakeven after N*R profit
+    breakeven_r: float = 1.0  # 0 = disabled; >0 = move SL to breakeven after N*R profit
     trail_delay_bars: int = 0  # 0 = trail immediately; >0 = don't trail for first N bars
 
     # --- Enhanced filter parameters (v4) ---
@@ -203,7 +205,7 @@ class BacktestEnvironment:
     min_signal_atr_mult: float = 0.0  # v5: min signal range / ATR (0=disabled)
 
     # --- ATR-adaptive stop loss (Quick Win) ---
-    atr_sl_floor_multiplier: float = 0.5  # min SL distance = ATR * this multiplier (0=disabled)
+    atr_sl_floor_multiplier: float = 1.0  # min SL distance = ATR * this multiplier (0=disabled)
 
     # --- Spread-aware stop loss cushion ---
     # Extra SL distance (in pips) added beyond the candle wick + pip_buffer so the
