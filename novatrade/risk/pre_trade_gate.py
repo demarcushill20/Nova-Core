@@ -51,7 +51,7 @@ from novatrade.risk.ftmo_compliance import (  # noqa: E402
     WeekendAutoCloser,
     WeeklyLossTracker,
 )
-from novatrade.risk.position_sizer import PositionSizer  # noqa: E402
+from novatrade.risk.position_sizer import DrawdownScaler, PositionSizer  # noqa: E402
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
@@ -128,6 +128,12 @@ class PreTradeGate:
             max_lot=self._risk.max_volume_per_trade,
             micro_variation_enabled=self._risk.lot_micro_variation_enabled,
             micro_variation_step=self._risk.lot_micro_variation_step,
+        )
+        # Drawdown-adaptive risk scaling (P0 priority from research)
+        self._drawdown_scaler = DrawdownScaler(
+            hysteresis=True,
+            total_dd_enabled=True,
+            loss_recovery_mode="instant",
         )
         # Attempt to restore persisted state from prior session
         self._lot_checker.load_state()
@@ -529,7 +535,11 @@ class PreTradeGate:
         )
 
     def _check_volume_sizing(self, request: OrderRequest, account: AccountState) -> RiskCheckResult:
-        """Cross-check requested volume against the 1% equity risk model.
+        """Cross-check requested volume against drawdown-adaptive risk model.
+
+        Uses 1% equity base risk with dynamic scaling based on drawdown proximity.
+        As daily/total drawdown approaches FTMO limits, position sizes are automatically
+        reduced to preserve the account (P0 priority from funded account research).
 
         Requires both entry price and stop-loss to be set.  If either is
         missing, the check passes (informational only) because not all
@@ -550,11 +560,53 @@ class PreTradeGate:
             )
 
         try:
-            calculated = self._sizer.calculate(
+            # Calculate base volume using standard 1% equity risk
+            base_calculated = self._sizer.calculate(
                 equity=account.equity,
                 entry=request.price,
                 stop=request.stop_loss,
             )
+
+            # Apply drawdown-adaptive scaling (P0 critical priority)
+            # Estimate daily drawdown from account balance vs configured limits
+            # This is a simplified approach - full implementation would get actual DD state
+            daily_dd_limit_pct = self._risk.max_daily_drawdown_pct  # e.g., 5.0
+            total_dd_limit_pct = self._risk.max_total_drawdown_pct  # e.g., 10.0
+
+            # Estimate drawdown usage as percentage of limits
+            # For FTMO $100K account, assume $100K starting balance
+            estimated_initial_equity = 100000.0  # FTMO standard
+            if hasattr(account, "initial_equity") and account.initial_equity > 0:
+                estimated_initial_equity = account.initial_equity
+
+            # Estimate daily start equity (simplified - same as current for now)
+            estimated_daily_start = estimated_initial_equity
+            if hasattr(account, "daily_start_equity") and account.daily_start_equity > 0:
+                estimated_daily_start = account.daily_start_equity
+
+            # Calculate drawdown usage percentages
+            daily_dd_used = max(0.0, (estimated_daily_start - account.equity) / estimated_daily_start * 100)
+            total_dd_used = max(0.0, (estimated_initial_equity - account.equity) / estimated_initial_equity * 100)
+
+            daily_dd_usage_pct = min(1.0, daily_dd_used / daily_dd_limit_pct) if daily_dd_limit_pct > 0 else 0.0
+            total_dd_usage_pct = min(1.0, total_dd_used / total_dd_limit_pct) if total_dd_limit_pct > 0 else 0.0
+
+            # Apply drawdown scaling to reduce position size as we approach limits
+            calculated = self._drawdown_scaler.scale_volume(
+                base_volume=base_calculated,
+                dd_used_pct=daily_dd_usage_pct,
+                total_dd_used_pct=total_dd_usage_pct,
+                min_lot=self._risk.min_volume_per_trade,
+            )
+
+            log.debug(
+                "Drawdown-adaptive sizing: base=%.2f, scaled=%.2f, daily_dd_usage=%.1f%%, total_dd_usage=%.1f%%",
+                base_calculated,
+                calculated,
+                daily_dd_usage_pct * 100,
+                total_dd_usage_pct * 100,
+            )
+
         except ValueError as exc:
             return RiskCheckResult(
                 name="volume_sizing",
@@ -870,6 +922,47 @@ class PreTradeGate:
                 passed=False,
                 detail=f"gap spread check error — blocked for safety: {exc}",
             )
+
+    # ---------------------------------------------------------------------------
+    # Drawdown-adaptive risk management (P0 priority)
+    # ---------------------------------------------------------------------------
+
+    def record_trade_loss(self) -> None:
+        """Record a losing trade for consecutive loss tracking.
+
+        This updates the internal state of the DrawdownScaler to apply
+        additional position size reduction based on loss streak length.
+        """
+        self._drawdown_scaler.record_loss()
+        log.debug("Recorded trade loss — consecutive losses: %d", self._drawdown_scaler.consecutive_losses)
+
+    def record_trade_win(self) -> None:
+        """Record a winning trade for consecutive loss tracking.
+
+        Resets or reduces the consecutive loss count depending on the
+        configured recovery mode (instant or gradual).
+        """
+        self._drawdown_scaler.record_win()
+        log.debug("Recorded trade win — consecutive losses: %d", self._drawdown_scaler.consecutive_losses)
+
+    def reset_daily_risk_scaling(self) -> None:
+        """Reset drawdown scaling state for a new trading day.
+
+        Should be called at the start of each trading day to reset
+        the daily drawdown tracking and loss streak state.
+        """
+        self._drawdown_scaler.reset()
+        log.info("Reset daily drawdown scaling state")
+
+    @property
+    def consecutive_losses(self) -> int:
+        """Current consecutive loss count for monitoring."""
+        return self._drawdown_scaler.consecutive_losses
+
+    @property
+    def current_drawdown_scale(self) -> float:
+        """Current drawdown scaling factor (1.0 = full size, 0.25 = survival mode)."""
+        return self._drawdown_scaler.current_dd_scale
 
 
 # ---------------------------------------------------------------------------
