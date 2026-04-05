@@ -356,6 +356,33 @@ class TestIRBStrategy:
                 atr_val = indicators["atr"][sig.bar_index]
                 assert sl_dist >= 0.5 * atr_val - 1e-10, f"SL distance {sl_dist} < ATR floor {0.5 * atr_val}"
 
+    def test_sl_spread_buffer_widens_stop_distance(self) -> None:
+        """Spread-buffer cushion widens SL distance by the configured pips."""
+        candles = _make_trending_candles(200, direction="up")
+        # Disable the ATR floor so the spread cushion is the only thing changing.
+        env_no_buf = BacktestEnvironment(
+            atr_sl_floor_multiplier=0.0, sl_spread_buffer_pips=0.0
+        )
+        env_with_buf = BacktestEnvironment(
+            atr_sl_floor_multiplier=0.0, sl_spread_buffer_pips=1.0
+        )
+        s_no = IRBStrategy(env=env_no_buf)
+        s_buf = IRBStrategy(env=env_with_buf)
+        ind = s_no.compute_indicators(candles)
+        sigs_no = {sig.bar_index: sig for sig in s_no.generate_signals(candles, ind)}
+        sigs_buf = {sig.bar_index: sig for sig in s_buf.generate_signals(candles, ind)}
+        common = set(sigs_no) & set(sigs_buf)
+        assert common, "expected at least one shared signal across configs"
+        for idx in common:
+            a = sigs_no[idx]
+            b = sigs_buf[idx]
+            dist_a = abs(a.entry_price - a.stop_loss)
+            dist_b = abs(b.entry_price - b.stop_loss)
+            # Buffered SL should be exactly 1 pip (0.0001) wider.
+            assert abs((dist_b - dist_a) - 0.0001) < 1e-10, (
+                f"expected +1 pip widening, got dist_a={dist_a} dist_b={dist_b}"
+            )
+
     def test_atr_sl_floor_disabled_when_zero(self) -> None:
         """With atr_sl_floor_multiplier=0, candle geometry is used as-is."""
         candles = _make_trending_candles(200, direction="up")

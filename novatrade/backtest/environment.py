@@ -205,6 +205,12 @@ class BacktestEnvironment:
     # --- ATR-adaptive stop loss (Quick Win) ---
     atr_sl_floor_multiplier: float = 0.5  # min SL distance = ATR * this multiplier (0=disabled)
 
+    # --- Spread-aware stop loss cushion ---
+    # Extra SL distance (in pips) added beyond the candle wick + pip_buffer so the
+    # broker's spread-adjusted trigger (bid for longs, ask for shorts) doesn't
+    # stop the trade out prematurely. 0 = disabled (legacy behaviour).
+    sl_spread_buffer_pips: float = 1.0
+
     # --- Measurement vs inference ---
     directly_measured: tuple[str, ...] = (
         "Pine syntax/compile readiness (Phase 3 static analysis, 45 checks)",
