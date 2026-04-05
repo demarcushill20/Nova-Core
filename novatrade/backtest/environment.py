@@ -174,7 +174,7 @@ class BacktestEnvironment:
     trail_step_pips: float = 10.0  # minimum distance to move before updating SL
     trail_cooldown_bars: int = 4  # minimum bars between SL modifications
     trail_ema_period: int = 0  # 0 = use ATR trailing; >0 = use EMA trailing
-    ema_confirm_bars: int = 0  # 0 = disabled; >0 = N bars closing above/below EMA fast
+    ema_confirm_bars: int = 2  # 0 = disabled; >0 = N bars closing above/below EMA fast
     use_ema_stack_filter: bool = False  # EMA 10 > 20 > 50 ordering
     warmup_bars: int = 34
     pip_buffer: float = 0.0001

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from novatrade.autonomy.collectors.base import BaseCollector
@@ -354,6 +354,13 @@ class PipelineCollector(BaseCollector):
                             else:
                                 score += 10.0  # high error rate
                             checks += 1
+                        elif self._is_forex_market_closed():
+                            # ticks=0 expected during market closure
+                            if errors == 0:
+                                score += 45.0  # healthy idle — no errors
+                            else:
+                                score += 25.0  # idle but has errors
+                            checks += 1
                         else:
                             score += 20.0  # file fresh → service running
                             checks += 1
@@ -405,3 +412,20 @@ class PipelineCollector(BaseCollector):
         elif age_h < 6:
             score = 25.0
         return score, round(age_h, 2)
+
+    @staticmethod
+    def _is_forex_market_closed() -> bool:
+        """Check if forex markets are currently closed.
+
+        Forex markets close Friday ~22:00 UTC and reopen Sunday ~22:00 UTC.
+        Returns True during the weekend closure window.
+        """
+        now = datetime.now(timezone.utc)
+        weekday = now.weekday()  # 0=Mon ... 6=Sun
+        hour = now.hour
+
+        if weekday == 5:  # Saturday — always closed
+            return True
+        if weekday == 6 and hour < 22:  # Sunday before 22:00 UTC
+            return True
+        return weekday == 4 and hour >= 22  # Friday after 22:00 UTC
