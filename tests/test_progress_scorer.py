@@ -2272,8 +2272,14 @@ def test_compact_entry_strips_sub_metrics():
         "generated_at": "2026-04-02T04:00:00+00:00",
         "overall_score": 91.1,
         "dimensions": {
-            "system_health": {"score": 100.0},
-            "risk_engine": {"score": 91.0},
+            "system_health": {
+                "score": 100.0,
+                "subs": {"service_status": 100.0, "orphaned_tasks": 100.0},
+            },
+            "risk_engine": {
+                "score": 91.0,
+                "subs": {"drawdown": 95.0},
+            },
         },
     }
     # Verify stripped fields are absent
@@ -2281,7 +2287,7 @@ def test_compact_entry_strips_sub_metrics():
     assert "warnings" not in compact
     assert "overall_alert" not in compact
     for dim in compact["dimensions"].values():
-        assert "sub_metrics" not in dim
+        assert "sub_metrics" not in dim  # full objects stripped; "subs" replaces them
         assert "confidence" not in dim
         assert "alert_level" not in dim
 
@@ -2323,8 +2329,8 @@ def test_compact_entry_size_reduction():
     compact = ProgressScorer._compact_entry(full_entry)
     full_size = len(json.dumps(full_entry))
     compact_size = len(json.dumps(compact))
-    # Compact should be at least 80% smaller
-    assert compact_size < full_size * 0.2, f"Compact {compact_size} not <20% of full {full_size}"
+    # Compact should be at least 65% smaller (subs dict adds ~10% vs full sub_metrics)
+    assert compact_size < full_size * 0.35, f"Compact {compact_size} not <35% of full {full_size}"
 
 
 @pytest.mark.asyncio
@@ -2358,8 +2364,9 @@ async def test_history_written_compact(tmp_path):
     # Should have only compact fields
     assert set(entry.keys()) == {"generated_at", "overall_score", "dimensions"}
     for dim_data in entry["dimensions"].values():
-        assert set(dim_data.keys()) == {"score"}
-        assert "sub_metrics" not in dim_data
+        assert "score" in dim_data
+        assert "subs" in dim_data  # flattened sub_metric values preserved
+        assert "sub_metrics" not in dim_data  # full objects stripped
         assert "warnings" not in dim_data
         assert "confidence" not in dim_data
 

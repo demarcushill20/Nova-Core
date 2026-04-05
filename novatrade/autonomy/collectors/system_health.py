@@ -227,6 +227,8 @@ class SystemHealthCollector(BaseCollector):
         # 10 pts per orphan (was 20) — avoids zeroing the metric on transient
         # task backlogs while still signalling when cleanup is needed.
         score = max(0.0, 100.0 - orphans * 10.0)
+        if orphans > 0:
+            self.log.info("orphaned_tasks: %d orphan(s), score=%.0f", orphans, score)
         return score, float(orphans)
 
     def _check_uptime(self) -> tuple[float, float]:
@@ -341,4 +343,6 @@ class SystemHealthCollector(BaseCollector):
                 continue
 
         score = max(0.0, 100.0 - errors * 5.0)
+        if errors > 0:
+            self.log.info("error_rate: %d ERROR line(s) in LOGS/, score=%.0f", errors, score)
         return score, float(errors)

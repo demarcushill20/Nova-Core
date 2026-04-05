@@ -257,9 +257,10 @@ class ProgressScorer:
     def _compact_entry(entry: dict) -> dict:
         """Extract only the fields needed for trend analysis and cache fallback.
 
-        History entries only need: generated_at, overall_score, and per-dimension
-        score.  Stripping sub_metrics, warnings, confidence, alert_level, trends
-        reduces per-entry size from ~4KB to ~250 bytes (~96% reduction).
+        History entries keep: generated_at, overall_score, per-dimension score,
+        and flattened sub_metric values (for post-hoc regression diagnosis).
+        Stripping full SubMetric objects, warnings, confidence, alert_level,
+        and trends still achieves ~90% size reduction vs uncompacted entries.
         """
         compact: dict = {
             "generated_at": entry.get("generated_at", ""),
@@ -267,7 +268,17 @@ class ProgressScorer:
         }
         dims = entry.get("dimensions", {})
         if dims:
-            compact["dimensions"] = {name: {"score": d.get("score", 0.0)} for name, d in dims.items()}
+            compact_dims: dict = {}
+            for name, d in dims.items():
+                dim_entry: dict = {"score": d.get("score", 0.0)}
+                # Preserve sub_metric values as {name: value} for diagnosability
+                subs = d.get("sub_metrics")
+                if subs:
+                    dim_entry["subs"] = {
+                        s["name"]: s.get("value", 0.0) for s in subs if isinstance(s, dict) and "name" in s
+                    }
+                compact_dims[name] = dim_entry
+            compact["dimensions"] = compact_dims
         return compact
 
     async def _append_history(self, report: ProgressReport) -> None:
