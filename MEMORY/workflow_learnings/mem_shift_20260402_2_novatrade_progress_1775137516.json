@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260402_2_novatrade_progress_1775137516",
+  "workflow_id": "shift_20260402_2_novatrade_progress",
+  "task_summary": "Fixed critical NovaTrade monitoring degradation - improved readiness from 90/100 to 100/100 by resolving stale risk state",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed critical NovaTrade monitoring degradation - improved readiness from 90/100 to 100/100 by resolving stale risk state"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260402_2_novatrade_progress"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed critical NovaTrade monitoring degradation - improved readiness from 90/100 to 100/100 by resolving stale risk state",
+  "created_at": "2026-04-02T13:45:16Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260402_2_novatrade_progress_1775138738"
+}

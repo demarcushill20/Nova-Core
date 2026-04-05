@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-04-02T11:33:46Z
+Generated: 2026-04-05T14:55:13Z
 
 ## Overall: HEALTHY
 
@@ -8,8 +8,8 @@ Generated: 2026-04-02T11:33:46Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 12 |
-| Failed workflows | 1 |
+| Completed workflows | 0 |
+| Failed workflows | 4 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
 | Completed delegations | 0 |
@@ -21,9 +21,9 @@ Generated: 2026-04-02T11:33:46Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 913 |
+| Contract successes | 950 |
 | Contract failures | 50 |
-| Contract failure rate | 5.2% |
+| Contract failure rate | 5.0% |
 | Budget exhaustions | 0 |
 | Policy violations | 0 |
 | Orphaned agents | 0 |
@@ -37,19 +37,10 @@ Generated: 2026-04-02T11:33:46Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| 0667_repair_performance_stability_regression | ? | completed | - |
-| 0672_repair_risk_engine_regression | ? | completed | - |
-| 0673_repair_system_health_regression | ? | completed | - |
-| shift_20260401_12_novatrade_testing | ? | completed | - |
-| shift_20260401_13_novatrade_research | ? | completed | - |
-| shift_20260401_14_novatrade_monitoring | ? | completed | - |
-| shift_20260401_1_system_health | ? | failed | verifier_rejected |
-| shift_20260401_4_deep_research | ? | completed | - |
-| shift_20260401_6_testing_quality | ? | completed | - |
-| shift_20260401_7_memory_hygiene | ? | completed | - |
-| shift_20260401_9_novatrade_status | ? | completed | - |
-| shift_gen_am_20260402 | ? | completed | - |
-| shift_gen_pm_20260401 | ? | completed | - |
+| shift_20260404_13_novatrade_research | ? | failed | - |
+| shift_20260404_14_novatrade_monitoring | ? | failed | - |
+| shift_20260405_1_system_health | ? | failed | verifier_rejected |
+| shift_gen_pm_20260404 | ? | failed | verifier_rejected |
 
 ## Health Findings
 

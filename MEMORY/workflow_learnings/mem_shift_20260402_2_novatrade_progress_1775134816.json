@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260402_2_novatrade_progress_1775134816",
+  "workflow_id": "shift_20260402_2_novatrade_progress",
+  "task_summary": "Identified critical lot consistency execution gap - empty trade history causing improper median calculation and 1.00 lot rejections",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Identified critical lot consistency execution gap - empty trade history causing improper median calculation and 1.00 lot rejections"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260402_2_novatrade_progress"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Identified critical lot consistency execution gap - empty trade history causing improper median calculation and 1.00 lot rejections",
+  "created_at": "2026-04-02T13:00:16Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260402_2_novatrade_progress_1775138738"
+}
