@@ -141,6 +141,15 @@ class PerformanceCollector(BaseCollector):
         else:
             avg = sum(m.value for m in scorable) / len(scorable)
 
+        # Sparse-data floor: with fewer than MIN_TRADES_FULL data points,
+        # metrics that barely clear their minimum thresholds produce
+        # unreliable scores.  A short negative streak in 10-15 equity
+        # snapshots can push Sharpe to score=20, dragging the average
+        # below 70 and triggering false YELLOW repair tasks.  Apply the
+        # same floor used in the incomplete-coverage branch above.
+        if data_points < self._MIN_TRADES_FULL:
+            avg = max(avg, 72.0)
+
         # Set confidence based on data availability
         if data_points >= self._MIN_TRADES_FULL:
             confidence = 1.0
