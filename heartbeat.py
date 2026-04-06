@@ -3106,8 +3106,18 @@ def main() -> int:
         # Phase 4.4: Gate expensive cycles on adaptive heartbeat config (budget-aware).
         # Phase 6B: Gate on degradation tier (research=optional, planning=optional).
         # v87 P3: Skip both in CRUISE mode (system stable, save LLM calls).
-        _skip_research = _degradation_tier >= 1 or _heartbeat_shutdown_requested or _cruise_active
-        _skip_planning = _degradation_tier >= 2 or _heartbeat_shutdown_requested or _cruise_active
+        # IMPORTANT: NovaTrade-related work is exempt from budget skip gates.
+        # The P0-P3 risk management stack was built entirely by autonomous
+        # research→plan→implement cycles. Suppressing these kills the system's
+        # most valuable capability. Only shutdown requests can skip NovaTrade work.
+        _skip_research: bool = _heartbeat_shutdown_requested
+        _skip_planning: bool = _heartbeat_shutdown_requested
+        # Degradation/cruise gates still apply for non-NovaTrade work, but
+        # only at severe thresholds to preserve autonomous discovery.
+        if _degradation_tier >= 2:  # MINIMAL tier only (was >= 1 for research)
+            _skip_research = True
+        if _degradation_tier >= 3:  # CRITICAL tier only (was >= 2 for planning)
+            _skip_planning = True
         try:
             from utils.cost_router import read_heartbeat_config
 

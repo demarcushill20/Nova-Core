@@ -99,7 +99,7 @@ CONTEXT_TOOLS = [
 PROFILES: dict[str, list[str] | None] = {
     "heartbeat_agent": CORE_TOOLS,
     "research": CORE_TOOLS + MEMORY_TOOLS + VAULT_TOOLS + SEARCH_TOOLS + CONTEXT_TOOLS,
-    "planning": CORE_TOOLS + MEMORY_TOOLS + VAULT_TOOLS,
+    "planning": CORE_TOOLS + MEMORY_TOOLS + VAULT_TOOLS + SEARCH_TOOLS,
     "code_impl": CORE_TOOLS + MEMORY_TOOLS + GITHUB_TOOLS + CONTEXT_TOOLS,
     "code_review": CORE_TOOLS + MEMORY_TOOLS + GITHUB_TOOLS,
     "simple": CORE_TOOLS,

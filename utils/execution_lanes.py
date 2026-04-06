@@ -178,7 +178,10 @@ def apply_weekly_budget_override(lane: Lane, budget_pct: float) -> Lane:
     Returns:
         The (possibly downgraded) lane.
     """
-    if budget_pct >= 90:
+    # Thresholds raised to preserve autonomous research/planning quality.
+    # Original: 90→LIGHT, 60→MEDIUM. New: 98→LIGHT, 95→MEDIUM.
+    # Autonomous research→plan→implement cycles require Opus + full context.
+    if budget_pct >= 98:
         if lane is not Lane.LIGHT:
             log.info(
                 "Budget override: %.1f%% consumed — downgrading %s → LIGHT",
@@ -187,7 +190,7 @@ def apply_weekly_budget_override(lane: Lane, budget_pct: float) -> Lane:
             )
         return Lane.LIGHT
 
-    if budget_pct >= 60 and lane is Lane.HEAVY:
+    if budget_pct >= 95 and lane is Lane.HEAVY:
         log.info(
             "Budget override: %.1f%% consumed — downgrading HEAVY → MEDIUM",
             budget_pct,

@@ -27,9 +27,12 @@ BUDGETS_DIR = STATE_DIR / "budgets"
 HEARTBEAT_CONFIG_FILE = STATE_DIR / "heartbeat_config.json"
 
 # Budget thresholds (percentage of daily limits)
-BUDGET_WARN_PCT = 75.0
-BUDGET_DOWNGRADE_PCT = 80.0
-BUDGET_CRITICAL_PCT = 90.0
+# Raised from 75/80/90 → 85/95/98 to preserve autonomous research/planning
+# quality. The P0-P3 risk management stack was built entirely by autonomous
+# research→plan→implement cycles; aggressive throttling kills that capability.
+BUDGET_WARN_PCT = 85.0
+BUDGET_DOWNGRADE_PCT = 95.0
+BUDGET_CRITICAL_PCT = 98.0
 
 # Daily cost alert threshold (USD)
 DAILY_COST_ALERT_USD = 20.0

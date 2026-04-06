@@ -111,10 +111,10 @@ class TestRouteTask:
         assert result.model == MODEL_TIERS["opus"]
         assert result.complexity == TaskComplexity.COMPLEX
 
-    @mock.patch("utils.cost_router.get_budget_utilization", return_value=85.0)
+    @mock.patch("utils.cost_router.get_budget_utilization", return_value=96.0)
     @mock.patch("utils.cost_router.get_langfuse_daily_cost", return_value=None)
-    def test_budget_downgrade_at_80pct(self, _lf, _budget):
-        """At 85% budget, normal-priority opus tasks downgrade to sonnet."""
+    def test_budget_downgrade_at_95pct(self, _lf, _budget):
+        """At 96% budget, normal-priority opus tasks downgrade to sonnet."""
         result = route_task(
             "Research the topic thoroughly",
             task_class="research",
@@ -123,10 +123,10 @@ class TestRouteTask:
         assert result.model == MODEL_TIERS["sonnet"]
         assert result.downgraded
 
-    @mock.patch("utils.cost_router.get_budget_utilization", return_value=85.0)
+    @mock.patch("utils.cost_router.get_budget_utilization", return_value=96.0)
     @mock.patch("utils.cost_router.get_langfuse_daily_cost", return_value=None)
-    def test_high_priority_not_downgraded_at_80pct(self, _lf, _budget):
-        """High priority tasks are NOT downgraded at 80% budget."""
+    def test_high_priority_not_downgraded_at_95pct(self, _lf, _budget):
+        """High priority tasks are NOT downgraded at 95% budget."""
         result = route_task(
             "Research the topic thoroughly",
             task_class="research",
@@ -135,10 +135,10 @@ class TestRouteTask:
         assert result.model == MODEL_TIERS["opus"]
         assert not result.downgraded
 
-    @mock.patch("utils.cost_router.get_budget_utilization", return_value=95.0)
+    @mock.patch("utils.cost_router.get_budget_utilization", return_value=99.0)
     @mock.patch("utils.cost_router.get_langfuse_daily_cost", return_value=None)
-    def test_budget_critical_at_90pct(self, _lf, _budget):
-        """At 95% budget, non-critical tasks downgrade to haiku."""
+    def test_budget_critical_at_98pct(self, _lf, _budget):
+        """At 99% budget, non-critical tasks downgrade to haiku."""
         result = route_task(
             "Research the topic",
             task_class="research",
@@ -147,10 +147,10 @@ class TestRouteTask:
         assert result.model == MODEL_TIERS["haiku"]
         assert result.downgraded
 
-    @mock.patch("utils.cost_router.get_budget_utilization", return_value=95.0)
+    @mock.patch("utils.cost_router.get_budget_utilization", return_value=99.0)
     @mock.patch("utils.cost_router.get_langfuse_daily_cost", return_value=None)
     def test_critical_priority_overrides_budget_limit(self, _lf, _budget):
-        """CRITICAL priority always gets opus, even at 95% budget."""
+        """CRITICAL priority always gets opus, even at 99% budget."""
         result = route_task(
             "Research the topic",
             task_class="research",
@@ -188,10 +188,10 @@ class TestRouteTask:
         result = route_task(text, task_class="unknown")
         assert result.estimated_tokens == 100  # 400 chars / 4
 
-    @mock.patch("utils.cost_router.get_budget_utilization", return_value=76.0)
+    @mock.patch("utils.cost_router.get_budget_utilization", return_value=90.0)
     @mock.patch("utils.cost_router.get_langfuse_daily_cost", return_value=None)
     def test_budget_warn_logged_but_no_downgrade(self, _lf, _budget):
-        """At 76% budget, warn is logged but no model change."""
+        """At 90% budget (above 85% warn), warn is logged but no model change."""
         result = route_task(
             "Research the topic thoroughly",
             task_class="research",
@@ -397,18 +397,18 @@ class TestAdaptiveHeartbeat:
         assert config.mode == "active"
         assert config.interval_minutes == 5
 
-    @mock.patch("utils.cost_router.get_budget_utilization", return_value=85.0)
+    @mock.patch("utils.cost_router.get_budget_utilization", return_value=96.0)
     @mock.patch(
         "utils.cost_router.get_cost_summary",
         return_value={
             "daily_cost_usd": 15,
-            "monthly_cost_usd": 80,
-            "monthly_pct": 80,
+            "monthly_cost_usd": 96,
+            "monthly_pct": 96,
             "monthly_cap_usd": 100,
         },
     )
     def test_budget_constrained_skips_cycles(self, _cost, _budget, tmp_path):
-        """Monthly budget > 80% → budget_constrained, skip research/planning."""
+        """Monthly budget > 95% → budget_constrained, skip research/planning."""
         tasks = tmp_path / "TASKS"
         tasks.mkdir()
         (tasks / "0001_test.md").write_text("test task")
@@ -418,7 +418,7 @@ class TestAdaptiveHeartbeat:
         assert config.skip_planning
         assert config.interval_minutes == 30
 
-    @mock.patch("utils.cost_router.get_budget_utilization", return_value=85.0)
+    @mock.patch("utils.cost_router.get_budget_utilization", return_value=96.0)
     @mock.patch(
         "utils.cost_router.get_cost_summary",
         return_value={
@@ -429,7 +429,7 @@ class TestAdaptiveHeartbeat:
         },
     )
     def test_daily_budget_constraint_triggers(self, _cost, _budget, tmp_path):
-        """Daily budget > 80% (but monthly ok) → budget_constrained."""
+        """Daily budget > 95% (but monthly ok) → budget_constrained."""
         tasks = tmp_path / "TASKS"
         tasks.mkdir()
         config = compute_heartbeat_config(tasks_dir=tasks)
