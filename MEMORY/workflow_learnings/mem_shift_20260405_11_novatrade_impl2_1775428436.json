@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Enabled volatility filter for IRB strategy - filters signals during low-volatility periods when ATR < SMA(ATR,50), expected to improve signal quality by 10-20%",
   "created_at": "2026-04-05T22:33:56Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_11_novatrade_impl2_1775432146"
 }

@@ -616,9 +616,19 @@ class IRBBacktester:
         if side == TradeSide.LONG:
             entry_price = bar.high + e.pip_buffer
             stop_loss = bar.low - e.pip_buffer - spread_cushion
+            # ATR-adaptive SL floor: widen SL if candle geometry is too tight
+            if e.atr_sl_floor_multiplier > 0:
+                min_sl_dist = atr_h1[i] * e.atr_sl_floor_multiplier
+                if (entry_price - stop_loss) < min_sl_dist:
+                    stop_loss = entry_price - min_sl_dist
         else:
             entry_price = bar.low - e.pip_buffer
             stop_loss = bar.high + e.pip_buffer + spread_cushion
+            # ATR-adaptive SL floor: widen SL if candle geometry is too tight
+            if e.atr_sl_floor_multiplier > 0:
+                min_sl_dist = atr_h1[i] * e.atr_sl_floor_multiplier
+                if (stop_loss - entry_price) < min_sl_dist:
+                    stop_loss = entry_price + min_sl_dist
 
         # --- Position sizing [A5][U7] ---
         stop_distance_pips = abs(entry_price - stop_loss) / e.pip_value

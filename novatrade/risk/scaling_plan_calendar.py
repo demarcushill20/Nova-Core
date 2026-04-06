@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from dateutil.relativedelta import relativedelta
@@ -35,7 +35,7 @@ class ScalingEvent:
     description: str
     due_date: datetime
     status: str = "pending"  # "pending", "completed", "expired"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(ZoneInfo("UTC")))
 
 
@@ -51,10 +51,10 @@ class ScalingCycle:
     target_profit_pct: float = 10.0
     current_equity: float = 0.0
     peak_equity: float = 0.0
-    scaling_eligible_date: Optional[datetime] = None
-    scaling_submitted_date: Optional[datetime] = None
+    scaling_eligible_date: datetime | None = None
+    scaling_submitted_date: datetime | None = None
     cycle_status: str = "active"  # "active", "scaling_eligible", "scaling_submitted", "completed", "failed"
-    events: List[ScalingEvent] = field(default_factory=list)
+    events: list[ScalingEvent] = field(default_factory=list)
 
     @property
     def current_profit_amount(self) -> float:
@@ -98,14 +98,14 @@ class ScalingPlanConfig:
 
     # Calendar integration
     enable_calendar_events: bool = True
-    reminder_days_before: List[int] = field(default_factory=lambda: [30, 14, 7, 3, 1])
+    reminder_days_before: list[int] = field(default_factory=lambda: [30, 14, 7, 3, 1])
 
     # Automation settings
     auto_submit_scaling: bool = False  # Requires manual approval for now
     notification_enabled: bool = True
 
     # State persistence
-    state_file_path: str = "/tmp/novatrade_scaling_plan_state.json"
+    state_file_path: str = "/tmp/novatrade_scaling_plan_state.json"  # noqa: S108
     auto_save: bool = True
 
 
@@ -123,22 +123,18 @@ class ScalingPlanCalendar:
     - Automated scaling process coordination
     """
 
-    def __init__(self, config: Optional[ScalingPlanConfig] = None):
+    def __init__(self, config: ScalingPlanConfig | None = None):
         """Initialize scaling plan calendar with configuration.
 
         Args:
             config: Scaling plan configuration. Uses defaults if None.
         """
         self.config = config or ScalingPlanConfig()
-        self._current_cycle: Optional[ScalingCycle] = None
+        self._current_cycle: ScalingCycle | None = None
         self._state_loaded = False
         self._load_state()
 
-    def initialize_cycle(
-        self,
-        starting_equity: float,
-        cycle_start_date: Optional[datetime] = None
-    ) -> ScalingCycle:
+    def initialize_cycle(self, starting_equity: float, cycle_start_date: datetime | None = None) -> ScalingCycle:
         """Initialize a new FTMO scaling cycle.
 
         Args:
@@ -171,7 +167,7 @@ class ScalingPlanCalendar:
             target_profit_pct=self.config.target_profit_pct,
             current_equity=starting_equity,
             peak_equity=starting_equity,
-            cycle_status="active"
+            cycle_status="active",
         )
 
         # Generate calendar events for this cycle
@@ -184,8 +180,10 @@ class ScalingPlanCalendar:
         if self.config.auto_save:
             self._save_state()
 
-        log.info(f"Initialized new scaling cycle: {cycle_id} "
-                f"(${starting_equity:,.2f} → ${starting_equity + target_profit_amount:,.2f})")
+        log.info(
+            f"Initialized new scaling cycle: {cycle_id} "
+            f"(${starting_equity:,.2f} → ${starting_equity + target_profit_amount:,.2f})"
+        )
 
         return cycle
 
@@ -205,7 +203,9 @@ class ScalingPlanCalendar:
         self._current_cycle.peak_equity = max(self._current_cycle.peak_equity, current_equity)
 
         # Check for scaling eligibility transition
-        was_eligible = (previous_equity - self._current_cycle.starting_equity) >= self._current_cycle.target_profit_amount
+        was_eligible = (
+            previous_equity - self._current_cycle.starting_equity
+        ) >= self._current_cycle.target_profit_amount
         is_eligible = self._current_cycle.is_scaling_eligible
 
         if is_eligible and not was_eligible:
@@ -219,7 +219,7 @@ class ScalingPlanCalendar:
         if self.config.auto_save:
             self._save_state()
 
-    def get_current_cycle(self) -> Optional[ScalingCycle]:
+    def get_current_cycle(self) -> ScalingCycle | None:
         """Get the current active scaling cycle.
 
         Returns:
@@ -227,7 +227,7 @@ class ScalingPlanCalendar:
         """
         return self._current_cycle
 
-    def get_cycle_status(self) -> Dict[str, Any]:
+    def get_cycle_status(self) -> dict[str, Any]:
         """Get comprehensive status of current scaling cycle.
 
         Returns:
@@ -256,12 +256,14 @@ class ScalingPlanCalendar:
             "is_scaling_eligible": cycle.is_scaling_eligible,
             "scaling_eligible_date": cycle.scaling_eligible_date.isoformat() if cycle.scaling_eligible_date else None,
             "scaling_deadline": cycle.scaling_deadline.isoformat(),
-            "scaling_submitted_date": cycle.scaling_submitted_date.isoformat() if cycle.scaling_submitted_date else None,
+            "scaling_submitted_date": cycle.scaling_submitted_date.isoformat()
+            if cycle.scaling_submitted_date
+            else None,
             "pending_events": len([e for e in cycle.events if e.status == "pending"]),
-            "total_events": len(cycle.events)
+            "total_events": len(cycle.events),
         }
 
-    def get_upcoming_events(self, days_ahead: int = 30) -> List[ScalingEvent]:
+    def get_upcoming_events(self, days_ahead: int = 30) -> list[ScalingEvent]:
         """Get upcoming scaling events within specified timeframe.
 
         Args:
@@ -278,8 +280,7 @@ class ScalingPlanCalendar:
 
         upcoming = []
         for event in self._current_cycle.events:
-            if (event.status == "pending" and
-                now <= event.due_date <= cutoff_date):
+            if event.status == "pending" and now <= event.due_date <= cutoff_date:
                 upcoming.append(event)
 
         # Sort by due date
@@ -309,7 +310,7 @@ class ScalingPlanCalendar:
             description=f"Scaling application submitted for cycle {self._current_cycle.cycle_id}",
             due_date=self._current_cycle.scaling_submitted_date,
             status="completed",
-            metadata={"profit_pct": self._current_cycle.current_profit_pct}
+            metadata={"profit_pct": self._current_cycle.current_profit_pct},
         )
         self._current_cycle.events.append(submission_event)
 
@@ -331,10 +332,14 @@ class ScalingPlanCalendar:
         start_event = ScalingEvent(
             event_id=f"{cycle.cycle_id}_start",
             event_type="cycle_start",
-            title=f"FTMO Scaling Cycle Start",
-            description=f"New FTMO scaling cycle started with ${cycle.starting_equity:,.2f} target: ${cycle.starting_equity + cycle.target_profit_amount:,.2f} (+{cycle.target_profit_pct}%)",
+            title="FTMO Scaling Cycle Start",
+            description=(
+                f"New FTMO scaling cycle started with ${cycle.starting_equity:,.2f} "
+                f"target: ${cycle.starting_equity + cycle.target_profit_amount:,.2f} "
+                f"(+{cycle.target_profit_pct}%)"
+            ),
             due_date=cycle.start_date,
-            status="completed"
+            status="completed",
         )
         events.append(start_event)
 
@@ -350,7 +355,7 @@ class ScalingPlanCalendar:
                     description=f"Scaling submission deadline in {days_before} days. Current profit: TBD",
                     due_date=reminder_date,
                     status="pending",
-                    metadata={"days_before_deadline": days_before}
+                    metadata={"days_before_deadline": days_before},
                 )
                 events.append(reminder_event)
 
@@ -361,7 +366,7 @@ class ScalingPlanCalendar:
             title="FTMO Scaling Submission Deadline",
             description=f"Final deadline to submit scaling application for cycle {cycle.cycle_id}",
             due_date=scaling_deadline,
-            status="pending"
+            status="pending",
         )
         events.append(deadline_event)
 
@@ -372,7 +377,7 @@ class ScalingPlanCalendar:
             title="FTMO Scaling Cycle End",
             description=f"End of FTMO scaling cycle {cycle.cycle_id}",
             due_date=cycle.end_date,
-            status="pending"
+            status="pending",
         )
         events.append(end_event)
 
@@ -395,18 +400,21 @@ class ScalingPlanCalendar:
             event_type="scaling_eligible",
             title="FTMO Scaling Eligible! 🎉",
             description=f"Account reached {self.config.target_profit_pct}% profit target! "
-                       f"Eligible for FTMO scaling. Submit application by {self._current_cycle.scaling_deadline.strftime('%Y-%m-%d')}",
+            f"Eligible for FTMO scaling. Submit application by "
+            f"{self._current_cycle.scaling_deadline.strftime('%Y-%m-%d')}",
             due_date=now,
             status="completed",
             metadata={
                 "profit_pct": self._current_cycle.current_profit_pct,
-                "profit_amount": self._current_cycle.current_profit_amount
-            }
+                "profit_amount": self._current_cycle.current_profit_amount,
+            },
         )
         self._current_cycle.events.append(eligible_event)
 
-        log.info(f"🎉 SCALING ELIGIBLE! Cycle {self._current_cycle.cycle_id} reached "
-                f"{self._current_cycle.current_profit_pct:.2f}% profit")
+        log.info(
+            f"🎉 SCALING ELIGIBLE! Cycle {self._current_cycle.cycle_id} reached "
+            f"{self._current_cycle.current_profit_pct:.2f}% profit"
+        )
 
         # TODO: Trigger notifications (Telegram, email, etc.)
 
@@ -448,8 +456,12 @@ class ScalingPlanCalendar:
                     "target_profit_pct": self._current_cycle.target_profit_pct,
                     "current_equity": self._current_cycle.current_equity,
                     "peak_equity": self._current_cycle.peak_equity,
-                    "scaling_eligible_date": self._current_cycle.scaling_eligible_date.isoformat() if self._current_cycle.scaling_eligible_date else None,
-                    "scaling_submitted_date": self._current_cycle.scaling_submitted_date.isoformat() if self._current_cycle.scaling_submitted_date else None,
+                    "scaling_eligible_date": self._current_cycle.scaling_eligible_date.isoformat()
+                    if self._current_cycle.scaling_eligible_date
+                    else None,
+                    "scaling_submitted_date": self._current_cycle.scaling_submitted_date.isoformat()
+                    if self._current_cycle.scaling_submitted_date
+                    else None,
                     "cycle_status": self._current_cycle.cycle_status,
                     "events": [
                         {
@@ -460,17 +472,17 @@ class ScalingPlanCalendar:
                             "due_date": e.due_date.isoformat(),
                             "status": e.status,
                             "metadata": e.metadata,
-                            "created_at": e.created_at.isoformat()
+                            "created_at": e.created_at.isoformat(),
                         }
                         for e in self._current_cycle.events
-                    ]
+                    ],
                 },
                 "config": {
                     "cycle_length_months": self.config.cycle_length_months,
                     "target_profit_pct": self.config.target_profit_pct,
-                    "timezone": self.config.timezone
+                    "timezone": self.config.timezone,
                 },
-                "saved_at": datetime.now(ZoneInfo("UTC")).isoformat()
+                "saved_at": datetime.now(ZoneInfo("UTC")).isoformat(),
             }
 
             # Ensure directory exists
@@ -478,8 +490,8 @@ class ScalingPlanCalendar:
             state_file.parent.mkdir(parents=True, exist_ok=True)
 
             # Write atomically
-            temp_file = state_file.with_suffix('.tmp')
-            with temp_file.open('w') as f:
+            temp_file = state_file.with_suffix(".tmp")
+            with temp_file.open("w") as f:
                 json.dump(state_data, f, indent=2)
             temp_file.rename(state_file)
 
@@ -496,42 +508,46 @@ class ScalingPlanCalendar:
             if not state_file.exists():
                 return
 
-            with state_file.open('r') as f:
+            with state_file.open("r") as f:
                 state_data = json.load(f)
 
-            cycle_data = state_data.get('cycle')
+            cycle_data = state_data.get("cycle")
             if not cycle_data:
                 return
 
             # Reconstruct events
             events = []
-            for event_data in cycle_data.get('events', []):
+            for event_data in cycle_data.get("events", []):
                 event = ScalingEvent(
-                    event_id=event_data['event_id'],
-                    event_type=event_data['event_type'],
-                    title=event_data['title'],
-                    description=event_data['description'],
-                    due_date=datetime.fromisoformat(event_data['due_date']),
-                    status=event_data['status'],
-                    metadata=event_data['metadata'],
-                    created_at=datetime.fromisoformat(event_data['created_at'])
+                    event_id=event_data["event_id"],
+                    event_type=event_data["event_type"],
+                    title=event_data["title"],
+                    description=event_data["description"],
+                    due_date=datetime.fromisoformat(event_data["due_date"]),
+                    status=event_data["status"],
+                    metadata=event_data["metadata"],
+                    created_at=datetime.fromisoformat(event_data["created_at"]),
                 )
                 events.append(event)
 
             # Reconstruct cycle
             self._current_cycle = ScalingCycle(
-                cycle_id=cycle_data['cycle_id'],
-                start_date=datetime.fromisoformat(cycle_data['start_date']),
-                end_date=datetime.fromisoformat(cycle_data['end_date']),
-                starting_equity=cycle_data['starting_equity'],
-                target_profit_amount=cycle_data['target_profit_amount'],
-                target_profit_pct=cycle_data['target_profit_pct'],
-                current_equity=cycle_data['current_equity'],
-                peak_equity=cycle_data['peak_equity'],
-                scaling_eligible_date=datetime.fromisoformat(cycle_data['scaling_eligible_date']) if cycle_data['scaling_eligible_date'] else None,
-                scaling_submitted_date=datetime.fromisoformat(cycle_data['scaling_submitted_date']) if cycle_data['scaling_submitted_date'] else None,
-                cycle_status=cycle_data['cycle_status'],
-                events=events
+                cycle_id=cycle_data["cycle_id"],
+                start_date=datetime.fromisoformat(cycle_data["start_date"]),
+                end_date=datetime.fromisoformat(cycle_data["end_date"]),
+                starting_equity=cycle_data["starting_equity"],
+                target_profit_amount=cycle_data["target_profit_amount"],
+                target_profit_pct=cycle_data["target_profit_pct"],
+                current_equity=cycle_data["current_equity"],
+                peak_equity=cycle_data["peak_equity"],
+                scaling_eligible_date=datetime.fromisoformat(cycle_data["scaling_eligible_date"])
+                if cycle_data["scaling_eligible_date"]
+                else None,
+                scaling_submitted_date=datetime.fromisoformat(cycle_data["scaling_submitted_date"])
+                if cycle_data["scaling_submitted_date"]
+                else None,
+                cycle_status=cycle_data["cycle_status"],
+                events=events,
             )
 
             log.info(f"Loaded scaling plan state: cycle {self._current_cycle.cycle_id}")

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260405_14_novatrade_monitoring_1775434429",
+  "workflow_id": "shift_20260405_14_novatrade_monitoring",
+  "task_summary": "NovaTrade monitoring \u2014 shadow mode NOT deployed (0/7 cutover criteria met), live pipeline healthy at $100,200.62 with 0% drawdown, all 22 pre-trade gates operational, weekend idle mode nominal",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "NovaTrade monitoring \u2014 shadow mode NOT deployed (0/7 cutover criteria met), live pipeline healthy at $100,200.62 with 0% drawdown, all 22 pre-trade gates operational, weekend idle mode nominal"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260405_14_novatrade_monitoring"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "NovaTrade monitoring \u2014 shadow mode NOT deployed (0/7 cutover criteria met), live pipeline healthy at $100,200.62 with 0% drawdown, all 22 pre-trade gates operational, weekend idle mode nominal",
+  "created_at": "2026-04-06T00:13:49Z",
+  "confidence": "high"
+}

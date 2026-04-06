@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260405_9_novatrade_status_1775433784",
+  "workflow_id": "shift_20260405_9_novatrade_status",
+  "task_summary": "NovaTrade status check \u2014 all services healthy, account at $100,200.62 with 0% drawdown, weekend idle mode with expected price feed errors, watcher memory at 80%",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "NovaTrade status check \u2014 all services healthy, account at $100,200.62 with 0% drawdown, weekend idle mode with expected price feed errors, watcher memory at 80%"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260405_9_novatrade_status"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "NovaTrade status check \u2014 all services healthy, account at $100,200.62 with 0% drawdown, weekend idle mode with expected price feed errors, watcher memory at 80%",
+  "created_at": "2026-04-06T00:03:04Z",
+  "confidence": "high"
+}

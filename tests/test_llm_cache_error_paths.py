@@ -111,30 +111,35 @@ class TestLLMCacheErrorPaths:
         assert result["cached"] is False
         assert result["source"] == "api"
 
-    def test_cached_llm_call_with_extract_functions(self, isolated_cache):
+    def test_cached_llm_call_with_extract_functions(self):
         """Test cached_llm_call with custom extract functions."""
+        with patch("utils.llm_cache.llm_cache") as mock_cache:
+            # Ensure cache miss
+            mock_cache.get.return_value = None
+            mock_cache.get_fuzzy.return_value = None
+            mock_cache.cache_key.return_value = "test_key_extract"
 
-        def mock_llm_call():
-            return {"content": "response text", "usage": {"total_tokens": 150}}
+            def mock_llm_call():
+                return {"content": "response text", "usage": {"total_tokens": 150}}
 
-        def extract_response(result):
-            return result["content"]
+            def extract_response(result):
+                return result["content"]
 
-        def extract_tokens(result):
-            return result["usage"]["total_tokens"]
+            def extract_tokens(result):
+                return result["usage"]["total_tokens"]
 
-        result = cached_llm_call(
-            call_fn=mock_llm_call,
-            model="test-model",
-            system_prompt="sys",
-            user_prompt="user",
-            extract_response=extract_response,
-            extract_tokens=extract_tokens,
-        )
+            result = cached_llm_call(
+                call_fn=mock_llm_call,
+                model="test-model",
+                system_prompt="sys",
+                user_prompt="user",
+                extract_response=extract_response,
+                extract_tokens=extract_tokens,
+            )
 
-        assert result["response"] == "response text"
-        assert result["tokens_used"] == 150
-        assert result["cached"] is False
+            assert result["response"] == "response text"
+            assert result["tokens_used"] == 150
+            assert result["cached"] is False
 
     def test_unavailable_redis_fallback(self):
         """Test LLMCache behavior when Redis is completely unavailable."""

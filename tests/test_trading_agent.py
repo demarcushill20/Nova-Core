@@ -33,10 +33,12 @@ from novatrade.execution.trading_agent import (
 from novatrade.models import (
     AccountMode,
     AccountState,
+    OrderRequest,
     OrderResult,
     OrderSide,
     OrderStatus,
     OrderType,
+    SymbolPrice,
 )
 from novatrade.risk.risk_engine import RiskEngine
 from novatrade.validation.evidence import EvidenceRecorder
@@ -78,6 +80,10 @@ def _make_adapter() -> MagicMock:
         return_value=OrderResult(ok=True, order_id="ORD-001", status=OrderStatus.CANCELLED)
     )
     adapter.close_position = AsyncMock(return_value=OrderResult(ok=True, order_id="POS-001", status=OrderStatus.FILLED))
+    # Live spread for dynamic SL adjustment (1.0 pip = within static buffer → no adjustment)
+    adapter.get_symbol_price = AsyncMock(
+        return_value=SymbolPrice(symbol="EURUSD.sim", bid=1.08760, ask=1.08770, spread=0.00010)
+    )
     return adapter
 
 
@@ -947,3 +953,138 @@ class TestPositionTracking:
         assert agent.state == AgentState.FLAT
         assert agent.position_symbol is None
         assert agent.position_volume == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Dynamic spread SL adjustment tests
+# ---------------------------------------------------------------------------
+
+
+class TestDynamicSpreadAdjustment:
+    """Tests for _adjust_sl_for_live_spread."""
+
+    @pytest.mark.asyncio
+    async def test_no_adjustment_when_spread_within_buffer(self):
+        """Live spread <= static buffer → SL unchanged."""
+        agent = _make_agent()
+        order = OrderRequest(
+            symbol="EURUSD.sim",
+            side=OrderSide.BUY,
+            order_type=OrderType.STOP,
+            volume=0.19,
+            price=1.08765,
+            stop_loss=1.08234,
+        )
+        # Live spread = 0.8 pips (ask - bid = 0.00008) < 1.0 static buffer
+        agent._adapter.get_symbol_price = AsyncMock(
+            return_value=SymbolPrice(symbol="EURUSD.sim", bid=1.08760, ask=1.08768, spread=0.00008)
+        )
+        result = await agent._adjust_sl_for_live_spread(order, OrderSide.BUY, "EURUSD.sim")
+        assert result.stop_loss == 1.08234
+
+    @pytest.mark.asyncio
+    async def test_widens_sl_for_long_when_spread_exceeds_buffer(self):
+        """Live spread > static buffer → SL moves lower for BUY."""
+        agent = _make_agent()
+        order = OrderRequest(
+            symbol="EURUSD.sim",
+            side=OrderSide.BUY,
+            order_type=OrderType.STOP,
+            volume=0.19,
+            price=1.08765,
+            stop_loss=1.08234,
+        )
+        # Live spread = 2.5 pips (0.00025) → extra = 1.5 pips
+        agent._adapter.get_symbol_price = AsyncMock(
+            return_value=SymbolPrice(symbol="EURUSD.sim", bid=1.08760, ask=1.08785, spread=0.00025)
+        )
+        result = await agent._adjust_sl_for_live_spread(order, OrderSide.BUY, "EURUSD.sim")
+        expected = 1.08234 - (1.5 * 0.0001)
+        assert abs(result.stop_loss - expected) < 1e-10
+
+    @pytest.mark.asyncio
+    async def test_widens_sl_for_short_when_spread_exceeds_buffer(self):
+        """Live spread > static buffer → SL moves higher for SELL."""
+        agent = _make_agent()
+        order = OrderRequest(
+            symbol="EURUSD.sim",
+            side=OrderSide.SELL,
+            order_type=OrderType.STOP,
+            volume=0.19,
+            price=1.08234,
+            stop_loss=1.08765,
+        )
+        # Live spread = 2.0 pips (0.00020) → extra = 1.0 pip
+        agent._adapter.get_symbol_price = AsyncMock(
+            return_value=SymbolPrice(symbol="EURUSD.sim", bid=1.08230, ask=1.08250, spread=0.00020)
+        )
+        result = await agent._adjust_sl_for_live_spread(order, OrderSide.SELL, "EURUSD.sim")
+        expected = 1.08765 + (1.0 * 0.0001)
+        assert abs(result.stop_loss - expected) < 1e-10
+
+    @pytest.mark.asyncio
+    async def test_caps_extra_spread_at_max(self):
+        """Extra spread beyond cap is clamped to _MAX_EXTRA_SPREAD_PIPS."""
+        agent = _make_agent()
+        order = OrderRequest(
+            symbol="EURUSD.sim",
+            side=OrderSide.BUY,
+            order_type=OrderType.STOP,
+            volume=0.19,
+            price=1.08765,
+            stop_loss=1.08234,
+        )
+        # Live spread = 10 pips (0.00100, extreme spike) → extra = 9, capped to 3
+        agent._adapter.get_symbol_price = AsyncMock(
+            return_value=SymbolPrice(symbol="EURUSD.sim", bid=1.08700, ask=1.08800, spread=0.00100)
+        )
+        result = await agent._adjust_sl_for_live_spread(order, OrderSide.BUY, "EURUSD.sim")
+        expected = 1.08234 - (3.0 * 0.0001)  # capped at 3 extra pips
+        assert abs(result.stop_loss - expected) < 1e-10
+
+    @pytest.mark.asyncio
+    async def test_failopen_on_price_fetch_error(self):
+        """If get_symbol_price raises, SL is unchanged (fail-open)."""
+        agent = _make_agent()
+        order = OrderRequest(
+            symbol="EURUSD.sim",
+            side=OrderSide.BUY,
+            order_type=OrderType.STOP,
+            volume=0.19,
+            price=1.08765,
+            stop_loss=1.08234,
+        )
+        agent._adapter.get_symbol_price = AsyncMock(side_effect=Exception("connection lost"))
+        result = await agent._adjust_sl_for_live_spread(order, OrderSide.BUY, "EURUSD.sim")
+        assert result.stop_loss == 1.08234
+
+    @pytest.mark.asyncio
+    async def test_failopen_on_none_price(self):
+        """If get_symbol_price returns None, SL is unchanged."""
+        agent = _make_agent()
+        order = OrderRequest(
+            symbol="EURUSD.sim",
+            side=OrderSide.BUY,
+            order_type=OrderType.STOP,
+            volume=0.19,
+            price=1.08765,
+            stop_loss=1.08234,
+        )
+        agent._adapter.get_symbol_price = AsyncMock(return_value=None)
+        result = await agent._adjust_sl_for_live_spread(order, OrderSide.BUY, "EURUSD.sim")
+        assert result.stop_loss == 1.08234
+
+    @pytest.mark.asyncio
+    async def test_no_adjustment_when_sl_is_none(self):
+        """If stop_loss is None, return order unchanged."""
+        agent = _make_agent()
+        order = OrderRequest(
+            symbol="EURUSD.sim",
+            side=OrderSide.BUY,
+            order_type=OrderType.STOP,
+            volume=0.19,
+            price=1.08765,
+            stop_loss=None,
+        )
+        result = await agent._adjust_sl_for_live_spread(order, OrderSide.BUY, "EURUSD.sim")
+        assert result.stop_loss is None

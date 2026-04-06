@@ -1723,12 +1723,56 @@ async def test_perf_backtest_source_tagged(perf_collector, tmp_path):
 
 @pytest.mark.asyncio
 async def test_perf_insufficient_data_warnings(perf_collector):
-    """All 4 sub-metrics emit insufficient-data warnings when no data, plus summary."""
+    """All 8 sub-metrics emit insufficient-data warnings when no data, plus summary.
+
+    Original 4 core metrics + 4 S7 enhanced metrics = 8 total.
+    (S7 metrics fall through to NO_DATA via equity_data check, not via their
+    state files, so they also emit equity-data warnings here.)
+    """
     result = await perf_collector.collect()
     per_metric = [w for w in result.warnings if "Insufficient equity data" in w]
-    assert len(per_metric) == 4
+    assert len(per_metric) == 8
     # M3: explicit no-data summary warning also present
     assert any("No equity data available" in w or "placeholder" in w for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_perf_nodata_metrics_excluded_from_average(perf_collector, tmp_path):
+    """NO_DATA S7 metrics must not drag the score toward 50.
+
+    When equity data exists but S7 state files are missing, only the
+    4 core metrics with real data should be averaged.  The 4 S7
+    placeholders (50.0 each) must be excluded.
+    """
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    # Steady increase: Sharpe>1 (100), DD 0% (100), WR stable (100), PF stable (~60)
+    data = [{"equity": 10000 + i * 50} for i in range(30)]
+    (state_dir / "equity_history.json").write_text(json.dumps(data))
+
+    result = await perf_collector.collect()
+
+    # S7 metrics should still exist as sub_metrics but be NO_DATA
+    s7_names = {
+        "partial_exit_efficiency",
+        "timeframe_signal_consistency",
+        "trade_duration_efficiency",
+        "volume_execution_accuracy",
+    }
+    for m in result.sub_metrics:
+        if m.name in s7_names:
+            assert m.raw_value == perf_collector._NO_DATA_RAW
+
+    # With NO_DATA excluded, average of real-data metrics should be ≥ 70
+    # (sharpe 100 + dd 100 + win_rate 100 + pf ~60 = ~90)
+    assert result.score >= 70.0, f"Score {result.score} too low — NO_DATA metrics may still be in average"
+
+
+@pytest.mark.asyncio
+async def test_perf_all_nodata_returns_neutral(perf_collector):
+    """When all metrics are NO_DATA, score should be neutral 50.0."""
+    result = await perf_collector.collect()
+    assert result.score == 50.0
 
 
 # =====================================================================

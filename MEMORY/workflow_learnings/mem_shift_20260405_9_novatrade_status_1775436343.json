@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260405_9_novatrade_status_1775436343",
+  "workflow_id": "shift_20260405_9_novatrade_status",
+  "task_summary": "NovaTrade status check \u2014 all trading services healthy at $100,200.62/0% drawdown, watcher memory CRITICAL at 3.8G/4G (95%)",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "NovaTrade status check \u2014 all trading services healthy at $100,200.62/0% drawdown, watcher memory CRITICAL at 3.8G/4G (95%)"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260405_9_novatrade_status"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "NovaTrade status check \u2014 all trading services healthy at $100,200.62/0% drawdown, watcher memory CRITICAL at 3.8G/4G (95%)",
+  "created_at": "2026-04-06T00:45:43Z",
+  "confidence": "high"
+}

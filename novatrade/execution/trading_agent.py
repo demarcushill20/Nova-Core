@@ -720,6 +720,13 @@ class TradingAgent:
                 elapsed_ms=elapsed,
             )
 
+        # Dynamic spread adjustment: widen SL based on live spread if it
+        # exceeds the static buffer baked into the signal by the strategy.
+        # The strategy uses sl_spread_buffer_pips (default 1.0 pip) which is
+        # static; live spread may be wider (e.g. news, Asian session, exotic
+        # pairs). We query the current bid/ask and apply the difference.
+        order_req = await self._adjust_sl_for_live_spread(order_req, side, broker_symbol)
+
         # Execute
         order_result = await self._adapter.place_order(order_req)
         elapsed = (time.monotonic() - t0) * 1000
@@ -779,6 +786,59 @@ class TradingAgent:
             order_result=order_result,
             elapsed_ms=elapsed,
         )
+
+    # -- Dynamic spread SL adjustment --------------------------------------
+
+    async def _adjust_sl_for_live_spread(
+        self,
+        order_req: OrderRequest,
+        side: OrderSide,
+        broker_symbol: str,
+    ) -> OrderRequest:
+        """Widen stop-loss if live spread exceeds the static buffer.
+
+        The strategy bakes in a static sl_spread_buffer_pips (default 1.0).
+        If the live bid/ask spread is wider, we add the difference so the SL
+        has room to breathe past the current spread. Fail-open: if we can't
+        fetch the price, return the order unchanged.
+        """
+        if order_req.stop_loss is None:
+            return order_req
+        try:
+            price = await self._adapter.get_symbol_price(broker_symbol)
+        except Exception:
+            log.debug("spread adjust: could not fetch price for %s — skipping", broker_symbol)
+            return order_req
+
+        if price is None or price.spread <= 0:
+            return order_req
+
+        pip_value = 0.0001  # standard 4-digit FX pip
+        live_spread_pips = price.spread / pip_value
+        static_buffer = self._cfg.risk.sl_spread_buffer_pips
+        extra_pips = live_spread_pips - static_buffer
+        if extra_pips <= 0:
+            return order_req
+
+        # Cap the extra adjustment
+        max_extra = self._cfg.risk.sl_spread_max_extra_pips
+        extra_pips = min(extra_pips, max_extra)
+
+        original_sl = order_req.stop_loss
+        if side == OrderSide.BUY:
+            order_req.stop_loss = original_sl - (extra_pips * pip_value)
+        else:
+            order_req.stop_loss = original_sl + (extra_pips * pip_value)
+
+        log.info(
+            "spread adjust: live=%.1f pips, static_buf=%.1f, extra=%.1f → SL %.5f→%.5f",
+            live_spread_pips,
+            static_buffer,
+            extra_pips,
+            original_sl,
+            order_req.stop_loss,
+        )
+        return order_req
 
     # -- Trail handler (MODIFY_SL) -----------------------------------------
 

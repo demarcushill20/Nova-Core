@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 # Module-level reference for testability — patch this, not time.time,
 # to avoid poisoning the global time module during tests.
 _now = time.time
-from typing import TYPE_CHECKING, List, Optional  # noqa: E402
+from typing import TYPE_CHECKING  # noqa: E402
 from zoneinfo import ZoneInfo  # noqa: E402
 
 if TYPE_CHECKING:
@@ -39,6 +39,7 @@ from novatrade.models import (  # noqa: E402
     RiskVerdict,
     SymbolPrice,
 )
+from novatrade.risk.daily_budget_tracker import DailyRiskBudgetTracker  # noqa: E402
 from novatrade.risk.ftmo_compliance import (  # noqa: E402
     BestDayRuleTracker,
     FtmoDailyLossTracker,
@@ -52,7 +53,6 @@ from novatrade.risk.ftmo_compliance import (  # noqa: E402
     WeeklyLossTracker,
 )
 from novatrade.risk.position_sizer import DrawdownScaler, PositionSizer  # noqa: E402
-from novatrade.risk.daily_budget_tracker import DailyRiskBudgetTracker  # noqa: E402
 from novatrade.risk.profit_cushion_protocol import ProfitCushionProtocol  # noqa: E402
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
@@ -141,7 +141,7 @@ class PreTradeGate:
         self._daily_budget_tracker = DailyRiskBudgetTracker(
             daily_loss_limit_pct=self._risk.max_daily_drawdown_pct,
             max_risk_per_trade_pct=20.0,  # Max 20% of daily budget per trade
-            min_risk_per_trade_pct=5.0,   # Min 5% of daily budget per trade
+            min_risk_per_trade_pct=5.0,  # Min 5% of daily budget per trade
             allocation_strategy="adaptive",
         )
         # Profit cushion protocol (P2 priority from funded account survival research)
@@ -151,18 +151,19 @@ class PreTradeGate:
             log.info("Loaded existing profit cushion state")
         except ValueError:
             # No existing state - will need to be initialized when account equity is known
-            self._profit_cushion = None
+            self._profit_cushion = None  # type: ignore[assignment]
             log.info("Profit cushion not initialized - will set up on first trade")
 
         # Scaling plan calendar (P3 priority from funded account survival research)
         # Manages FTMO 4-month cycles, scaling deadlines, and calendar automation
         try:
             from .scaling_plan_calendar import ScalingPlanCalendar
+
             self._scaling_calendar = ScalingPlanCalendar()
             log.info("Initialized scaling plan calendar")
         except Exception as exc:
             log.error(f"Failed to initialize scaling plan calendar: {exc}")
-            self._scaling_calendar = None
+            self._scaling_calendar = None  # type: ignore[assignment]
 
         # Attempt to restore persisted state from prior session
         self._lot_checker.load_state()
@@ -634,10 +635,12 @@ class PreTradeGate:
             total_dd_limit_pct = self._risk.max_total_drawdown_pct  # e.g., 10.0
 
             # Estimate drawdown usage as percentage of limits
-            # For FTMO $100K account, assume $100K starting balance
-            estimated_initial_equity = 100000.0  # FTMO standard
+            # Use FTMO account_size from config, fall back to account.balance
+            estimated_initial_equity = account.balance
             if hasattr(account, "initial_equity") and account.initial_equity > 0:
                 estimated_initial_equity = account.initial_equity
+            elif self._cfg.ftmo.account_size > 0:
+                estimated_initial_equity = float(self._cfg.ftmo.account_size)
 
             # Estimate daily start equity (simplified - same as current for now)
             estimated_daily_start = estimated_initial_equity
@@ -676,8 +679,7 @@ class PreTradeGate:
                     # Initialize scaling calendar for the same cycle
                     if self._scaling_calendar and not self._scaling_calendar.get_current_cycle():
                         self._scaling_calendar.initialize_cycle(
-                            starting_equity=account.equity,
-                            cycle_start_date=cycle_start
+                            starting_equity=account.equity, cycle_start_date=cycle_start
                         )
                         log.info(f"Initialized scaling plan calendar for cycle starting ${account.equity:,.2f}")
 
@@ -697,10 +699,7 @@ class PreTradeGate:
                     profit_tier = self._profit_cushion.get_tier()
 
                     # Apply profit cushion scaling
-                    calculated = max(
-                        self._risk.min_volume_per_trade,
-                        drawdown_scaled * profit_multiplier
-                    )
+                    calculated = max(self._risk.min_volume_per_trade, drawdown_scaled * profit_multiplier)
 
                     # Update scaling calendar with current equity
                     if self._scaling_calendar:
@@ -714,7 +713,7 @@ class PreTradeGate:
                         profit_tier,
                         profit_multiplier,
                         drawdown_scaled,
-                        calculated
+                        calculated,
                     )
                 except Exception as exc:
                     log.warning(f"Profit cushion scaling failed: {exc}, using drawdown-only scaling")
@@ -1157,7 +1156,7 @@ class PreTradeGate:
         return current_cycle.is_scaling_eligible if current_cycle else False
 
     @property
-    def scaling_deadline(self) -> Optional[str]:
+    def scaling_deadline(self) -> str | None:
         """Next scaling submission deadline (ISO format)."""
         if self._scaling_calendar is None:
             return None
@@ -1165,7 +1164,7 @@ class PreTradeGate:
         return current_cycle.scaling_deadline.isoformat() if current_cycle else None
 
     @property
-    def upcoming_scaling_events(self) -> List[dict]:
+    def upcoming_scaling_events(self) -> list[dict]:
         """Upcoming scaling calendar events."""
         if self._scaling_calendar is None:
             return []
@@ -1176,7 +1175,7 @@ class PreTradeGate:
                 "type": e.event_type,
                 "title": e.title,
                 "due_date": e.due_date.isoformat(),
-                "status": e.status
+                "status": e.status,
             }
             for e in events
         ]
@@ -1191,7 +1190,10 @@ class PreTradeGate:
         if cycle_start_date is None:
             from datetime import datetime
             from zoneinfo import ZoneInfo
-            cycle_start_date = datetime.now(ZoneInfo("Europe/Prague")).replace(hour=0, minute=0, second=0, microsecond=0)
+
+            cycle_start_date = datetime.now(ZoneInfo("Europe/Prague")).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
 
         try:
             self._profit_cushion = ProfitCushionProtocol(
@@ -1203,8 +1205,7 @@ class PreTradeGate:
             # Also initialize scaling calendar for the same cycle
             if self._scaling_calendar:
                 self._scaling_calendar.initialize_cycle(
-                    starting_equity=starting_equity,
-                    cycle_start_date=cycle_start_date
+                    starting_equity=starting_equity, cycle_start_date=cycle_start_date
                 )
                 log.info(f"Started new scaling plan calendar: equity=${starting_equity:,.2f}")
 

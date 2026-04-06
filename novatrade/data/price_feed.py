@@ -108,6 +108,40 @@ class TickBatchPoller:
                     try:
                         self.polls += 1
                         broker_sym = self._broker_map.get(symbol, symbol)
+
+                        # CRITICAL FIX: OANDA demo accounts - try different symbol variations
+                        if symbol == "EURUSD":
+                            if broker_sym == "EURUSD":
+                                log.warning(
+                                    "TickBatchPoller: broker_map failed for EURUSD, "
+                                    "applying emergency fix -> EURUSD.sim"
+                                )
+                                broker_sym = "EURUSD.sim"
+
+                            # If .sim fails, try alternative symbol names
+                            if hasattr(self, "_symbol_attempts"):
+                                attempts = self._symbol_attempts.get(symbol, 0)
+                                if attempts == 1:
+                                    broker_sym = "EURUSD"  # try without suffix
+                                elif attempts == 2:
+                                    broker_sym = "EURUSD.demo"  # try .demo suffix
+                                elif attempts == 3:
+                                    broker_sym = "EUR_USD"  # try underscore format
+                                elif attempts >= 4:
+                                    broker_sym = "EURUSD.sim"  # back to .sim and stay there
+                            else:
+                                self._symbol_attempts: dict[str, int] = {}
+
+                            log.info(
+                                "TickBatchPoller: requesting price for symbol=%s broker_sym=%s (attempt=%s)",
+                                symbol,
+                                broker_sym,
+                                getattr(self, "_symbol_attempts", {}).get(symbol, 0),
+                            )
+                        else:
+                            log.info(
+                                "TickBatchPoller: requesting price for symbol=%s broker_sym=%s", symbol, broker_sym
+                            )
                         price = await self._adapter.get_symbol_price(broker_sym)
 
                         # Zero-price guard
@@ -140,6 +174,17 @@ class TickBatchPoller:
                     except Exception as exc:
                         self.errors += 1
                         self._consecutive_errors += 1
+
+                        # Track symbol attempts for intelligent fallback
+                        if symbol == "EURUSD" and "NotFoundException" in str(exc):
+                            if not hasattr(self, "_symbol_attempts"):
+                                self._symbol_attempts = {}
+                            self._symbol_attempts[symbol] = self._symbol_attempts.get(symbol, 0) + 1
+                            if self._symbol_attempts[symbol] <= 4:
+                                log.warning(
+                                    "TickBatchPoller: EURUSD symbol attempt %d failed, will try alternative next cycle",
+                                    self._symbol_attempts[symbol],
+                                )
 
                         # Rate-limit backoff: sleep until recommended retry time
                         if "TooManyRequests" in type(exc).__name__:

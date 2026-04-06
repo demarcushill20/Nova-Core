@@ -4,18 +4,12 @@ Tests the FTMO scaling plan calendar system including cycle management,
 event generation, scaling eligibility tracking, and calendar automation.
 """
 
-import tempfile
 import os
-import json
+import tempfile
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from novatrade.risk.scaling_plan_calendar import (
-    ScalingEvent,
-    ScalingCycle,
-    ScalingPlanConfig,
-    ScalingPlanCalendar
-)
+from novatrade.risk.scaling_plan_calendar import ScalingCycle, ScalingEvent, ScalingPlanCalendar, ScalingPlanConfig
 
 
 class TestScalingEvent:
@@ -32,7 +26,7 @@ class TestScalingEvent:
             description="Test event for scaling calendar",
             due_date=due_date,
             status="pending",
-            metadata={"test_key": "test_value"}
+            metadata={"test_key": "test_value"},
         )
 
         assert event.event_id == "test_event_001"
@@ -59,7 +53,7 @@ class TestScalingCycle:
             end_date=end_date,
             starting_equity=100000.0,
             target_profit_amount=10000.0,
-            current_equity=100000.0
+            current_equity=100000.0,
         )
 
         assert cycle.cycle_id == "test_cycle_20260401"
@@ -81,7 +75,7 @@ class TestScalingCycle:
             end_date=end_date,
             starting_equity=100000.0,
             target_profit_amount=10000.0,
-            current_equity=105000.0  # 5% profit
+            current_equity=105000.0,  # 5% profit
         )
 
         # Test profit calculations
@@ -109,7 +103,7 @@ class TestScalingCycle:
             start_date=start_date,
             end_date=end_date,
             starting_equity=100000.0,
-            target_profit_amount=10000.0
+            target_profit_amount=10000.0,
         )
 
         # Should have approximately 90 days remaining
@@ -126,7 +120,7 @@ class TestScalingCycle:
             start_date=start_date,
             end_date=end_date,
             starting_equity=100000.0,
-            target_profit_amount=10000.0
+            target_profit_amount=10000.0,
         )
 
         assert cycle.scaling_deadline == expected_deadline
@@ -155,7 +149,7 @@ class TestScalingPlanConfig:
             target_profit_pct=15.0,
             scaling_deadline_days=14,
             timezone="America/New_York",
-            reminder_days_before=[7, 3, 1]
+            reminder_days_before=[7, 3, 1],
         )
 
         assert config.cycle_length_months == 6
@@ -173,10 +167,7 @@ class TestScalingPlanCalendar:
         self.temp_dir = tempfile.mkdtemp()
         self.state_file = os.path.join(self.temp_dir, "test_scaling_calendar.json")
 
-        self.config = ScalingPlanConfig(
-            state_file_path=self.state_file,
-            auto_save=True
-        )
+        self.config = ScalingPlanConfig(state_file_path=self.state_file, auto_save=True)
 
     def tearDown(self):
         """Clean up test fixtures."""
@@ -208,17 +199,14 @@ class TestScalingPlanCalendar:
 
             # Initialize new cycle
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
-            cycle = calendar.initialize_cycle(
-                starting_equity=125000.0,
-                cycle_start_date=start_date
-            )
+            cycle = calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
 
             # Verify cycle properties
             assert cycle.cycle_id == "ftmo_cycle_20260401"
             assert cycle.start_date == start_date
-            assert cycle.starting_equity == 125000.0
-            assert cycle.target_profit_amount == 12500.0  # 10% of 125K
-            assert cycle.current_equity == 125000.0
+            assert cycle.starting_equity == 100000.0
+            assert cycle.target_profit_amount == 10000.0  # 10% of 100K
+            assert cycle.current_equity == 100000.0
             assert cycle.cycle_status == "active"
 
             # Should be set as current cycle
@@ -235,10 +223,7 @@ class TestScalingPlanCalendar:
             calendar = ScalingPlanCalendar(self.config)
 
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
-            cycle = calendar.initialize_cycle(
-                starting_equity=100000.0,
-                cycle_start_date=start_date
-            )
+            cycle = calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
 
             # Should have generated multiple events
             assert len(cycle.events) >= 5  # start, reminders, deadline, end
@@ -264,10 +249,7 @@ class TestScalingPlanCalendar:
             calendar = ScalingPlanCalendar(self.config)
 
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
-            calendar.initialize_cycle(
-                starting_equity=100000.0,
-                cycle_start_date=start_date
-            )
+            calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
 
             # Initially not scaling eligible
             cycle = calendar.get_current_cycle()
@@ -306,10 +288,7 @@ class TestScalingPlanCalendar:
             calendar = ScalingPlanCalendar(self.config)
 
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
-            calendar.initialize_cycle(
-                starting_equity=100000.0,
-                cycle_start_date=start_date
-            )
+            calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
 
             # Update equity to scaling eligible
             calendar.update_equity(110000.0)
@@ -343,10 +322,7 @@ class TestScalingPlanCalendar:
             # Create cycle with start date in the past so we have upcoming events
             now = datetime.now(ZoneInfo("Europe/Prague"))
             start_date = now - timedelta(days=10)
-            calendar.initialize_cycle(
-                starting_equity=100000.0,
-                cycle_start_date=start_date
-            )
+            calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
 
             # Get upcoming events for next 120 days (4 months)
             upcoming = calendar.get_upcoming_events(days_ahead=120)
@@ -363,7 +339,7 @@ class TestScalingPlanCalendar:
 
             # Events should be sorted by due date
             for i in range(1, len(upcoming)):
-                assert upcoming[i-1].due_date <= upcoming[i].due_date
+                assert upcoming[i - 1].due_date <= upcoming[i].due_date
         finally:
             self.tearDown()
 
@@ -374,10 +350,7 @@ class TestScalingPlanCalendar:
             calendar = ScalingPlanCalendar(self.config)
 
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
-            calendar.initialize_cycle(
-                starting_equity=100000.0,
-                cycle_start_date=start_date
-            )
+            calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
 
             # Cannot submit when not scaling eligible
             assert not calendar.submit_scaling_application()
@@ -409,10 +382,7 @@ class TestScalingPlanCalendar:
             # Create calendar and initialize cycle
             calendar1 = ScalingPlanCalendar(self.config)
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
-            cycle = calendar1.initialize_cycle(
-                starting_equity=100000.0,
-                cycle_start_date=start_date
-            )
+            cycle = calendar1.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
 
             # Update equity and trigger scaling eligibility
             calendar1.update_equity(110000.0)
@@ -440,7 +410,7 @@ class TestScalingPlanCalendar:
         self.setUp()
         try:
             # Create invalid state file
-            with open(self.state_file, 'w') as f:
+            with open(self.state_file, "w") as f:
                 f.write("invalid json content")
 
             # Should handle corruption gracefully
@@ -451,10 +421,7 @@ class TestScalingPlanCalendar:
 
             # Should be able to initialize new cycle
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
-            cycle = calendar.initialize_cycle(
-                starting_equity=100000.0,
-                cycle_start_date=start_date
-            )
+            cycle = calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
             assert cycle is not None
         finally:
             self.tearDown()
@@ -466,10 +433,7 @@ class TestScalingPlanCalendar:
             calendar = ScalingPlanCalendar(self.config)
 
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
-            calendar.initialize_cycle(
-                starting_equity=100000.0,
-                cycle_start_date=start_date
-            )
+            calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
 
             # Track equity progression
             equity_updates = [102000, 105000, 108000, 106000, 111000, 109000]

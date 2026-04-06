@@ -211,6 +211,9 @@ class BacktestEnvironment:
     # Extra SL distance (in pips) added beyond the candle wick + pip_buffer so the
     # broker's spread-adjusted trigger (bid for longs, ask for shorts) doesn't
     # stop the trade out prematurely. 0 = disabled (legacy behaviour).
+    # NOTE: backtest also deducts avg_spread_pips from PnL at exit, so the spread
+    # cost is modeled twice — once in SL distance and once in PnL. This makes
+    # backtest results conservatively pessimistic vs live execution.
     sl_spread_buffer_pips: float = 1.0
 
     # --- Measurement vs inference ---

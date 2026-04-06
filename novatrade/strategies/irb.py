@@ -281,10 +281,10 @@ class IRBStrategy(BaseStrategy):
                 "time_stop_bars": {"default": 40, "min": 20, "max": 80, "step": 1},
                 "mtf_lookback": {"default": 5, "min": 1, "max": 20, "step": 1},
                 "warmup_bars": {"default": 34, "min": 20, "max": 60, "step": 1},
+                "sl_spread_buffer_pips": {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.1},
             },
             "immutable_params": {
                 "pip_buffer": 0.0001,
-                "sl_spread_buffer_pips": 1.0,
             },
             "filters_mandatory": ["irb_geometry", "trend_filter", "adx_filter"],
             "filters_optional": ["mtf_alignment", "overextension_filter"],

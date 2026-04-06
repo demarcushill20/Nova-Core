@@ -63,6 +63,25 @@ class PerformanceMetrics:
     profit_factor: float | None = None
     sharpe_ratio: float | None = None
 
+    # S7: Partial exit metrics (v5 features)
+    partial_exits_count: int = 0
+    partial_exit_rate: float = 0.0  # percentage of trades with partial exits
+    avg_partial_profit: float = 0.0  # average profit from partial exits
+    partial_to_breakeven_rate: float = 0.0  # percentage reaching breakeven after partial
+
+    # S7: Multi-timeframe metrics
+    timeframe: str = "H1"  # current timeframe being monitored
+    m5_signal_rate: float = 0.0  # signals per hour on M5
+    h1_signal_rate: float = 0.0  # signals per hour on H1
+    mtf_alignment_rate: float = 0.0  # H1/H4 or M5/H1 alignment success rate
+
+    # S7: Enhanced strategy metrics (v5)
+    trades_per_day: float = 0.0
+    avg_trade_duration_hours: float = 0.0
+    volume_efficiency: float = 0.0  # actual vs target position sizes
+    sl_modification_count: int = 0
+    trail_trigger_rate: float = 0.0  # percentage of trades where trailing activated
+
     # System health
     feed_health_score: float = 0.0
     uptime_seconds: float = 0.0
@@ -153,6 +172,14 @@ class PerformanceAnalyzer:
             "min_feed_health": 0.9,  # Alert if feed health < 90%
             "max_error_rate": 0.05,  # Alert if error rate > 5%
             "min_execution_quality": 75.0,  # Alert if execution quality < 75
+            # S7: Enhanced thresholds for v5 features
+            "min_partial_exit_rate": 30.0,  # Alert if < 30% partial exit rate when enabled
+            "max_trades_per_day": 8.0,  # Alert if > 8 trades/day (overtrading)
+            "min_trades_per_day": 0.5,  # Alert if < 0.5 trades/day (undertrading)
+            "min_mtf_alignment": 60.0,  # Alert if MTF alignment < 60%
+            "max_avg_trade_duration": 48.0,  # Alert if avg trade > 48h (holding too long)
+            "min_volume_efficiency": 80.0,  # Alert if volume efficiency < 80%
+            "max_sl_modifications_per_day": 20.0,  # Alert if excessive SL modifications
         }
 
         if alert_thresholds:
@@ -163,6 +190,7 @@ class PerformanceAnalyzer:
         metrics = status_data.get("metrics", {})
         strategy = status_data.get("strategy_state", {})
         feed_health = status_data.get("feed_health", {})
+        config = status_data.get("config", {})
 
         # Extract core metrics
         equity = strategy.get("equity", self.initial_equity)
@@ -190,6 +218,36 @@ class PerformanceAnalyzer:
             errors = metrics.get("errors", 0)
             error_rate = errors / total_ops
 
+        # S7: Extract v5 feature metrics
+        # Partial exit metrics
+        partial_exits = metrics.get("partial_exits", 0)
+        total_trades = metrics.get("total_trades", 1)
+        partial_exit_rate = (partial_exits / total_trades * 100) if total_trades > 0 else 0.0
+        avg_partial_profit = metrics.get("avg_partial_profit", 0.0)
+        partial_to_breakeven = metrics.get("partial_to_breakeven", 0)
+        partial_to_breakeven_rate = (partial_to_breakeven / max(partial_exits, 1) * 100) if partial_exits > 0 else 0.0
+
+        # Multi-timeframe metrics
+        timeframe = config.get("timeframe", "H1")
+        m5_signals = metrics.get("m5_signals_1h", 0)
+        h1_signals = metrics.get("h1_signals_1h", 0)
+        mtf_aligned = metrics.get("mtf_aligned_signals", 0)
+        mtf_total = metrics.get("mtf_checked_signals", 1)
+        mtf_alignment_rate = (mtf_aligned / mtf_total * 100) if mtf_total > 0 else 0.0
+
+        # Enhanced strategy metrics
+        uptime_hours = status_data.get("uptime_seconds", 0) / 3600.0
+        trades_per_day = (total_trades / max(uptime_hours / 24.0, 0.001)) if uptime_hours > 0 else 0.0
+
+        avg_duration = metrics.get("avg_trade_duration_hours", 0.0)
+        target_volume = metrics.get("target_volume_sum", 1.0)
+        actual_volume = metrics.get("actual_volume_sum", 1.0)
+        volume_efficiency = (actual_volume / target_volume * 100) if target_volume > 0 else 100.0
+
+        sl_modifications = metrics.get("sl_modifications", 0)
+        trail_triggers = metrics.get("trail_triggers", 0)
+        trail_trigger_rate = (trail_triggers / max(total_trades, 1) * 100) if total_trades > 0 else 0.0
+
         perf_metrics = PerformanceMetrics(
             equity=equity,
             equity_change=equity_change,
@@ -200,6 +258,20 @@ class PerformanceAnalyzer:
             feed_health_score=feed_health_score,
             uptime_seconds=status_data.get("uptime_seconds", 0),
             error_rate=error_rate,
+            # S7: New v5 metrics
+            partial_exits_count=partial_exits,
+            partial_exit_rate=partial_exit_rate,
+            avg_partial_profit=avg_partial_profit,
+            partial_to_breakeven_rate=partial_to_breakeven_rate,
+            timeframe=timeframe,
+            m5_signal_rate=float(m5_signals),
+            h1_signal_rate=float(h1_signals),
+            mtf_alignment_rate=mtf_alignment_rate,
+            trades_per_day=trades_per_day,
+            avg_trade_duration_hours=avg_duration,
+            volume_efficiency=volume_efficiency,
+            sl_modification_count=sl_modifications,
+            trail_trigger_rate=trail_trigger_rate,
         )
 
         # Add to history
@@ -286,6 +358,93 @@ class PerformanceAnalyzer:
                 )
             )
 
+        # S7: Enhanced v5 feature alerts
+        # Partial exit rate alert (only when partial exits are enabled)
+        if metrics.partial_exits_count > 0 and metrics.partial_exit_rate < self.thresholds["min_partial_exit_rate"]:
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"Partial exit rate {metrics.partial_exit_rate:.1f}% below expected threshold",
+                    metric_name="partial_exit_rate",
+                    current_value=metrics.partial_exit_rate,
+                    threshold=self.thresholds["min_partial_exit_rate"],
+                )
+            )
+
+        # Trading frequency alerts
+        if metrics.trades_per_day > self.thresholds["max_trades_per_day"]:
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=(
+                        f"Trading frequency {metrics.trades_per_day:.1f} trades/day exceeds threshold (overtrading)"
+                    ),
+                    metric_name="trades_per_day",
+                    current_value=metrics.trades_per_day,
+                    threshold=self.thresholds["max_trades_per_day"],
+                )
+            )
+
+        if metrics.trades_per_day < self.thresholds["min_trades_per_day"]:
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"Trading frequency {metrics.trades_per_day:.1f} trades/day below threshold (undertrading)",
+                    metric_name="trades_per_day",
+                    current_value=metrics.trades_per_day,
+                    threshold=self.thresholds["min_trades_per_day"],
+                )
+            )
+
+        # Multi-timeframe alignment alert
+        if metrics.mtf_alignment_rate < self.thresholds["min_mtf_alignment"]:
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"MTF alignment rate {metrics.mtf_alignment_rate:.1f}% below threshold",
+                    metric_name="mtf_alignment_rate",
+                    current_value=metrics.mtf_alignment_rate,
+                    threshold=self.thresholds["min_mtf_alignment"],
+                )
+            )
+
+        # Trade duration alert
+        if metrics.avg_trade_duration_hours > self.thresholds["max_avg_trade_duration"]:
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"Average trade duration {metrics.avg_trade_duration_hours:.1f}h exceeds threshold",
+                    metric_name="avg_trade_duration",
+                    current_value=metrics.avg_trade_duration_hours,
+                    threshold=self.thresholds["max_avg_trade_duration"],
+                )
+            )
+
+        # Volume efficiency alert
+        if metrics.volume_efficiency < self.thresholds["min_volume_efficiency"]:
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"Volume efficiency {metrics.volume_efficiency:.1f}% below threshold",
+                    metric_name="volume_efficiency",
+                    current_value=metrics.volume_efficiency,
+                    threshold=self.thresholds["min_volume_efficiency"],
+                )
+            )
+
+        # Stop-loss modification alert
+        daily_sl_modifications = metrics.sl_modification_count * (24.0 / max(metrics.uptime_seconds / 3600.0, 1.0))
+        if daily_sl_modifications > self.thresholds["max_sl_modifications_per_day"]:
+            alerts.append(
+                PerformanceAlert(
+                    severity=AlertSeverity.WARNING,
+                    message=f"SL modifications {daily_sl_modifications:.1f}/day exceed threshold",
+                    metric_name="sl_modifications_per_day",
+                    current_value=daily_sl_modifications,
+                    threshold=self.thresholds["max_sl_modifications_per_day"],
+                )
+            )
+
         return alerts
 
     def performance_trend(self, window: int = 10) -> str:
@@ -333,4 +492,24 @@ class PerformanceAnalyzer:
             "alert_count": len(alerts),
             "alerts": [alert.to_dict() for alert in alerts],
             "timestamp": metrics.timestamp,
+            # S7: Enhanced v5 metrics summary
+            "partial_exit_metrics": {
+                "partial_exits_count": metrics.partial_exits_count,
+                "partial_exit_rate": round(metrics.partial_exit_rate, 1),
+                "avg_partial_profit": round(metrics.avg_partial_profit, 2),
+                "partial_to_breakeven_rate": round(metrics.partial_to_breakeven_rate, 1),
+            },
+            "timeframe_metrics": {
+                "primary_timeframe": metrics.timeframe,
+                "m5_signal_rate": round(metrics.m5_signal_rate, 1),
+                "h1_signal_rate": round(metrics.h1_signal_rate, 1),
+                "mtf_alignment_rate": round(metrics.mtf_alignment_rate, 1),
+            },
+            "trading_efficiency": {
+                "trades_per_day": round(metrics.trades_per_day, 1),
+                "avg_trade_duration_hours": round(metrics.avg_trade_duration_hours, 1),
+                "volume_efficiency": round(metrics.volume_efficiency, 1),
+                "sl_modification_count": metrics.sl_modification_count,
+                "trail_trigger_rate": round(metrics.trail_trigger_rate, 1),
+            },
         }

@@ -33,6 +33,27 @@ class PerformanceCollector(BaseCollector):
             ("max_drawdown_30d", self._compute_max_drawdown, "30-day max drawdown vs FTMO 5% limit"),
             ("win_rate_stability", self._compute_win_rate_stability, "Win rate variance across rolling windows"),
             ("profit_factor_trend", self._compute_profit_factor_trend, "Profit factor direction"),
+            # S7: Enhanced v5 performance metrics
+            (
+                "partial_exit_efficiency",
+                self._compute_partial_exit_efficiency,
+                "Partial exit profit capture vs full trades",
+            ),
+            (
+                "timeframe_signal_consistency",
+                self._compute_timeframe_consistency,
+                "M5 vs H1 signal generation consistency",
+            ),
+            (
+                "trade_duration_efficiency",
+                self._compute_trade_duration_efficiency,
+                "Average trade duration vs optimal range",
+            ),
+            (
+                "volume_execution_accuracy",
+                self._compute_volume_execution_accuracy,
+                "Position sizing accuracy vs targets",
+            ),
         ]
 
         no_data_count = 0
@@ -78,7 +99,11 @@ class PerformanceCollector(BaseCollector):
             )
         )
 
-        avg = sum(m.value for m in sub_metrics) / max(len(sub_metrics), 1)
+        # Exclude NO_DATA placeholders and the meta-metric from the average.
+        # Metrics without real data (raw_value == _NO_DATA_RAW) carry no
+        # information and would drag the score toward 50 artificially.
+        scorable = [m for m in sub_metrics if m.raw_value != self._NO_DATA_RAW and m.name != "insufficient_data"]
+        avg = sum(m.value for m in scorable) / len(scorable) if scorable else self._NO_DATA_SCORE
 
         # Set confidence based on data availability
         if data_points >= self._MIN_TRADES_FULL:
@@ -203,13 +228,19 @@ class PerformanceCollector(BaseCollector):
         if len(values) < 2:
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
-        # Daily returns
+        # Filter out swap/spread noise before computing returns.
+        # Small equity changes (< _PF_NOISE_FLOOR_PCT of base equity) are not
+        # real trade outcomes and inflate std deviation, depressing Sharpe.
+        base_equity = values[0] if values[0] > 0 else 1.0
+        noise_floor = base_equity * self._PF_NOISE_FLOOR_PCT
+
+        # Daily returns (noise-filtered)
         returns = []
         for i in range(1, len(values)):
-            if values[i - 1] != 0:
+            if values[i - 1] != 0 and abs(values[i] - values[i - 1]) > noise_floor:
                 returns.append((values[i] - values[i - 1]) / values[i - 1])
 
-        if not returns:
+        if len(returns) < 4:
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         mean_r = sum(returns) / len(returns)
@@ -276,14 +307,21 @@ class PerformanceCollector(BaseCollector):
             return self._NO_DATA_SCORE, self._NO_DATA_RAW  # placeholder
 
         values = [e.get("equity", e.get("value", 0)) for e in equity_data]
+
+        # Apply the same noise floor as PF trend — swap ticks, spread drift,
+        # and balance/equity oscillation produce many small negative returns
+        # that dominate the return count and distort window win rates.
+        base_equity = values[0] if values[0] > 0 else 1.0
+        noise_floor = base_equity * self._PF_NOISE_FLOOR_PCT
+
         returns = []
         for i in range(1, len(values)):
             r = values[i] - values[i - 1]
-            # Skip near-zero returns (flat market / weekend snapshots)
-            if abs(r) > self._MIN_RETURN_THRESHOLD:
+            if abs(r) > noise_floor:
                 returns.append(r)
 
-        if len(returns) < 4:
+        # Require more data after noise filtering for meaningful variance
+        if len(returns) < 8:
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         # Split into windows and compute win rate per window
@@ -318,6 +356,12 @@ class PerformanceCollector(BaseCollector):
     # live data creates meaningless first-half / second-half comparisons.
     _PF_TREND_MAX_RETURNS = 80
 
+    # Minimum absolute return (as fraction of base equity) to count as a real
+    # trade signal for PF trend.  Smaller moves are swap ticks, spread
+    # adjustments, or balance-equity oscillation during market close.
+    # Empirically: noise clusters at 0.01-0.03% of equity, real trades at 0.05%+.
+    _PF_NOISE_FLOOR_PCT = 0.0003  # 0.03% of equity
+
     def _compute_profit_factor_trend(self, equity_data: list[dict]) -> tuple[float, float]:
         """Is profit factor improving, stable, or declining?"""
         if len(equity_data) < 4:
@@ -334,6 +378,27 @@ class PerformanceCollector(BaseCollector):
         # Focus on recent data to avoid stale backtest contamination
         if len(returns) > self._PF_TREND_MAX_RETURNS:
             returns = returns[-self._PF_TREND_MAX_RETURNS :]
+
+        # Filter out equity noise (swap ticks, spread drift, balance-equity
+        # oscillation during market close).  Only keep returns large enough
+        # to represent actual trade outcomes.
+        base_equity = values[0] if values[0] > 0 else 1.0
+        noise_floor = base_equity * self._PF_NOISE_FLOOR_PCT
+        returns = [r for r in returns if abs(r) > noise_floor]
+
+        if len(returns) < 4:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        # Require minimum diversity: both winning AND losing returns must be
+        # present in sufficient quantity.  With <2 losses (or wins), a single
+        # outlier landing in one half can swing the trend score from 80→30,
+        # producing misleading "strongly declining" signals during low-activity
+        # periods (e.g., balance/equity oscillation with no real trades).
+        _MIN_SIDE_COUNT = 2
+        wins_count = sum(1 for r in returns if r > self._MIN_RETURN_THRESHOLD)
+        losses_count = sum(1 for r in returns if r < -self._MIN_RETURN_THRESHOLD)
+        if wins_count < _MIN_SIDE_COUNT or losses_count < _MIN_SIDE_COUNT:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         # Split into two halves and compute profit factor for each
         mid = len(returns) // 2
@@ -362,3 +427,170 @@ class PerformanceCollector(BaseCollector):
         if gross_loss == 0:
             return None
         return gross_profit / gross_loss
+
+    # ------------------------------------------------------------------
+    # S7: Enhanced v5 performance metric computations
+    # ------------------------------------------------------------------
+
+    def _compute_partial_exit_efficiency(self, equity_data: list[dict]) -> tuple[float, float]:
+        """Measure profit capture efficiency of partial exits vs full trades."""
+        partial_exit_stats = self._load_partial_exit_stats()
+        if not partial_exit_stats:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        total_trades = partial_exit_stats.get("total_trades", 0)
+
+        if total_trades < 5:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        # Compare average profit: partial exit trades vs full exit trades
+        partial_avg_profit = partial_exit_stats.get("partial_avg_profit", 0.0)
+        full_avg_profit = partial_exit_stats.get("full_avg_profit", 0.0)
+
+        if full_avg_profit <= 0:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        efficiency_ratio = partial_avg_profit / full_avg_profit
+
+        # Score: >1.2 = excellent, >1.0 = good, >0.8 = average, <0.8 = poor
+        if efficiency_ratio > 1.2:
+            score = 100.0
+        elif efficiency_ratio > 1.0:
+            score = 80.0
+        elif efficiency_ratio > 0.8:
+            score = 60.0
+        elif efficiency_ratio > 0.6:
+            score = 40.0
+        else:
+            score = 20.0
+
+        return score, round(efficiency_ratio, 3)
+
+    def _compute_timeframe_consistency(self, equity_data: list[dict]) -> tuple[float, float]:
+        """Measure signal generation consistency between M5 and H1 timeframes."""
+        signal_stats = self._load_signal_stats()
+        if not signal_stats:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        m5_signals = signal_stats.get("m5_signals_24h", 0)
+        h1_signals = signal_stats.get("h1_signals_24h", 0)
+
+        if m5_signals == 0 and h1_signals == 0:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        # Expected ratio: M5 should generate ~3-5x more signals than H1
+        if h1_signals > 0:
+            signal_ratio = m5_signals / h1_signals
+            target_ratio = 4.0  # ideal M5:H1 ratio
+
+            # Score based on how close to target ratio
+            ratio_deviation = abs(signal_ratio - target_ratio) / target_ratio
+            if ratio_deviation < 0.2:
+                score = 100.0  # within 20% of target
+            elif ratio_deviation < 0.4:
+                score = 80.0  # within 40% of target
+            elif ratio_deviation < 0.6:
+                score = 60.0  # within 60% of target
+            else:
+                score = 40.0  # significant deviation
+
+            return score, round(signal_ratio, 2)
+        else:
+            # H1 has no signals but M5 does - could indicate M5-only strategy
+            return 70.0, float(m5_signals)
+
+    def _compute_trade_duration_efficiency(self, equity_data: list[dict]) -> tuple[float, float]:
+        """Measure trade duration efficiency vs optimal holding periods."""
+        trade_stats = self._load_trade_stats()
+        if not trade_stats:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        avg_duration_hours = trade_stats.get("avg_duration_hours", 0.0)
+        if avg_duration_hours <= 0:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        # IRB strategy optimal range: 2-24 hours (reversal should be quick)
+        optimal_min, optimal_max = 2.0, 24.0
+
+        if optimal_min <= avg_duration_hours <= optimal_max:
+            score = 100.0  # within optimal range
+        elif avg_duration_hours < optimal_min:
+            # Too short - may not capture full move
+            score = max(50.0, 100.0 * (avg_duration_hours / optimal_min))
+        else:
+            # Too long - may indicate poor exit strategy
+            excess_hours = avg_duration_hours - optimal_max
+            score = max(20.0, 100.0 - (excess_hours / optimal_max) * 30.0)
+
+        return score, round(avg_duration_hours, 1)
+
+    def _compute_volume_execution_accuracy(self, equity_data: list[dict]) -> tuple[float, float]:
+        """Measure position sizing accuracy vs risk-based targets."""
+        volume_stats = self._load_volume_stats()
+        if not volume_stats:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        target_volume_sum = volume_stats.get("target_volume_sum", 0.0)
+        actual_volume_sum = volume_stats.get("actual_volume_sum", 0.0)
+
+        if target_volume_sum <= 0:
+            return self._NO_DATA_SCORE, self._NO_DATA_RAW
+
+        accuracy_pct = (actual_volume_sum / target_volume_sum) * 100.0
+
+        # Score: 95-105% = excellent, 90-110% = good, 80-120% = average
+        accuracy_deviation = abs(accuracy_pct - 100.0)
+        if accuracy_deviation <= 5.0:
+            score = 100.0  # within 5%
+        elif accuracy_deviation <= 10.0:
+            score = 85.0  # within 10%
+        elif accuracy_deviation <= 20.0:
+            score = 65.0  # within 20%
+        else:
+            score = 30.0  # significant deviation
+
+        return score, round(accuracy_pct, 1)
+
+    # ------------------------------------------------------------------
+    # S7: Data loading helpers for v5 metrics
+    # ------------------------------------------------------------------
+
+    def _load_partial_exit_stats(self) -> dict:
+        """Load partial exit statistics from STATE/novatrade/partial_exit_stats.json."""
+        path = Path(self.base_path) / "STATE" / "novatrade" / "partial_exit_stats.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _load_signal_stats(self) -> dict:
+        """Load signal statistics from STATE/novatrade/signal_stats.json."""
+        path = Path(self.base_path) / "STATE" / "novatrade" / "signal_stats.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _load_trade_stats(self) -> dict:
+        """Load trade statistics from STATE/novatrade/trade_stats.json."""
+        path = Path(self.base_path) / "STATE" / "novatrade" / "trade_stats.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _load_volume_stats(self) -> dict:
+        """Load volume execution statistics from STATE/novatrade/volume_stats.json."""
+        path = Path(self.base_path) / "STATE" / "novatrade" / "volume_stats.json"
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}

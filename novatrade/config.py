@@ -112,6 +112,12 @@ class RiskConfig:
     # stops from candle geometry; ATR-adaptive SL now handles volatility
     # gating, so this is a safety net only.
     min_sl_distance_pips: float = 2.0
+    # Spread cushion baked into SL at signal time (pips). Must match
+    # BacktestEnvironment.sl_spread_buffer_pips for backtest/live parity.
+    sl_spread_buffer_pips: float = 1.0
+    # Max extra SL widening from live spread adjustment (pips). Caps the
+    # dynamic spread adjustment to prevent runaway widening during spikes.
+    sl_spread_max_extra_pips: float = 3.0
 
     def validate(self) -> list[str]:
         errors: list[str] = []

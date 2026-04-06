@@ -344,10 +344,10 @@ async def test_m3_no_equity_data_explicit_warning(tmp_path):
 
     result = await collector.collect()
     assert any("No equity data available" in w or "placeholder" in w for w in result.warnings)
-    # Score uses neutral 50.0 per metric (not pessimistic 30.0), averaged with
-    # insufficient_data sub-metric (0.0) → ~40.0 overall.
+    # Score uses neutral 50.0 per metric (not pessimistic 30.0). The insufficient_data
+    # sub-metric (0.0) is informational only and excluded from averaging.
     # Low confidence (0.1) prevents this from inflating the overall weighted score.
-    assert result.score == 40.0
+    assert result.score == 50.0
     assert result.confidence <= 0.2
 
 
@@ -386,7 +386,7 @@ async def test_m3_no_data_description_tagged(tmp_path):
 
     result = await collector.collect()
     no_data_metrics = [sm for sm in result.sub_metrics if "[NO DATA]" in sm.description]
-    assert len(no_data_metrics) == 4  # All 4 metrics should have no data
+    assert len(no_data_metrics) == 8  # All 8 metrics (4 original + 4 S7 v5) should have no data
 
 
 # =====================================================================

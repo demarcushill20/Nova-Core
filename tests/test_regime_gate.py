@@ -93,11 +93,11 @@ def _make_candles(n: int, base_close: float = 1.10, spread: float = 0.001) -> li
 
 
 class TestRegimeGateDefault:
-    """Regime gate is disabled by default."""
+    """Regime gate default state (enabled since volatility filter activation)."""
 
-    def test_default_off(self):
+    def test_default_on(self):
         env = BacktestEnvironment()
-        assert env.use_regime_gate is False
+        assert env.use_regime_gate is True
 
     def test_filter_rejection_field_exists(self):
         fr = FilterRejection()

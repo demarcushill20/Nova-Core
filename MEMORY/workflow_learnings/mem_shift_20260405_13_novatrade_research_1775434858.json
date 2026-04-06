@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260405_13_novatrade_research_1775434858",
+  "workflow_id": "shift_20260405_13_novatrade_research",
+  "task_summary": "Deep research on forex market microstructure, session liquidity patterns, execution optimization, and FTMO scaling \u2014 identified 3 critical disabled features and 12 prioritized recommendations for NovaTrade",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Deep research on forex market microstructure, session liquidity patterns, execution optimization, and FTMO scaling \u2014 identified 3 critical disabled features and 12 prioritized recommendations for NovaTrade"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260405_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Deep research on forex market microstructure, session liquidity patterns, execution optimization, and FTMO scaling \u2014 identified 3 critical disabled features and 12 prioritized recommendations for NovaTrade",
+  "created_at": "2026-04-06T00:20:58Z",
+  "confidence": "high"
+}

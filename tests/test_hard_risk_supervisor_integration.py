@@ -46,6 +46,7 @@ def mock_adapter():
     adapter.get_positions.return_value = []
     adapter.place_order.return_value = OrderResult(ok=True, order_id="test_order_123")
     adapter.close_position.return_value = OrderResult(ok=True, order_id="close_order_123")
+    adapter.get_symbol_price.return_value = None  # no live spread data in tests
     return adapter
 
 

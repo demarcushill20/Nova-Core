@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_shift_20260405_9_novatrade_status_1775430410",
+  "workflow_id": "shift_20260405_9_novatrade_status",
+  "task_summary": "NovaTrade status check \u2014 all services healthy, MetaApi connected, $100,200.62 equity, FTMO compliant, weekend idle mode (markets closed Sunday)",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "NovaTrade status check \u2014 all services healthy, MetaApi connected, $100,200.62 equity, FTMO compliant, weekend idle mode (markets closed Sunday)"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260405_9_novatrade_status"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "NovaTrade status check \u2014 all services healthy, MetaApi connected, $100,200.62 equity, FTMO compliant, weekend idle mode (markets closed Sunday)",
+  "created_at": "2026-04-05T23:06:50Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260405_9_novatrade_status_1775426389"
+}

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260405_13_novatrade_research_1775441462",
+  "workflow_id": "shift_20260405_13_novatrade_research",
+  "task_summary": "Comprehensive research on FTMO first 90 days survival strategy, payout timing optimization, scaling path, drawdown recovery protocol, and 10 actionable NovaTrade recommendations",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Comprehensive research on FTMO first 90 days survival strategy, payout timing optimization, scaling path, drawdown recovery protocol, and 10 actionable NovaTrade recommendations"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260405_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Comprehensive research on FTMO first 90 days survival strategy, payout timing optimization, scaling path, drawdown recovery protocol, and 10 actionable NovaTrade recommendations",
+  "created_at": "2026-04-06T02:11:02Z",
+  "confidence": "low"
+}

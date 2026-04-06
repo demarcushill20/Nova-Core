@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260405_15_free_will_pm_1775439884",
+  "workflow_id": "shift_20260405_15_free_will_pm",
+  "task_summary": "Fixed 5 test regressions (1 production risk bug, 4 test issues) bringing suite from blocked to 7522/7522 green",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 5 test regressions (1 production risk bug, 4 test issues) bringing suite from blocked to 7522/7522 green"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260405_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 5 test regressions (1 production risk bug, 4 test issues) bringing suite from blocked to 7522/7522 green",
+  "created_at": "2026-04-06T01:44:44Z",
+  "confidence": "high"
+}

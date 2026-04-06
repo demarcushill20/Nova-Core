@@ -354,8 +354,9 @@ class PipelineCollector(BaseCollector):
                             else:
                                 score += 10.0  # high error rate
                             checks += 1
-                        elif self._is_forex_market_closed():
-                            # ticks=0 expected during market closure
+                        elif self._is_forex_market_closed() or self._runtime_reports_market_closed():
+                            # ticks=0 expected during market closure or
+                            # early Monday transition when runtime still idle
                             if errors == 0:
                                 score += 45.0  # healthy idle — no errors
                             else:
@@ -378,6 +379,8 @@ class PipelineCollector(BaseCollector):
 
                     if status == "OK" and concern == "GREEN":
                         score += 50.0
+                    elif status == "MARKET_CLOSED" and concern == "GREEN":
+                        score += 45.0  # healthy weekend/transition idle
                     elif status == "OK":
                         score += 35.0
                     elif concern in ("GREEN", "YELLOW"):
@@ -412,6 +415,23 @@ class PipelineCollector(BaseCollector):
         elif age_h < 6:
             score = 25.0
         return score, round(age_h, 2)
+
+    def _runtime_reports_market_closed(self) -> bool:
+        """Check if NovaTrade runtime's signal_stats reports MARKET_CLOSED.
+
+        Trusts the runtime's own assessment of market state, which handles
+        edge cases like early Monday transition better than static weekday checks.
+        """
+        stats_path = Path(self.base_path) / "STATE" / "novatrade" / "signal_stats.json"
+        if not stats_path.exists():
+            return False
+        try:
+            data = json.loads(stats_path.read_text())
+            if isinstance(data, dict):
+                return data.get("status", "").upper() == "MARKET_CLOSED"
+        except (json.JSONDecodeError, OSError):
+            pass
+        return False
 
     @staticmethod
     def _is_forex_market_closed() -> bool:

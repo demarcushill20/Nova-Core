@@ -13,8 +13,10 @@ from novatrade.risk.pre_trade_gate import PreTradeGate
 
 @pytest.fixture
 def config():
-    """Standard test configuration."""
-    return NovaTradeCfg()
+    """Standard test configuration with FTMO 100K account baseline."""
+    from novatrade.config import FtmoProfile
+
+    return NovaTradeCfg(ftmo=FtmoProfile(account_size=100000))
 
 
 @pytest.fixture
@@ -344,6 +346,15 @@ class TestEdgeCases:
 # ---------------------------------------------------------------------------
 
 
+try:
+    import pytest_benchmark  # noqa: F401
+
+    _HAS_BENCHMARK = True
+except ImportError:
+    _HAS_BENCHMARK = False
+
+
+@pytest.mark.skipif(not _HAS_BENCHMARK, reason="pytest-benchmark not installed")
 class TestPerformanceImpact:
     """Ensure drawdown-adaptive sizing doesn't significantly impact performance."""
 

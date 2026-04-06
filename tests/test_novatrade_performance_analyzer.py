@@ -100,6 +100,20 @@ class TestPerformanceAnalyzer:
                 "approved": 2,
                 "rejected": 0,
                 "errors": 0,
+                # S7: Add v5 feature metrics to prevent alerts
+                "total_trades": 1,  # Low enough to not trigger overtrading alert
+                "partial_exits": 1,
+                "avg_partial_profit": 15.0,
+                "partial_to_breakeven": 1,
+                "m5_signals_1h": 2,
+                "h1_signals_1h": 1,
+                "mtf_aligned_signals": 2,
+                "mtf_checked_signals": 2,
+                "avg_trade_duration_hours": 8.0,
+                "target_volume_sum": 5.0,
+                "actual_volume_sum": 4.8,
+                "sl_modifications": 1,
+                "trail_triggers": 4,
             },
             "strategy_state": {
                 "equity": 100075.0,
@@ -110,7 +124,10 @@ class TestPerformanceAnalyzer:
                 "healthy": 1,
                 "unhealthy": 0,
             },
-            "uptime_seconds": 4572.0,
+            "config": {
+                "timeframe": "H1",
+            },
+            "uptime_seconds": 86400.0,  # 24 hours to make 1 trade/day reasonable
         }
 
     def test_analyze_status_basic_metrics(self, analyzer, sample_status_data):
@@ -125,7 +142,7 @@ class TestPerformanceAnalyzer:
         assert metrics.consecutive_losses == 0
         assert metrics.feed_health_score == 1.0
         assert metrics.error_rate == 0.0
-        assert metrics.uptime_seconds == 4572.0
+        assert metrics.uptime_seconds == 86400.0
 
     def test_analyze_status_with_errors(self, analyzer, sample_status_data):
         """Test analysis with errors and rejections."""
@@ -266,7 +283,7 @@ class TestPerformanceAnalyzer:
         assert summary["execution_quality_score"] == 100.0
         assert summary["feed_health_score"] == 1.0
         assert summary["consecutive_losses"] == 0
-        assert summary["uptime_hours"] == 1.3  # 4572 seconds / 3600
+        assert summary["uptime_hours"] == 24.0  # 86400 seconds / 3600
         assert summary["alert_count"] == 0
         assert summary["alerts"] == []
         assert "timestamp" in summary

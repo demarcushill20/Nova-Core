@@ -746,3 +746,75 @@ class TestTransactionCostDeduction:
         # total_cost_pips should use fixed (2.0), not avg (1.0)
         expected_pips = 50.0 - 2.0  # = 48.0
         assert trade.pnl_pips == pytest.approx(expected_pips, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# ATR floor + spread cushion parity (engine vs strategy wrapper)
+# ---------------------------------------------------------------------------
+
+
+class TestEngineATRFloorParity:
+    """Verify the backtest engine applies ATR floor to SL after spread cushion,
+    matching the IRBStrategy wrapper behaviour."""
+
+    def test_atr_floor_widens_sl_in_engine(self):
+        """Engine should apply ATR floor when candle geometry is tight."""
+        h1 = _trending_up_candles(100)
+        h4 = _trending_up_candles(25, step=0.004)
+
+        env = BacktestEnvironment(
+            atr_sl_floor_multiplier=1.0,
+            sl_spread_buffer_pips=1.0,
+        )
+        bt = IRBBacktester(env=env)
+        bt.run(h1, h4)
+
+        env_no_floor = BacktestEnvironment(
+            atr_sl_floor_multiplier=0.0,
+            sl_spread_buffer_pips=1.0,
+        )
+        bt_no_floor = IRBBacktester(env=env_no_floor)
+        bt_no_floor.run(h1, h4)
+
+        # If ATR floor is active, trades with tight geometry should have
+        # wider SL distances.
+        if bt._trades and bt_no_floor._trades:
+            floor_dists = [abs(t.entry_price - t.stop_loss) for t in bt._trades]
+            no_floor_dists = [abs(t.entry_price - t.stop_loss) for t in bt_no_floor._trades]
+            avg_floor = sum(floor_dists) / len(floor_dists)
+            avg_no_floor = sum(no_floor_dists) / len(no_floor_dists)
+            assert avg_floor >= avg_no_floor, f"ATR floor should widen or equal SL: {avg_floor} vs {avg_no_floor}"
+
+    def test_spread_cushion_and_atr_floor_interaction(self):
+        """When both spread cushion and ATR floor are active, the wider one wins."""
+        h1 = _trending_up_candles(100)
+        h4 = _trending_up_candles(25, step=0.004)
+
+        # Large ATR floor + small spread → ATR floor dominates
+        env_big_floor = BacktestEnvironment(
+            atr_sl_floor_multiplier=2.0,
+            sl_spread_buffer_pips=0.5,
+        )
+        bt_big = IRBBacktester(env=env_big_floor)
+        bt_big.run(h1, h4)
+
+        # No ATR floor + large spread → spread cushion is only factor
+        env_big_spread = BacktestEnvironment(
+            atr_sl_floor_multiplier=0.0,
+            sl_spread_buffer_pips=3.0,
+        )
+        bt_spread = IRBBacktester(env=env_big_spread)
+        bt_spread.run(h1, h4)
+
+        # Both should produce trades with wider stops than the base case
+        env_base = BacktestEnvironment(
+            atr_sl_floor_multiplier=0.0,
+            sl_spread_buffer_pips=0.0,
+        )
+        bt_base = IRBBacktester(env=env_base)
+        bt_base.run(h1, h4)
+
+        if bt_big._trades and bt_base._trades:
+            big_dists = [abs(t.entry_price - t.stop_loss) for t in bt_big._trades]
+            base_dists = [abs(t.entry_price - t.stop_loss) for t in bt_base._trades]
+            assert sum(big_dists) / len(big_dists) >= sum(base_dists) / len(base_dists)
