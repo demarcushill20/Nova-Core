@@ -10,7 +10,12 @@ since heartbeat.py imports from this module.
 
 import json
 import subprocess
+import time
 from datetime import datetime, timezone
+from pathlib import Path
+
+_CODEBASE_CACHE_FILE = Path("/home/nova/nova-core/STATE/codebase_snapshot.json")
+_CODEBASE_CACHE_TTL = 6 * 3600  # 6 hours
 
 
 def _gather_extended_state(checks: list) -> str:
@@ -152,7 +157,20 @@ def _gather_extended_state(checks: list) -> str:
 
 
 def _scan_codebase() -> str:
-    """Scan the nova-core codebase and return a structured snapshot."""
+    """Scan the nova-core codebase and return a structured snapshot.
+
+    Caches results in STATE/codebase_snapshot.json with 6h TTL.
+    """
+    # Check cache first
+    if _CODEBASE_CACHE_FILE.exists():
+        try:
+            cache = json.loads(_CODEBASE_CACHE_FILE.read_text())
+            cached_at = cache.get("cached_at", 0)
+            if (time.time() - cached_at) < _CODEBASE_CACHE_TTL:
+                return cache.get("snapshot", "(cached scan empty)")
+        except Exception:
+            pass
+
     import heartbeat
 
     parts = []
@@ -248,7 +266,23 @@ def _scan_codebase() -> str:
     except Exception:
         pass
 
-    return "\n".join(parts) if parts else "(codebase scan failed)"
+    snapshot = "\n".join(parts) if parts else "(codebase scan failed)"
+
+    # Cache the result
+    try:
+        _CODEBASE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CODEBASE_CACHE_FILE.write_text(
+            json.dumps(
+                {
+                    "cached_at": time.time(),
+                    "snapshot": snapshot,
+                }
+            )
+        )
+    except Exception:
+        pass
+
+    return snapshot
 
 
 def _build_research_prompt() -> str:
@@ -283,140 +317,68 @@ def _build_research_prompt() -> str:
     # Scan the codebase
     codebase_snapshot = _scan_codebase()
 
+    ctx_line = (
+        "CONTEXT: Query memory (get_last_checkpoint, "
+        'query_memory "research topics"), '
+        'scan vault (vault_list "40-research"), review goals.'
+    )
+    cats = (
+        "Categories: MCP tools, agent architecture, "
+        "production hardening, memory/RAG, code quality, "
+        "security, monitoring, scheduling, meta-learning, "
+        "cost optimization."
+    )
+    mem_meta = (
+        f'{{"category":"research","project":"nova-core",'
+        f'"topic":"<topic>","date":"{date_str}",'
+        f'"confidence":"high","source":"heartbeat"}}'
+    )
+    vault_fm = (
+        f'{{type:"research-summary", '
+        f'research_id:"rs-<slug>-{date_str}", '
+        f'title:"<title>", topic:"<topic>", '
+        f'date_researched:"{date_str}", '
+        f"sources_count:<N>, "
+        f'confidence:"high", source:"nova-core-memory", '
+        f'tags:["#type/research","<topic-tag>",'
+        f'"heartbeat-research"]}}'
+    )
     return f"""\
-You are Nova, an autonomous AI agent. This is your RESEARCH CYCLE.
-Current time: {ts}
+You are Nova. RESEARCH CYCLE — {ts}
 
-YOUR MISSION: Scan your codebase AND both memory systems for context, then
-conduct deep research on a topic of your choice, create a research report,
-and save it to BOTH of your memory systems. You have 10 minutes.
+{ctx_line}
 
-═══════════════════════════════════════════════════════════════
-STEP 1: CONTEXT GATHERING — scan codebase + both memory systems
-═══════════════════════════════════════════════════════════════
+Recent outputs (don't repeat): {recent_str}
+Active goals: {goals_str}
+Codebase: {len(codebase_snapshot)} chars snapshot — run git ls-files if needed.
 
-1a. Query Fusion Memory for prior research:
-    - Call `get_last_checkpoint` to see session state
-    - Call `query_memory` with query="research topics completed nova-core"
-    - Call `query_memory` with query="knowledge gaps improvement areas"
+TASK: Pick ONE unresearched topic aligned with goals. {cats}
 
-1b. Scan Obsidian Vault for existing research:
-    - Call `vault_list` on path "40-research" to see what exists
-    - Call `vault_search` with query="research" to find research notes
+RESEARCH: 3-5 searches (tavily_search/tavily_research),
+fetch 2-3 pages, cross-reference. Prefer 2025-2026 sources.
 
-1c. Codebase snapshot (your own code — look for gaps, patterns, opportunities):
-{codebase_snapshot}
+WRITE: /home/nova/nova-core/OUTPUT/hb_research_{stamp}.md
+Format: # Title, ## Executive Summary, ## Key Findings,
+## Recommendations, ## Sources, ## CONTRACT
 
-1d. Review recent outputs (DO NOT repeat these topics):
-{recent_str}
+SAVE TO MEMORY: upsert_memory(
+  content=<500-1000 char summary>,
+  id="research_{date_str}_<slug>",
+  metadata={mem_meta})
 
-1e. Active goals to align research with:
-{goals_str}
+SAVE TO VAULT: vault_write(
+  path="40-research/<slug>-{date_str}.md",
+  frontmatter={vault_fm},
+  body=<full content>)
 
-═══════════════════════════════════════════════════════════════
-STEP 2: CHOOSE A RESEARCH TOPIC
-═══════════════════════════════════════════════════════════════
+VERIFY: OUTPUT file exists, upsert_memory success,
+vault_write success. Retry once on failure.
 
-Pick ONE topic that:
-- Has NOT been researched before (check memory + recent outputs above)
-- Aligns with an active goal when possible
-- Is informed by the codebase scan — what does nova-core need right now?
-- Is actionable — results should improve nova-core
-- Has enough depth for a substantive report
-
-Topic categories (pick one, go deep):
-- New MCP servers or tools for agent capabilities
-- Autonomous agent architecture patterns (self-healing, reflection, planning)
-- Production hardening for AI agent runtimes
-- Memory/RAG innovations and knowledge graph techniques
-- Code quality and testing automation for AI-generated code
-- Security practices for autonomous AI systems
-- Monitoring and observability for agent runtimes
-- Task scheduling and workflow orchestration
-- Self-improvement and meta-learning in AI agents
-- Cost optimization for LLM-powered systems
-
-═══════════════════════════════════════════════════════════════
-STEP 3: DEEP WEB RESEARCH (use multiple tools)
-═══════════════════════════════════════════════════════════════
-
-- Run 3-5 search queries using `brave_web_search` and/or `tavily_search`
-- Use `tavily_research` for at least one deep synthesis query
-- Fetch 2-3 authoritative full pages using `fetch`
-- Cross-reference findings across multiple sources
-- Prefer sources from 2025-2026
-
-═══════════════════════════════════════════════════════════════
-STEP 4: WRITE OUTPUT REPORT
-═══════════════════════════════════════════════════════════════
-
-Create file: /home/nova/nova-core/OUTPUT/hb_research_{stamp}.md
-
-Include:
-- # Title with topic and date
-- ## Executive Summary (2-3 paragraphs)
-- ## Key Findings (numbered, detailed)
-- ## Recommendations for Nova-Core (specific, actionable)
-- ## Sources (URLs with brief descriptions)
-- ## CONTRACT block (required — see below)
-
-═══════════════════════════════════════════════════════════════
-STEP 5: SAVE TO FUSION MEMORY (MANDATORY — do not skip)
-═══════════════════════════════════════════════════════════════
-
-Call `upsert_memory` with these exact parameters:
-- content: Dense summary of findings (500-1000 chars)
-- id: "research_{date_str}_<topic_slug>"
-- metadata: {{
-    "category": "research",
-    "project": "nova-core",
-    "topic": "<the research topic>",
-    "date": "{date_str}",
-    "confidence": "high",
-    "source": "heartbeat"
-  }}
-
-═══════════════════════════════════════════════════════════════
-STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY — do not skip)
-═══════════════════════════════════════════════════════════════
-
-Call `vault_write` with these exact parameters:
-- path: "40-research/<topic-slug>-{date_str}.md"
-- frontmatter (MUST match this schema exactly):
-    type: "research-summary"
-    research_id: "rs-<topic-slug>-{date_str}"
-    title: "<Research Title>"
-    topic: "<topic category>"
-    date_researched: "{date_str}"
-    sources_count: <integer — number of sources>
-    confidence: "high"
-    source: "nova-core-memory"
-    tags:
-      - "#type/research"
-      - "<topic-tag>"
-      - "heartbeat-research"
-- body: Full research content (findings + recommendations + sources)
-
-IMPORTANT: The frontmatter must include `source: "nova-core-memory"` and
-tags must include "#type/research". Without these, vault_write will reject.
-
-═══════════════════════════════════════════════════════════════
-STEP 7: SELF-CHECK
-═══════════════════════════════════════════════════════════════
-
-Before exiting, verify:
-1. OUTPUT file exists at /home/nova/nova-core/OUTPUT/hb_research_{stamp}.md
-2. upsert_memory returned success
-3. vault_write returned success
-If any failed, retry ONCE.
-
-## CONTRACT (at end of OUTPUT report)
-summary: <one-line description>
+## CONTRACT
+summary: <one-line>
 files_changed: OUTPUT/hb_research_{stamp}.md
-verification: OUTPUT exists, upsert_memory success, vault_write success
-confidence: high
-
-BEGIN NOW. Start with Step 1 — query your memory systems."""
+verification: OUTPUT exists, memory saved, vault saved
+confidence: high"""
 
 
 def _build_planning_prompt() -> str:
@@ -451,153 +413,71 @@ def _build_planning_prompt() -> str:
         except Exception:
             pass
 
+    plan_ctx = (
+        "CONTEXT: Query memory (get_last_checkpoint, "
+        'query_memory "implementation plan", '
+        '"recent research", "enhancement plan"). '
+        'Scan vault (vault_search "implementation plan", '
+        '"enhancement", vault_list "40-research").'
+    )
+    plan_decide = (
+        "DECIDE: CREATE new plan if none exists/all complete/"
+        "new direction. REVISE existing plan if new research "
+        "available/priorities shifted."
+    )
+    plan_mem_meta = (
+        f'{{"category":"decision","project":"nova-core",'
+        f'"topic":"enhancement_plan",'
+        f'"date":"{date_str}","confidence":"high",'
+        f'"source":"heartbeat","plan_version":"<N>"}}'
+    )
+    plan_vault_fm = (
+        f'{{type:"implementation-plan", '
+        f'plan_id:"plan-nova-core-{stamp}", '
+        f'title:"Nova-Core Enhancement Plan", '
+        f'date_created:"{date_str}", confidence:"high", '
+        f'source:"nova-core-memory", '
+        f'tags:["#type/plan","planning",'
+        f'"heartbeat-planning"]}}'
+    )
     return f"""\
-You are Nova, an autonomous AI agent. This is your PLANNING CYCLE.
-Current time: {ts}
+You are Nova. PLANNING CYCLE — {ts}
 
-YOUR MISSION: Scan your codebase AND both memory systems for full context,
-then either CREATE a new phased implementation plan or REVISE an existing
-plan based on new research findings. Save the plan to BOTH memory systems.
-You have 10 minutes.
+{plan_ctx}
 
-═══════════════════════════════════════════════════════════════
-STEP 1: DEEP CONTEXT GATHERING
-═══════════════════════════════════════════════════════════════
+Recent outputs: {recent_str}
+Active goals: {goals_str}
+Codebase: {len(codebase_snapshot)} chars snapshot — run git ls-files if needed.
 
-1a. Query Fusion Memory for existing plans and recent research:
-    - Call `get_last_checkpoint` to see session state
-    - Call `query_memory` with query="implementation plan nova-core phases"
-    - Call `query_memory` with query="recent research findings discoveries"
-    - Call `query_memory` with query="enhancement plan revision"
+{plan_decide}
 
-1b. Scan Obsidian Vault for existing plans and patterns:
-    - Call `vault_search` with query="implementation plan"
-    - Call `vault_search` with query="enhancement"
-    - Call `vault_list` on path "40-research" to see recent research
-
-1c. Codebase snapshot (your own code — understand what exists):
-{codebase_snapshot}
-
-1d. Recent outputs (research reports to build plans from):
-{recent_str}
-
-1e. Active goals:
-{goals_str}
-
-═══════════════════════════════════════════════════════════════
-STEP 2: DECIDE — CREATE NEW or REVISE EXISTING
-═══════════════════════════════════════════════════════════════
-
-Based on your context scan, decide:
-
-A) CREATE a new plan if:
-   - No current plan exists, OR
-   - The existing plan is fully completed, OR
-   - New research has revealed a completely new direction
-
-B) REVISE an existing plan if:
-   - A current plan exists but new research has been done since last revision
-   - Some phases are complete and need updating
-   - Priorities have shifted based on new findings
-
-When revising: read the existing plan fully, note what's done, what's
-changed, and what new research suggests. Don't start from scratch.
-
-═══════════════════════════════════════════════════════════════
-STEP 3: BUILD THE PLAN
-═══════════════════════════════════════════════════════════════
-
-Your plan MUST follow this structure:
-
+BUILD PLAN:
 # Nova-Core Enhancement Plan v<N> — {date_str}
-
-## Vision
-One paragraph describing the overall direction.
-
-## Current State
-What's built, what's working, what's missing. Reference the codebase scan.
-
-## Phase-by-Phase Implementation
-
-### Phase <N>: <Name> (priority: high/medium/low)
-**Goal:** What this phase achieves
-**Prerequisites:** What must be done first
-**Steps:**
-1. Step with specific file paths and code changes
-2. Step with specific commands or configurations
-3. Step with verification criteria
-**Estimated complexity:** small/medium/large
-**Success criteria:** How to know it's done
-
-(Repeat for each phase — aim for 3-7 phases)
-
+## Vision (1 paragraph)
+## Current State (what's built, working, missing)
+## Phase-by-Phase: Goal, Prerequisites, Steps, Complexity,
+   Success Criteria
 ## Research Gaps
-Topics that need research before certain phases can start.
+## Quick Wins (<30 min each)
 
-## Quick Wins
-Small improvements (< 30 min each) that can be done immediately.
+WRITE: /home/nova/nova-core/OUTPUT/hb_plan_{stamp}.md
+(include ## CONTRACT at end)
 
-═══════════════════════════════════════════════════════════════
-STEP 4: WRITE OUTPUT REPORT
-═══════════════════════════════════════════════════════════════
+SAVE TO MEMORY: upsert_memory(
+  content=<plan summary 500-1000 chars>,
+  id="plan_{date_str}_<slug>",
+  metadata={plan_mem_meta})
 
-Create file: /home/nova/nova-core/OUTPUT/hb_plan_{stamp}.md
+SAVE TO VAULT: vault_write(
+  path="00-inbox/plan-nova-core-{stamp}.md",
+  frontmatter={plan_vault_fm},
+  body=<full plan>)
 
-Include the full plan plus a ## CONTRACT block at the end.
+VERIFY: OUTPUT file exists, memory saved, vault saved.
+Retry once on failure.
 
-═══════════════════════════════════════════════════════════════
-STEP 5: SAVE TO FUSION MEMORY (MANDATORY)
-═══════════════════════════════════════════════════════════════
-
-Call `upsert_memory` with:
-- content: Plan summary with phase names and priorities (500-1000 chars)
-- id: "plan_{date_str}_<plan_slug>"
-- metadata: {{
-    "category": "decision",
-    "project": "nova-core",
-    "topic": "enhancement_plan",
-    "date": "{date_str}",
-    "confidence": "high",
-    "source": "heartbeat",
-    "plan_version": "<version number>"
-  }}
-
-═══════════════════════════════════════════════════════════════
-STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY)
-═══════════════════════════════════════════════════════════════
-
-Call `vault_write` with EXACTLY this frontmatter (do NOT change the type or source):
-- path: "00-inbox/plan-nova-core-{stamp}.md"
-- frontmatter:
-    type: "implementation-plan"
-    plan_id: "plan-nova-core-{stamp}"
-    title: "Nova-Core Enhancement Plan"
-    date_created: "{date_str}"
-    confidence: "high"
-    source: "nova-core-memory"
-    tags:
-      - "#type/plan"
-      - "planning"
-      - "heartbeat-planning"
-- body: Full plan content
-
-CRITICAL: You MUST use type: "implementation-plan" and source: "nova-core-memory".
-Any other values will be rejected by schema validation.
-
-═══════════════════════════════════════════════════════════════
-STEP 7: SELF-CHECK
-═══════════════════════════════════════════════════════════════
-
-Verify:
-1. OUTPUT file exists at /home/nova/nova-core/OUTPUT/hb_plan_{stamp}.md
-2. upsert_memory returned success
-3. vault_write returned success
-If any failed, retry ONCE.
-
-## CONTRACT (at end of OUTPUT report)
-summary: <one-line: created or revised plan>
+## CONTRACT
+summary: <created or revised plan>
 files_changed: OUTPUT/hb_plan_{stamp}.md
-verification: OUTPUT exists, upsert_memory success, vault_write success
-confidence: high
-
-BEGIN NOW. Start with Step 1 — gather context from memory and codebase."""
+verification: OUTPUT exists, memory saved, vault saved
+confidence: high"""

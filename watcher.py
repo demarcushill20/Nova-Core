@@ -37,6 +37,7 @@ from utils.async_worker_pool import AsyncWorkerPool, TaskPriority, parse_task_pr
 from utils.audit_log import get_audit_logger
 from utils.cost_router import route_task as cost_route_task
 from utils.dlp_gate import dlp
+from utils.execution_lanes import classify_lane, get_lane_config
 from utils.file_watcher import TaskFileWatcher
 from utils.langfuse_tracing import trace_llm_call
 from utils.max_plan_guard import record_invocation as _mpg_record
@@ -45,6 +46,8 @@ from utils.self_healing import DegradationTier as _DegradationTier
 from utils.self_healing import get_degradation_tier as _sh_get_tier
 from utils.self_healing import record_error as _sh_record_error
 from utils.self_healing import touch_dead_man_switch as _sh_touch
+from utils.token_ledger import record_invocation as _ledger_record
+from utils.tool_profiles import get_allowed_tools_args
 
 try:
     from utils.warning_router import WarningSeverity as _WarnSev
@@ -1183,6 +1186,23 @@ async def _execute_worker(
             )
             stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
             stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            # Phase 1: Parse JSON output for token usage
+            _input_toks, _output_toks = 0, 0
+            if stdout:
+                try:
+                    import json as _json
+
+                    _resp = _json.loads(stdout)
+                    if isinstance(_resp, dict):
+                        _usage = _resp.get("usage", {})
+                        _input_toks = _usage.get("input_tokens", 0)
+                        _output_toks = _usage.get("output_tokens", 0)
+                        # Extract the actual text result for downstream processing
+                        _result_text = _resp.get("result", "")
+                        if _result_text:
+                            stdout = _result_text
+                except (ValueError, TypeError, KeyError):
+                    pass  # Not JSON or unexpected format — use raw stdout
         except asyncio.TimeoutError:
             proc.kill()
             await proc.communicate()
@@ -1236,6 +1256,21 @@ async def _execute_worker(
         logger.info("Claude exited with code %d for %s", exit_code, stem)
         log_size = await asyncio.to_thread(lambda: worker_log.stat().st_size)
         logger.info("Worker log: %s (%d bytes)", worker_log, log_size)
+
+        # Phase 1: Record token usage in ledger
+        _dur = (datetime.now(timezone.utc) - _mpg_t0).total_seconds()
+        if _input_toks > 0 or _output_toks > 0:
+            try:
+                _ledger_record(
+                    caller=stem.split("_")[0] if "_" in stem else "watcher",
+                    input_tokens=_input_toks,
+                    output_tokens=_output_toks,
+                    model=_mpg_model,
+                    duration_secs=_dur,
+                    task_id=stem,
+                )
+            except Exception:
+                logger.debug("Token ledger record failed for %s (non-fatal)", stem)
 
     except asyncio.CancelledError:
         raise  # re-raise, already handled above
@@ -1568,6 +1603,22 @@ async def _dispatch_inner(task_path: Path):
         finally:
             orch_pid_file.unlink(missing_ok=True)
 
+    # --- Phase 5: Execution lane classification ---
+    _lane = classify_lane(
+        task_class=routing["task_class"],
+        complexity=cost_decision.complexity,
+        work_mode="",
+    )
+    _lane_config = get_lane_config(_lane, task_class=routing["task_class"])
+    logger.info(
+        "EXECUTION_LANE: %s (tool_profile=%s, skill_mode=%s, memory=%s, timeout=%ds)",
+        _lane.value,
+        _lane_config.tool_profile,
+        _lane_config.skill_mode,
+        _lane_config.memory_enabled,
+        _lane_config.timeout_seconds,
+    )
+
     # --- Skill activation ---
     all_skills = load_skills()
     selected = select_skills(task_text, all_skills)
@@ -1575,7 +1626,7 @@ async def _dispatch_inner(task_path: Path):
     logger.info("SKILLS SELECTED: %s", ", ".join(selected_names) or "(none)")
 
     skill_injection_path = WORK_DIR / f"skill_injection_{stem}.txt"
-    append_prompt_content = render_append_prompt(selected)
+    append_prompt_content = render_append_prompt(selected, mode=_lane_config.skill_mode)
     if append_prompt_content:
         skill_injection_path.write_text(append_prompt_content, encoding="utf-8")
         logger.info(
@@ -1590,7 +1641,7 @@ async def _dispatch_inner(task_path: Path):
     memory_context = ""
     try:
         task_class = routing.get("task_class", "unknown")
-        keywords = _extract_keywords(task_text)
+        keywords = _extract_keywords(task_text) if _lane_config.memory_enabled else []
         if keywords:
             recall_result = memory_router.recall(
                 query=" ".join(keywords[:5]),
@@ -1633,7 +1684,20 @@ async def _dispatch_inner(task_path: Path):
         prompt = context_prefix + prompt
 
     # --- Deterministic worker log (Phase 4.4: model from cost router) ---
-    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", "--model", routed_model]
+    cmd = [
+        CLAUDE_BIN,
+        "-p",
+        "--output-format",
+        "json",
+        "--verbose",
+        "--dangerously-skip-permissions",
+        "--model",
+        routed_model,
+    ]
+    # Phase 2: Selective MCP tool loading
+    _tool_args = get_allowed_tools_args(_lane_config.tool_profile or routing["task_class"])
+    if _tool_args:
+        cmd.extend(_tool_args)
     if append_prompt_content and skill_injection_path.exists():
         cmd += ["--append-system-prompt", append_prompt_content]
     cmd.append(prompt)
@@ -1763,12 +1827,18 @@ async def _dispatch_inner(task_path: Path):
             retry_cmd = [
                 CLAUDE_BIN,
                 "-p",
+                "--output-format",
+                "json",
                 "--verbose",
                 "--dangerously-skip-permissions",
                 "--model",
                 "claude-opus-4-6",
-                reflection_prompt,
             ]
+            # Phase 2: Fallback profile (all tools) for reflexion retries
+            _retry_tool_args = get_allowed_tools_args("fallback")
+            if _retry_tool_args:
+                retry_cmd.extend(_retry_tool_args)
+            retry_cmd.append(reflection_prompt)
             retry_exit = await _execute_worker(
                 stem=stem,
                 cmd=retry_cmd,

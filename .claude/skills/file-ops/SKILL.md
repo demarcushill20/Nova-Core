@@ -3,24 +3,14 @@ name: file-ops
 description: "Safely create, read, edit, move, and rename files within the nova-core sandbox using a diff-first, read-before-write workflow."
 activation:
   keywords:
-    - file
-    - read
-    - write
-    - edit
-    - diff
-    - patch
-    - path
-    - .py
-    - .md
-    - .json
-    - .yaml
-    - .yml
-    - .txt
-    - .csv
-    - .toml
-    - .cfg
-    - .ini
-    - .sh
+    - create file
+    - write file
+    - edit file
+    - move file
+    - rename file
+    - delete file
+    - file operation
+    - file management
   when:
     - Task requires creating, reading, editing, or moving files
     - Task involves generating code, configs, or documentation

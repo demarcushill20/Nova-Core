@@ -93,6 +93,23 @@ except ImportError:
     _update_cruise_state = None  # type: ignore[assignment,misc]
 
 try:
+    from utils.token_ledger import record_invocation as _ledger_record
+except ImportError:
+    _ledger_record = None  # type: ignore[assignment]
+
+try:
+    from utils.tool_profiles import get_allowed_tools_args as _get_allowed_tools_args
+except ImportError:
+    _get_allowed_tools_args = None  # type: ignore[assignment]
+
+try:
+    from utils.heartbeat_rules import HeartbeatRulesEngine
+
+    _rules_engine = HeartbeatRulesEngine()
+except ImportError:
+    _rules_engine = None  # type: ignore[assignment]
+
+try:
     from utils.scheduler.calibration import (
         compute_calibration as _compute_calibration,
     )
@@ -1304,7 +1321,8 @@ def _run_heartbeat_agent(checks: list) -> None:
     """LLM-driven heartbeat: reads checklist + state, decides whether to act.
 
     Runs AFTER deterministic health checks. Only during active hours.
-    Uses Haiku for cost efficiency.
+    Uses HEARTBEAT_MODEL (defaults to Opus). Rules engine handles most decisions;
+    LLM is only called for escalation cases the rules can't resolve.
     """
     current_hour = datetime.now(timezone.utc).hour
     if not (ACTIVE_HOURS_START <= current_hour < ACTIVE_HOURS_END):
@@ -1367,13 +1385,68 @@ def _run_heartbeat_agent(checks: list) -> None:
     # (prevents runaway retries from bypassing the cooldown gate).
     _update_heartbeat_agent_cooldown(success=True)
 
+    # --- Phase 3: Rules engine replaces LLM for pattern-matchable decisions ---
+    if _rules_engine is not None:
+        try:
+            rule_result = _rules_engine.evaluate(checks)
+            _hb_dur = (datetime.now(timezone.utc) - _hb_t0).total_seconds()
+
+            if _mpg_record is not None:
+                _mpg_record(
+                    caller="heartbeat_agent",
+                    component="heartbeat._run_heartbeat_agent.rules",
+                    model="rules_engine",
+                    success=True,
+                    duration_secs=_hb_dur,
+                )
+
+            if rule_result.escalate_to_llm:
+                _log_agent(f"RULES_ESCALATE: {rule_result.escalation_reason}")
+                print(f"[heartbeat-agent] Rules engine escalating to LLM: {rule_result.escalation_reason}")
+                # Fall through to LLM path below
+            else:
+                if not rule_result.actions:
+                    _log_agent("HEARTBEAT_OK (rules engine — no actions)")
+                    print("[heartbeat-agent] All clear — HEARTBEAT_OK (rules engine)")
+                    return
+
+                _log_agent(f"RULES_ACTION: {len(rule_result.actions)} action(s)")
+                print(f"[heartbeat-agent] Rules engine: {len(rule_result.actions)} action(s)")
+
+                # Convert rule actions to the same format _handle_agent_actions expects
+                import json as _json
+
+                _synth_response = _json.dumps(rule_result.actions)
+                _handle_agent_actions(_synth_response, checks=checks)
+                return
+        except Exception as exc:
+            _log_agent(f"RULES_ERROR: {exc} — falling back to LLM")
+            print(f"[heartbeat-agent] Rules engine error: {exc} — falling back to LLM")
+
+    # --- LLM fallback path (Phase 3 escalation or rules engine unavailable) ---
     try:
         child_env = os.environ.copy()
         child_env.pop("CLAUDECODE", None)
         child_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
+        _hb_cmd = [
+            claude_bin,
+            "-p",
+            "--output-format",
+            "json",
+            "--model",
+            HEARTBEAT_MODEL,
+            "--dangerously-skip-permissions",
+        ]
+        # Phase 2: Restrict tools for heartbeat agent
+        if _get_allowed_tools_args is not None:
+            _hb_tool_args = _get_allowed_tools_args("heartbeat_agent")
+            if _hb_tool_args:
+                _hb_cmd.extend(_hb_tool_args)
+        _hb_cmd.append(prompt)
+
         result = subprocess.run(
-            [claude_bin, "-p", "--model", HEARTBEAT_MODEL, "--dangerously-skip-permissions", prompt],
+            _hb_cmd,
             capture_output=True,
             text=True,
             timeout=HEARTBEAT_TIMEOUT,
@@ -1382,6 +1455,34 @@ def _run_heartbeat_agent(checks: list) -> None:
         )
         _hb_dur = (datetime.now(timezone.utc) - _hb_t0).total_seconds()
         response = result.stdout.strip()
+
+        # Phase 1: Parse JSON output for token tracking
+        _input_toks, _output_toks = 0, 0
+        if response:
+            try:
+                import json as _json
+
+                _resp_obj = _json.loads(response)
+                if isinstance(_resp_obj, dict):
+                    _usage = _resp_obj.get("usage", {})
+                    _input_toks = _usage.get("input_tokens", 0)
+                    _output_toks = _usage.get("output_tokens", 0)
+                    response = _resp_obj.get("result", response)
+            except (ValueError, TypeError):
+                pass  # Not JSON — use raw response
+
+        if _ledger_record is not None and (_input_toks > 0 or _output_toks > 0):
+            try:
+                _ledger_record(
+                    caller="heartbeat_agent",
+                    input_tokens=_input_toks,
+                    output_tokens=_output_toks,
+                    model=HEARTBEAT_MODEL,
+                    duration_secs=_hb_dur,
+                    task_id="heartbeat_agent",
+                )
+            except Exception:
+                pass
 
         if _mpg_record is not None:
             _mpg_record(
@@ -1740,8 +1841,25 @@ def _run_claude_cycle(
         child_env.pop("CLAUDECODE", None)
         child_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
+        _cycle_cmd = [
+            claude_bin,
+            "-p",
+            "--output-format",
+            "json",
+            "--model",
+            HEARTBEAT_MODEL,
+            "--dangerously-skip-permissions",
+        ]
+        # Phase 2: Selective tool loading for research/planning cycles
+        if _get_allowed_tools_args is not None:
+            _cycle_tool_profile = "research" if cycle_name == "research" else "planning"
+            _cycle_tool_args = _get_allowed_tools_args(_cycle_tool_profile)
+            if _cycle_tool_args:
+                _cycle_cmd.extend(_cycle_tool_args)
+        _cycle_cmd.append(prompt)
+
         result = subprocess.run(
-            [claude_bin, "-p", "--model", HEARTBEAT_MODEL, "--dangerously-skip-permissions", prompt],
+            _cycle_cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -1749,7 +1867,37 @@ def _run_claude_cycle(
             env=child_env,
         )
         response = result.stdout.strip()
+
+        # Phase 1: Parse JSON output for token tracking
+        _cycle_input_toks, _cycle_output_toks = 0, 0
+        if response:
+            try:
+                import json as _json
+
+                _cycle_resp = _json.loads(response)
+                if isinstance(_cycle_resp, dict):
+                    _cycle_usage = _cycle_resp.get("usage", {})
+                    _cycle_input_toks = _cycle_usage.get("input_tokens", 0)
+                    _cycle_output_toks = _cycle_usage.get("output_tokens", 0)
+                    response = _cycle_resp.get("result", response)
+            except (ValueError, TypeError):
+                pass
+
         _cycle_dur = (datetime.now(timezone.utc) - _cycle_t0).total_seconds()
+
+        # Phase 1: Record tokens in ledger
+        if _ledger_record is not None and (_cycle_input_toks > 0 or _cycle_output_toks > 0):
+            try:
+                _ledger_record(
+                    caller=f"{cycle_name}_cycle",
+                    input_tokens=_cycle_input_toks,
+                    output_tokens=_cycle_output_toks,
+                    model=HEARTBEAT_MODEL,
+                    duration_secs=_cycle_dur,
+                    task_id=f"{cycle_name}_cycle",
+                )
+            except Exception:
+                pass
 
         # Record completion in max-plan ledger (single entry per invocation)
         if _mpg_record is not None:
@@ -2312,6 +2460,43 @@ def check_scheduler() -> dict:
         return {"name": "scheduler", "ok": False, "detail": f"config load failed: {e}"}
 
 
+def check_token_budget() -> dict:
+    """Heartbeat health check: report daily/weekly token consumption and burn rate."""
+    try:
+        from utils.token_ledger import get_consumption_report
+
+        report = get_consumption_report()
+        burn = report.get("burn_rate", {})
+        w24h = report.get("windows", {}).get("24h", {})
+        used_24h = w24h.get("total_tokens", 0)
+        exhaustion = report.get("projected_exhaustion")
+        msg = f"24h tokens: {used_24h:,}, burn: {burn.get('tokens_per_hour', 0):,.0f}/hr"
+        if exhaustion:
+            msg += f", projected exhaustion: {exhaustion}"
+        return {"name": "token_budget", "ok": True, "message": msg}
+    except Exception as exc:
+        return {"name": "token_budget", "ok": True, "message": f"token ledger unavailable: {exc}"}
+
+
+def check_weekly_budget() -> dict:
+    """Heartbeat health check: weekly token budget status."""
+    try:
+        weekly_file = STATE_DIR / "budgets" / "weekly_status.json"
+        if not weekly_file.exists():
+            return {"name": "weekly_budget", "ok": True, "message": "no weekly tracking yet"}
+        data = json.loads(weekly_file.read_text())
+        pct = data.get("utilization_pct", 0)
+        ok = pct < 90
+        msg = f"weekly budget: {pct:.1f}% used"
+        if data.get("projected_exhaustion"):
+            msg += f", projected exhaustion: {data['projected_exhaustion']}"
+        if not ok:
+            msg += " — CRITICAL: approaching weekly cap"
+        return {"name": "weekly_budget", "ok": ok, "message": msg}
+    except Exception as exc:
+        return {"name": "weekly_budget", "ok": True, "message": f"weekly budget check failed: {exc}"}
+
+
 # --- Main --------------------------------------------------------------------
 
 
@@ -2409,6 +2594,8 @@ def main() -> int:
     checks.append(check_llm_cache())
     checks.append(check_cost_router())
     checks.append(check_scheduler())
+    checks.append(check_token_budget())
+    checks.append(check_weekly_budget())
 
     # --- Self-healing runtime (Phase 6A) ---
     try:

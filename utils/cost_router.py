@@ -95,6 +95,7 @@ class RoutingDecision:
     estimated_tokens: int = 0
     budget_utilization_pct: float = 0.0
     downgraded: bool = False
+    lane: str = ""  # Phase 5: execution lane (light/medium/heavy)
 
 
 # ---------------------------------------------------------------------------

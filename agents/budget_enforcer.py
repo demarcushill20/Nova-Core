@@ -5,11 +5,14 @@ Provides pre-flight checks and post-call accounting.
 """
 
 import json
+import logging
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 BASE = Path("/home/nova/nova-core")
 STATE = BASE / "STATE"
@@ -266,6 +269,76 @@ class BudgetEnforcer:
         """Reset per-task counters for a new task."""
         with self._lock:
             self._tasks[task_id] = TokenCounter()
+
+    def get_weekly_status(self, weekly_cap_tokens: int = 10_000_000) -> dict[str, Any]:
+        """Return weekly token consumption status aligned to billing cycle.
+
+        Args:
+            weekly_cap_tokens: Weekly token budget (input tokens). Default 10M.
+
+        Returns:
+            Dict with week_start, tokens_used, burn_rate_per_hour,
+            projected_exhaustion_datetime, utilization_pct.
+        """
+        with self._lock:
+            self._maybe_roll_day()
+
+            # Determine week start (Sunday 00:00 UTC)
+            today = datetime.strptime(self._today_str, "%Y-%m-%d")
+            days_since_sunday = today.weekday() + 1  # Monday=0, Sunday=6, so +1
+            if days_since_sunday == 7:
+                days_since_sunday = 0
+            week_start = today - timedelta(days=days_since_sunday)
+            week_start_str = week_start.strftime("%Y-%m-%d")
+
+            # Sum daily usage files for this week
+            week_input = 0
+            week_output = 0
+            budgets_dir = BUDGETS_DIR
+            for i in range(7):
+                day = week_start + timedelta(days=i)
+                day_file = budgets_dir / f"usage_{day.strftime('%Y-%m-%d')}.json"
+                if day_file.exists():
+                    try:
+                        data = json.loads(day_file.read_text())
+                        week_input += data.get("input_tokens", 0)
+                        week_output += data.get("output_tokens", 0)
+                    except Exception as exc:
+                        logger.debug("Failed to read %s: %s", day_file, exc)
+
+            # Burn rate (tokens/hour over days elapsed)
+            days_elapsed = (today - week_start).days + 1
+            hours_elapsed = max(days_elapsed * 24, 1)
+            burn_rate = week_input / hours_elapsed
+
+            # Project exhaustion
+            projected_exhaustion = None
+            utilization_pct = (week_input / weekly_cap_tokens * 100) if weekly_cap_tokens > 0 else 0
+            if burn_rate > 0 and week_input < weekly_cap_tokens:
+                remaining = weekly_cap_tokens - week_input
+                hours_until_exhaustion = remaining / burn_rate
+                projected_exhaustion = (datetime.now(timezone.utc) + timedelta(hours=hours_until_exhaustion)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+
+            status = {
+                "week_start": week_start_str,
+                "tokens_used": week_input,
+                "output_tokens_used": week_output,
+                "burn_rate_per_hour": round(burn_rate, 1),
+                "projected_exhaustion": projected_exhaustion,
+                "utilization_pct": round(utilization_pct, 1),
+                "weekly_cap_tokens": weekly_cap_tokens,
+            }
+
+            # Persist for health checks
+            weekly_file = budgets_dir / "weekly_status.json"
+            try:
+                weekly_file.write_text(json.dumps(status, indent=2))
+            except Exception as exc:
+                logger.debug("Failed to write weekly_status.json: %s", exc)
+
+            return status
 
     def check_alerts(self) -> list[str]:
         """Return alert messages for any scope that has crossed 75% or 90% thresholds."""

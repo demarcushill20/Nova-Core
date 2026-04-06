@@ -20,24 +20,14 @@ ALWAYS_INCLUDE = {"task-execution", "self-verification"}
 _BUILTIN_RULES: dict[str, list[str]] = {
     "git-ops": ["git", "commit", "branch", "merge"],
     "file-ops": [
-        "file",
-        "read",
-        "write",
-        "edit",
-        "diff",
-        "patch",
-        "path",
-        ".py",
-        ".md",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".txt",
-        ".csv",
-        ".toml",
-        ".cfg",
-        ".ini",
-        ".sh",
+        "create file",
+        "write file",
+        "edit file",
+        "move file",
+        "rename file",
+        "delete file",
+        "file operation",
+        "file management",
     ],
 }
 
@@ -234,8 +224,13 @@ def select_skills(task_text: str, skills: list[Skill] | None = None) -> list[Ski
     )
 
 
-def render_append_prompt(skills: list[Skill]) -> str:
+def render_append_prompt(skills: list[Skill], mode: str = "full") -> str:
     """Render selected skills into a single append-system-prompt string.
+
+    Args:
+        skills: List of selected skills to render.
+        mode: "compact" uses SKILL_COMPACT.md if available (or truncates to 1KB),
+              "full" renders the complete skill body.
 
     Format:
         ## ACTIVE SKILLS
@@ -251,7 +246,16 @@ def render_append_prompt(skills: list[Skill]) -> str:
     parts: list[str] = ["## ACTIVE SKILLS\n"]
 
     for skill in sorted(skills, key=lambda s: s.name):
-        block = f"--- {skill.name} ---\n{skill.body.strip()}\n--- end {skill.name} ---\n"
+        body = skill.body.strip()
+        if mode == "compact":
+            # Try SKILL_COMPACT.md first
+            compact_path = skill.path.parent / "SKILL_COMPACT.md"
+            if compact_path.is_file():
+                _, compact_body = _parse_frontmatter(compact_path.read_text(encoding="utf-8"))
+                body = compact_body.strip()
+            elif len(body) > 1024:
+                body = body[:1024] + "\n[... truncated for compact mode]"
+        block = f"--- {skill.name} ---\n{body}\n--- end {skill.name} ---\n"
         parts.append(block)
 
     result = "\n".join(parts)

@@ -284,6 +284,35 @@ class ReasoningEngine:
                 raise RuntimeError(f"claude CLI returned {proc.returncode}: {stderr.decode()[:200]}")
 
             response_text = stdout.decode().strip()
+
+            # Unwrap JSON envelope from --output-format json and record tokens
+            _input_toks, _output_toks = 0, 0
+            try:
+                _envelope = json.loads(response_text)
+                if isinstance(_envelope, dict) and "result" in _envelope:
+                    _usage = _envelope.get("usage", {})
+                    _input_toks = _usage.get("input_tokens", 0)
+                    _output_toks = _usage.get("output_tokens", 0)
+                    response_text = _envelope["result"]
+            except (json.JSONDecodeError, TypeError):
+                pass  # Not a JSON envelope — use raw text
+
+            # Record in token ledger (visibility only, never throttle NovaTrade)
+            if _input_toks > 0 or _output_toks > 0:
+                try:
+                    from utils.token_ledger import record_invocation
+
+                    record_invocation(
+                        caller="novatrade_reasoning",
+                        input_tokens=_input_toks,
+                        output_tokens=_output_toks,
+                        model=model,
+                        duration_secs=0,  # not tracked here
+                        task_id="novatrade_reasoning",
+                    )
+                except Exception as exc:
+                    log.debug("Token ledger record failed (non-fatal): %s", exc)
+
             return self._parse_llm_response(response_text, report, context)
 
         except Exception as exc:
