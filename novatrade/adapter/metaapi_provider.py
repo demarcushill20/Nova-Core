@@ -428,12 +428,28 @@ class MetaApiAdapter(MT5Adapter):
     async def subscribe_to_market_data(self, symbols: list[str]) -> None:
         """Subscribe to market data for symbols with long-term subscription.
 
-        Calls ``get_symbol_price(symbol, keep_subscription=True)`` for each
-        symbol to ensure the MetaApi terminal starts streaming prices before
-        the TickBatchPoller begins polling.  Without this, the first polls
-        may return stale or missing data.
+        Uses two-step approach for reliability:
+        1. ``refresh_symbol_quotes()`` — forces terminal to refresh Market Watch
+           quotes without requiring an existing price (works during market open/close).
+        2. ``get_symbol_price(keep_subscription=True)`` — establishes the long-term
+           subscription for streaming prices.
+
+        This prevents the chicken-and-egg failure where ``getSymbolPrice`` returns
+        NotFoundException because the symbol isn't in Market Watch yet.
         """
         await self._ensure_connected_or_reconnect()
+
+        # Step 1: Force-refresh Market Watch quotes (does not require existing price)
+        try:
+            await self._connection.refresh_symbol_quotes(symbols)
+            log.info("metaapi subscribe: refreshed quotes for %s", symbols)
+        except Exception as exc:
+            log.warning("metaapi subscribe: refresh_symbol_quotes failed: %s", _safe_error(exc))
+
+        # Brief pause to let the terminal populate Market Watch
+        await asyncio.sleep(2.0)
+
+        # Step 2: Establish long-term subscription via getSymbolPrice
         for symbol in symbols:
             try:
                 raw = await self._connection.get_symbol_price(symbol, keep_subscription=True)
@@ -444,7 +460,7 @@ class MetaApiAdapter(MT5Adapter):
                     raw["ask"],
                 )
             except Exception as exc:
-                log.warning("metaapi subscribe: failed for %s: %s", symbol, _safe_error(exc))
+                log.warning("metaapi subscribe: get_symbol_price failed for %s: %s", symbol, _safe_error(exc))
         self._subscribed_symbols = list(symbols)
         self._last_resubscribe = time.monotonic()
 
@@ -476,7 +492,17 @@ class MetaApiAdapter(MT5Adapter):
     async def get_symbol_price(self, symbol: str) -> SymbolPrice:
         """Get current bid/ask for a symbol."""
         await self._ensure_connected_or_reconnect()
-        raw = await self._connection.get_symbol_price(symbol, keep_subscription=False)
+        try:
+            raw = await self._connection.get_symbol_price(symbol, keep_subscription=True)
+        except Exception:
+            # If initial call fails, force-refresh Market Watch then retry
+            log.warning("get_symbol_price: NotFoundException for %s — refreshing quotes", symbol)
+            try:
+                await self._connection.refresh_symbol_quotes([symbol])
+                await asyncio.sleep(1.0)
+            except Exception as refresh_exc:
+                log.warning("get_symbol_price: refresh_symbol_quotes failed: %s", _safe_error(refresh_exc))
+            raw = await self._connection.get_symbol_price(symbol, keep_subscription=True)
         log.debug(
             "metaapi get_symbol_price: %s bid=%.5f ask=%.5f",
             symbol,

@@ -108,13 +108,6 @@ class TickBatchPoller:
                     try:
                         self.polls += 1
                         broker_sym = self._broker_map.get(symbol, symbol)
-
-                        # Use broker_map for symbol resolution (configured via FTMO_SYMBOL_SUFFIX)
-                        log.debug(
-                            "TickBatchPoller: requesting price for symbol=%s broker_sym=%s",
-                            symbol,
-                            broker_sym,
-                        )
                         price = await self._adapter.get_symbol_price(broker_sym)
 
                         # Zero-price guard
@@ -148,16 +141,6 @@ class TickBatchPoller:
                         self.errors += 1
                         self._consecutive_errors += 1
 
-                        # Log symbol errors for debugging
-                        if "NotFoundException" in str(exc):
-                            log.warning(
-                                "TickBatchPoller: Symbol %s not found with broker_sym=%s",
-                                symbol,
-                                broker_sym,
-                            )
-                        else:
-                            log.exception("Error polling %s — continuing", symbol)
-
                         # Rate-limit backoff: sleep until recommended retry time
                         if "TooManyRequests" in type(exc).__name__:
                             backoff = min(30 * self._consecutive_errors, 300)
@@ -170,6 +153,14 @@ class TickBatchPoller:
                             if self._running:
                                 await asyncio.sleep(backoff)
                             break  # skip remaining symbols this cycle
+                        elif "NotFoundException" in type(exc).__name__ or "NotFoundException" in str(exc):
+                            # Log at warning level, not exception (avoids noisy tracebacks)
+                            log.warning(
+                                "TickBatchPoller: price not found for %s (broker_sym=%s) — consecutive=%d",
+                                symbol,
+                                broker_sym,
+                                self._consecutive_errors,
+                            )
                         else:
                             log.exception("Error polling %s — continuing", symbol)
 

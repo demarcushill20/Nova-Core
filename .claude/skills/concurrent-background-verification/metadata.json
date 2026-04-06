@@ -1,0 +1,17 @@
+{
+  "name": "concurrent-background-verification",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "The execution used a background agent to run coverage analysis in parallel with documentation/memory work. This concurrent-verification pattern (implement \u2192 kick off background validation \u2192 write docs while waiting \u2192 merge results) is not captured in any existing skill and saved wall-clock time.",
+    "task_examples": [
+      "shift_20260406_3_implementation",
+      "shift_20260406_3_implementation"
+    ],
+    "task_id": "shift_20260406_3_implementation"
+  },
+  "created_at": "2026-04-06T13:32:01.358599+00:00"
+}
