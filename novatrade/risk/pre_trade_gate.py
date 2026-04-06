@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 # Module-level reference for testability — patch this, not time.time,
 # to avoid poisoning the global time module during tests.
 _now = time.time
-from typing import TYPE_CHECKING  # noqa: E402
+from typing import TYPE_CHECKING, List, Optional  # noqa: E402
 from zoneinfo import ZoneInfo  # noqa: E402
 
 if TYPE_CHECKING:
@@ -52,6 +52,8 @@ from novatrade.risk.ftmo_compliance import (  # noqa: E402
     WeeklyLossTracker,
 )
 from novatrade.risk.position_sizer import DrawdownScaler, PositionSizer  # noqa: E402
+from novatrade.risk.daily_budget_tracker import DailyRiskBudgetTracker  # noqa: E402
+from novatrade.risk.profit_cushion_protocol import ProfitCushionProtocol  # noqa: E402
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
@@ -135,6 +137,33 @@ class PreTradeGate:
             total_dd_enabled=True,
             loss_recovery_mode="instant",
         )
+        # Daily risk budget tracker (P1 priority from funded account survival research)
+        self._daily_budget_tracker = DailyRiskBudgetTracker(
+            daily_loss_limit_pct=self._risk.max_daily_drawdown_pct,
+            max_risk_per_trade_pct=20.0,  # Max 20% of daily budget per trade
+            min_risk_per_trade_pct=5.0,   # Min 5% of daily budget per trade
+            allocation_strategy="adaptive",
+        )
+        # Profit cushion protocol (P2 priority from funded account survival research)
+        # Auto-loads existing state or requires initialization for new cycles
+        try:
+            self._profit_cushion = ProfitCushionProtocol()
+            log.info("Loaded existing profit cushion state")
+        except ValueError:
+            # No existing state - will need to be initialized when account equity is known
+            self._profit_cushion = None
+            log.info("Profit cushion not initialized - will set up on first trade")
+
+        # Scaling plan calendar (P3 priority from funded account survival research)
+        # Manages FTMO 4-month cycles, scaling deadlines, and calendar automation
+        try:
+            from .scaling_plan_calendar import ScalingPlanCalendar
+            self._scaling_calendar = ScalingPlanCalendar()
+            log.info("Initialized scaling plan calendar")
+        except Exception as exc:
+            log.error(f"Failed to initialize scaling plan calendar: {exc}")
+            self._scaling_calendar = None
+
         # Attempt to restore persisted state from prior session
         self._lot_checker.load_state()
         self._request_counter.load_state()
@@ -142,6 +171,8 @@ class PreTradeGate:
         self._daily_loss_tracker.load_state()
         self._sl_mod_counter.load_state()
         self._weekly_loss_tracker.load_state()
+        self._daily_budget_tracker.load_state()
+        # Note: profit cushion state is loaded automatically in __init__
 
     # ------------------------------------------------------------------
     # Public API
@@ -183,6 +214,7 @@ class PreTradeGate:
         checks.append(self._check_duplicate_position(request, positions))
         checks.append(self._check_drawdown(account))
         checks.append(self._daily_loss_tracker.check(account.balance, account.equity))
+        checks.append(self._check_daily_budget(request, account))
         checks.append(self._check_spread(price))
         checks.append(self._check_weekend(now))
         checks.append(self._check_news(request.symbol, now))
@@ -243,12 +275,13 @@ class PreTradeGate:
         return decision
 
     def initialize_daily_loss(self, balance: float, equity: float) -> None:
-        """Initialize the FTMO daily loss tracker with account state.
+        """Initialize the FTMO daily loss tracker and daily budget tracker with account state.
 
         Call once at session start after fetching account balance from broker.
         """
         self._daily_loss_tracker.initialize(balance, equity)
         self._weekly_loss_tracker.initialize(balance)
+        self._daily_budget_tracker.initialize(equity)
 
     def record_closed_trade_pnl(self, pnl: float, date_str: str | None = None) -> None:
         """Record a closed trade's P&L for weekly loss and best day tracking.
@@ -275,6 +308,32 @@ class PreTradeGate:
         self._request_counter.record("order_open")
         self._days_tracker.record_trade_day()
 
+    def record_trade_with_budget(
+        self,
+        symbol: str,
+        side_value: str,
+        volume: float,
+        entry_price: float,
+        stop_loss: float,
+        trade_id: str = "",
+    ) -> None:
+        """Record a trade with full details for budget tracking.
+
+        This should be called after successful order placement to record
+        the trade against the daily budget allocation.
+        """
+        # Record in standard tracking
+        self.record_trade(symbol, side_value, volume)
+
+        # Record budget allocation
+        self._daily_budget_tracker.allocate_trade_risk(
+            symbol=symbol,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            volume=volume,
+            trade_id=trade_id,
+        )
+
     def record_server_request(self, operation: str) -> None:
         """Record a non-trade server request (modify SL/TP, close, etc.)."""
         self._request_counter.record(operation)
@@ -288,13 +347,14 @@ class PreTradeGate:
         return self._sl_mod_counter.check(position_id)
 
     def save_ftmo_state(self) -> None:
-        """Persist FTMO compliance state for crash recovery."""
+        """Persist FTMO compliance state and daily budget for crash recovery."""
         self._lot_checker.save_state()
         self._request_counter.save_state()
         self._days_tracker.save_state()
         self._daily_loss_tracker.save_state()
         self._sl_mod_counter.save_state()
         self._weekly_loss_tracker.save_state()
+        self._daily_budget_tracker.save_state()
 
     def _day_start_prague_tz(self, ts: float) -> float:
         """Return midnight Prague timezone timestamp for the day containing *ts*.
@@ -592,16 +652,80 @@ class PreTradeGate:
             total_dd_usage_pct = min(1.0, total_dd_used / total_dd_limit_pct) if total_dd_limit_pct > 0 else 0.0
 
             # Apply drawdown scaling to reduce position size as we approach limits
-            calculated = self._drawdown_scaler.scale_volume(
+            drawdown_scaled = self._drawdown_scaler.scale_volume(
                 base_volume=base_calculated,
                 dd_used_pct=daily_dd_usage_pct,
                 total_dd_used_pct=total_dd_usage_pct,
                 min_lot=self._risk.min_volume_per_trade,
             )
 
+            # Initialize profit cushion on first trade if needed
+            if self._profit_cushion is None:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+
+                # Initialize new FTMO cycle starting today
+                cycle_start = datetime.now(ZoneInfo("Europe/Prague")).replace(hour=0, minute=0, second=0, microsecond=0)
+                try:
+                    self._profit_cushion = ProfitCushionProtocol(
+                        starting_equity=account.equity,
+                        cycle_start_date=cycle_start,
+                    )
+                    log.info(f"Initialized new profit cushion cycle: equity=${account.equity:,.2f}")
+
+                    # Initialize scaling calendar for the same cycle
+                    if self._scaling_calendar and not self._scaling_calendar.get_current_cycle():
+                        self._scaling_calendar.initialize_cycle(
+                            starting_equity=account.equity,
+                            cycle_start_date=cycle_start
+                        )
+                        log.info(f"Initialized scaling plan calendar for cycle starting ${account.equity:,.2f}")
+
+                except Exception as exc:
+                    log.warning(f"Failed to initialize profit cushion: {exc}")
+                    # Fallback to no profit cushion scaling
+                    calculated = drawdown_scaled
+
+            # Apply profit cushion protocol scaling
+            if self._profit_cushion is not None:
+                try:
+                    # Update current equity (may change tier)
+                    self._profit_cushion.update_equity(account.equity)
+
+                    # Get profit cushion risk multiplier
+                    profit_multiplier = self._profit_cushion.get_risk_multiplier()
+                    profit_tier = self._profit_cushion.get_tier()
+
+                    # Apply profit cushion scaling
+                    calculated = max(
+                        self._risk.min_volume_per_trade,
+                        drawdown_scaled * profit_multiplier
+                    )
+
+                    # Update scaling calendar with current equity
+                    if self._scaling_calendar:
+                        try:
+                            self._scaling_calendar.update_equity(account.equity)
+                        except Exception as scaling_exc:
+                            log.warning(f"Scaling calendar update failed: {scaling_exc}")
+
+                    log.debug(
+                        "Profit cushion scaling: tier=%s, multiplier=%.2fx, pre=%.2f, post=%.2f",
+                        profit_tier,
+                        profit_multiplier,
+                        drawdown_scaled,
+                        calculated
+                    )
+                except Exception as exc:
+                    log.warning(f"Profit cushion scaling failed: {exc}, using drawdown-only scaling")
+                    calculated = drawdown_scaled
+            else:
+                calculated = drawdown_scaled
+
             log.debug(
-                "Drawdown-adaptive sizing: base=%.2f, scaled=%.2f, daily_dd_usage=%.1f%%, total_dd_usage=%.1f%%",
+                "Multi-tier risk scaling: base=%.2f, drawdown=%.2f, final=%.2f, daily_dd=%.1f%%, total_dd=%.1f%%",
                 base_calculated,
+                drawdown_scaled,
                 calculated,
                 daily_dd_usage_pct * 100,
                 total_dd_usage_pct * 100,
@@ -734,6 +858,28 @@ class PreTradeGate:
             passed=True,
             detail=f"drawdown={drawdown_pct:.2f}%, limit={limit:.1f}%",
         )
+
+    def _check_daily_budget(self, request: OrderRequest, account: AccountState) -> RiskCheckResult:
+        """Check if sufficient daily risk budget is available for this trade.
+
+        Uses the Daily Risk Budget Tracker (P1 priority from funded account survival research)
+        to ensure proper risk distribution throughout the trading day.
+        """
+        if request.price is None or request.stop_loss is None:
+            return RiskCheckResult(
+                name="daily_budget",
+                passed=True,
+                detail="price or stop_loss not set — budget check skipped",
+            )
+
+        # Calculate required risk for this trade
+        stop_distance = abs(request.price - request.stop_loss)
+        pip_value = _pip_value_for_symbol(request.symbol)
+        stop_pips = stop_distance / pip_value
+        required_risk_usd = request.volume * stop_pips * 10.0  # $10/pip for standard lot
+
+        # Check budget availability
+        return self._daily_budget_tracker.check_budget_availability(required_risk_usd)
 
     def _check_spread(self, price: SymbolPrice | None) -> RiskCheckResult:
         """Deny if current spread exceeds ceiling."""
@@ -963,6 +1109,108 @@ class PreTradeGate:
     def current_drawdown_scale(self) -> float:
         """Current drawdown scaling factor (1.0 = full size, 0.25 = survival mode)."""
         return self._drawdown_scaler.current_dd_scale
+
+    @property
+    def daily_budget_status(self) -> dict:
+        """Current daily budget tracker status for monitoring."""
+        return self._daily_budget_tracker.get_status_summary()
+
+    @property
+    def remaining_daily_budget(self) -> float:
+        """Remaining risk budget for today in USD."""
+        return self._daily_budget_tracker.remaining_budget_usd
+
+    @property
+    def profit_cushion_status(self) -> dict:
+        """Current profit cushion protocol status for monitoring."""
+        if self._profit_cushion is None:
+            return {"error": "Profit cushion not initialized"}
+        return self._profit_cushion.get_cycle_status()
+
+    @property
+    def profit_cushion_multiplier(self) -> float:
+        """Current profit cushion risk multiplier (1.0 = full size, 0.1 = scaling lock mode)."""
+        if self._profit_cushion is None:
+            return 1.0
+        return self._profit_cushion.get_risk_multiplier()
+
+    @property
+    def profit_cushion_tier(self) -> str:
+        """Current profit cushion tier (normal/conservative/selective/turtle/scaling_lock)."""
+        if self._profit_cushion is None:
+            return "normal"
+        return self._profit_cushion.get_tier()
+
+    @property
+    def scaling_calendar_status(self) -> dict:
+        """Current scaling plan calendar status for monitoring."""
+        if self._scaling_calendar is None:
+            return {"error": "Scaling calendar not initialized"}
+        return self._scaling_calendar.get_cycle_status()
+
+    @property
+    def is_scaling_eligible(self) -> bool:
+        """Whether account is eligible for FTMO scaling (10% profit reached)."""
+        if self._scaling_calendar is None:
+            return False
+        current_cycle = self._scaling_calendar.get_current_cycle()
+        return current_cycle.is_scaling_eligible if current_cycle else False
+
+    @property
+    def scaling_deadline(self) -> Optional[str]:
+        """Next scaling submission deadline (ISO format)."""
+        if self._scaling_calendar is None:
+            return None
+        current_cycle = self._scaling_calendar.get_current_cycle()
+        return current_cycle.scaling_deadline.isoformat() if current_cycle else None
+
+    @property
+    def upcoming_scaling_events(self) -> List[dict]:
+        """Upcoming scaling calendar events."""
+        if self._scaling_calendar is None:
+            return []
+        events = self._scaling_calendar.get_upcoming_events(days_ahead=30)
+        return [
+            {
+                "event_id": e.event_id,
+                "type": e.event_type,
+                "title": e.title,
+                "due_date": e.due_date.isoformat(),
+                "status": e.status
+            }
+            for e in events
+        ]
+
+    def start_new_profit_cycle(self, starting_equity: float, cycle_start_date=None) -> None:
+        """Start a new FTMO profit cycle.
+
+        Args:
+            starting_equity: Starting equity for new cycle
+            cycle_start_date: Start date (defaults to now)
+        """
+        if cycle_start_date is None:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            cycle_start_date = datetime.now(ZoneInfo("Europe/Prague")).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        try:
+            self._profit_cushion = ProfitCushionProtocol(
+                starting_equity=starting_equity,
+                cycle_start_date=cycle_start_date,
+            )
+            log.info(f"Started new profit cushion cycle: equity=${starting_equity:,.2f}")
+
+            # Also initialize scaling calendar for the same cycle
+            if self._scaling_calendar:
+                self._scaling_calendar.initialize_cycle(
+                    starting_equity=starting_equity,
+                    cycle_start_date=cycle_start_date
+                )
+                log.info(f"Started new scaling plan calendar: equity=${starting_equity:,.2f}")
+
+        except Exception as exc:
+            log.error(f"Failed to start new profit cycle: {exc}")
+            raise
 
 
 # ---------------------------------------------------------------------------
