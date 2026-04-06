@@ -368,6 +368,8 @@ class RiskEngine:
         else:
             log.info("Risk engine initialized — equity=$%.2f", account.equity)
 
+        self._gate.initialize_daily_loss(account.balance, account.equity)
+
     # ------------------------------------------------------------------
     # Pre-trade evaluation (Phase 6: 5-layer policy model)
     # ------------------------------------------------------------------

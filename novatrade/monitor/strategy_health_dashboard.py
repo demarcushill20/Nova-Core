@@ -341,6 +341,10 @@ class StrategyHealthMonitor:
     ) -> tuple[float, bool, bool, bool]:
         """Calculate position sizing and trading restrictions.
 
+        Degradation gating is disabled — daily budget and drawdown limits
+        handle risk control.  The health score remains advisory (logged and
+        written to state) but never throttles position sizing.
+
         Args:
             snapshot: Latest degradation analysis
             health_score: Composite health score
@@ -348,23 +352,7 @@ class StrategyHealthMonitor:
         Returns:
             Tuple of (position_multiplier, halt_entries, reduce_risk, pause_strategy)
         """
-        action = snapshot.recommended_action
-
-        if action == "FULL_PAUSE":
-            return 0.0, True, True, True
-        elif action == "HALT_ENTRIES":
-            return 0.0, True, True, False
-        elif action == "REDUCE_RISK":
-            # Gradual risk reduction based on health score
-            if health_score.overall_score >= 70:
-                multiplier = 0.75  # 25% reduction
-            elif health_score.overall_score >= 60:
-                multiplier = 0.50  # 50% reduction
-            else:
-                multiplier = 0.25  # 75% reduction
-            return multiplier, False, True, False
-        else:
-            return 1.0, False, False, False
+        return 1.0, False, False, False
 
     def assess_strategy_health(
         self,

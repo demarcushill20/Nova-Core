@@ -90,6 +90,12 @@ class TestRiskEngineInitialization:
         assert snap.daily_drawdown.reference_equity == 50_000
         assert snap.total_drawdown.reference_equity == 50_000
 
+    def test_initialize_wires_daily_budget(self):
+        engine = RiskEngine(_cfg())
+        engine.initialize(_account(equity=100_000))
+        # Daily budget should be 5% of equity = $5,000
+        assert engine._gate._daily_budget_tracker.daily_budget_usd == 5000.0
+
 
 class TestPreTradeCheck:
     def test_allow_normal_trade(self):

@@ -48,8 +48,8 @@ class HurstMetrics:
 
     def __post_init__(self) -> None:
         self.is_mean_reverting = self.exponent < 0.5
-        # Research thresholds: Green H<0.45, Yellow 0.45-0.55, Red H>0.55
-        if self.exponent < 0.45:
+        # Insufficient data (cold-start default) → treat as neutral/GREEN
+        if (self.std_error == 0.0 and self.exponent == 0.5) or self.exponent < 0.45:
             self.health_level = HealthLevel.GREEN
         elif self.exponent <= 0.55:
             self.health_level = HealthLevel.YELLOW

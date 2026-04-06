@@ -82,8 +82,12 @@ class TestRiskCalculation:
         assert risk == 500.0
         assert "equal allocation" in reasoning
 
-    def test_adaptive_allocation_strategy(self, budget_tracker):
+    @patch("time.time")
+    def test_adaptive_allocation_strategy(self, mock_time, budget_tracker):
         """Test adaptive allocation based on budget utilization."""
+        # Pin time to 10:00 Prague (08:00 UTC) — outside the 16-22 conservative window
+        mock_time.return_value = datetime(2026, 4, 6, 8, 0, 0, tzinfo=timezone.utc).timestamp()
+
         # Initial allocation should be full percentage
         risk1, _ = budget_tracker.calculate_trade_risk("EURUSD", 1.1000, 1.0950)
         expected_max = 5000.0 * 0.20  # 20% of daily budget
@@ -91,7 +95,7 @@ class TestRiskCalculation:
 
         # Simulate some budget usage
         budget_tracker._allocated_today = [
-            TradeRiskAllocation(time.time(), "EURUSD", 800.0, 1.1000, 1.0950, 0.8, "test1")
+            TradeRiskAllocation(mock_time.return_value, "EURUSD", 800.0, 1.1000, 1.0950, 0.8, "test1")
         ]
 
         # Second allocation should be reduced due to utilization

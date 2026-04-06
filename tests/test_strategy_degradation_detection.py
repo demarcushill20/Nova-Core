@@ -389,22 +389,17 @@ class TestStrategyHealthDashboard:
         assert hurst_alert.level == HealthLevel.RED
 
     def test_risk_adjustment_calculations(self):
-        """Test position sizing and risk adjustments."""
+        """Test position sizing — degradation gating disabled, always full size."""
         monitor = StrategyHealthMonitor()
 
-        # Test scenarios
-        test_cases = [
-            # (recommended_action, health_score, expected_multiplier, halt_entries, reduce_risk, pause_strategy)
-            ("NORMAL_OPERATION", 85, 1.0, False, False, False),
-            ("REDUCE_RISK", 75, 0.75, False, True, False),
-            ("REDUCE_RISK", 65, 0.50, False, True, False),
-            ("REDUCE_RISK", 55, 0.25, False, True, False),
-            ("HALT_ENTRIES", 45, 0.0, True, True, False),
-            ("FULL_PAUSE", 25, 0.0, True, True, True),
-        ]
-
-        for action, score, exp_mult, exp_halt, exp_reduce, exp_pause in test_cases:
-            # Create mock snapshot and health score
+        # All actions should return full sizing — drawdown limits handle risk
+        for action, score in [
+            ("NORMAL_OPERATION", 85),
+            ("REDUCE_RISK", 75),
+            ("REDUCE_RISK", 55),
+            ("HALT_ENTRIES", 45),
+            ("FULL_PAUSE", 25),
+        ]:
             snapshot = type("MockSnapshot", (), {"recommended_action": action})()
             health_score = HealthScore(
                 overall_score=score,
@@ -416,10 +411,10 @@ class TestStrategyHealthDashboard:
 
             mult, halt, reduce, pause = monitor.calculate_risk_adjustments(snapshot, health_score)
 
-            assert mult == exp_mult, f"Wrong multiplier for {action}/{score}: got {mult}, expected {exp_mult}"
-            assert halt == exp_halt
-            assert reduce == exp_reduce
-            assert pause == exp_pause
+            assert mult == 1.0, f"Expected full sizing for {action}/{score}, got {mult}"
+            assert halt is False
+            assert reduce is False
+            assert pause is False
 
     def test_full_health_assessment(self):
         """Test complete strategy health assessment."""
@@ -524,10 +519,11 @@ class TestIntegrationScenarios:
         assert dashboard1.health_score.overall_score > 60
         assert not dashboard1.should_pause_strategy
 
-        # Test bad period (trend break)
+        # Test bad period (trend break) — degradation gating disabled,
+        # so should_reduce_risk is always False (drawdown limits handle risk)
         dashboard2 = monitor.assess_strategy_health(prices[100:200], bad_returns, "EURUSD", "M5")
-        # Should detect problems and recommend risk reduction
-        assert dashboard2.should_reduce_risk or dashboard2.should_halt_entries
+        assert not dashboard2.should_reduce_risk
+        assert not dashboard2.should_halt_entries
 
     def test_strategy_recovery_scenario(self):
         """Test strategy recovery detection."""
