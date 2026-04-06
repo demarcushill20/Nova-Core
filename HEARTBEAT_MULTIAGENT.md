@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-04-06T15:00:14Z
+Generated: 2026-04-06T19:44:45Z
 
 ## Overall: HEALTHY
 
@@ -8,8 +8,8 @@ Generated: 2026-04-06T15:00:14Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 11 |
-| Failed workflows | 1 |
+| Completed workflows | 13 |
+| Failed workflows | 2 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
 | Completed delegations | 0 |
@@ -21,9 +21,9 @@ Generated: 2026-04-06T15:00:14Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 1076 |
+| Contract successes | 1095 |
 | Contract failures | 53 |
-| Contract failure rate | 4.7% |
+| Contract failure rate | 4.6% |
 | Budget exhaustions | 0 |
 | Policy violations | 0 |
 | Orphaned agents | 0 |
@@ -37,18 +37,21 @@ Generated: 2026-04-06T15:00:14Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| 0703_Can_you_investigate_theses_issues__Nova___Apr_5__2026_at_4_53_AM_ | ? | completed | - |
 | 0706_repair_performance_stability_regression | ? | completed | - |
 | 0708_repair_system_health_regression | ? | completed | - |
 | 0711_repair_performance_stability_regression | ? | completed | - |
 | 0713_research_system_health_gaps | ? | completed | - |
 | 0714_research_strategy_validity_gaps | ? | completed | - |
 | 0716_I_haven_t_seen_any_trades_from_novatrade_since_market_open_can_you_investigate_o | ? | completed | - |
-| shift_20260405_1_system_health | ? | failed | verifier_rejected |
-| shift_20260405_4_deep_research | ? | completed | - |
+| 0717_research_execution_pipeline_gaps | ? | completed | - |
+| hb_proactive_20260406_160119_hb_research_injection | ? | failed | verifier_rejected |
+| hb_proactive_20260406_163057_hb_research_injection | ? | failed | verifier_rejected |
+| hb_proactive_20260406_180046_hb_research_injection | ? | completed | - |
+| hb_proactive_20260406_183446_hb_research_injection | ? | completed | - |
 | shift_20260406_1_system_health | ? | completed | - |
 | shift_gen_am_20260406 | ? | completed | - |
 | shift_gen_pm_20260405 | ? | completed | - |
+| shift_gen_pm_20260406 | ? | completed | - |
 
 ## Health Findings
 

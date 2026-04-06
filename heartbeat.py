@@ -392,19 +392,38 @@ def check_task_queue() -> dict:
             task_path = TASKS_DIR / f"{stem}.md"
             failed_path = TASKS_DIR / f"{stem}.md.failed"
 
-            # Check retry eligibility
+            # Check retry eligibility — proactive tasks get stricter limit
             can_retry = True
+            is_proactive = stem.startswith("hb_proactive_")
             try:
                 from utils.task_checkpoint import MAX_TASK_RETRIES, increment_retry
 
                 cp = increment_retry(stem)
-                if cp is not None and cp.retry_count >= MAX_TASK_RETRIES:
-                    can_retry = False
+                if cp is not None:
+                    if is_proactive:
+                        from utils.heartbeat_rules import PROACTIVE_MAX_RETRIES
+
+                        max_r = PROACTIVE_MAX_RETRIES
+                    else:
+                        max_r = MAX_TASK_RETRIES
+                    if cp.retry_count >= max_r:
+                        can_retry = False
+                        # Record failure in circuit breaker for research injections
+                        if is_proactive and "research" in stem:
+                            try:
+                                from utils.heartbeat_rules import HeartbeatRulesEngine
+
+                                HeartbeatRulesEngine.record_research_injection_result(success=False)
+                            except Exception:
+                                pass
             except Exception:
                 pass
 
             try:
                 if can_retry:
+                    # Adaptive retry: append failure context to proactive task body
+                    if is_proactive:
+                        _append_retry_context(orphan_path)
                     orphan_path.rename(task_path)
                     auto_recovered.append(f"{stem}→retry")
                 else:
@@ -423,6 +442,53 @@ def check_task_queue() -> dict:
     if orphaned:
         detail += f", ORPHANED: {', '.join(orphaned)}"
     return {"name": "task_queue", "ok": ok, "detail": detail}
+
+
+def _append_retry_context(task_path: Path, failure_reason: str = "") -> None:
+    """Append retry escalation context to a proactive task file before re-dispatch.
+
+    Makes the retry adaptive rather than identical by:
+    - Noting this is a retry attempt
+    - Including the specific prior failure reason when available
+    - Reinforcing CONTRACT compliance instructions
+    """
+    try:
+        original = task_path.read_text()
+
+        # Build prior-failure detail if available
+        prior_detail = ""
+        if failure_reason:
+            prior_detail = f"\nPRIOR FAILURE REASON: {failure_reason}\n"
+        else:
+            # Try to load from circuit breaker state
+            try:
+                from utils.heartbeat_rules import HeartbeatRulesEngine
+
+                saved_reason = HeartbeatRulesEngine.get_last_failure_reason()
+                if saved_reason:
+                    prior_detail = f"\nPRIOR FAILURE REASON: {saved_reason}\n"
+            except Exception:
+                pass
+
+        retry_block = (
+            "\n\n---\n"
+            "## RETRY ESCALATION\n"
+            "This task previously failed. Fix the specific issue below.\n"
+            f"{prior_detail}\n"
+            "Common failure reasons:\n"
+            "- Missing ## CONTRACT block in output\n"
+            "- Missing required output file in OUTPUT/\n"
+            "- Incomplete output format\n\n"
+            "MANDATORY: You MUST end your output with a ## CONTRACT block:\n"
+            "## CONTRACT\n"
+            "summary: <one-line description>\n"
+            "files_changed: <comma-separated list>\n"
+            "verification: <how you verified>\n"
+            "confidence: <high|medium|low>\n"
+        )
+        task_path.write_text(original + retry_block)
+    except OSError:
+        pass
 
 
 def check_last_output() -> dict:

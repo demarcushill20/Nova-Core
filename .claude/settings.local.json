@@ -53,5 +53,20 @@
         ]
       }
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "nova-memory",
+    "brave-search",
+    "tavily",
+    "fetch",
+    "nova-vault",
+    "playwright",
+    "context7",
+    "semgrep",
+    "sequential-thinking",
+    "github",
+    "n8n",
+    "firecrawl",
+    "pinescript"
+  ]
 }

@@ -1646,6 +1646,15 @@ async def _dispatch_inner(task_path: Path):
                 else:
                     increment_retry(stem)
             _session_mgr.record_task_completion(stem, success=passed)
+            # Update research injection circuit breaker for proactive research tasks
+            if stem.startswith("hb_proactive_") and "research" in stem:
+                try:
+                    from utils.heartbeat_rules import HeartbeatRulesEngine
+
+                    _fail_reason = "; ".join(messages[:3]) if not passed and messages else ""
+                    HeartbeatRulesEngine.record_research_injection_result(success=passed, failure_reason=_fail_reason)
+                except Exception:
+                    pass
             return
         except Exception as exc:
             logger.error("ORCHESTRATOR ERROR for %s: %s — falling back to worker", stem, exc)
@@ -1982,6 +1991,16 @@ async def _dispatch_inner(task_path: Path):
             clear_checkpoint(stem)
         else:
             increment_retry(stem)
+
+    # Update research injection circuit breaker for proactive research tasks
+    if stem.startswith("hb_proactive_") and "research" in stem:
+        try:
+            from utils.heartbeat_rules import HeartbeatRulesEngine
+
+            _fail_reason = "; ".join(messages[:3]) if not passed and messages else ""
+            HeartbeatRulesEngine.record_research_injection_result(success=passed, failure_reason=_fail_reason)
+        except Exception:
+            pass
 
     # --- Scheduler: record execution and lifecycle ---
     if _HAS_SCHEDULER:
