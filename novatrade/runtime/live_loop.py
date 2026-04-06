@@ -636,26 +636,21 @@ class LiveLoop:
 
             snapshots = existing.get("snapshots", [])
 
-            # Deduplicate: skip if the last snapshot has the same equity value
-            # AND is recent (< 1 hour old).  This ensures the time series
-            # stays fresh even during flat-equity periods — critical for the
-            # performance_stability collector to know the system is alive.
             now_iso = datetime.now(timezone.utc).isoformat()
+
+            # Rate-limit: at most one snapshot per hour.
+            # The performance_stability collector resamples to hourly granularity,
+            # so sub-hour writes are wasted.  Rapid equity oscillation
+            # (balance↔equity-with-unrealized-PnL) fills the 720-entry cap
+            # within one hour, evicting historical data and collapsing the
+            # resampled series to 1 point → score regression.
             if snapshots:
                 last = snapshots[-1]
-                if last.get("equity") == equity:
-                    # Allow one snapshot per hour even when equity is unchanged
-                    last_ts = last.get("timestamp", "")
-                    try:
-                        from datetime import datetime as _dt
-
-                        last_time = _dt.fromisoformat(last_ts.replace("Z", "+00:00"))
-                        now_time = datetime.now(timezone.utc)
-                        age_hours = (now_time - last_time).total_seconds() / 3600
-                        if age_hours < 1.0:
-                            return  # recent and unchanged — skip
-                    except (ValueError, TypeError):
-                        pass  # can't parse timestamp — write snapshot anyway
+                last_ts = last.get("timestamp", "")
+                last_hour = last_ts[:13] if len(last_ts) >= 13 else ""
+                current_hour = now_iso[:13] if len(now_iso) >= 13 else ""
+                if last_hour == current_hour:
+                    return  # already have a snapshot for this hour
 
                 # Anomaly guard: reject equity changes > 3% in a single step.
                 # Prevents stale/corrupt adapter values from creating synthetic drawdowns
@@ -671,13 +666,6 @@ class LiveLoop:
                             pct_change * 100,
                         )
                         return
-
-            # Guard against re-appending duplicate (timestamp, equity) pairs
-            ts_norm = now_iso.replace("Z", "+00:00").split(".")[0]
-            for existing_snap in snapshots[-20:]:
-                existing_ts = existing_snap.get("timestamp", "").replace("Z", "+00:00").split(".")[0]
-                if existing_ts == ts_norm and existing_snap.get("equity") == equity:
-                    return
 
             snapshots.append(
                 {

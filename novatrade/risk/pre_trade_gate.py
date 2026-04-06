@@ -40,6 +40,7 @@ from novatrade.models import (  # noqa: E402
     SymbolPrice,
 )
 from novatrade.risk.daily_budget_tracker import DailyRiskBudgetTracker  # noqa: E402
+from novatrade.risk.first_trade_validator import FirstTradeValidationResult, FirstTradeValidator  # noqa: E402
 from novatrade.risk.ftmo_compliance import (  # noqa: E402
     BestDayRuleTracker,
     FtmoDailyLossTracker,
@@ -164,6 +165,10 @@ class PreTradeGate:
         except Exception as exc:
             log.error(f"Failed to initialize scaling plan calendar: {exc}")
             self._scaling_calendar = None  # type: ignore[assignment]
+
+        # First trade validator (R4 priority from funded account survival research)
+        # Validates first live trade execution to catch integration bugs early
+        self._first_trade_validator = FirstTradeValidator()
 
         # Attempt to restore persisted state from prior session
         self._lot_checker.load_state()
@@ -688,6 +693,20 @@ class PreTradeGate:
                     # Fallback to no profit cushion scaling
                     calculated = drawdown_scaled
 
+            # Prepare first trade validation (R4 priority from funded account survival research)
+            # Store expected values to validate against actual execution later
+            if self._first_trade_validator.is_first_trade_pending:
+                try:
+                    self._first_trade_validator.prepare_first_trade_checks(
+                        entry_price=request.price,
+                        sl_price=request.stop_loss,
+                        volume=drawdown_scaled,
+                        typical_spread_pips=1.0,  # EURUSD typical spread
+                    )
+                    log.info("Prepared first trade validation — this will be validated post-execution")
+                except Exception as exc:
+                    log.warning(f"Failed to prepare first trade validation: {exc}")
+
             # Apply profit cushion protocol scaling
             if self._profit_cushion is not None:
                 try:
@@ -1089,6 +1108,43 @@ class PreTradeGate:
         """
         self._drawdown_scaler.record_win()
         log.debug("Recorded trade win — consecutive losses: %d", self._drawdown_scaler.consecutive_losses)
+
+    def validate_first_trade_execution(
+        self,
+        actual_entry_price: float,
+        actual_sl_price: float,
+        actual_volume: float,
+        execution_time_ms: float,
+        current_spread_pips: float | None = None,
+    ) -> FirstTradeValidationResult:
+        """Validate first trade execution (R4 priority from funded account survival research).
+
+        Performs comprehensive validation of the first live trade to catch integration
+        bugs before significant capital is at risk. Validates:
+        - Fill price accuracy (within spread bounds)
+        - Stop-loss placement precision
+        - Spread behavior under real conditions
+        - Execution latency timing
+        - Volume accuracy
+
+        Args:
+            actual_entry_price: Actual fill price from broker
+            actual_sl_price: Actual stop-loss price set
+            actual_volume: Actual volume executed
+            execution_time_ms: Execution time in milliseconds
+            current_spread_pips: Current spread at execution (optional)
+
+        Returns:
+            FirstTradeValidationResult with pass/fail status and detailed metrics
+        """
+
+        return self._first_trade_validator.validate_first_trade_execution(
+            actual_entry_price=actual_entry_price,
+            actual_sl_price=actual_sl_price,
+            actual_volume=actual_volume,
+            execution_time_ms=execution_time_ms,
+            current_spread_pips=current_spread_pips,
+        )
 
     def reset_daily_risk_scaling(self) -> None:
         """Reset drawdown scaling state for a new trading day.

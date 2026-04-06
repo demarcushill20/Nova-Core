@@ -1040,19 +1040,19 @@ class TestEquitySnapshotPersistence:
 
     @pytest.mark.asyncio
     async def test_equity_snapshot_appends_on_change(self, tmp_path):
-        """Equity change should append a new snapshot."""
+        """Equity change should append a new snapshot (different hours)."""
         state_dir = tmp_path / "STATE" / "novatrade"
         state_dir.mkdir(parents=True)
 
         cfg = _cfg(data_dir=tmp_path / "OUTPUT" / "novatrade")
-        # First cycle: equity 10000
-        monitor = _build_monitor(cfg=cfg)
+        # First cycle: equity 10000 at hour=12
+        monitor = _build_monitor(cfg=cfg, clock=_make_clock(hour=12))
         await monitor.run_cycle()
 
-        # Second cycle: equity changed to 10050
+        # Second cycle: equity changed to 10050 at hour=13 (different hour)
         account2 = _account(equity=10050.0)
         adapter2 = _mock_adapter(account=account2)
-        monitor2 = _build_monitor(cfg=cfg, adapter=adapter2)
+        monitor2 = _build_monitor(cfg=cfg, adapter=adapter2, clock=_make_clock(hour=13))
         await monitor2.run_cycle()
 
         eq_path = state_dir / "equity_history.json"

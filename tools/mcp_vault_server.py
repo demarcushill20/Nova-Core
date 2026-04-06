@@ -133,6 +133,7 @@ _VALID_NOTE_TYPES = {
     "debugging-guide": "#type/debugging",
     "inbox": "#type/inbox",
     "adr": "#type/adr",
+    "moc": "#type/moc",
 }
 
 # Valid enum values used across schemas
@@ -141,6 +142,18 @@ _VALID_SOURCES = {"operator", "nova-core-memory"}
 _VALID_AGENT_ROLES = {"research", "coder", "critic", "verifier", "planner", "memory"}
 _VALID_TASK_CLASSES = {"research", "code_impl", "code_review", "system", "simple", "unknown"}
 _VALID_VERIFICATION_OUTCOMES = {"approved", "rejected", "partial", "not_verified"}
+_VALID_MOC_DOMAINS = {
+    "novatrade",
+    "infrastructure",
+    "memory",
+    "autonomy",
+    "research",
+    "debugging",
+    "agents",
+    "risk",
+    "trading-strategies",
+    "operations",
+}
 
 # Per-type required frontmatter fields
 _REQUIRED_FIELDS: dict[str, list[str]] = {
@@ -207,6 +220,15 @@ _REQUIRED_FIELDS: dict[str, list[str]] = {
         "title",
         "status",
         "date",
+        "source",
+        "tags",
+    ],
+    "moc": [
+        "type",
+        "moc_id",
+        "title",
+        "domain",
+        "date_created",
         "source",
         "tags",
     ],
@@ -494,6 +516,14 @@ def validate_frontmatter(fm: dict, note_type: str | None = None) -> tuple[bool, 
         adr_status = fm.get("status")
         if adr_status and adr_status not in _adr_statuses:
             errors.append(f"invalid ADR status: {adr_status!r} (allowed: {sorted(_adr_statuses)})")
+
+    elif actual_type == "moc":
+        domain = fm.get("domain")
+        if domain and domain not in _VALID_MOC_DOMAINS:
+            errors.append(f"invalid domain: {domain!r}")
+        moc_id = fm.get("moc_id")
+        if moc_id and not isinstance(moc_id, str):
+            errors.append("moc_id must be a string")
 
     return (len(errors) == 0), errors
 

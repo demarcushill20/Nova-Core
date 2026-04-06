@@ -23,6 +23,7 @@ VALID_NOTE_TYPES: dict[str, str] = {
     "debugging-guide": "#type/debugging",
     "inbox": "#type/inbox",
     "adr": "#type/adr",
+    "moc": "#type/moc",
 }
 
 VALID_CONFIDENCES = frozenset({"high", "medium", "low"})
@@ -33,6 +34,20 @@ VALID_VERIFICATION_OUTCOMES = frozenset({"approved", "rejected", "partial", "not
 VALID_PLAN_STATUSES = frozenset({"backlog", "active", "completed", "paused"})
 VALID_PLAN_PRIORITIES = frozenset({"high", "medium", "low"})
 VALID_ADR_STATUSES = frozenset({"proposed", "accepted", "deprecated", "superseded"})
+VALID_MOC_DOMAINS = frozenset(
+    {
+        "novatrade",
+        "infrastructure",
+        "memory",
+        "autonomy",
+        "research",
+        "debugging",
+        "agents",
+        "risk",
+        "trading-strategies",
+        "operations",
+    }
+)
 PROGRESS_RE = re.compile(r"^\d+/\d+$")
 
 # Per-type required frontmatter fields
@@ -100,6 +115,15 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
         "title",
         "status",
         "date",
+        "source",
+        "tags",
+    ],
+    "moc": [
+        "type",
+        "moc_id",
+        "title",
+        "domain",
+        "date_created",
         "source",
         "tags",
     ],
@@ -213,6 +237,14 @@ def validate_frontmatter(fm: dict, note_type: str | None = None) -> tuple[bool, 
         adr_status = fm.get("status")
         if adr_status and adr_status not in VALID_ADR_STATUSES:
             errors.append(f"invalid ADR status: {adr_status!r} (allowed: {sorted(VALID_ADR_STATUSES)})")
+
+    elif actual_type == "moc":
+        domain = fm.get("domain")
+        if domain and domain not in VALID_MOC_DOMAINS:
+            errors.append(f"invalid domain: {domain!r}")
+        moc_id = fm.get("moc_id")
+        if moc_id and not isinstance(moc_id, str):
+            errors.append("moc_id must be a string")
 
     elif actual_type == "implementation-plan":
         # Optional fields validated when present (Phase 0 fix)

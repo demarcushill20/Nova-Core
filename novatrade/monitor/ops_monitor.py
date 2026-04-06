@@ -1084,20 +1084,20 @@ class OpsMonitor:
 
         snapshots = existing.get("snapshots", [])
 
-        # Deduplicate: skip if last snapshot has the same equity
-        if snapshots and snapshots[-1].get("equity") == equity:
-            return
-
         now_iso = self._clock().isoformat()
 
-        # Guard against re-appending duplicate (timestamp, equity) pairs.
-        # This prevents cyclic equity values (e.g., 100000→100500→95000→100000)
-        # from being re-appended on service restarts when the clock is stale.
-        ts_norm = now_iso.replace("Z", "+00:00").split(".")[0]
-        for existing_snap in snapshots[-20:]:  # check recent entries
-            existing_ts = existing_snap.get("timestamp", "").replace("Z", "+00:00").split(".")[0]
-            if existing_ts == ts_norm and existing_snap.get("equity") == equity:
-                return
+        # Rate-limit: at most one snapshot per hour.
+        # The performance_stability collector resamples to hourly granularity,
+        # so sub-hour writes are wasted.  Worse, rapid equity oscillation
+        # (e.g. balance↔equity-with-unrealized-PnL every 5s) fills the 720-entry
+        # cap within a single hour, evicting historical multi-hour data and
+        # collapsing the resampled series to 1 point → score regression.
+        if snapshots:
+            last_ts = snapshots[-1].get("timestamp", "")
+            last_hour = last_ts[:13] if len(last_ts) >= 13 else ""
+            current_hour = now_iso[:13] if len(now_iso) >= 13 else ""
+            if last_hour == current_hour:
+                return  # already have a snapshot for this hour
 
         snapshots.append(
             {

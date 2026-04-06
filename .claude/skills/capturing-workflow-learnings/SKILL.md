@@ -78,6 +78,27 @@ Compaction rules:
 - Include enough context to understand the learning without the original task file.
 - Omit session-specific details (timestamps, exact file paths) unless they are the lesson itself.
 
+### Step 3.5 — Find related notes and check for duplicates
+
+Before composing the note, search for related content in the vault. This serves two purposes: deduplication and link discovery.
+
+Use `vault_search` with 2-3 key terms from the extracted insights (title keywords, task class, key concepts).
+
+From the search results:
+- **Dedup check**: If a closely matching note already exists, skip the write and report the duplicate.
+- **Link harvesting**: Select 2-3 of the most relevant (but non-duplicate) results as related notes. Record their filenames for use in the `related:` frontmatter field and `## Related Notes` body section.
+
+**Domain inference**: From the task_class and content keywords, infer the primary domain:
+- trade, strategy, backtest, IRB, MT5, execution → `novatrade`
+- autonomy, heartbeat, decision engine, guardrail → `autonomy`
+- memory, fusion, pinecone, neo4j, vault, recall → `memory`
+- systemd, circuit breaker, self-heal, deploy, nginx → `infrastructure`
+- agent, spawner, orchestrator, multi-agent → `agents`
+- risk, gate, filter, drawdown, exposure → `risk`
+- Default: `operations`
+
+Record the inferred domain for use in tags.
+
 ### Step 4 — Compose the note
 
 Build the workflow-learning note with this structure:
@@ -100,9 +121,14 @@ tags:
   - "#type/learning"
   - "#confidence/<level>"
   - "#status/active"
+  - "#domain/<inferred-domain>"
+  - "#project/nova-core"
 related:
   - "[[related-note-1]]"
+  - "[[related-note-2]]"
 ---
+
+up:: [[moc-<inferred-domain>]]
 
 ## Task Summary
 
@@ -129,6 +155,12 @@ related:
 ## Metrics
 
 - <quantitative outcomes if available>
+
+## Related Notes
+
+- [[related-note-1]] — <brief annotation of why it's related>
+- [[related-note-2]] — <brief annotation>
+(Populated from vault_search results in Step 3.5. Omit if no related notes found.)
 
 ## Trace
 
@@ -169,9 +201,9 @@ If write succeeds, optionally use `vault_read` to confirm the note was created c
 - **vault_validate first.** Always validate the note content before writing. Fix errors before proceeding.
 - **vault_write for creation.** Use only `vault_write` to create new notes. Never use `vault_update` for initial creation.
 - **vault_read for verification.** Optionally read back the created note to confirm correctness.
-- **vault_search for dedup check.** Before writing, search for similar existing learnings. If a closely matching note exists, skip the write and report the duplicate.
+- **vault_search for dedup and linking.** Search happens in Step 3.5 — serves both dedup and related-note discovery. If a closely matching note exists, skip the write and report the duplicate.
 - **No vault_update.** This skill creates new learning notes. It does not modify existing ones.
-- **Bounded tool calls.** Maximum 6 tool calls per invocation: 1 search (dedup) + 1 validate + 1 write + 1 read (verify) + 2 spare.
+- **Bounded tool calls.** Maximum 6 tool calls per invocation: 1 search (dedup + related) + 1 validate + 1 write + 1 read (verify) + 2 spare.
 
 ## Output Contract
 

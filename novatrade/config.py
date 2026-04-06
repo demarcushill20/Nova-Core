@@ -84,8 +84,12 @@ class RiskConfig:
     require_stop_loss: bool = True
     max_drawdown_equity_pct: float = _DEFAULT_MAX_DAILY_DRAWDOWN_PCT
     # Phase 6: IRB-specific risk hardening
-    check_forex_session: bool = False  # enforce 24/5 forex market hours
+    check_forex_session: bool = True  # P4: Enable enhanced session-aware filtering
     irb_max_open_positions: int = 0  # IRB exposure limit (0 = disabled)
+    # P4: Enhanced session filtering options
+    session_overlap_only: bool = False  # Restrict to London-NY overlap only
+    session_allow_asian: bool = True  # Allow Asian session trading
+    session_minimum_quality: str = "acceptable"  # minimum|acceptable|good|premium
     # FTMO daily reset timezone (IANA name). FTMO resets at midnight Prague time.
     daily_reset_tz: str = "Europe/Prague"
     # Slippage control (Phase: Execution Gaps)

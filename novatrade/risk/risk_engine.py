@@ -49,6 +49,7 @@ from novatrade.models import (
     SymbolPrice,
 )
 from novatrade.risk.pre_trade_gate import PreTradeGate
+from novatrade.risk.session_aware_filter import SessionAwareFilter
 
 log = logging.getLogger("novatrade.risk.risk_engine")
 
@@ -256,6 +257,9 @@ class RiskEngine:
         self._risk = cfg.risk
         self._gate = PreTradeGate(cfg)
 
+        # P4: Enhanced session-aware filtering with London-NY overlap focus
+        self._session_filter = self._create_session_filter()
+
         # Portfolio state
         self._initial_equity: float = 0.0
         self._current_equity: float = 0.0
@@ -280,6 +284,37 @@ class RiskEngine:
 
         # Injectable clock for testability (Phase 6)
         self._clock = _default_utc_now
+
+    def _create_session_filter(self) -> SessionAwareFilter:
+        """Create session filter based on risk configuration.
+
+        P4: Enhanced Session-Aware Risk Management
+        Reads configuration to create appropriate session filter with
+        London-NY overlap focus and configurable quality thresholds.
+
+        Returns:
+            Configured SessionAwareFilter instance.
+        """
+        from novatrade.risk.session_aware_filter import SessionAwareConfig, SessionQuality
+
+        # Map string quality to enum
+        quality_map = {
+            "minimum": SessionQuality.POOR,
+            "acceptable": SessionQuality.ACCEPTABLE,
+            "good": SessionQuality.GOOD,
+            "premium": SessionQuality.PREMIUM,
+        }
+        min_quality = quality_map.get(self._risk.session_minimum_quality, SessionQuality.ACCEPTABLE)
+
+        config = SessionAwareConfig(
+            allow_overlap_only=self._risk.session_overlap_only,
+            allow_premium_sessions=True,  # Always allow premium sessions
+            allow_asian_session=self._risk.session_allow_asian,
+            minimum_quality=min_quality,
+            block_transition_periods=False,  # TODO: Future enhancement
+        )
+
+        return SessionAwareFilter(config)
 
     # ------------------------------------------------------------------
     # Initialization
@@ -456,22 +491,36 @@ class RiskEngine:
     # ------------------------------------------------------------------
 
     def _check_session(self) -> RiskCheckResult:
-        """Check if forex market is open (24/5).
+        """Enhanced session-aware risk check with London-NY overlap focus.
 
-        Forex market: Sunday 22:00 UTC to Friday 22:00 UTC.
-        No new orders during the weekend close window.
+        P4: Session-Aware Risk Management
+        - Blocks weekend closure (market closed)
+        - Evaluates session quality (Premium > Good > Acceptable > Poor)
+        - Focuses on London-NY overlap for optimal execution
+        - Configurable session preferences
+
+        This replaces the basic weekend-only check with sophisticated session
+        awareness to improve execution quality and FTMO compliance.
         """
         now = self._clock()
-        if _is_forex_weekend(now):
+        session_info = self._session_filter.check_session(now)
+
+        # Check if trading is allowed based on session filtering
+        is_allowed = self._session_filter.is_trading_allowed(now)
+
+        if not is_allowed:
             return RiskCheckResult(
                 name="forex_session",
                 passed=False,
-                detail=f"Forex market closed (weekend): {now.strftime('%A %H:%M UTC')}",
+                detail=f"Session blocked: {session_info.reason}",
             )
+
+        # Include session quality information in success case
+        quality_note = f" ({session_info.quality.value})" if session_info.quality else ""
         return RiskCheckResult(
             name="forex_session",
             passed=True,
-            detail=f"Forex market open: {now.strftime('%A %H:%M UTC')}",
+            detail=f"Session allowed: {session_info.reason}{quality_note}",
         )
 
     # ------------------------------------------------------------------
@@ -625,6 +674,28 @@ class RiskEngine:
     ) -> None:
         """Record a trade fill and start position risk tracking."""
         self._gate.record_trade(symbol, side.value, volume)
+
+        # P4: First trade validation — validate execution quality of the first
+        # live trade to catch integration bugs early (R4 priority from funded
+        # account survival research).  Expected values were stored during
+        # pre_trade_check → gate.evaluate → prepare_first_trade_checks.
+        try:
+            result = self._gate.validate_first_trade_execution(
+                actual_entry_price=fill_price,
+                actual_sl_price=stop_loss,
+                actual_volume=volume,
+                execution_time_ms=0.0,  # Stop orders — no meaningful latency metric
+            )
+            if result.checks_performed:  # Only log if this was actually the first trade
+                if result.passed:
+                    log.info("First trade validation PASSED — platform integration healthy")
+                else:
+                    log.error(
+                        "First trade validation FAILED — errors: %s",
+                        "; ".join(result.errors),
+                    )
+        except Exception as exc:
+            log.warning("First trade validation error (non-blocking): %s", exc)
 
         self._position_risks[position_id] = PositionRiskState(
             position_id=position_id,

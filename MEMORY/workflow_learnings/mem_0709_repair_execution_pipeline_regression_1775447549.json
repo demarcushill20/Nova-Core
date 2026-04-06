@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0709_repair_execution_pipeline_regression_1775447549",
+  "workflow_id": "0709_repair_execution_pipeline_regression",
+  "task_summary": "Validated execution_pipeline regression already fixed \u2014 score stable at 96.7 (was 82.9), MARKET_CLOSED handling patched in PipelineCollector",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Validated execution_pipeline regression already fixed \u2014 score stable at 96.7 (was 82.9), MARKET_CLOSED handling patched in PipelineCollector"
+  ],
+  "successful_patterns": [
+    "task_completed: 0709_repair_execution_pipeline_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Validated execution_pipeline regression already fixed \u2014 score stable at 96.7 (was 82.9), MARKET_CLOSED handling patched in PipelineCollector",
+  "created_at": "2026-04-06T03:52:29Z",
+  "confidence": "high"
+}

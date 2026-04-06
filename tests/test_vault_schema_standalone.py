@@ -13,6 +13,7 @@ from schemas.vault_note_schema import (
     PROGRESS_RE,
     REQUIRED_FIELDS,
     VALID_ADR_STATUSES,
+    VALID_MOC_DOMAINS,
     VALID_NOTE_TYPES,
     VALID_PLAN_PRIORITIES,
     VALID_PLAN_STATUSES,
@@ -125,6 +126,20 @@ def _fm_research(**kw):
     return base
 
 
+def _fm_moc(**kw):
+    base = {
+        "type": "moc",
+        "moc_id": "moc-novatrade",
+        "title": "MOC: NovaTrade",
+        "domain": "novatrade",
+        "date_created": "2026-04-06",
+        "source": "nova-core-memory",
+        "tags": ["#type/moc"],
+    }
+    base.update(kw)
+    return base
+
+
 # ---------------------------------------------------------------------------
 # Tests: all canonical types accepted
 # ---------------------------------------------------------------------------
@@ -141,6 +156,7 @@ class TestAllCanonicalTypes:
         "debugging-guide": _fm_debug,
         "inbox": _fm_inbox,
         "adr": _fm_adr,
+        "moc": _fm_moc,
     }
 
     def test_all_types_have_builders(self):
@@ -273,6 +289,48 @@ class TestADRValidation:
 
 
 # ---------------------------------------------------------------------------
+# Tests: MOC type validation
+# ---------------------------------------------------------------------------
+
+
+class TestMOCValidation:
+    """MOC type validation."""
+
+    def test_valid_moc_passes(self):
+        valid, errors = validate_frontmatter(_fm_moc())
+        assert valid is True, f"MOC rejected: {errors}"
+
+    def test_moc_missing_domain_fails(self):
+        fm = _fm_moc()
+        del fm["domain"]
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("domain" in e for e in errors)
+
+    def test_moc_invalid_domain_fails(self):
+        valid, errors = validate_frontmatter(_fm_moc(domain="fantasy"))
+        assert valid is False
+        assert any("domain" in e for e in errors)
+
+    def test_moc_missing_moc_id_fails(self):
+        fm = _fm_moc()
+        del fm["moc_id"]
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("moc_id" in e for e in errors)
+
+    def test_moc_required_tag(self):
+        valid, errors = validate_frontmatter(_fm_moc(tags=["#other"]))
+        assert valid is False
+        assert any("#type/moc" in e for e in errors)
+
+    def test_moc_all_valid_domains(self):
+        for domain in sorted(VALID_MOC_DOMAINS):
+            valid, errors = validate_frontmatter(_fm_moc(domain=domain))
+            assert valid is True, f"MOC domain {domain!r} rejected: {errors}"
+
+
+# ---------------------------------------------------------------------------
 # Tests: implementation-plan optional fields (Phase 0 addition)
 # ---------------------------------------------------------------------------
 
@@ -388,6 +446,27 @@ class TestEnumCompleteness:
 
     def test_adr_statuses_complete(self):
         assert VALID_ADR_STATUSES == {"proposed", "accepted", "deprecated", "superseded"}
+
+    def test_note_types_include_moc(self):
+        assert "moc" in VALID_NOTE_TYPES
+
+    def test_moc_has_required_tag(self):
+        assert VALID_NOTE_TYPES["moc"] == "#type/moc"
+
+    def test_moc_domains_complete(self):
+        expected = {
+            "novatrade",
+            "infrastructure",
+            "memory",
+            "autonomy",
+            "research",
+            "debugging",
+            "agents",
+            "risk",
+            "trading-strategies",
+            "operations",
+        }
+        assert VALID_MOC_DOMAINS == expected
 
     def test_progress_regex_valid(self):
         assert PROGRESS_RE.match("3/7")

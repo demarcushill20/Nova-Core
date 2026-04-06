@@ -10,6 +10,10 @@ activation:
     - Monday morning planning for the week ahead
     - User asks for a weekly summary or recap
     - Weekly retrospective or standup
+allowed-tools:
+  - mcp__nova-vault__vault_search
+  - mcp__nova-vault__vault_validate
+  - mcp__nova-vault__vault_write
 tool_doctrine:
   weekly_digest:
     workflow:
@@ -112,6 +116,59 @@ Count commits, summarize key changes.
 3. [based on open tasks]
 ```
 
+### Step 6 — Persist to vault
+
+After composing the digest, create a condensed weekly review note in the Obsidian vault.
+
+1. Extract key deliverables, meeting count, email stats, and commit highlights from the digest
+2. `vault_search` for notes created this week (search by recent date keywords) to build a `## Related Notes` section with wikilinks to that week's learnings, patterns, and research
+3. Compose the vault note:
+
+**Frontmatter:**
+```yaml
+---
+type: inbox
+title: "Weekly Review: <YYYY-MM-DD>"
+date: "<YYYY-MM-DD>"
+source: nova-core-memory
+tags:
+  - "#type/inbox"
+  - "#action/move-to-diary"
+  - "#domain/operations"
+  - "#project/nova-core"
+related:
+  - "[[related-note]]"
+---
+```
+
+**Body:**
+```markdown
+up:: [[moc-operations]]
+
+## Week Summary
+
+- **Meetings**: <count> (<hours> hours)
+- **Email**: <received> received / <sent> sent
+- **Tasks completed**: <count>
+- **Commits**: <count>
+
+## Key Deliverables
+
+- <deliverable 1>
+- <deliverable 2>
+
+## Related Notes
+
+- [[note-created-this-week-1]] — <annotation>
+- [[note-created-this-week-2]] — <annotation>
+(Notes created or updated during this week)
+```
+
+4. `vault_validate` the composed note
+5. `vault_write` to `00-inbox/weekly-review-<YYYY-MM-DD>.md`
+
+**Note:** If vault write fails (unavailable, rate limit, etc.), continue — the digest output is the primary deliverable. Vault persistence is best-effort.
+
 ## Tool Usage Rules
 
 - **Read-only.** Never modify any data.
@@ -119,6 +176,7 @@ Count commits, summarize key changes.
 - **7-day window.** Always look back exactly one week.
 - **Include git activity.** NovaCore work is tracked in git, not just TASKS/.
 - **Forward-looking.** Include next week's meeting count for planning.
+- **Vault persistence is best-effort.** If vault tools fail, report the error but still output the digest. The vault note is supplementary.
 
 ## Failure Handling
 
@@ -128,6 +186,8 @@ Count commits, summarize key changes.
 | Gmail not authenticated | Skip email section, note it |
 | No tasks completed | Report "no tasks completed this week" |
 | Git log empty | Report "no commits this week" |
+| Vault unavailable | Skip vault persistence, note it in output |
+| Vault write rejected | Skip vault persistence, note validation errors |
 
 ## Outputs / Contract
 

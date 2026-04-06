@@ -90,7 +90,7 @@ class TestEquitySnapshotStaleness:
         state_dir = tmp_path / "STATE" / "novatrade"
         state_dir.mkdir(parents=True)
 
-        recent_time = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        recent_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
         eq_data = {
             "snapshots": [
                 {"equity": 100000.0, "timestamp": recent_time, "source": "live"},
@@ -106,8 +106,8 @@ class TestEquitySnapshotStaleness:
         result = json.loads((state_dir / "equity_history.json").read_text())
         assert len(result["snapshots"]) == 1, "Should NOT write when recent and unchanged"
 
-    def test_changed_equity_always_written(self, tmp_path):
-        """Changed equity should always be written regardless of time."""
+    def test_changed_equity_same_hour_skipped(self, tmp_path):
+        """Changed equity within the same hour should be rate-limited."""
         state_dir = tmp_path / "STATE" / "novatrade"
         state_dir.mkdir(parents=True)
 
@@ -117,6 +117,28 @@ class TestEquitySnapshotStaleness:
                 {"equity": 100000.0, "timestamp": recent_time, "source": "live"},
             ],
             "last_updated": recent_time,
+            "initial_equity": 100000.0,
+        }
+        (state_dir / "equity_history.json").write_text(json.dumps(eq_data))
+
+        loop = _make_loop(str(tmp_path), adapter_equity=100200.62)
+        loop._persist_equity_snapshot()
+
+        result = json.loads((state_dir / "equity_history.json").read_text())
+        # Rate-limited: same hour → no new snapshot
+        assert len(result["snapshots"]) == 1
+
+    def test_changed_equity_new_hour_written(self, tmp_path):
+        """Changed equity in a new hour should be written."""
+        state_dir = tmp_path / "STATE" / "novatrade"
+        state_dir.mkdir(parents=True)
+
+        old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        eq_data = {
+            "snapshots": [
+                {"equity": 100000.0, "timestamp": old_time, "source": "live"},
+            ],
+            "last_updated": old_time,
             "initial_equity": 100000.0,
         }
         (state_dir / "equity_history.json").write_text(json.dumps(eq_data))

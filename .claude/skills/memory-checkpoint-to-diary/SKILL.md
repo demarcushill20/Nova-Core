@@ -71,9 +71,11 @@ session checkpoint.
    - Extract: session_id, summary, open_threads, next_actions,
      last_event_seq, started_at, ended_at
 
-2. DEDUP CHECK
+2. DEDUP CHECK AND LINK HARVESTING
    - Call vault_search(session_id) to check if diary already exists
    - If found in 00-inbox/ or 90-diary/, report "already exists" and stop
+   - Harvest 2-3 related notes from search results (workflow-learnings or patterns
+     mentioned in the checkpoint) for ## Related Notes section
 
 3. GET SESSION EVENTS
    - Call get_session_events(session_id, limit=20)
@@ -107,11 +109,14 @@ tags:
   - "#type/inbox"
   - "#action/move-to-diary"
   - "#project/<project>"
+  - "#domain/operations"
 ---
 ```
 
 ### Body
 ```markdown
+up:: [[moc-operations]]
+
 ## Session Summary
 
 <session_summary from checkpoint>
@@ -137,6 +142,12 @@ tags:
 | 15  | scratch | The query router uses... |
 
 *<N> events in this session. Showing most recent 20.*
+
+## Related Notes
+
+- [[related-note-1]] — <brief annotation>
+- [[related-note-2]] — <brief annotation>
+(Populated from vault_search results. Omit if no related notes found.)
 
 ## Metadata
 

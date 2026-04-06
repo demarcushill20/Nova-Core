@@ -1307,6 +1307,62 @@ class TestValidateFrontmatter:
         valid, errors = validate_frontmatter(fm)
         assert valid is True, errors
 
+    # --- MOC type validation ---
+
+    def test_valid_moc(self):
+        fm = {
+            "type": "moc",
+            "moc_id": "moc-novatrade",
+            "title": "MOC: NovaTrade",
+            "domain": "novatrade",
+            "date_created": "2026-04-06",
+            "source": "nova-core-memory",
+            "tags": ["#type/moc"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is True, errors
+
+    def test_moc_invalid_domain(self):
+        fm = {
+            "type": "moc",
+            "moc_id": "moc-test",
+            "title": "MOC: Fantasy",
+            "domain": "fantasy",
+            "date_created": "2026-04-06",
+            "source": "nova-core-memory",
+            "tags": ["#type/moc"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("domain" in e for e in errors)
+
+    def test_moc_missing_moc_id(self):
+        fm = {
+            "type": "moc",
+            "title": "MOC: No ID",
+            "domain": "novatrade",
+            "date_created": "2026-04-06",
+            "source": "nova-core-memory",
+            "tags": ["#type/moc"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("moc_id" in e for e in errors)
+
+    def test_moc_missing_required_tag(self):
+        fm = {
+            "type": "moc",
+            "moc_id": "moc-test",
+            "title": "MOC: Wrong Tag",
+            "domain": "novatrade",
+            "date_created": "2026-04-06",
+            "source": "nova-core-memory",
+            "tags": ["#status/active"],
+        }
+        valid, errors = validate_frontmatter(fm)
+        assert valid is False
+        assert any("#type/moc" in e for e in errors)
+
     # --- Phase 0: all canonical types accepted ---
 
     def test_all_canonical_types_in_validator(self):

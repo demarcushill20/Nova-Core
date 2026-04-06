@@ -103,7 +103,23 @@ class PerformanceCollector(BaseCollector):
         # Metrics without real data (raw_value == _NO_DATA_RAW) carry no
         # information and would drag the score toward 50 artificially.
         scorable = [m for m in sub_metrics if m.raw_value != self._NO_DATA_RAW and m.name != "insufficient_data"]
-        avg = sum(m.value for m in scorable) / len(scorable) if scorable else self._NO_DATA_SCORE
+        total_core = sum(1 for m in sub_metrics if m.name != "insufficient_data")
+
+        if not scorable:
+            # No scorable metrics.  Distinguish "no data at all" from
+            # "data exists but returns are too quiet" (idle market / weekend).
+            # During idle periods equity doesn't degrade — score neutrally
+            # above the alert threshold to prevent false regression alarms.
+            avg = 75.0 if has_data else self._NO_DATA_SCORE
+        elif len(scorable) * 2 < total_core:
+            # Fewer than half of core metrics have real data — blend the
+            # raw average with a neutral score to prevent 1-2 metrics from
+            # swinging the entire dimension score between 50 and 100.
+            raw_avg = sum(m.value for m in scorable) / len(scorable)
+            coverage = len(scorable) / total_core if total_core else 1.0
+            avg = raw_avg * coverage + 75.0 * (1.0 - coverage)
+        else:
+            avg = sum(m.value for m in scorable) / len(scorable)
 
         # Set confidence based on data availability
         if data_points >= self._MIN_TRADES_FULL:

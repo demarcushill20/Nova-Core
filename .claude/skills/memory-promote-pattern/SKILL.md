@@ -102,9 +102,11 @@ A pattern is promotable when ALL of these are true:
    - If < 2 distinct sessions -> skip (insufficient evidence)
    - If contradicted by a later event -> skip (superseded)
 
-3. DEDUP CHECK
+3. DEDUP CHECK AND LINK HARVESTING
    - vault_search(pattern_title) in 20-agent-patterns/
    - If similar pattern exists -> skip (already exists)
+   - Harvest 2-3 related (but non-duplicate) notes from results
+   - Record filenames for related: field and ## Related Notes section
 
 4. CLASSIFY AND COMPOSE
    - Determine agent_role from pattern content:
@@ -134,6 +136,17 @@ A pattern is promotable when ALL of these are true:
      })
 ```
 
+### Domain Inference
+
+Infer the primary domain from pattern content keywords:
+- trade, strategy, backtest, IRB, MT5, execution → `novatrade`
+- autonomy, heartbeat, decision engine, guardrail → `autonomy`
+- memory, fusion, pinecone, neo4j, vault, recall → `memory`
+- systemd, circuit breaker, self-heal, deploy, nginx → `infrastructure`
+- agent, spawner, orchestrator, multi-agent → `agents`
+- risk, gate, filter, drawdown, exposure → `risk`
+- Default: `operations`
+
 ## Agent-Pattern Note Schema
 
 ### Frontmatter (all required)
@@ -154,12 +167,19 @@ tags:
   - "#agent/<role>"
   - "#confidence/<level>"
   - "#status/active"
+  - "#domain/<inferred-domain>"
+  - "#project/nova-core"
+related:
+  - "[[related-note-1]]"
+  - "[[related-note-2]]"
 ---
 ```
 
 ### Body (all sections required)
 
 ```markdown
+up:: [[moc-<inferred-domain>]]
+
 ## Summary
 
 1-2 sentence description of the pattern. Written for a future agent
@@ -190,6 +210,12 @@ that has never seen the original work.
 
 Concrete, actionable advice. This is the most important section.
 Write for an agent that will follow these instructions literally.
+
+## Related Notes
+
+- [[related-note-1]] — <brief annotation>
+- [[related-note-2]] — <brief annotation>
+(Populated from vault_search dedup results. Omit if none found.)
 
 ## Source Evidence
 

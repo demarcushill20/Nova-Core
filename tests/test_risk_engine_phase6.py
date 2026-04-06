@@ -223,10 +223,28 @@ class TestForexWeekend:
 
 
 class TestSessionPolicy:
-    def test_session_check_disabled_by_default(self):
-        """Default config does not enable session check."""
+    def test_session_check_enabled_by_default(self):
+        """P4: Session check is enabled by default for enhanced risk filtering."""
         engine = _make_engine(_cfg())
-        # Even if it's a weekend, should ALLOW because check is disabled
+        # Weekend should DENY because session check is now on by default
+        engine._clock = _make_weekday_clock(5, 12)  # Saturday
+        decision = engine.pre_trade_check(_order(), _account(), [])
+        assert decision.verdict == RiskVerdict.DENY
+        assert decision.policy_layer == 1
+
+    def test_session_check_explicitly_disabled(self):
+        """Session check can be explicitly disabled via config."""
+        cfg = _cfg(
+            risk=RiskConfig(
+                max_daily_drawdown_pct=5.0,
+                max_total_drawdown_pct=10.0,
+                max_positions=5,
+                max_volume_per_trade=1.0,
+                min_volume_per_trade=0.01,
+                check_forex_session=False,
+            )
+        )
+        engine = _make_engine(cfg)
         engine._clock = _make_weekday_clock(5, 12)  # Saturday
         decision = engine.pre_trade_check(_order(), _account(), [])
         assert decision.verdict == RiskVerdict.ALLOW
@@ -267,9 +285,17 @@ class TestSessionPolicy:
 
     def test_session_allow_friday_before_close(self):
         engine = _make_engine(_irb_cfg())
-        engine._clock = _make_weekday_clock(4, 21)  # Friday 21:00
+        engine._clock = _make_weekday_clock(4, 20)  # Friday 20:00 (before 21:00 close)
         decision = engine.pre_trade_check(_order(), _account(), [])
         assert decision.verdict == RiskVerdict.ALLOW
+
+    def test_session_deny_friday_at_close(self):
+        """Friday 21:00 UTC = 5 PM EST is market close."""
+        engine = _make_engine(_irb_cfg())
+        engine._clock = _make_weekday_clock(4, 21)  # Friday 21:00 (market close)
+        decision = engine.pre_trade_check(_order(), _account(), [])
+        assert decision.verdict == RiskVerdict.DENY
+        assert decision.policy_layer == 1
 
 
 # ---------------------------------------------------------------------------

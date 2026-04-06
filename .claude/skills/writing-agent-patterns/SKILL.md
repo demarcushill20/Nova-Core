@@ -71,6 +71,16 @@ If any check fails, stop. Report "Pattern not mature enough" and recommend track
 Use `vault_search` with the method's core terms to check:
 - Does a similar pattern already exist? If yes, report the duplicate and stop.
 - Are there related workflow learnings that support this pattern? Note them as evidence.
+- **Link harvesting**: From the search results, select 2-3 relevant but non-duplicate notes as related content. Record their filenames for use in the `related:` field and `## Related Notes` body section.
+
+**Domain inference**: From the agent_role and pattern content, infer the primary domain:
+- trade, strategy, backtest, IRB, MT5, execution → `novatrade`
+- autonomy, heartbeat, decision engine, guardrail → `autonomy`
+- memory, fusion, pinecone, neo4j, vault, recall → `memory`
+- systemd, circuit breaker, self-heal, deploy, nginx → `infrastructure`
+- agent, spawner, orchestrator, multi-agent → `agents`
+- risk, gate, filter, drawdown, exposure → `risk`
+- Default: `operations`
 
 ### Step 3 — Extract the stable pattern
 
@@ -109,9 +119,14 @@ tags:
   - "#agent/<role>"
   - "#confidence/<level>"
   - "#status/active"
+  - "#domain/<inferred-domain>"
+  - "#project/nova-core"
 related:
   - "[[related-note-1]]"
+  - "[[related-note-2]]"
 ---
+
+up:: [[moc-<inferred-domain>]]
 
 ## Summary
 
@@ -138,6 +153,12 @@ related:
 ## Guidance
 
 <Concrete advice. The most important section.>
+
+## Related Notes
+
+- [[related-note-1]] — <brief annotation>
+- [[related-note-2]] — <brief annotation>
+(Populated from vault_search results in Step 2. Omit if no related notes found.)
 
 ## Source Evidence
 

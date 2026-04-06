@@ -20,6 +20,7 @@ Source: tools/mcp_vault_server.py validation logic + audit of all existing vault
 | `inbox` | `#type/inbox` | Catch-all for notes that don't fit other types (daily summaries, misc) | 00-inbox |
 
 | `adr` | `#type/adr` | Architecture Decision Records | 10-adrs (read-only, operator-managed) |
+| `moc` | `#type/moc` | Map of Content — index/hub notes for topic clusters | 00-inbox |
 
 No other type values are accepted. Any note with a type not in this list will be rejected.
 
@@ -113,6 +114,17 @@ to preserve backward compatibility with heartbeat-generated plans that omit them
 | date | string | YES | Non-empty. Convention: YYYY-MM-DD |
 | source | string | YES | Enum: operator, nova-core-memory |
 | tags | list[string] | YES | Non-empty, must include "#type/adr", max 10 |
+
+### moc
+| Field | Type | Required | Validation |
+|-------|------|----------|------------|
+| type | string | YES | Must be "moc" |
+| moc_id | string | YES | Non-empty. Convention: "moc-<domain-slug>" |
+| title | string | YES | Non-empty, ≤ 100 chars |
+| domain | string | YES | Enum: novatrade, infrastructure, memory, autonomy, research, debugging, agents, risk, trading-strategies, operations |
+| date_created | string | YES | Non-empty. Convention: YYYY-MM-DD |
+| source | string | YES | Enum: operator, nova-core-memory |
+| tags | list[string] | YES | Non-empty, must include "#type/moc", max 10 |
 
 ---
 

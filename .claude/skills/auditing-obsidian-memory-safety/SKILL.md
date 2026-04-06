@@ -73,6 +73,7 @@ Parse the candidate's YAML frontmatter and verify:
    - `research-summary` (required tag: `#type/research`)
    - `debugging-guide` (required tag: `#type/debugging`)
    - `inbox` (required tag: `#type/inbox`)
+   - `moc` (required tag: `#type/moc`)
 
 2. All required frontmatter fields for that type are present:
 
@@ -94,6 +95,8 @@ Parse the candidate's YAML frontmatter and verify:
 4. Tags list is non-empty, includes the required type tag, and has at most 10 entries
 
 5. Title is present and at most 100 characters
+
+6. Check for `#domain/*` tag presence (soft warning — do not reject if missing, but record as a warning in the audit results)
 
 Use `vault_validate` to confirm schema compliance. If validation returns errors, record each error as a rejection reason.
 
@@ -138,7 +141,7 @@ Scan the candidate content for obvious secrets or credentials. This is a lightwe
 |---------|---------|
 | API key prefixes | `sk-`, `pk_live_`, `AKIA`, `ghp_`, `gho_`, `tvly-`, `BSA` followed by key-like strings |
 | Password-like fields | `password:`, `passwd:`, `secret:`, `token:` followed by non-placeholder values |
-| Private key blocks | `-----BEGIN RSA PRIVATE KEY-----`, `-----BEGIN EC PRIVATE KEY-----`, `-----BEGIN DSA PRIVATE KEY-----` |
+| Private key blocks | PEM private key headers (RSA, EC, DSA variants) |
 | Environment variable dumps | `export API_KEY=`, `export SECRET_KEY=` |
 | Connection strings with credentials | `postgres://user:pass@`, `mysql://root:` |
 | Raw bearer tokens | `Authorization: Bearer <long-string>` |
@@ -211,6 +214,7 @@ Every invocation of this skill MUST produce:
 | Write mode | pass/fail | <create-only/ownership compliance> |
 | Ownership | pass/fail/n-a | <ownership check result> |
 | Size/structure | pass/fail | <size, frontmatter present, body present> |
+| Tag taxonomy | pass/warn | <#domain/* tag present or missing warning> |
 
 ### Decision
 - **Audit passed**: <true | false>

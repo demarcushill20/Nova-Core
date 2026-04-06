@@ -106,10 +106,21 @@ A Fusion Memory decision is worth surfacing when ALL of these are true:
    - Skip trivial, tactical, or ephemeral decisions
    - Group related decisions about the same topic
 
-3. DEDUP AGAINST EXISTING ADRs
+3. DEDUP AGAINST EXISTING ADRs AND LINK HARVESTING
    - For each candidate: vault_search(decision_topic) in 10-adrs/
    - If matching ADR exists -> skip (already covered)
    - Also vault_search in 00-inbox/ for pending candidates
+   - Harvest 2-3 partially-related ADRs or notes from results
+     for ## Related Notes section (even if not exact duplicates)
+
+   **Domain inference**: From the decision content, infer the primary domain:
+   - trade, strategy, backtest, IRB, MT5, execution → `novatrade`
+   - autonomy, heartbeat, decision engine, guardrail → `autonomy`
+   - memory, fusion, pinecone, neo4j, vault, recall → `memory`
+   - systemd, circuit breaker, self-heal, deploy, nginx → `infrastructure`
+   - agent, spawner, orchestrator, multi-agent → `agents`
+   - risk, gate, filter, drawdown, exposure → `risk`
+   - Default: `operations`
 
 4. COMPOSE CANDIDATE NOTE
    - Frontmatter: type=inbox, ADR candidate tags
@@ -140,12 +151,15 @@ tags:
   - "#action/review"
   - "#action/promote-to-adr"
   - "#project/<project>"
+  - "#domain/<inferred-domain>"
 ---
 ```
 
 ### Body
 
 ```markdown
+up:: [[moc-<inferred-domain>]]
+
 ## Proposed Decision
 
 <Clear statement of the decision that was made>
@@ -173,6 +187,12 @@ if the original decision didn't capture alternatives.)
 - First recorded: <session_id> on <date>
 - Related decisions: <list of related memory_ids, if any>
 - Surfaced from Fusion Memory on <today's date>
+
+## Related Notes
+
+- [[related-adr-or-note]] — <brief annotation of partial relationship>
+- [[related-note-2]] — <brief annotation>
+(Populated from vault_search dedup results. Omit if no related notes found.)
 
 ## Action Needed
 
