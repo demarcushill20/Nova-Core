@@ -17,5 +17,7 @@
   "reusable_guidance": "Comprehensive research on BB mean reversion edge durability, strategy degradation detection (CUSUM/Hurst/WFA), and 6 NovaTrade implementation gaps for live strategy monitoring",
   "created_at": "2026-04-06T05:14:48Z",
   "confidence": "low",
-  "supersedes": "mem_shift_20260405_13_novatrade_research_1775431102"
+  "supersedes": "mem_shift_20260405_13_novatrade_research_1775431102",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_13_novatrade_research_1775438389"
 }

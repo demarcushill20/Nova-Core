@@ -10,6 +10,7 @@ import pytest
 
 from watcher import (
     _check_contract,
+    _check_expired,
     _check_scheduled,
     _extract_keywords,
     _find_recent_output,
@@ -453,3 +454,88 @@ scheduled_at: {future_time.isoformat()}
         with patch("watcher.TASKS_DIR", tasks_dir):
             pending = get_pending_tasks()
             assert pending == []
+
+    def test_get_pending_tasks_expired_task_auto_marked_done(self, tmp_path):
+        """Expired tasks are renamed to .done and excluded from results."""
+        tasks_dir = tmp_path / "TASKS"
+        tasks_dir.mkdir()
+
+        gen_time = (datetime.now() - timedelta(hours=3)).isoformat()
+        expired = tasks_dir / "0711_repair.md"
+        expired.write_text(f'---\ngenerated_at: "{gen_time}"\nexpiry_minutes: 120\n---\n# Repair\n')
+        fresh = tasks_dir / "0712_fresh.md"
+        fresh.write_text("# Fresh task\n")
+
+        with patch("watcher.TASKS_DIR", tasks_dir):
+            pending = get_pending_tasks()
+
+        assert len(pending) == 1
+        assert pending[0].name == "0712_fresh.md"
+        assert (tasks_dir / "0711_repair.md.done").exists()
+        assert not (tasks_dir / "0711_repair.md").exists()
+
+    def test_get_pending_tasks_within_expiry_window(self, tmp_path):
+        """Tasks still within their expiry window are returned normally."""
+        tasks_dir = tmp_path / "TASKS"
+        tasks_dir.mkdir()
+
+        gen_time = (datetime.now() - timedelta(minutes=30)).isoformat()
+        valid = tasks_dir / "0001_valid.md"
+        valid.write_text(f'---\ngenerated_at: "{gen_time}"\nexpiry_minutes: 120\n---\n# Valid\n')
+
+        with patch("watcher.TASKS_DIR", tasks_dir):
+            pending = get_pending_tasks()
+
+        assert len(pending) == 1
+        assert pending[0].name == "0001_valid.md"
+
+    def test_get_pending_tasks_no_expiry_metadata(self, tmp_path):
+        """Tasks without expiry frontmatter are never expired."""
+        tasks_dir = tmp_path / "TASKS"
+        tasks_dir.mkdir()
+
+        manual = tasks_dir / "0001_manual.md"
+        manual.write_text("# Manual task\n")
+
+        with patch("watcher.TASKS_DIR", tasks_dir):
+            pending = get_pending_tasks()
+
+        assert len(pending) == 1
+        assert pending[0].name == "0001_manual.md"
+
+
+class TestCheckExpired:
+    """Unit tests for _check_expired() edge cases."""
+
+    def test_empty_dict(self):
+        assert _check_expired({}) is False
+
+    def test_missing_generated_at(self):
+        assert _check_expired({"expiry_minutes": 120}) is False
+
+    def test_missing_expiry_minutes(self):
+        gen = datetime.now().isoformat()
+        assert _check_expired({"generated_at": gen}) is False
+
+    def test_zero_expiry(self):
+        gen = datetime.now().isoformat()
+        assert _check_expired({"expiry_minutes": 0, "generated_at": gen}) is False
+
+    def test_negative_expiry(self):
+        gen = datetime.now().isoformat()
+        assert _check_expired({"expiry_minutes": -10, "generated_at": gen}) is False
+
+    def test_past_window(self):
+        gen = (datetime.now() - timedelta(hours=3)).isoformat()
+        assert _check_expired({"expiry_minutes": 120, "generated_at": gen}) is True
+
+    def test_within_window(self):
+        gen = (datetime.now() - timedelta(minutes=30)).isoformat()
+        assert _check_expired({"expiry_minutes": 120, "generated_at": gen}) is False
+
+    def test_invalid_generated_at_string(self):
+        assert _check_expired({"expiry_minutes": 120, "generated_at": "not-a-date"}) is False
+
+    def test_invalid_expiry_type(self):
+        gen = datetime.now().isoformat()
+        assert _check_expired({"expiry_minutes": "abc", "generated_at": gen}) is False

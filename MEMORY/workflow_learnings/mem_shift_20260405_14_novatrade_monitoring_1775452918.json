@@ -17,5 +17,7 @@
   "reusable_guidance": "NovaTrade monitoring \u2014 live pipeline healthy at $100,200.62, 0 trades today, 0 webhook alerts received, 2/7 cutover criteria met, shadow validation not yet producing comparison data",
   "created_at": "2026-04-06T05:21:58Z",
   "confidence": "low",
-  "supersedes": "mem_shift_20260405_14_novatrade_monitoring_1775434429"
+  "supersedes": "mem_shift_20260405_14_novatrade_monitoring_1775434429",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_14_novatrade_monitoring_1775437922"
 }

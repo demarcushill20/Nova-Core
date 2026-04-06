@@ -16,5 +16,6 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Fixed heartbeat crash loop (KeyError 'detail' in budget checks) and aligned 15 test failures with current degradation tier policy and skill keyword matching",
   "created_at": "2026-04-06T06:03:24Z",
-  "confidence": "low"
+  "confidence": "low",
+  "supersedes": "mem_shift_20260405_15_free_will_pm_1775439884"
 }

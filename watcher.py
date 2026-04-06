@@ -590,12 +590,41 @@ def _check_scheduled(scheduled_at) -> bool:
     return now >= scheduled_at
 
 
+def _check_expired(fm: dict) -> bool:
+    """Return True if task has exceeded its expiry_minutes window.
+
+    Tasks without expiry metadata are never considered expired.
+    """
+    expiry_minutes = fm.get("expiry_minutes")
+    generated_at = fm.get("generated_at")
+    if expiry_minutes is None or generated_at is None:
+        return False
+    try:
+        expiry_minutes = int(expiry_minutes)
+    except (ValueError, TypeError):
+        return False
+    if expiry_minutes <= 0:
+        return False
+    if isinstance(generated_at, str):
+        try:
+            gen_dt = datetime.fromisoformat(generated_at)
+        except (ValueError, TypeError):
+            return False
+    elif isinstance(generated_at, datetime):
+        gen_dt = generated_at
+    else:
+        return False
+    now = datetime.now(tz=gen_dt.tzinfo)
+    return now > gen_dt + timedelta(minutes=expiry_minutes)
+
+
 # --- Core logic ---
 def get_pending_tasks() -> list[Path]:
     """Return sorted list of pending .md task files.
 
     Ignores: .done, .failed, .inprogress, .cancelled
     Defers: tasks with a future ``scheduled_at`` frontmatter field.
+    Expires: tasks past their ``expiry_minutes`` window (auto-marked .done).
     """
     if not TASKS_DIR.exists():
         return []
@@ -610,6 +639,20 @@ def get_pending_tasks() -> list[Path]:
                 p.name,
                 fm.get("scheduled_at"),
             )
+            continue
+        if _check_expired(fm):
+            expired_path = p.with_name(f"{p.stem}.md.done")
+            try:
+                p.rename(expired_path)
+                logger.info(
+                    "EXPIRY: %s → %s (generated_at=%s, expiry_minutes=%s)",
+                    p.name,
+                    expired_path.name,
+                    fm.get("generated_at"),
+                    fm.get("expiry_minutes"),
+                )
+            except OSError as exc:
+                logger.warning("EXPIRY: rename failed for %s: %s", p.name, exc)
             continue
         ready.append(p)
     return ready

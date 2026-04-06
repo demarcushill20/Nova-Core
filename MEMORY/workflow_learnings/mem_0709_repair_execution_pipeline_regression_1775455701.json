@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Verified execution_pipeline regression already resolved \u2014 score 98.0/100, MARKET_CLOSED fix stable for 8+ hours",
   "created_at": "2026-04-06T06:08:21Z",
-  "confidence": "low"
+  "confidence": "low",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0709_repair_execution_pipeline_regression_1775472711"
 }

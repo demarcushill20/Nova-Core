@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Fixed strategy_validity oscillation \u2014 added off-hours neutral scoring and MAD outlier filtering to prevent false backtest/live alignment divergence",
   "created_at": "2026-04-06T04:51:16Z",
-  "confidence": "low"
+  "confidence": "low",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0712_repair_strategy_validity_regression_1775474795"
 }

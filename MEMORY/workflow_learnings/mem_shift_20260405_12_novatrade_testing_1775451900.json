@@ -17,5 +17,7 @@
   "reusable_guidance": "NovaTrade testing completed - 1,160/1,161 tests passing, 172 FTMO compliance tests verified, fixed IRB threshold test failure, zero shadow mode divergences",
   "created_at": "2026-04-06T05:05:00Z",
   "confidence": "low",
-  "supersedes": "mem_shift_20260405_12_novatrade_testing_1775435473"
+  "supersedes": "mem_shift_20260405_12_novatrade_testing_1775435473",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_12_novatrade_testing_1775433038"
 }

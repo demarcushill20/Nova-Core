@@ -17,5 +17,7 @@
   "reusable_guidance": "Implemented P0/P1 IRB parameter optimizations: trail ATR multiplier 1.5\u21922.0, news blackout 15\u219260min, added BBW ceiling 0.04, tightened IRB threshold 0.45\u21920.40 \u2014 all tests passing, estimated +$600-1000/month revenue improvement",
   "created_at": "2026-04-06T04:40:37Z",
   "confidence": "low",
-  "supersedes": "mem_shift_20260405_10_novatrade_impl_1775434313"
+  "supersedes": "mem_shift_20260405_10_novatrade_impl_1775434313",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_10_novatrade_impl_1775430011"
 }

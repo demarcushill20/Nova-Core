@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_0712_repair_strategy_validity_regression_1775474795",
+  "workflow_id": "0712_repair_strategy_validity_regression",
+  "task_summary": "Verified strategy_validity regression already resolved \u2014 live collector score 92.0/100 (GREEN), service active, 47 signals/hr, 1516 trades/24h, no halt state",
+  "task_class": "code_impl",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Verified strategy_validity regression already resolved \u2014 live collector score 92.0/100 (GREEN), service active, 47 signals/hr, 1516 trades/24h, no halt state"
+  ],
+  "successful_patterns": [
+    "task_completed: 0712_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Verified strategy_validity regression already resolved \u2014 live collector score 92.0/100 (GREEN), service active, 47 signals/hr, 1516 trades/24h, no halt state",
+  "created_at": "2026-04-06T11:26:35Z",
+  "confidence": "high",
+  "supersedes": "mem_0712_repair_strategy_validity_regression_1775451076"
+}

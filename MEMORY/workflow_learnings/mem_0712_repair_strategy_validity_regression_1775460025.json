@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Validated strategy_validity regression as FALSE_ALARM \u2014 score 80/100 above 70 threshold, service healthy, trading active, divergence caused by stale backtest baseline",
   "created_at": "2026-04-06T07:20:25Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0712_repair_strategy_validity_regression_1775474795"
 }

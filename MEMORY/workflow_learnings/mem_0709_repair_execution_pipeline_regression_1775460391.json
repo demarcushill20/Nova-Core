@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Validated execution_pipeline regression as FALSE_ALARM \u2014 score 98.0/100, all sub-metrics healthy, transient dip self-recovered",
   "created_at": "2026-04-06T07:26:31Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0709_repair_execution_pipeline_regression_1775472711"
 }
