@@ -553,37 +553,84 @@ async def build_live_stack(
             cfg.ftmo.symbol_suffix,
         )
 
-    # --- Warmup: pre-seed historical candles ---
-    try:
-        primary_candles = await adapter.get_candles(broker_symbol, primary_tf, 500)
-        higher_candles = await adapter.get_candles(broker_symbol, higher_tf, 200)
-        strategy_engine.seed_history(primary_candles, higher_candles)
-        log.info(
-            "build_live_stack: seeded %d %s + %d %s candles",
-            len(primary_candles),
-            primary_tf,
-            len(higher_candles),
-            higher_tf,
-        )
-    except Exception:
-        log.error(
-            "build_live_stack: WARMUP FAILED — could not fetch historical candles. "
-            "Strategy engine has NO historical context and must warm up entirely "
-            "from live data. Signals will be unreliable until enough bars accumulate.",
-            exc_info=True,
-        )
+    # --- Warmup: pre-seed historical candles (with retry for reliability) ---
+    max_warmup_attempts = 3
+
+    for attempt in range(max_warmup_attempts):
+        try:
+            log.info("build_live_stack: attempting warmup (attempt %d/%d)", attempt + 1, max_warmup_attempts)
+            primary_candles = await adapter.get_candles(broker_symbol, primary_tf, 500)
+            higher_candles = await adapter.get_candles(broker_symbol, higher_tf, 200)
+
+            # Validate candle data quality
+            if len(primary_candles) < 100:
+                raise ValueError(f"Insufficient primary candles: {len(primary_candles)} < 100")
+            if len(higher_candles) < 50:
+                raise ValueError(f"Insufficient higher candles: {len(higher_candles)} < 50")
+
+            strategy_engine.seed_history(primary_candles, higher_candles)
+            log.info(
+                "build_live_stack: WARMUP SUCCESS — seeded %d %s + %d %s candles (attempt %d)",
+                len(primary_candles),
+                primary_tf,
+                len(higher_candles),
+                higher_tf,
+                attempt + 1,
+            )
+            break
+
+        except Exception as exc:
+            is_final_attempt = attempt == max_warmup_attempts - 1
+            if is_final_attempt:
+                log.error(
+                    "build_live_stack: WARMUP FAILED — could not fetch historical candles after %d attempts. "
+                    "Strategy engine has NO historical context and must warm up entirely "
+                    "from live data. Signals will be unreliable until enough bars accumulate. "
+                    "Final error: %s",
+                    max_warmup_attempts,
+                    str(exc)[:200],
+                    exc_info=True,
+                )
+            else:
+                # Add progressive backoff: 5s, 15s for retries
+                delay = 5 + (attempt * 10)
+                log.warning(
+                    "build_live_stack: warmup attempt %d failed: %s. Retrying in %ds...",
+                    attempt + 1,
+                    str(exc)[:200],
+                    delay,
+                )
+                await asyncio.sleep(delay)
 
     # --- Subscribe to market data (prime the price feed) ---
     broker_symbols = list(broker_map.values())
-    try:
-        await adapter.subscribe_to_market_data(broker_symbols)
-        log.info("build_live_stack: subscribed to market data for %s", broker_symbols)
-    except Exception:
-        log.warning(
-            "build_live_stack: market data subscription failed — poller will "
-            "attempt on first poll, but initial ticks may be delayed",
-            exc_info=True,
-        )
+    max_subscription_attempts = 2
+
+    for attempt in range(max_subscription_attempts):
+        try:
+            log.info(
+                "build_live_stack: subscribing to market data (attempt %d/%d)", attempt + 1, max_subscription_attempts
+            )
+            await adapter.subscribe_to_market_data(broker_symbols)
+            log.info("build_live_stack: subscribed to market data for %s", broker_symbols)
+            break
+        except Exception as exc:
+            is_final_attempt = attempt == max_subscription_attempts - 1
+            if is_final_attempt:
+                log.warning(
+                    "build_live_stack: market data subscription failed after %d attempts — poller will "
+                    "attempt on first poll, but initial ticks may be delayed. Final error: %s",
+                    max_subscription_attempts,
+                    str(exc)[:200],
+                    exc_info=True,
+                )
+            else:
+                log.warning(
+                    "build_live_stack: subscription attempt %d failed: %s. Retrying in 3s...",
+                    attempt + 1,
+                    str(exc)[:200],
+                )
+                await asyncio.sleep(3)
 
     # --- Startup reconciliation: sync agent state with broker reality ---
     # After restart, agent restores persisted state from StateStore (may be
