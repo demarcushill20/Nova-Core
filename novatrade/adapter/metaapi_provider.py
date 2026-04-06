@@ -398,12 +398,32 @@ class MetaApiAdapter(MT5Adapter):
     # --- account -------------------------------------------------------------
 
     async def get_account(self) -> AccountState:
-        """Fetch current account snapshot from MetaApi."""
-        await self._ensure_connected_or_reconnect()
-        info = await self._connection.get_account_information()
-        self._cached_equity = info.get("equity")
-        log.debug("metaapi get_account: balance=%.2f equity=%.2f", info["balance"], info["equity"])
-        return _translate_account(info)
+        """Fetch current account snapshot from MetaApi with retry/backoff."""
+        max_retries = self._config.retry_max_attempts
+        for attempt in range(max_retries + 1):
+            try:
+                await self._ensure_connected_or_reconnect()
+                info = await self._connection.get_account_information()
+                self._cached_equity = info.get("equity")
+                log.debug("metaapi get_account: balance=%.2f equity=%.2f", info["balance"], info["equity"])
+                return _translate_account(info)
+            except Exception as exc:
+                if attempt == max_retries:
+                    raise
+                is_rate_limit = any(
+                    hint in str(exc).lower()
+                    for hint in ("429", "too many requests", "toomanyrequests", "rate limit", "quota exceeded")
+                )
+                delay = max(10, 2 ** (attempt + 3)) if is_rate_limit else 2**attempt
+                log.warning(
+                    "metaapi get_account attempt %d/%d failed: %s, retrying in %ds",
+                    attempt + 1,
+                    max_retries + 1,
+                    str(exc)[:200],
+                    delay,
+                )
+                await asyncio.sleep(delay)
+        raise RuntimeError("get_account: unreachable")
 
     def get_equity(self) -> float | None:
         """Return the most recently observed equity value.
