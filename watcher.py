@@ -72,6 +72,16 @@ from utils.task_checkpoint import (
 from utils.task_validator import audit_task_execution, validate_task_content
 from utils.trace_context import TraceContext
 
+# Daily session circuit breaker — hard cap on Claude subprocesses per UTC day
+try:
+    from utils.session_counter import MAX_DAILY_SESSIONS as _session_counter_max
+    from utils.session_counter import can_dispatch as _session_can_dispatch
+    from utils.session_counter import increment as _session_counter_increment
+
+    _HAS_SESSION_COUNTER = True
+except ImportError:
+    _HAS_SESSION_COUNTER = False
+
 # Quota-aware scheduling (optional — degrades gracefully if quota file absent)
 try:
     from utils.quota_manager import check_emergency_brake as _quota_emergency_brake
@@ -788,7 +798,7 @@ def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
         # Check if retry is possible via checkpoint system
         can_retry = True
         try:
-            cp = increment_retry(stem)
+            cp = load_checkpoint(stem)
             if cp is None:
                 # No checkpoint — first recovery attempt, allow it
                 can_retry = True
@@ -1218,6 +1228,11 @@ async def _execute_worker(
 
         await asyncio.to_thread(pid_file.write_text, str(proc.pid), "utf-8")
         logger.info("Worker PID %d written to %s", proc.pid, pid_file)
+
+        # Daily session counter — track actual Claude subprocess spawns
+        if _HAS_SESSION_COUNTER:
+            _sc_count = _session_counter_increment()
+            logger.info("SESSION COUNTER: %d/%d for today", _sc_count, _session_counter_max)
 
         # Start watchdog keepalive pings during long-running subprocess
         keepalive_task = asyncio.create_task(_watchdog_keepalive())
@@ -2465,9 +2480,40 @@ async def scan_and_enqueue(pool: AsyncWorkerPool) -> None:
 
     new_tasks = [t for t in pending if t.name not in _dispatched and t.name not in _deferred]
 
+    # --- Checkpoint retry-cap guard: reject tasks that exhausted retries ---
+    if new_tasks:
+        capped: list[Path] = []
+        for t in new_tasks:
+            _cap_stem = _task_stem(t.name)
+            _cap_cp = load_checkpoint(_cap_stem)
+            if _cap_cp is not None and _cap_cp.retry_count >= MAX_TASK_RETRIES:
+                _cap_failed = t.with_name(f"{_cap_stem}.md.failed")
+                try:
+                    t.rename(_cap_failed)
+                    logger.warning(
+                        "RETRY CAP: %s → %s (retry_count=%d >= MAX=%d)",
+                        t.name,
+                        _cap_failed.name,
+                        _cap_cp.retry_count,
+                        MAX_TASK_RETRIES,
+                    )
+                    slog.event("task.retry_exhausted", stem=_cap_stem, retry_count=_cap_cp.retry_count)
+                except (OSError, FileNotFoundError) as exc:
+                    logger.warning("RETRY CAP: rename failed for %s: %s", t.name, exc)
+                capped.append(t)
+        if capped:
+            new_tasks = [t for t in new_tasks if t not in capped]
+
     if not new_tasks:
         logger.info("Scan complete — no new tasks.")
         return
+
+    # Daily session circuit breaker — halt dispatch if daily cap reached
+    if _HAS_SESSION_COUNTER:
+        _sc_ok, _sc_reason = _session_can_dispatch()
+        if not _sc_ok:
+            logger.warning("DAILY SESSION CAP: %s — halting dispatch for today", _sc_reason)
+            return
 
     # Quota-aware filtering — defers non-critical tasks under pressure
     if _HAS_QUOTA and _quota_emergency_brake():
