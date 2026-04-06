@@ -371,13 +371,18 @@ def _build_stageD_inspect_steps(stem: str, task_text: str) -> list[PlanStep]:
         PlanStep(
             step_id=f"{stem}_analyze",
             skill_name="file-ops",
-            goal="Analyze findings and write inspection report",
+            goal=(
+                "Analyze findings and write inspection report. "
+                "MANDATORY: End output with a ## CONTRACT block containing "
+                "summary, files_changed, verification, and confidence fields. "
+                "Task will be rejected without a valid CONTRACT block."
+            ),
             inputs={"task_text": task_text[:2000]},
         ),
         PlanStep(
             step_id=f"{stem}_verify",
             skill_name="self-verification",
-            goal="Verify inspection completeness (MANDATORY — verifier approval required)",
+            goal="Verify inspection completeness and CONTRACT block validity (MANDATORY — verifier approval required)",
             inputs={},
         ),
     ]
@@ -411,13 +416,18 @@ def _build_stageD_report_steps(stem: str, task_text: str) -> list[PlanStep]:
         PlanStep(
             step_id=f"{stem}_report",
             skill_name="file-ops",
-            goal="Compile diagnostic findings into a structured report",
+            goal=(
+                "Compile diagnostic findings into a structured report. "
+                "MANDATORY: End output with a ## CONTRACT block containing "
+                "summary, files_changed, verification, and confidence fields. "
+                "Task will be rejected without a valid CONTRACT block."
+            ),
             inputs={"task_text": task_text[:2000]},
         ),
         PlanStep(
             step_id=f"{stem}_verify",
             skill_name="self-verification",
-            goal="Verify report completeness and confirm no mutations occurred (MANDATORY)",
+            goal="Verify report completeness, CONTRACT block validity, and confirm no mutations occurred (MANDATORY)",
             inputs={},
         ),
     ]

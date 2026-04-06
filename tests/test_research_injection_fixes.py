@@ -757,3 +757,46 @@ class TestStepGoalContractCompliance:
         # system steps should not have MANDATORY CONTRACT in goal
         for step in steps:
             assert "MANDATORY" not in step.goal or "CONTRACT" not in step.goal
+
+    def test_stageD_report_steps_have_contract_in_goal(self):
+        """_build_stageD_report_steps report step mandates CONTRACT."""
+        from tools.orchestrator_adapter import _build_stageD_report_steps
+
+        steps = _build_stageD_report_steps("test_stem", "Check system health")
+        report_steps = [s for s in steps if "report" in s.step_id]
+        assert len(report_steps) == 1
+        goal = report_steps[0].goal
+        assert "CONTRACT" in goal
+        assert "MANDATORY" in goal
+        assert "summary" in goal
+        assert "files_changed" in goal
+
+    def test_stageD_report_verify_mentions_contract(self):
+        """_build_stageD_report_steps verify step references CONTRACT."""
+        from tools.orchestrator_adapter import _build_stageD_report_steps
+
+        steps = _build_stageD_report_steps("test_stem", "Check system health")
+        verify_steps = [s for s in steps if "verify" in s.step_id]
+        assert len(verify_steps) == 1
+        assert "CONTRACT" in verify_steps[0].goal
+
+    def test_stageD_inspect_analyze_has_contract_in_goal(self):
+        """_build_stageD_inspect_steps analyze step mandates CONTRACT."""
+        from tools.orchestrator_adapter import _build_stageD_inspect_steps
+
+        steps = _build_stageD_inspect_steps("test_stem", "Inspect logs")
+        analyze_steps = [s for s in steps if "analyze" in s.step_id]
+        assert len(analyze_steps) == 1
+        goal = analyze_steps[0].goal
+        assert "CONTRACT" in goal
+        assert "MANDATORY" in goal
+        assert "summary" in goal
+
+    def test_stageD_inspect_verify_mentions_contract(self):
+        """_build_stageD_inspect_steps verify step references CONTRACT."""
+        from tools.orchestrator_adapter import _build_stageD_inspect_steps
+
+        steps = _build_stageD_inspect_steps("test_stem", "Inspect logs")
+        verify_steps = [s for s in steps if "verify" in s.step_id]
+        assert len(verify_steps) == 1
+        assert "CONTRACT" in verify_steps[0].goal
