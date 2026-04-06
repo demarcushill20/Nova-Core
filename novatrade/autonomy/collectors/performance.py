@@ -126,16 +126,16 @@ class PerformanceCollector(BaseCollector):
             # During idle periods equity doesn't degrade — score neutrally
             # above the alert threshold to prevent false regression alarms.
             avg = 75.0 if has_data else self._NO_DATA_SCORE
-        elif len(scorable) * 2 <= total_core:
-            # Half or fewer of core metrics have real data — blend the
-            # raw average with a neutral score to prevent 1-2 metrics from
-            # swinging the entire dimension score between 50 and 100.
+        elif len(scorable) < total_core:
+            # Some core metrics lack real data — blend the raw average with
+            # a neutral score proportional to coverage to prevent missing
+            # metrics from swinging the dimension score artificially.
             raw_avg = sum(m.value for m in scorable) / len(scorable)
             coverage = len(scorable) / total_core if total_core else 1.0
             avg = raw_avg * coverage + 75.0 * (1.0 - coverage)
-            # Floor: with ≤ 50% data coverage the signal is too sparse to
-            # confidently flag a regression.  Prevent false YELLOW alarms
-            # that trigger unnecessary repair tasks.
+            # Floor: incomplete data coverage is too sparse to confidently
+            # flag a regression.  Prevent false YELLOW alarms that trigger
+            # unnecessary repair tasks.
             avg = max(avg, 72.0)
         else:
             avg = sum(m.value for m in scorable) / len(scorable)
