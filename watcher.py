@@ -795,31 +795,60 @@ def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
         failed_file = TASKS_DIR / f"{stem}.md.failed"
         done_file = TASKS_DIR / f"{stem}.md.done"
 
-        # Check if retry is possible via checkpoint system
+        # Check if retry is possible via checkpoint system.
+        # Proactive tasks use a stricter retry limit than global tasks.
+        is_proactive = stem.startswith("hb_proactive_")
+        is_research = is_proactive and "research" in stem
         can_retry = True
         try:
             cp = load_checkpoint(stem)
             if cp is None:
                 # No checkpoint — first recovery attempt, allow it
                 can_retry = True
-            elif cp.retry_count >= MAX_TASK_RETRIES:
-                can_retry = False
+            else:
+                if is_proactive:
+                    from utils.heartbeat_rules import PROACTIVE_MAX_RETRIES
+
+                    max_r = PROACTIVE_MAX_RETRIES
+                else:
+                    max_r = MAX_TASK_RETRIES
+                if cp.retry_count >= max_r:
+                    can_retry = False
         except Exception:
             can_retry = True  # Err on side of retrying
 
         if can_retry:
+            # For proactive tasks, apply adaptive retry context before re-dispatch
+            if is_proactive:
+                try:
+                    _append_retry_context_watcher(ip)
+                except Exception:
+                    pass  # best-effort — don't block recovery
             try:
                 ip.rename(task_file)
                 logger.info(
-                    "ORPHAN RECOVERY: %s → %s (stuck %.1f min, reset for retry)",
+                    "ORPHAN RECOVERY: %s → %s (stuck %.1f min, reset for retry%s)",
                     ip.name,
                     task_file.name,
                     age_s / 60,
+                    ", adaptive" if is_proactive else "",
                 )
                 recovered.append(ip.name)
             except (OSError, FileNotFoundError) as exc:
                 logger.warning("ORPHAN RECOVERY: failed to reset %s: %s", ip.name, exc)
         else:
+            # Record circuit breaker failure for research injection tasks
+            if is_research:
+                try:
+                    from utils.heartbeat_rules import HeartbeatRulesEngine
+
+                    HeartbeatRulesEngine.record_research_injection_result(
+                        success=False,
+                        failure_reason=f"max retries exhausted via watcher orphan recovery ({stem})",
+                    )
+                except Exception:
+                    pass
+
             # Before marking failed, check if OUTPUT exists — the worker may
             # have completed successfully but the watcher missed the lifecycle
             # transition (e.g., watcher restarted during execution).
@@ -835,6 +864,14 @@ def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
                         output_exists.name,
                     )
                     recovered.append(ip.name)
+                    # Correct the circuit breaker — task actually succeeded
+                    if is_research:
+                        try:
+                            from utils.heartbeat_rules import HeartbeatRulesEngine
+
+                            HeartbeatRulesEngine.record_research_injection_result(success=True)
+                        except Exception:
+                            pass
                 except (OSError, FileNotFoundError) as exc:
                     logger.warning("ORPHAN RESCUE: failed to mark %s as done: %s", ip.name, exc)
             else:
@@ -853,6 +890,45 @@ def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
     if recovered:
         slog.event("task.orphan_recovered", count=len(recovered), tasks=recovered)
     return recovered
+
+
+def _append_retry_context_watcher(task_path: Path) -> None:
+    """Append adaptive retry context to a proactive task before watcher re-dispatch.
+
+    Mirror of heartbeat._append_retry_context for the watcher orphan-recovery
+    path, ensuring retries through the watcher are also adaptive (not identical).
+    """
+    original = task_path.read_text(encoding="utf-8")
+    if "RETRY ESCALATION" in original:
+        return  # already has retry context
+
+    prior_detail = ""
+    try:
+        from utils.heartbeat_rules import HeartbeatRulesEngine
+
+        saved_reason = HeartbeatRulesEngine.get_last_failure_reason()
+        if saved_reason:
+            prior_detail = f"\nPRIOR FAILURE REASON: {saved_reason}\n"
+    except Exception:
+        pass
+
+    retry_block = (
+        "\n\n---\n"
+        "## RETRY ESCALATION\n"
+        "This task previously failed and was recovered by the watcher.\n"
+        f"{prior_detail}\n"
+        "Common failure reasons:\n"
+        "- Missing ## CONTRACT block in output\n"
+        "- Missing required output file in OUTPUT/\n"
+        "- Incomplete output format\n\n"
+        "MANDATORY: You MUST end your output with a ## CONTRACT block:\n"
+        "## CONTRACT\n"
+        "summary: <one-line description>\n"
+        "files_changed: <comma-separated list>\n"
+        "verification: <how you verified>\n"
+        "confidence: <high|medium|low>\n"
+    )
+    task_path.write_text(original + retry_block, encoding="utf-8")
 
 
 def _find_any_output(task_stem: str) -> Path | None:

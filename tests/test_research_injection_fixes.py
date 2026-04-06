@@ -504,3 +504,72 @@ class TestNormalPathsUnaffected:
         actions, _, _ = engine._check_task_queue_health([])
         # No tasks = no issues
         assert len(actions) == 0
+
+
+# ---------------------------------------------------------------------------
+# 7. Watcher orphan recovery respects proactive retry limits
+# ---------------------------------------------------------------------------
+
+
+class TestWatcherOrphanRecoveryProactive:
+    """Verify watcher orphan recovery uses PROACTIVE_MAX_RETRIES for proactive tasks."""
+
+    def test_watcher_append_retry_context_adds_contract(self, tmp_path):
+        """_append_retry_context_watcher adds CONTRACT block and retry escalation."""
+        from watcher import _append_retry_context_watcher
+
+        task_file = tmp_path / "hb_proactive_research_test.md.inprogress"
+        task_file.write_text("# Research task\n\nDo research.")
+
+        _append_retry_context_watcher(task_file)
+
+        content = task_file.read_text()
+        assert "# Research task" in content
+        assert "RETRY ESCALATION" in content
+        assert "## CONTRACT" in content
+        assert "MANDATORY" in content
+
+    def test_watcher_append_retry_context_idempotent(self, tmp_path):
+        """Calling _append_retry_context_watcher twice doesn't double-append."""
+        from watcher import _append_retry_context_watcher
+
+        task_file = tmp_path / "hb_proactive_research_test.md.inprogress"
+        task_file.write_text("# Research task")
+
+        _append_retry_context_watcher(task_file)
+        first_content = task_file.read_text()
+        _append_retry_context_watcher(task_file)
+        second_content = task_file.read_text()
+
+        assert first_content == second_content
+
+    def test_watcher_append_retry_context_includes_cb_reason(self, tmp_path):
+        """_append_retry_context_watcher loads failure reason from circuit breaker."""
+        from utils.heartbeat_rules import HeartbeatRulesEngine
+        from watcher import _append_retry_context_watcher
+
+        HeartbeatRulesEngine.record_research_injection_result(success=False, failure_reason="Missing CONTRACT block")
+
+        task_file = tmp_path / "hb_proactive_research_test.md.inprogress"
+        task_file.write_text("# Research task")
+
+        _append_retry_context_watcher(task_file)
+
+        content = task_file.read_text()
+        assert "Missing CONTRACT block" in content
+        assert "PRIOR FAILURE REASON" in content
+
+    def test_watcher_retry_content_differs_from_original(self, tmp_path):
+        """Watcher retry context makes the prompt content different from original."""
+        from watcher import _append_retry_context_watcher
+
+        original = "# Proactive Research Task\n\nQueue is low."
+        task_file = tmp_path / "hb_proactive_research_test.md.inprogress"
+        task_file.write_text(original)
+
+        _append_retry_context_watcher(task_file)
+        content = task_file.read_text()
+
+        assert len(content) > len(original)
+        assert "RETRY ESCALATION" in content
+        assert "recovered by the watcher" in content
