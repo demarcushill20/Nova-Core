@@ -123,7 +123,7 @@ class ContextAssembler:
             log.warning("Failed to load goals: %s", exc)
             return []
 
-    def _load_recent_decisions(self, limit: int = 5) -> list[dict]:
+    def _load_recent_decisions(self, limit: int = 20) -> list[dict]:
         """Load recent decisions from STATE/decision_history.json."""
         if not self._decisions_path.exists():
             return []
@@ -186,19 +186,26 @@ class ContextAssembler:
 
     @staticmethod
     def _classify_market_session() -> str:
-        """Classify current forex market session based on UTC hour."""
-        hour = datetime.now(timezone.utc).hour
+        """Classify current forex market session based on UTC hour and weekday."""
+        now = datetime.now(timezone.utc)
+        weekday, hour = now.weekday(), now.hour
+        # Forex weekend: Friday 22:00 UTC → Sunday 22:00 UTC
+        if weekday == 5:  # Saturday
+            return "closed"
+        if weekday == 6 and hour < 22:  # Sunday before open
+            return "closed"
+        if weekday == 4 and hour >= 22:  # Friday after close
+            return "closed"
+        # Weekday sessions
         if 0 <= hour < 7:
             return "asian"
-        if 7 <= hour < 8:
-            return "london"  # London pre-open
-        if 8 <= hour < 13:
+        if 7 <= hour < 13:
             return "london"
         if 13 <= hour < 16:
-            return "overlap"  # London+NY overlap
+            return "overlap"
         if 16 <= hour < 21:
             return "new_york"
-        return "closed"  # Low liquidity (21-00 UTC)
+        return "closed"
 
     def _load_active_investigations(self) -> list[str]:
         """Find in-progress investigation tasks in TASKS/."""

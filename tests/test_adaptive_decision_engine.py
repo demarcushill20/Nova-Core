@@ -175,7 +175,7 @@ async def test_assembler_loads_decision_history(tmp_path):
 
     assembler = ContextAssembler(base_path=str(tmp_path))
     ctx = await assembler.assemble(make_report())
-    assert len(ctx.recent_decisions) == 5  # limited to 5
+    assert len(ctx.recent_decisions) == 10  # limited to 20, only 10 exist
 
 
 @pytest.mark.asyncio
@@ -603,3 +603,115 @@ def test_has_plan_no_match():
 def test_has_plan_none_dimension():
     engine = DecisionEngine()
     assert engine._has_existing_plan(None, make_context()) is False
+
+
+# =====================================================================
+# Regression GREEN-score guard tests (Phase 3 false-alarm fix)
+# =====================================================================
+
+
+def test_regression_suppressed_when_green():
+    """Score 83 >= target 70 => regression suppressed even though delta 12 > 10."""
+    report = make_report(
+        dims={"system_health": 83.0},
+        trends={"system_health": (95.0, "degrading")},
+    )
+    engine = DecisionEngine(config=DecisionConfig(regression_delta=10.0))
+    result = engine._detect_regression(report, [])
+    assert result is None
+
+
+def test_regression_fires_when_below_target():
+    """Score 55 < target 70 and delta 15 > 10 => regression fires."""
+    report = make_report(
+        dims={"system_health": 55.0},
+        trends={"system_health": (70.0, "degrading")},
+    )
+    engine = DecisionEngine(config=DecisionConfig(regression_delta=10.0))
+    result = engine._detect_regression(report, [])
+    assert result == "system_health"
+
+
+def test_regression_fires_at_boundary():
+    """Score 69.9 < target 70 and delta 12.1 > 10 => regression fires."""
+    report = make_report(
+        dims={"system_health": 69.9},
+        trends={"system_health": (82.0, "degrading")},
+    )
+    engine = DecisionEngine(config=DecisionConfig(regression_delta=10.0))
+    result = engine._detect_regression(report, [])
+    assert result == "system_health"
+
+
+# =====================================================================
+# Phase 2 false-alarm fix: REPAIR/EXECUTE rate-limiting tests
+# =====================================================================
+
+
+def test_repair_daily_cap_blocks_fifth_repair():
+    """4 repair decisions today should hit the daily cap (max_repair_per_day=4)."""
+    from datetime import datetime, timedelta, timezone
+
+    engine = DecisionEngine()
+    now = datetime.now(timezone.utc)
+    # Create 4 repair decisions from today, spaced far enough apart to avoid cooldown
+    recent = [
+        {
+            "mode": "repair",
+            "target_dimension": "system_health",
+            "decided_at": (now - timedelta(hours=10 - i)).isoformat(),
+        }
+        for i in range(4)
+    ]
+    ctx = make_context(recent_decisions=recent)
+    # The 5th repair should be blocked by daily limit
+    assert engine._check_cooldown(ActionMode.REPAIR, ctx) is True
+
+
+def test_repair_cooldown_120_minutes():
+    """REPAIR has a 120-minute cooldown. A repair 90 min ago blocks; 121 min ago does not."""
+    from datetime import datetime, timedelta, timezone
+
+    engine = DecisionEngine()
+    now = datetime.now(timezone.utc)
+
+    # 90 minutes ago -> should be blocked (within 120-min cooldown)
+    recent_90 = [
+        {
+            "mode": "repair",
+            "target_dimension": "system_health",
+            "decided_at": (now - timedelta(minutes=90)).isoformat(),
+        }
+    ]
+    ctx_90 = make_context(recent_decisions=recent_90)
+    assert engine._check_cooldown(ActionMode.REPAIR, ctx_90) is True
+
+    # 121 minutes ago -> should NOT be blocked (outside 120-min cooldown)
+    recent_121 = [
+        {
+            "mode": "repair",
+            "target_dimension": "system_health",
+            "decided_at": (now - timedelta(minutes=121)).isoformat(),
+        }
+    ]
+    ctx_121 = make_context(recent_decisions=recent_121)
+    assert engine._check_cooldown(ActionMode.REPAIR, ctx_121) is False
+
+
+def test_non_repair_uses_30min_cooldown():
+    """Non-REPAIR modes (e.g. RESEARCH) still use the default 30-min cooldown."""
+    from datetime import datetime, timedelta, timezone
+
+    engine = DecisionEngine()
+    now = datetime.now(timezone.utc)
+
+    # 31 minutes ago -> should NOT be blocked (outside 30-min default cooldown)
+    recent = [
+        {
+            "mode": "research",
+            "target_dimension": "system_health",
+            "decided_at": (now - timedelta(minutes=31)).isoformat(),
+        }
+    ]
+    ctx = make_context(recent_decisions=recent)
+    assert engine._check_cooldown(ActionMode.RESEARCH, ctx) is False

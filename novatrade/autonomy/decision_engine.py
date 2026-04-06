@@ -42,6 +42,9 @@ class DecisionConfig(BaseModel):
     cooldown_minutes: int = 30  # min time between same-mode decisions
     max_research_per_day: int = 3
     max_plan_per_day: int = 2
+    max_repair_per_day: int = 4
+    max_execute_per_day: int = 4
+    cooldown_minutes_repair: int = 120  # 2h cooldown for REPAIR mode
 
 
 class Decision(BaseModel):
@@ -176,6 +179,10 @@ class DecisionEngine:
                     # Triggering repairs on noise wastes cycles and generates
                     # false-alarm tasks.
                     if dim.confidence < 0.5:
+                        continue
+                    # Don't repair dimensions still in GREEN range — score
+                    # oscillation above target_score is noise, not actionable.
+                    if dim.score >= self.config.target_score:
                         continue
                     delta = trend.avg_6h - dim.score
                     if delta >= self.config.regression_delta:
@@ -604,7 +611,9 @@ class DecisionEngine:
                     dt = datetime.fromisoformat(dec_at.replace("Z", "+00:00"))
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
-                    if (now - dt) < timedelta(minutes=self.config.cooldown_minutes):
+                    cooldown_map = {ActionMode.REPAIR: self.config.cooldown_minutes_repair}
+                    cooldown_mins = cooldown_map.get(mode, self.config.cooldown_minutes)
+                    if (now - dt) < timedelta(minutes=cooldown_mins):
                         return True
                 except (ValueError, TypeError):
                     pass
@@ -615,6 +624,8 @@ class DecisionEngine:
         limit_map = {
             ActionMode.RESEARCH: self.config.max_research_per_day,
             ActionMode.PLAN: self.config.max_plan_per_day,
+            ActionMode.REPAIR: self.config.max_repair_per_day,
+            ActionMode.EXECUTE: self.config.max_execute_per_day,
         }
         limit = limit_map.get(mode)
         if limit is not None:

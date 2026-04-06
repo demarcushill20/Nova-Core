@@ -180,6 +180,61 @@ class TestMarketSessionClassification:
         result = ContextAssembler._classify_market_session()
         assert result in ("asian", "london", "overlap", "new_york", "closed")
 
+    def test_saturday_returns_closed(self):
+        """Saturday at any hour should return 'closed'."""
+        # 2026-04-04 is a Saturday
+        mock_dt = datetime(2026, 4, 4, 12, 0, 0, tzinfo=timezone.utc)
+        with patch("novatrade.autonomy.decision_context.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_dt
+            mock_datetime.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert ContextAssembler._classify_market_session() == "closed"
+
+    def test_sunday_before_open_returns_closed(self):
+        """Sunday before 22:00 UTC should return 'closed'."""
+        # 2026-04-05 is a Sunday
+        mock_dt = datetime(2026, 4, 5, 10, 0, 0, tzinfo=timezone.utc)
+        with patch("novatrade.autonomy.decision_context.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_dt
+            mock_datetime.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert ContextAssembler._classify_market_session() == "closed"
+
+    def test_sunday_at_open_returns_session(self):
+        """Sunday at 22:00 UTC (market open) — hour-based logic returns 'closed'."""
+        # 2026-04-05 is a Sunday
+        mock_dt = datetime(2026, 4, 5, 22, 0, 0, tzinfo=timezone.utc)
+        with patch("novatrade.autonomy.decision_context.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_dt
+            mock_datetime.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            # 22:00 UTC falls into the "closed" bucket by hour logic
+            assert ContextAssembler._classify_market_session() == "closed"
+
+    def test_friday_before_close_returns_session(self):
+        """Friday before 22:00 UTC should return normal session."""
+        # 2026-04-03 is a Friday
+        mock_dt = datetime(2026, 4, 3, 16, 0, 0, tzinfo=timezone.utc)
+        with patch("novatrade.autonomy.decision_context.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_dt
+            mock_datetime.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert ContextAssembler._classify_market_session() == "new_york"
+
+    def test_friday_after_close_returns_closed(self):
+        """Friday at 22:00 UTC should return 'closed'."""
+        # 2026-04-03 is a Friday
+        mock_dt = datetime(2026, 4, 3, 22, 0, 0, tzinfo=timezone.utc)
+        with patch("novatrade.autonomy.decision_context.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_dt
+            mock_datetime.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert ContextAssembler._classify_market_session() == "closed"
+
+    def test_sunday_21_59_returns_closed(self):
+        """Sunday 21:59 UTC — still weekend, should be 'closed'."""
+        # 2026-04-05 is a Sunday
+        mock_dt = datetime(2026, 4, 5, 21, 59, 0, tzinfo=timezone.utc)
+        with patch("novatrade.autonomy.decision_context.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_dt
+            mock_datetime.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert ContextAssembler._classify_market_session() == "closed"
+
 
 # =====================================================================
 # Step 4.3: Degradation tier loading
