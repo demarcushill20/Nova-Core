@@ -372,8 +372,39 @@ class TestS7PerformanceCollectorEnhancement:
         assert score > 0  # Should compute successfully
 
     def test_collect_includes_s7_metrics(self, collector):
-        """Test that collect() includes S7 enhanced metrics."""
+        """Test that collect() includes S7 enhanced metrics when state files exist."""
         # Create minimal equity data
+        state_dir = Path(collector.base_path) / "STATE" / "novatrade"
+        state_dir.mkdir(parents=True)
+
+        equity_data = [{"equity": 100000}, {"equity": 101000}]
+        (state_dir / "equity_history.json").write_text(json.dumps(equity_data))
+
+        # S7 metrics are conditional — only included when their state files
+        # exist with the required fields.  Create them to test inclusion.
+        (state_dir / "partial_exit_stats.json").write_text(
+            json.dumps({"total_trades": 10, "partial_avg_profit": 50, "full_avg_profit": 40})
+        )
+        (state_dir / "signal_stats.json").write_text(json.dumps({"m5_signals_24h": 20, "h1_signals_24h": 5}))
+        (state_dir / "trade_stats.json").write_text(json.dumps({"avg_duration_hours": 8.0}))
+        (state_dir / "volume_stats.json").write_text(json.dumps({"target_volume_sum": 1.0, "actual_volume_sum": 0.98}))
+
+        import asyncio
+
+        dimension_score = asyncio.run(collector.collect())
+
+        # Should have 9 metrics (4 original + 4 S7 enhanced + 1 insufficient_data)
+        assert len(dimension_score.sub_metrics) == 9
+
+        metric_names = {m.name for m in dimension_score.sub_metrics}
+        assert "partial_exit_efficiency" in metric_names
+        assert "timeframe_signal_consistency" in metric_names
+        assert "trade_duration_efficiency" in metric_names
+        assert "volume_execution_accuracy" in metric_names
+        assert "insufficient_data" in metric_names
+
+    def test_collect_excludes_s7_without_state_files(self, collector):
+        """Test that S7 metrics are excluded when state files don't exist."""
         state_dir = Path(collector.base_path) / "STATE" / "novatrade"
         state_dir.mkdir(parents=True)
 
@@ -384,15 +415,10 @@ class TestS7PerformanceCollectorEnhancement:
 
         dimension_score = asyncio.run(collector.collect())
 
-        # Should have 9 metrics now (4 original + 4 S7 enhanced + 1 insufficient_data)
-        assert len(dimension_score.sub_metrics) == 9
-
+        # Only 4 original + 1 insufficient_data (no S7 without state files)
+        assert len(dimension_score.sub_metrics) == 5
         metric_names = {m.name for m in dimension_score.sub_metrics}
-        assert "partial_exit_efficiency" in metric_names
-        assert "timeframe_signal_consistency" in metric_names
-        assert "trade_duration_efficiency" in metric_names
-        assert "volume_execution_accuracy" in metric_names
-        assert "insufficient_data" in metric_names
+        assert "partial_exit_efficiency" not in metric_names
 
 
 if __name__ == "__main__":

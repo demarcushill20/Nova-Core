@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Comprehensive NovaTrade monitoring \u2014 identified critical price feed bug (100% poller error rate due to EURUSD\u2192EURUSD.sim symbol mapping), MetaApi connection healthy, $100,200.62 balance, 0% drawdown, shadow validation at 0/7 days with 0 cutover criteria met",
   "created_at": "2026-04-06T03:40:00Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_14_novatrade_monitoring_1775452918"
 }

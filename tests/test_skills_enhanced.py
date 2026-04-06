@@ -155,7 +155,7 @@ class TestSelectSkills:
 
     def test_builtin_file_rule(self):
         skills = [self._make_skill("file-ops")]
-        selected = select_skills("edit the file", skills)
+        selected = select_skills("edit file config.yaml", skills)
         assert any(s.name == "file-ops" for s in selected)
 
     def test_shell_intent_triggers(self):

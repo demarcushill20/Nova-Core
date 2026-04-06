@@ -36,7 +36,7 @@ class TestBacktestEnvironment:
 
     def test_default_strategy_params(self):
         env = DEFAULT_ENVIRONMENT
-        assert env.irb_threshold == 0.45
+        assert env.irb_threshold == 0.40
         assert env.ema_period == 20
         assert env.atr_period == 14
         assert env.adx_period == 14
@@ -45,7 +45,7 @@ class TestBacktestEnvironment:
         assert env.overextension_threshold == 2.0
         assert env.trigger_window_bars == 20
         assert env.time_stop_bars == 40
-        assert env.trail_atr_multiplier == 1.5
+        assert env.trail_atr_multiplier == 2.0
         assert env.warmup_bars == 34
 
     def test_default_position_sizing(self):

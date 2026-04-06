@@ -1118,10 +1118,64 @@ async def _handle_briefing(chat_id: str) -> str:
 # --- Proactive completion notifications (Phase 3) ---
 
 
+_AUTONOMY_SUMMARY_PROMPT = """\
+Nova-Core autonomously decided to run this task — the user did NOT request it.
+Summarize what Nova did and why, so the user knows what happened.
+
+Rules:
+- Start with what triggered this (e.g., "I detected a regression in..." or "My autonomy engine flagged...")
+- Say what was done and the outcome
+- Keep it to 3-5 sentences
+- Be transparent — the user wants to know when Nova acts on its own
+- Do NOT include task IDs, file paths, CONTRACT blocks, or internal metadata
+
+TASK OUTPUT:
+"""
+
+
+def _find_recent_autonomous_outputs(max_age_seconds: int = 300) -> list[Path]:
+    """Find OUTPUT files from autonomy-generated tasks completed in the last N seconds."""
+    output_dir = Path("/home/nova/nova-core/OUTPUT")
+    tasks_dir = Path("/home/nova/nova-core/TASKS")
+    notified_dir = Path("/home/nova/nova-core/STATE/notified")
+    if not output_dir.exists():
+        return []
+    cutoff = time.time() - max_age_seconds
+    results = []
+    for p in output_dir.iterdir():
+        if not p.is_file() or p.suffix != ".md":
+            continue
+        try:
+            if p.stat().st_mtime < cutoff:
+                continue
+        except OSError:
+            continue
+        # Skip if already notified
+        if (notified_dir / f"{p.name}.notified").exists():
+            continue
+        # Extract task stem from output filename
+        name = p.stem
+        m = re.match(r"^(.+?)__\d{8}-\d{6}$", name)
+        stem = m.group(1) if m else name
+        # Check if the task was autonomy-generated
+        for suffix in (".md.done", ".md.inprogress", ".md"):
+            task_path = tasks_dir / f"{stem}{suffix}"
+            if task_path.exists():
+                try:
+                    head = task_path.read_text(encoding="utf-8")[:500]
+                    if "source: autonomy-decision-engine" in head:
+                        results.append(p)
+                except OSError:
+                    pass
+                break
+    return sorted(results, key=lambda x: x.stat().st_mtime)
+
+
 async def _check_completions(app) -> None:
-    """Periodic loop: check if any delegated tasks have completed."""
+    """Periodic loop: check if any delegated or autonomous tasks have completed."""
     _log.info("Completion checker started (every 15s)")
     _persist_counter = 0
+    _owner_chat_id = os.environ.get("ALLOWED_CHAT_ID", "").strip()
     while True:
         await asyncio.sleep(15)
         # Persist metrics every ~5 minutes (20 cycles * 15s)
@@ -1136,77 +1190,107 @@ async def _check_completions(app) -> None:
             _cleanup_stale_delegation_markers(max_age_seconds=86400)
             # Phase 10: cleanup expired recent completions (>4h old)
             rc_cleanup()
-        if not _delegations.has_pending():
-            continue
 
-        for stem in _delegations.pending_stems():
-            output_path = find_completed_output(stem)
-            if output_path is None:
-                continue
+        # --- Part 1: User-delegated task completions ---
+        if _delegations.has_pending():
+            for stem in _delegations.pending_stems():
+                output_path = find_completed_output(stem)
+                if output_path is None:
+                    continue
 
-            # Atomically claim the notification — if we lose, notifier handles it
-            if not claim_notification(output_path.name):
-                _delegations.complete(stem)
-                _log.info("COMPLETION claim lost for %s (notifier got it)", stem)
-                continue
+                # Atomically claim the notification — if we lose, notifier handles it
+                if not claim_notification(output_path.name):
+                    _delegations.complete(stem)
+                    _log.info("COMPLETION claim lost for %s (notifier got it)", stem)
+                    continue
 
-            chat_id = _delegations.complete(stem)
-            if not chat_id:
-                continue
+                chat_id = _delegations.complete(stem)
+                if not chat_id:
+                    continue
 
-            _log.info("COMPLETION detected: stem=%s output=%s chat=%s", stem, output_path.name, chat_id)
+                _log.info("COMPLETION detected: stem=%s output=%s chat=%s", stem, output_path.name, chat_id)
 
-            # Read output and generate natural summary
-            try:
-                output_content = extract_output_summary(output_path)
-
-                # Phase 8: inject original request context from working memory
-                wm_task = _working_memory.complete(stem)
-                wm_prefix = ""
-                reply_to = None
-                if wm_task:
-                    wm_prefix = _working_memory.format_completion_context(wm_task) + "\n\n"
-                    if wm_task.message_id:
-                        reply_to = wm_task.message_id
-
-                summary = await generate_response(
-                    prompt=f"{wm_prefix}{COMPLETION_SUMMARY_PROMPT}{output_content}",
-                    system_prompt=SYSTEM_PROMPT,
-                )
-
-                # Record in conversation buffer for continuity
-                _conversations.add_assistant_message(chat_id, summary)
-
-                # Send to user — reply to original message if available
-                chunks = chunk_text(summary, chunk_size=4000)
-                for i, chunk in enumerate(chunks):
-                    kwargs = {"chat_id": chat_id, "text": chunk}
-                    if i == 0 and reply_to:
-                        kwargs["reply_to_message_id"] = reply_to
-                        kwargs["allow_sending_without_reply"] = True
-                    await app.bot.send_message(**kwargs)
-
-                # Phase 9: clean up delegation marker after CEO Nova delivers
-                _cleanup_delegation_marker(stem)
-
-                # Phase 10: record in recent-completions store for
-                # session reconstruction (survives conversation buffer expiry)
+                # Read output and generate natural summary
                 try:
-                    rc_record_completion(
-                        task_stem=stem,
-                        chat_id=chat_id,
-                        original_message=(wm_task.original_message if wm_task else ""),
-                        intent_summary=(wm_task.intent_summary if wm_task else stem),
-                        output_file=str(output_path),
-                        output_summary_line=output_content[:200].split("\n")[0],
-                        completion_response=summary[:300],
-                    )
-                except Exception as rc_exc:
-                    _log.warning("RC_RECORD failed for %s: %s", stem, rc_exc)
+                    output_content = extract_output_summary(output_path)
 
-                _log.info("COMPLETION notified: stem=%s chat=%s len=%d", stem, chat_id, len(summary))
+                    # Phase 8: inject original request context from working memory
+                    wm_task = _working_memory.complete(stem)
+                    wm_prefix = ""
+                    reply_to = None
+                    if wm_task:
+                        wm_prefix = _working_memory.format_completion_context(wm_task) + "\n\n"
+                        if wm_task.message_id:
+                            reply_to = wm_task.message_id
+
+                    summary = await generate_response(
+                        prompt=f"{wm_prefix}{COMPLETION_SUMMARY_PROMPT}{output_content}",
+                        system_prompt=SYSTEM_PROMPT,
+                    )
+
+                    # Record in conversation buffer for continuity
+                    _conversations.add_assistant_message(chat_id, summary)
+
+                    # Send to user — reply to original message if available
+                    chunks = chunk_text(summary, chunk_size=4000)
+                    for i, chunk in enumerate(chunks):
+                        kwargs = {"chat_id": chat_id, "text": chunk}
+                        if i == 0 and reply_to:
+                            kwargs["reply_to_message_id"] = reply_to
+                            kwargs["allow_sending_without_reply"] = True
+                        await app.bot.send_message(**kwargs)
+
+                    # Phase 9: clean up delegation marker after CEO Nova delivers
+                    _cleanup_delegation_marker(stem)
+
+                    # Phase 10: record in recent-completions store for
+                    # session reconstruction (survives conversation buffer expiry)
+                    try:
+                        rc_record_completion(
+                            task_stem=stem,
+                            chat_id=chat_id,
+                            original_message=(wm_task.original_message if wm_task else ""),
+                            intent_summary=(wm_task.intent_summary if wm_task else stem),
+                            output_file=str(output_path),
+                            output_summary_line=output_content[:200].split("\n")[0],
+                            completion_response=summary[:300],
+                        )
+                    except Exception as rc_exc:
+                        _log.warning("RC_RECORD failed for %s: %s", stem, rc_exc)
+
+                    _log.info("COMPLETION notified: stem=%s chat=%s len=%d", stem, chat_id, len(summary))
+                except Exception as exc:
+                    _log.error("COMPLETION notification failed for %s: %s", stem, exc, exc_info=True)
+
+        # --- Part 2: Autonomous task completions (not user-delegated) ---
+        if _owner_chat_id:
+            try:
+                auto_outputs = _find_recent_autonomous_outputs(max_age_seconds=300)
+                for output_path in auto_outputs:
+                    # Atomically claim — notifier may also try
+                    if not claim_notification(output_path.name):
+                        continue
+
+                    _log.info("AUTONOMOUS completion detected: %s", output_path.name)
+                    try:
+                        output_content = extract_output_summary(output_path)
+                        summary = await generate_response(
+                            prompt=f"{_AUTONOMY_SUMMARY_PROMPT}{output_content}",
+                            system_prompt=SYSTEM_PROMPT,
+                        )
+                        msg = f"[AUTONOMOUS] {summary}"
+
+                        # Record in owner's conversation buffer
+                        _conversations.add_assistant_message(_owner_chat_id, msg)
+
+                        for chunk in chunk_text(msg, chunk_size=4000):
+                            await app.bot.send_message(chat_id=_owner_chat_id, text=chunk)
+
+                        _log.info("AUTONOMOUS notified: %s chat=%s", output_path.name, _owner_chat_id)
+                    except Exception as exc:
+                        _log.error("AUTONOMOUS notification failed for %s: %s", output_path.name, exc, exc_info=True)
             except Exception as exc:
-                _log.error("COMPLETION notification failed for %s: %s", stem, exc, exc_info=True)
+                _log.error("AUTONOMOUS scan error: %s", exc, exc_info=True)
 
 
 # --- Unified message handler ---

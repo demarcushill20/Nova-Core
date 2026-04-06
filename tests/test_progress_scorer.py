@@ -577,10 +577,28 @@ async def test_strategy_silent_failure_weekend(strat_collector):
 
 @pytest.mark.asyncio
 async def test_strategy_backtest_no_data(strat_collector):
-    """No backtest dir = neutral 50."""
-    result = await strat_collector.collect()
+    """No backtest dir during market hours = neutral 50."""
+    # Mock Wednesday 14:00 UTC to bypass off-hours short-circuit
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
     bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
     assert bt.value == 50.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_backtest_off_hours(strat_collector):
+    """Off-hours = neutral 70 (no trading to compare)."""
+    weekend = datetime(2026, 3, 28, 12, 0, 0, tzinfo=timezone.utc)  # Saturday
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = weekend
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+    bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
+    assert bt.value == 70.0
+    assert bt.raw_value == -4.0  # sentinel for off-hours
 
 
 @pytest.mark.asyncio
@@ -590,7 +608,11 @@ async def test_strategy_backtest_with_results(strat_collector, tmp_path):
     bt_dir.mkdir(parents=True)
     (bt_dir / "irb_v2_baseline.json").write_text(json.dumps({"sharpe_ratio": 1.5, "profit_factor": 2.0}))
 
-    result = await strat_collector.collect()
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
     bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
     assert bt.value == 60.0
 
@@ -610,7 +632,11 @@ async def test_strategy_backtest_alignment_close(strat_collector, tmp_path):
     equities = [{"equity": 10000 + i * 100, "source": "live"} for i in range(20)]
     (state_dir / "equity_history.json").write_text(json.dumps({"snapshots": equities}))
 
-    result = await strat_collector.collect()
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
     bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
     # Live Sharpe will be very high (consistent returns), delta > 0.1
     # Score depends on actual computed live Sharpe
@@ -632,7 +658,11 @@ async def test_strategy_backtest_alignment_pre_live(strat_collector, tmp_path):
     equities = [{"equity": 100000 + i * 10, "source": "backtest"} for i in range(20)]
     (state_dir / "equity_history.json").write_text(json.dumps({"snapshots": equities}))
 
-    result = await strat_collector.collect()
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
     bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
     assert bt.value == 60.0  # pre-live neutral score, not penalized
     assert bt.raw_value == -3.0  # sentinel for pre-live
@@ -645,7 +675,11 @@ async def test_strategy_backtest_nested_sharpe(strat_collector, tmp_path):
     bt_dir.mkdir(parents=True)
     (bt_dir / "result.json").write_text(json.dumps({"metrics": {"sharpe_ratio": 0.8}}))
 
-    result = await strat_collector.collect()
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
     bt = next(m for m in result.sub_metrics if m.name == "backtest_live_alignment")
     # Backtest found but no live data → 60
     assert bt.value == 60.0
@@ -1723,26 +1757,25 @@ async def test_perf_backtest_source_tagged(perf_collector, tmp_path):
 
 @pytest.mark.asyncio
 async def test_perf_insufficient_data_warnings(perf_collector):
-    """All 8 sub-metrics emit insufficient-data warnings when no data, plus summary.
+    """All 4 core sub-metrics emit insufficient-data warnings when no data, plus summary.
 
-    Original 4 core metrics + 4 S7 enhanced metrics = 8 total.
-    (S7 metrics fall through to NO_DATA via equity_data check, not via their
-    state files, so they also emit equity-data warnings here.)
+    S7 enhanced metrics are excluded entirely when their state files don't
+    exist (conditional inclusion), so only the 4 original core metrics warn.
     """
     result = await perf_collector.collect()
     per_metric = [w for w in result.warnings if "Insufficient equity data" in w]
-    assert len(per_metric) == 8
+    assert len(per_metric) == 4
     # M3: explicit no-data summary warning also present
     assert any("No equity data available" in w or "placeholder" in w for w in result.warnings)
 
 
 @pytest.mark.asyncio
 async def test_perf_nodata_metrics_excluded_from_average(perf_collector, tmp_path):
-    """NO_DATA S7 metrics must not drag the score toward 50.
+    """S7 metrics are fully excluded when state files are missing.
 
-    When equity data exists but S7 state files are missing, only the
-    4 core metrics with real data should be averaged.  The 4 S7
-    placeholders (50.0 each) must be excluded.
+    When equity data exists but S7 state files are missing, S7 metrics
+    are not included at all (conditional inclusion).  Only the 4 core
+    metrics should be present and averaged.
     """
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
@@ -1752,20 +1785,19 @@ async def test_perf_nodata_metrics_excluded_from_average(perf_collector, tmp_pat
 
     result = await perf_collector.collect()
 
-    # S7 metrics should still exist as sub_metrics but be NO_DATA
+    # S7 metrics should NOT be present when state files are missing
     s7_names = {
         "partial_exit_efficiency",
         "timeframe_signal_consistency",
         "trade_duration_efficiency",
         "volume_execution_accuracy",
     }
-    for m in result.sub_metrics:
-        if m.name in s7_names:
-            assert m.raw_value == perf_collector._NO_DATA_RAW
+    present_names = {m.name for m in result.sub_metrics}
+    assert not s7_names & present_names, f"S7 metrics should be excluded: {s7_names & present_names}"
 
-    # With NO_DATA excluded, average of real-data metrics should be ≥ 70
+    # With only core metrics, average should be ≥ 70
     # (sharpe 100 + dd 100 + win_rate 100 + pf ~60 = ~90)
-    assert result.score >= 70.0, f"Score {result.score} too low — NO_DATA metrics may still be in average"
+    assert result.score >= 70.0, f"Score {result.score} too low"
 
 
 @pytest.mark.asyncio

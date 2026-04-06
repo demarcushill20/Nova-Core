@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Researched forex market microstructure, FTMO execution quality, and slippage reduction techniques \u2014 identified 7 actionable gaps in NovaTrade execution pipeline with prioritized implementation roadmap",
   "created_at": "2026-04-06T01:19:49Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_13_novatrade_research_1775452488"
 }

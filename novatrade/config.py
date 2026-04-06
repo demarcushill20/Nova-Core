@@ -80,7 +80,8 @@ class RiskConfig:
     spread_ceiling_points: float = _DEFAULT_SPREAD_CEILING_POINTS
     cooldown_seconds: int = 60
     max_trades_per_day: int = 10  # FTMO-safe: quality over quantity
-    news_blackout_minutes: int = 15
+    # Extended from 15 for Apr 6-11: PCE/CPI high-vol releases
+    news_blackout_minutes: int = 60
     require_stop_loss: bool = True
     max_drawdown_equity_pct: float = _DEFAULT_MAX_DAILY_DRAWDOWN_PCT
     # Phase 6: IRB-specific risk hardening

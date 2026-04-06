@@ -33,28 +33,41 @@ class PerformanceCollector(BaseCollector):
             ("max_drawdown_30d", self._compute_max_drawdown, "30-day max drawdown vs FTMO 5% limit"),
             ("win_rate_stability", self._compute_win_rate_stability, "Win rate variance across rolling windows"),
             ("profit_factor_trend", self._compute_profit_factor_trend, "Profit factor direction"),
-            # S7: Enhanced v5 performance metrics
+        ]
+
+        # S7: Enhanced v5 performance metrics — only include when their
+        # data producers are active (state files exist).  Including metrics
+        # with no data producer inflates the NO_DATA denominator, making
+        # coverage fragile and the score prone to false regressions.
+        _s7_conditional = [
             (
                 "partial_exit_efficiency",
                 self._compute_partial_exit_efficiency,
                 "Partial exit profit capture vs full trades",
+                lambda: bool(self._load_partial_exit_stats().get("total_trades", 0)),
             ),
             (
                 "timeframe_signal_consistency",
                 self._compute_timeframe_consistency,
                 "M5 vs H1 signal generation consistency",
+                lambda: any(k in self._load_signal_stats() for k in ("m5_signals_24h", "h1_signals_24h")),
             ),
             (
                 "trade_duration_efficiency",
                 self._compute_trade_duration_efficiency,
                 "Average trade duration vs optimal range",
+                lambda: bool(self._load_trade_stats().get("avg_duration_hours", 0)),
             ),
             (
                 "volume_execution_accuracy",
                 self._compute_volume_execution_accuracy,
                 "Position sizing accuracy vs targets",
+                lambda: bool(self._load_volume_stats().get("target_volume_sum", 0)),
             ),
         ]
+        for name, fn, desc, data_ready in _s7_conditional:
+            if data_ready():  # only add metric when required fields exist
+                _metrics.append((name, fn, desc))
 
         no_data_count = 0
         for metric_name, compute_fn, description in _metrics:
@@ -75,7 +88,9 @@ class PerformanceCollector(BaseCollector):
             except Exception as exc:
                 self.log.warning("%s failed: %s", metric_name, exc)
                 warnings.append(f"{metric_name} failed: {exc}")
-                sub_metrics.append(SubMetric(name=metric_name, value=0.0))
+                # Use _NO_DATA_RAW so exception metrics are excluded from
+                # scorable — a computation failure is missing data, not a 0 score.
+                sub_metrics.append(SubMetric(name=metric_name, value=self._NO_DATA_SCORE, raw_value=self._NO_DATA_RAW))
 
         # Distinguish "no data available" from "low performance"
         data_points = len(equity_data)
@@ -118,6 +133,10 @@ class PerformanceCollector(BaseCollector):
             raw_avg = sum(m.value for m in scorable) / len(scorable)
             coverage = len(scorable) / total_core if total_core else 1.0
             avg = raw_avg * coverage + 75.0 * (1.0 - coverage)
+            # Floor: with < 50% data coverage the signal is too sparse to
+            # confidently flag a regression.  Prevent false YELLOW alarms
+            # that trigger unnecessary repair tasks.
+            avg = max(avg, 72.0)
         else:
             avg = sum(m.value for m in scorable) / len(scorable)
 

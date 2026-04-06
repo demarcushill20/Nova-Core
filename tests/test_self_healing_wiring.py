@@ -119,8 +119,12 @@ class TestDegradationTierGating:
         assert len(planning_called) == 1, "Planning cycle should run at FULL"
         assert len(agent_called) == 1, "Heartbeat agent should run at FULL"
 
-    def test_reduced_tier_skips_research(self, monkeypatch):
-        """REDUCED tier (1): research skipped, planning + agent still run."""
+    def test_reduced_tier_allows_research(self, monkeypatch):
+        """REDUCED tier (1): research + planning + agent all still run.
+
+        Policy change: research threshold raised from >= 1 to >= 2 (MINIMAL)
+        to preserve autonomous NovaTrade research→plan→implement cycles.
+        """
         hb = self.hb
         monkeypatch.setattr(hb, "_sh_get_tier", lambda: _mock_degradation_state(1))
 
@@ -137,12 +141,15 @@ class TestDegradationTierGating:
 
         hb.main()
 
-        assert len(research_called) == 0, "Research should be skipped at REDUCED"
+        assert len(research_called) == 1, "Research should still run at REDUCED (threshold is MINIMAL)"
         assert len(planning_called) == 1, "Planning should still run at REDUCED"
         assert len(agent_called) == 1, "Heartbeat agent should still run at REDUCED"
 
-    def test_minimal_tier_skips_research_and_planning(self, monkeypatch):
-        """MINIMAL tier (2): research + planning skipped, agent still runs."""
+    def test_minimal_tier_skips_research_but_allows_planning(self, monkeypatch):
+        """MINIMAL tier (2): research skipped, planning + agent still run.
+
+        Policy change: research threshold is >= 2, planning threshold raised to >= 3.
+        """
         hb = self.hb
         monkeypatch.setattr(hb, "_sh_get_tier", lambda: _mock_degradation_state(2))
 
@@ -161,7 +168,7 @@ class TestDegradationTierGating:
         hb.main()
 
         assert len(research_called) == 0, "Research should be skipped at MINIMAL"
-        assert len(planning_called) == 0, "Planning should be skipped at MINIMAL"
+        assert len(planning_called) == 1, "Planning should still run at MINIMAL (threshold is CRITICAL)"
         assert len(maintenance_called) == 0, "Memory maintenance should be skipped at MINIMAL"
         assert len(agent_called) == 1, "Heartbeat agent should still run at MINIMAL"
 
@@ -319,7 +326,11 @@ class TestBudgetWatchdogWiring:
         self.hb = hb
 
     def test_budget_exceeded_downgrades_to_reduced(self, monkeypatch):
-        """When budget is exceeded, tier is escalated to at least REDUCED."""
+        """When budget is exceeded, tier is escalated to at least REDUCED.
+
+        Policy: REDUCED tier (1) still allows research + planning.
+        Research only skips at MINIMAL (2), planning at CRITICAL (3).
+        """
         hb = self.hb
         monkeypatch.setattr(hb, "_sh_get_tier", lambda: _mock_degradation_state(0))
 
@@ -337,8 +348,8 @@ class TestBudgetWatchdogWiring:
 
         hb.main()
 
-        # Budget exceeded -> REDUCED -> research skipped
-        assert len(research_called) == 0, "Research should be skipped when budget exceeded"
+        # Budget exceeded -> REDUCED (1) -> research + planning still run (thresholds are 2 and 3)
+        assert len(research_called) == 1, "Research should still run at REDUCED (threshold is MINIMAL)"
         assert len(planning_called) == 1, "Planning should still run at REDUCED"
 
     def test_budget_ok_no_tier_change(self, monkeypatch):

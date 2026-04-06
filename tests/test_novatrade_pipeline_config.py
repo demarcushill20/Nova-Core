@@ -136,7 +136,7 @@ async def test_build_live_stack_no_config_uses_defaults():
         loop = await build_live_stack(cfg=cfg, dry_run=True)
 
     # Default values from BacktestEnvironment
-    assert loop._strategy_engine._env.irb_threshold == pytest.approx(0.45)
+    assert loop._strategy_engine._env.irb_threshold == pytest.approx(0.40)
     assert loop._strategy_engine._env.ema_period == 20
     assert loop._strategy_engine._env.warmup_bars == 34
 

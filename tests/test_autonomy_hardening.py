@@ -386,7 +386,9 @@ async def test_m3_no_data_description_tagged(tmp_path):
 
     result = await collector.collect()
     no_data_metrics = [sm for sm in result.sub_metrics if "[NO DATA]" in sm.description]
-    assert len(no_data_metrics) == 8  # All 8 metrics (4 original + 4 S7 v5) should have no data
+    # S7 conditional metrics are excluded when their data producers are absent,
+    # so only the 4 core metrics (sharpe, drawdown, win_rate, profit_factor) remain.
+    assert len(no_data_metrics) == 4
 
 
 # =====================================================================

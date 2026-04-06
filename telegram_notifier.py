@@ -818,10 +818,73 @@ tags:
     log(f"Wrote vault diary: {vault_filename} ({len(note)} bytes)")
 
 
-_SKIP_PREFIXES = ("autonomous_report_", "hb_plan_", "heartbeat_report_")
+# Only skip heartbeat reports (system chatter) — NOT autonomous task outputs
+_SKIP_PREFIXES = ("hb_plan_", "heartbeat_report_")
 
 # Intermediate outputs: retries, research sub-steps, synthesis sub-steps
 _SKIP_SUBSTRINGS = ("__retry", "_research_", "_synthesize_")
+
+
+def _is_autonomous_task_output(output_path: Path) -> bool:
+    """Check if this output came from an autonomy-generated task."""
+    name = output_path.stem
+    m = re.match(r"^(.+?)__\d{8}-\d{6}$", name)
+    stem = m.group(1) if m else name
+    # Check the original task file for autonomy source marker
+    tasks_dir = ROOT / "TASKS"
+    for suffix in (".md.done", ".md.inprogress", ".md"):
+        task_path = tasks_dir / f"{stem}{suffix}"
+        if task_path.exists():
+            try:
+                head = task_path.read_text(encoding="utf-8")[:500]
+                return "source: autonomy-decision-engine" in head
+            except OSError:
+                pass
+    return False
+
+
+def _build_autonomous_alert(output_path: Path) -> str:
+    """Build a Telegram alert for an autonomously-created and completed task."""
+    txt = output_path.read_text(encoding="utf-8", errors="replace")
+    info = parse_task_report(txt, output_name=output_path.name)
+    summary = info.get("summary") or "(no summary)"
+    task_id = info.get("task_id") or output_path.name
+
+    # Extract category and dimension from task frontmatter
+    name = output_path.stem
+    m = re.match(r"^(.+?)__\d{8}-\d{6}$", name)
+    stem = m.group(1) if m else name
+    category = "unknown"
+    dimension = ""
+    tasks_dir = ROOT / "TASKS"
+    for suffix in (".md.done", ".md.inprogress", ".md"):
+        task_path = tasks_dir / f"{stem}{suffix}"
+        if task_path.exists():
+            try:
+                head = task_path.read_text(encoding="utf-8")[:500]
+                cat_m = re.search(r"category:\s*(\S+)", head)
+                dim_m = re.search(r"target_dimension:\s*(\S+)", head)
+                if cat_m:
+                    category = cat_m.group(1)
+                if dim_m and dim_m.group(1) != "none":
+                    dimension = dim_m.group(1)
+            except OSError:
+                pass
+            break
+
+    dim_label = f" ({dimension})" if dimension else ""
+    lines = [
+        f"[AUTONOMOUS] Nova acted on its own — {category}{dim_label}",
+        f"Task: {task_id}",
+        "",
+        summary,
+    ]
+    # Include first 20 lines of output for context
+    preview = "\n".join(txt.splitlines()[:20])
+    if preview.strip():
+        lines.append("")
+        lines.append(preview)
+    return "\n".join(lines)
 
 
 def maybe_notify(path: Path) -> None:
@@ -864,18 +927,29 @@ def maybe_notify(path: Path) -> None:
     try:
         intent = _load_intent(path)
         mode = get_mode()
+        is_autonomous = _is_autonomous_task_output(path)
 
+        # Always send to Telegram — verbose mode additionally writes to vault
         if mode == "verbose" and intent != "chat":
-            # Route verbose task output to nova-vault diary instead of Telegram
-            write_to_vault_diary(path)
-            log(f"Routed to vault diary for {path.name} (mode=verbose, pid={os.getpid()})")
+            try:
+                write_to_vault_diary(path)
+                log(f"Wrote vault diary for {path.name} (mode=verbose)")
+            except Exception as vault_err:
+                log(f"Vault diary write failed for {path.name}: {vault_err}")
+
+        # Build the Telegram message
+        if is_autonomous:
+            msg = _build_autonomous_alert(path)
+        elif intent == "chat":
+            msg = _build_chat_message(path)
         else:
-            if intent == "chat":
-                msg = _build_chat_message(path)
-            else:
-                msg = build_message(path)
-            send_message_chunked(msg)
-            log(f"Sent Telegram for {path.name} (intent={intent}, mode={mode}, pid={os.getpid()})")
+            msg = build_message(path)
+
+        send_message_chunked(msg)
+        log(
+            f"Sent Telegram for {path.name} "
+            f"(intent={intent}, mode={mode}, autonomous={is_autonomous}, pid={os.getpid()})"
+        )
     except Exception as e:
         # Send/write failed — remove marker so next attempt can retry
         unclaim_send(path.name)

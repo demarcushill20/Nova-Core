@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Implemented R4 First-Trade Validation Sequence - comprehensive 6-layer validation system for first live trade execution covering fill price accuracy, SL placement, volume accuracy, latency, spread behavior, and timing",
   "created_at": "2026-04-06T03:20:31Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_11_novatrade_impl2_1775449648"
 }

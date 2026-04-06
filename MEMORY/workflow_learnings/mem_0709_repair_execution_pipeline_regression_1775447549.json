@@ -16,5 +16,6 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Validated execution_pipeline regression already fixed \u2014 score stable at 96.7 (was 82.9), MARKET_CLOSED handling patched in PipelineCollector",
   "created_at": "2026-04-06T03:52:29Z",
-  "confidence": "high"
+  "confidence": "high",
+  "supersedes": "mem_0709_repair_execution_pipeline_regression_1775429889"
 }

@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "S7 Performance Monitoring sprint completed - enhanced v5 metrics collection, partial exit tracking, multi-timeframe analysis, advanced alerting with 100% test coverage",
   "created_at": "2026-04-06T02:06:01Z",
-  "confidence": "low"
+  "confidence": "low",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_10_novatrade_impl_1775450437"
 }

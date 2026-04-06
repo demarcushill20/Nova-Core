@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0712_repair_strategy_validity_regression_1775451076",
+  "workflow_id": "0712_repair_strategy_validity_regression",
+  "task_summary": "Fixed strategy_validity oscillation \u2014 added off-hours neutral scoring and MAD outlier filtering to prevent false backtest/live alignment divergence",
+  "task_class": "code_impl",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed strategy_validity oscillation \u2014 added off-hours neutral scoring and MAD outlier filtering to prevent false backtest/live alignment divergence"
+  ],
+  "successful_patterns": [
+    "task_completed: 0712_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed strategy_validity oscillation \u2014 added off-hours neutral scoring and MAD outlier filtering to prevent false backtest/live alignment divergence",
+  "created_at": "2026-04-06T04:51:16Z",
+  "confidence": "low"
+}

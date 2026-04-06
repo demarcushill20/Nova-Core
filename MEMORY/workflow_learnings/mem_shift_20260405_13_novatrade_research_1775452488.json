@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_shift_20260405_13_novatrade_research_1775452488",
+  "workflow_id": "shift_20260405_13_novatrade_research",
+  "task_summary": "Comprehensive research on BB mean reversion edge durability, strategy degradation detection (CUSUM/Hurst/WFA), and 6 NovaTrade implementation gaps for live strategy monitoring",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Comprehensive research on BB mean reversion edge durability, strategy degradation detection (CUSUM/Hurst/WFA), and 6 NovaTrade implementation gaps for live strategy monitoring"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260405_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Comprehensive research on BB mean reversion edge durability, strategy degradation detection (CUSUM/Hurst/WFA), and 6 NovaTrade implementation gaps for live strategy monitoring",
+  "created_at": "2026-04-06T05:14:48Z",
+  "confidence": "low",
+  "supersedes": "mem_shift_20260405_13_novatrade_research_1775431102"
+}

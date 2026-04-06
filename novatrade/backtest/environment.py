@@ -158,7 +158,8 @@ class BacktestEnvironment:
     max_volume: float = 1.00
 
     # --- Strategy parameters ---
-    irb_threshold: float = 0.45
+    # Tightened from 0.45 per P1.2: strict rejection quality, reducing false signals
+    irb_threshold: float = 0.40
     ema_period: int = 20
     ema_fast_period: int = 10
     ema_slow_period: int = 50
@@ -170,7 +171,8 @@ class BacktestEnvironment:
     overextension_threshold: float = 2.0
     trigger_window_bars: int = 20
     time_stop_bars: int = 40
-    trail_atr_multiplier: float = 1.5
+    # Increased from 1.5 per P0.1: wider trails reduce premature stop-outs in high-vol regime
+    trail_atr_multiplier: float = 2.0
     trail_step_pips: float = 10.0  # minimum distance to move before updating SL
     trail_cooldown_bars: int = 4  # minimum bars between SL modifications
     trail_ema_period: int = 0  # 0 = use ATR trailing; >0 = use EMA trailing
@@ -189,6 +191,8 @@ class BacktestEnvironment:
     use_regime_gate: bool = True  # Tier 1 regime gate: skip signals when BBW indicates ranging
     regime_bbw_period: int = 20  # Bollinger Band width lookback period
     regime_bbw_threshold: float = 0.005  # BBW below this = ranging → skip signal
+    # P1.1: BBW above this = extreme vol → skip (prevents entries during news spikes)
+    regime_bbw_ceiling: float = 0.04
 
     # --- Risk management (v4) ---
     max_consecutive_losses: int = 0  # 0 = disabled; >0 = pause trading after N consecutive losses

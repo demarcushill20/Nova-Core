@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Fixed execution_pipeline weekend false alarm by adding forex market closure awareness to feed_health scoring",
   "created_at": "2026-04-05T22:58:09Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0709_repair_execution_pipeline_regression_1775447549"
 }

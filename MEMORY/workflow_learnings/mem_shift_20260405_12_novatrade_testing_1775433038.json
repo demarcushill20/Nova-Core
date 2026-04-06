@@ -17,5 +17,7 @@
   "reusable_guidance": "NovaTrade comprehensive testing completed \u2014 1,103 tests passing, FTMO compliance validated (52/52), system stable with weekend idle mode",
   "created_at": "2026-04-05T23:50:38Z",
   "confidence": "high",
-  "supersedes": "mem_shift_20260405_12_novatrade_testing_1775429120"
+  "supersedes": "mem_shift_20260405_12_novatrade_testing_1775429120",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_12_novatrade_testing_1775451900"
 }

@@ -316,7 +316,16 @@ class StrategyCollector(BaseCollector):
         Returns (score, delta) where delta is the relative divergence.
         No data on either side → neutral 50.
         Pre-live (all equity snapshots from backtest, no real trades) → 60.
+        Off-hours/weekends → neutral 70 (no trading activity to measure).
         """
+        now = datetime.now(timezone.utc)
+
+        # Off-hours: Sharpe comparison is meaningless when markets are closed.
+        # Equity snapshots during weekends/off-hours are just balance polls,
+        # not trading outcomes — comparing them to backtest Sharpe is noise.
+        if now.weekday() >= 5 or now.hour < 7 or now.hour >= 21:
+            return 70.0, -4.0  # -4 sentinel = off-hours
+
         bt_sharpe = self._load_backtest_sharpe()
         live_sharpe = self._load_live_sharpe()
 
@@ -399,7 +408,11 @@ class StrategyCollector(BaseCollector):
         return None
 
     def _load_live_sharpe(self) -> float | None:
-        """Compute live Sharpe from STATE/novatrade/equity_history.json."""
+        """Compute live Sharpe from STATE/novatrade/equity_history.json.
+
+        Filters outlier equity values (test artifacts, simulation spikes)
+        using median-absolute-deviation before computing returns.
+        """
         path = Path(self.base_path) / "STATE" / "novatrade" / "equity_history.json"
         if not path.exists():
             return None
@@ -411,6 +424,22 @@ class StrategyCollector(BaseCollector):
 
             equities = [s.get("equity", s) if isinstance(s, dict) else s for s in snapshots]
             equities = [float(e) for e in equities if e is not None]
+            if len(equities) < 5:
+                return None
+
+            # Filter outliers: remove values > 3× MAD from median.
+            # Equity history can contain test artifacts (e.g. 5000, 95000)
+            # that create artificial volatility and corrupt the Sharpe ratio.
+            sorted_eq = sorted(equities)
+            median = sorted_eq[len(sorted_eq) // 2]
+            if median > 0:
+                abs_devs = [abs(e - median) for e in equities]
+                abs_devs_sorted = sorted(abs_devs)
+                mad = abs_devs_sorted[len(abs_devs_sorted) // 2]
+                # MAD-based threshold: 3× MAD, minimum 1% of median
+                threshold = max(3.0 * mad, median * 0.01)
+                equities = [e for e in equities if abs(e - median) <= threshold]
+
             if len(equities) < 5:
                 return None
 

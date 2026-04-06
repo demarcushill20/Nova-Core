@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "NovaTrade monitoring complete \u2014 CRITICAL poller 100% error rate (MetaApi connection failure), shadow mode not deployed (0/7 cutover criteria), account healthy at $100,200.62 with 0% drawdown",
   "created_at": "2026-04-06T01:12:02Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_14_novatrade_monitoring_1775452918"
 }

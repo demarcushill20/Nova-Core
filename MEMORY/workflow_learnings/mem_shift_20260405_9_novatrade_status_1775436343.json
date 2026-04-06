@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "NovaTrade status check \u2014 all trading services healthy at $100,200.62/0% drawdown, watcher memory CRITICAL at 3.8G/4G (95%)",
   "created_at": "2026-04-06T00:45:43Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_9_novatrade_status_1775426389"
 }

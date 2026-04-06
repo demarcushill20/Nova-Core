@@ -589,10 +589,10 @@ class IRBBacktester:
             self._rejections.overextension_filter += 1
             return
 
-        # --- Tier 1 regime gate: skip when BBW indicates ranging/squeeze ---
+        # --- Tier 1 regime gate: skip when BBW indicates ranging/squeeze or extreme volatility ---
         if e.use_regime_gate and self._bbw and i < len(self._bbw):
             bbw_val = self._bbw[i]
-            if not math.isnan(bbw_val) and bbw_val < e.regime_bbw_threshold:
+            if not math.isnan(bbw_val) and (bbw_val < e.regime_bbw_threshold or bbw_val > e.regime_bbw_ceiling):
                 self._rejections.regime_gate += 1
                 return
 

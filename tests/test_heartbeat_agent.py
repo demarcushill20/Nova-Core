@@ -59,6 +59,7 @@ class TestActiveHoursGating(unittest.TestCase):
             patch("heartbeat.HEARTBEAT_AGENT_LOG", Path(tmpdir) / "agent.log"),
             patch("heartbeat.STATE_DIR", state_dir),
             patch("heartbeat.HEARTBEAT_AGENT_COOLDOWN_FILE", state_dir / "last_heartbeat_agent.json"),
+            patch("heartbeat._rules_engine", None),  # bypass rules engine → exercise LLM path
         ):
             heartbeat._run_heartbeat_agent([])
 

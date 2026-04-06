@@ -152,10 +152,14 @@ class IRBStrategy(BaseStrategy):
         if rng / atr[i] > e.overextension_threshold:
             return None
 
-        # --- Tier 1 regime gate: skip when BBW indicates ranging/squeeze ---
+        # --- Tier 1 regime gate: skip when BBW indicates ranging/squeeze or extreme volatility ---
         if e.use_regime_gate:
             bbw = indicators.get("bbw", [])
-            if i < len(bbw) and not math.isnan(bbw[i]) and bbw[i] < e.regime_bbw_threshold:
+            if (
+                i < len(bbw)
+                and not math.isnan(bbw[i])
+                and (bbw[i] < e.regime_bbw_threshold or bbw[i] > e.regime_bbw_ceiling)
+            ):
                 return None
 
         # --- Compute entry/stop levels ---

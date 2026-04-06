@@ -2473,9 +2473,9 @@ def check_token_budget() -> dict:
         msg = f"24h tokens: {used_24h:,}, burn: {burn.get('tokens_per_hour', 0):,.0f}/hr"
         if exhaustion:
             msg += f", projected exhaustion: {exhaustion}"
-        return {"name": "token_budget", "ok": True, "message": msg}
+        return {"name": "token_budget", "ok": True, "detail": msg}
     except Exception as exc:
-        return {"name": "token_budget", "ok": True, "message": f"token ledger unavailable: {exc}"}
+        return {"name": "token_budget", "ok": True, "detail": f"token ledger unavailable: {exc}"}
 
 
 def check_weekly_budget() -> dict:
@@ -2483,7 +2483,7 @@ def check_weekly_budget() -> dict:
     try:
         weekly_file = STATE_DIR / "budgets" / "weekly_status.json"
         if not weekly_file.exists():
-            return {"name": "weekly_budget", "ok": True, "message": "no weekly tracking yet"}
+            return {"name": "weekly_budget", "ok": True, "detail": "no weekly tracking yet"}
         data = json.loads(weekly_file.read_text())
         pct = data.get("utilization_pct", 0)
         ok = pct < 90
@@ -2492,9 +2492,9 @@ def check_weekly_budget() -> dict:
             msg += f", projected exhaustion: {data['projected_exhaustion']}"
         if not ok:
             msg += " — CRITICAL: approaching weekly cap"
-        return {"name": "weekly_budget", "ok": ok, "message": msg}
+        return {"name": "weekly_budget", "ok": ok, "detail": msg}
     except Exception as exc:
-        return {"name": "weekly_budget", "ok": True, "message": f"weekly budget check failed: {exc}"}
+        return {"name": "weekly_budget", "ok": True, "detail": f"weekly budget check failed: {exc}"}
 
 
 # --- Main --------------------------------------------------------------------

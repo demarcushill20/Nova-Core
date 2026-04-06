@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "NovaTrade weekend monitoring \u2014 shadow mode not deployed (0/7 cutover criteria), MetaApi 100% errors (expected weekend), equity $100,200.62 at 0% drawdown, 22/22 pre-trade gates operational",
   "created_at": "2026-04-06T02:02:13Z",
-  "confidence": "low"
+  "confidence": "low",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260405_14_novatrade_monitoring_1775452918"
 }
