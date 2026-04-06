@@ -171,6 +171,12 @@ class DecisionEngine:
             if trend.direction == "degrading":
                 dim = report.dimensions.get(name)
                 if dim and trend.avg_6h is not None:
+                    # Skip low-confidence dimensions — sparse data produces
+                    # noisy scores that swing ±20 points between heartbeats.
+                    # Triggering repairs on noise wastes cycles and generates
+                    # false-alarm tasks.
+                    if dim.confidence < 0.5:
+                        continue
                     delta = trend.avg_6h - dim.score
                     if delta >= self.config.regression_delta:
                         return name

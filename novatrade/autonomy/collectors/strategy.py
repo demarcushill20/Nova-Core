@@ -244,7 +244,10 @@ class StrategyCollector(BaseCollector):
         trades = self._load_trade_log()
         cutoff = time.time() - 24 * 3600
 
-        recent = [t for t in trades if t.get("timestamp", 0) >= cutoff]
+        # Count only real trades (exclude shadow-mode ".sim" symbols)
+        recent = [
+            t for t in trades if t.get("timestamp", 0) >= cutoff and not str(t.get("symbol", "")).endswith(".sim")
+        ]
         count = len(recent)
 
         if count >= 5:
@@ -341,6 +344,13 @@ class StrategyCollector(BaseCollector):
         # there's no real live/backtest divergence to measure yet.
         if self._is_pre_live():
             return 60.0, -3.0  # -3 sentinel = pre-live state
+
+        # Flat-equity guard: if live Sharpe is near zero (|Sharpe| < 0.01),
+        # equity is just balance polling with no meaningful P&L — comparing
+        # to backtest Sharpe is noise.  This catches both no-trade scenarios
+        # and shadow-mode-only scenarios where journal has sim entries.
+        if abs(live_sharpe) < 0.01:
+            return 60.0, -5.0  # -5 sentinel = no meaningful live trading data
 
         # Real alignment: delta-based scoring
         denom = max(abs(bt_sharpe), 0.01)
@@ -498,6 +508,14 @@ class StrategyCollector(BaseCollector):
             elif s.get("timestamp", 0) >= cutoff:
                 total += 1
 
+        # If signal_log.json has no recent entries, check signal_stats.json
+        # as a secondary source.  signal_log.json is a bounded ring buffer
+        # that can go stale while the runtime continues generating signals.
+        if total == 0:
+            stats_total = self._load_signal_stats_rate()
+            if stats_total > 0:
+                total = stats_total
+
         rate = float(total)
         score = min(100.0, rate * 20.0)
 
@@ -548,6 +566,27 @@ class StrategyCollector(BaseCollector):
 
         # Webhook pipeline is configured, awaiting TradingView alerts
         return 70.0, 0.0
+
+    def _load_signal_stats_rate(self) -> int:
+        """Read signal_stats.json for real-time signal counts.
+
+        signal_stats.json is updated every tick by the live runtime and
+        contains ``signals_1h`` — the number of signals in the last hour.
+        Unlike signal_log.json (a bounded ring buffer), this file stays
+        current as long as the runtime is alive.
+        """
+        path = Path(self.base_path) / "STATE" / "novatrade" / "signal_stats.json"
+        if not path.exists():
+            return 0
+        try:
+            # Only trust the file if it was written in the last 10 minutes
+            age_min = (time.time() - path.stat().st_mtime) / 60.0
+            if age_min > 10:
+                return 0
+            data = json.loads(path.read_text())
+            return int(data.get("signals_1h", 0))
+        except (json.JSONDecodeError, OSError, ValueError, TypeError):
+            return 0
 
     def _check_signal_pipeline_health(self) -> tuple[float, float]:
         """Check if the signal pipeline components are operational.

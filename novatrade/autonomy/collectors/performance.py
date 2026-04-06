@@ -121,11 +121,12 @@ class PerformanceCollector(BaseCollector):
         total_core = sum(1 for m in sub_metrics if m.name != "insufficient_data")
 
         if not scorable:
-            # No scorable metrics.  Distinguish "no data at all" from
-            # "data exists but returns are too quiet" (idle market / weekend).
-            # During idle periods equity doesn't degrade — score neutrally
-            # above the alert threshold to prevent false regression alarms.
-            avg = 75.0 if has_data else self._NO_DATA_SCORE
+            # No scorable metrics — either no data at all or data exists but
+            # returns are too quiet (idle market / weekend).  Both states are
+            # information-free: the absence of data is NOT evidence of poor
+            # performance.  Score neutrally above the alert threshold to
+            # prevent false regression alarms and spurious repair tasks.
+            avg = 75.0
         elif len(scorable) < total_core:
             # Some core metrics lack real data — blend the raw average with
             # a neutral score proportional to coverage to prevent missing

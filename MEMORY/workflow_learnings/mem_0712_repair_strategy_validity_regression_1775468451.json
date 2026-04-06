@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0712_repair_strategy_validity_regression_1775468451",
+  "workflow_id": "0712_repair_strategy_validity_regression",
+  "task_summary": "Fixed strategy_validity scorer \u2014 signal_stats.json fallback for stale signal_log, flat-equity guard for backtest alignment, shadow-trade filtering",
+  "task_class": "code_impl",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed strategy_validity scorer \u2014 signal_stats.json fallback for stale signal_log, flat-equity guard for backtest alignment, shadow-trade filtering"
+  ],
+  "successful_patterns": [
+    "task_completed: 0712_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed strategy_validity scorer \u2014 signal_stats.json fallback for stale signal_log, flat-equity guard for backtest alignment, shadow-trade filtering",
+  "created_at": "2026-04-06T09:40:51Z",
+  "confidence": "high"
+}

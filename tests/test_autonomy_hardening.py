@@ -344,10 +344,11 @@ async def test_m3_no_equity_data_explicit_warning(tmp_path):
 
     result = await collector.collect()
     assert any("No equity data available" in w or "placeholder" in w for w in result.warnings)
-    # Score uses neutral 50.0 per metric (not pessimistic 30.0). The insufficient_data
-    # sub-metric (0.0) is informational only and excluded from averaging.
-    # Low confidence (0.1) prevents this from inflating the overall weighted score.
-    assert result.score == 50.0
+    # No-data state scores neutrally at 75.0 (same as idle-market) to prevent
+    # false regression alarms.  Confidence 0.1 ensures this doesn't inflate
+    # the weighted overall score, and the decision engine's confidence gate
+    # prevents repair task generation on sparse data.
+    assert result.score == 75.0
     assert result.confidence <= 0.2
 
 

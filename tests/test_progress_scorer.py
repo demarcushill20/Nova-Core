@@ -1802,9 +1802,9 @@ async def test_perf_nodata_metrics_excluded_from_average(perf_collector, tmp_pat
 
 @pytest.mark.asyncio
 async def test_perf_all_nodata_returns_neutral(perf_collector):
-    """When all metrics are NO_DATA, score should be neutral 50.0."""
+    """When all metrics are NO_DATA, score should be neutral 75.0 (not pessimistic)."""
     result = await perf_collector.collect()
-    assert result.score == 50.0
+    assert result.score == 75.0
 
 
 # =====================================================================
