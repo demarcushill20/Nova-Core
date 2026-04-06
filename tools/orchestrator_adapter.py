@@ -261,13 +261,18 @@ def _build_stageB_research_steps(stem: str, task_text: str) -> list[PlanStep]:
         PlanStep(
             step_id=f"{stem}_synthesize",
             skill_name="file-ops",
-            goal="Synthesize findings into output report",
+            goal=(
+                "Synthesize findings into output report. "
+                "MANDATORY: End output with a ## CONTRACT block containing "
+                "summary, files_changed, verification, and confidence fields. "
+                "Task will be rejected without a valid CONTRACT block."
+            ),
             inputs={"task_text": task_text[:2000]},
         ),
         PlanStep(
             step_id=f"{stem}_verify",
             skill_name="self-verification",
-            goal="Verify output completeness and contract",
+            goal="Verify output completeness and CONTRACT block validity (MANDATORY)",
             inputs={},
         ),
     ]
@@ -435,13 +440,18 @@ def _build_steps_for_class(stem: str, task_class: str, task_text: str) -> list[P
             PlanStep(
                 step_id=f"{stem}_synthesize",
                 skill_name="file-ops",
-                goal="Synthesize findings into output report",
+                goal=(
+                    "Synthesize findings into output report. "
+                    "MANDATORY: End output with a ## CONTRACT block containing "
+                    "summary, files_changed, verification, and confidence fields. "
+                    "Task will be rejected without a valid CONTRACT block."
+                ),
                 inputs={"task_text": task_text[:2000]},
             ),
             PlanStep(
                 step_id=f"{stem}_verify",
                 skill_name="self-verification",
-                goal="Verify output completeness and contract",
+                goal="Verify output completeness and CONTRACT block validity (MANDATORY)",
                 inputs={},
             ),
         ]

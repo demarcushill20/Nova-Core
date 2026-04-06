@@ -682,3 +682,78 @@ class TestNonResearchPathsUnaffected:
         result = engine.evaluate([])
         research_tasks = [a for a in result.actions if "research" in a.get("title", "").lower()]
         assert len(research_tasks) == 0
+
+
+# ---------------------------------------------------------------------------
+# 10. Orchestrator step goals enforce CONTRACT at the authoritative layer
+# ---------------------------------------------------------------------------
+
+
+class TestStepGoalContractCompliance:
+    """Verify orchestrator step goals include explicit CONTRACT instructions.
+
+    The step goal is the authoritative prompt layer — workers prioritize it
+    over inputs.task_text. Without CONTRACT instructions in the goal,
+    workers may skip the CONTRACT block even when the task body requests it.
+    """
+
+    def test_stageB_research_synthesize_goal_has_contract(self):
+        """_build_stageB_research_steps synthesize step mandates CONTRACT."""
+        from tools.orchestrator_adapter import _build_stageB_research_steps
+
+        steps = _build_stageB_research_steps("test_stem", "Do research")
+        synth_steps = [s for s in steps if "synthesize" in s.step_id]
+        assert len(synth_steps) == 1
+        goal = synth_steps[0].goal
+        assert "CONTRACT" in goal
+        assert "MANDATORY" in goal
+        assert "summary" in goal
+        assert "files_changed" in goal
+
+    def test_stageB_research_verify_goal_mentions_contract(self):
+        """_build_stageB_research_steps verify step references CONTRACT."""
+        from tools.orchestrator_adapter import _build_stageB_research_steps
+
+        steps = _build_stageB_research_steps("test_stem", "Do research")
+        verify_steps = [s for s in steps if "verify" in s.step_id]
+        assert len(verify_steps) == 1
+        assert "CONTRACT" in verify_steps[0].goal
+
+    def test_default_research_synthesize_goal_has_contract(self):
+        """_build_steps_for_class('research') synthesize step mandates CONTRACT."""
+        from tools.orchestrator_adapter import _build_steps_for_class
+
+        steps = _build_steps_for_class("test_stem", "research", "Do research")
+        synth_steps = [s for s in steps if "synthesize" in s.step_id]
+        assert len(synth_steps) == 1
+        goal = synth_steps[0].goal
+        assert "CONTRACT" in goal
+        assert "MANDATORY" in goal
+        assert "rejected" in goal.lower()
+
+    def test_default_research_verify_goal_mentions_contract(self):
+        """_build_steps_for_class('research') verify step references CONTRACT."""
+        from tools.orchestrator_adapter import _build_steps_for_class
+
+        steps = _build_steps_for_class("test_stem", "research", "Do research")
+        verify_steps = [s for s in steps if "verify" in s.step_id]
+        assert len(verify_steps) == 1
+        assert "CONTRACT" in verify_steps[0].goal
+
+    def test_code_impl_steps_unaffected(self):
+        """_build_steps_for_class('code_impl') steps are NOT changed."""
+        from tools.orchestrator_adapter import _build_steps_for_class
+
+        steps = _build_steps_for_class("test_stem", "code_impl", "Fix bug")
+        # code_impl synthesize step should NOT have the research CONTRACT mandate
+        synth_steps = [s for s in steps if "synthesize" in s.step_id]
+        assert len(synth_steps) == 0  # code_impl has analyze/implement/review, no synthesize
+
+    def test_system_steps_unaffected(self):
+        """_build_steps_for_class('system') steps are NOT changed."""
+        from tools.orchestrator_adapter import _build_steps_for_class
+
+        steps = _build_steps_for_class("test_stem", "system", "Check disk")
+        # system steps should not have MANDATORY CONTRACT in goal
+        for step in steps:
+            assert "MANDATORY" not in step.goal or "CONTRACT" not in step.goal
