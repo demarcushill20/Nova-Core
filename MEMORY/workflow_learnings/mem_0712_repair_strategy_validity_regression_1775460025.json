@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0712_repair_strategy_validity_regression_1775460025",
+  "workflow_id": "0712_repair_strategy_validity_regression",
+  "task_summary": "Validated strategy_validity regression as FALSE_ALARM \u2014 score 80/100 above 70 threshold, service healthy, trading active, divergence caused by stale backtest baseline",
+  "task_class": "code_impl",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Validated strategy_validity regression as FALSE_ALARM \u2014 score 80/100 above 70 threshold, service healthy, trading active, divergence caused by stale backtest baseline"
+  ],
+  "successful_patterns": [
+    "task_completed: 0712_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Validated strategy_validity regression as FALSE_ALARM \u2014 score 80/100 above 70 threshold, service healthy, trading active, divergence caused by stale backtest baseline",
+  "created_at": "2026-04-06T07:20:25Z",
+  "confidence": "high"
+}
