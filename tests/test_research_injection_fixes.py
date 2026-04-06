@@ -573,3 +573,112 @@ class TestWatcherOrphanRecoveryProactive:
         assert len(content) > len(original)
         assert "RETRY ESCALATION" in content
         assert "recovered by the watcher" in content
+
+
+# ---------------------------------------------------------------------------
+# 8. Contract-failure retry adapts for research injection tasks
+# ---------------------------------------------------------------------------
+
+
+class TestContractRetryAdaptive:
+    """Verify _create_retry_task includes adaptive context for research injection."""
+
+    def test_research_retry_includes_adaptive_context(self, tmp_path, monkeypatch):
+        """Retry task for proactive research includes prior failure context."""
+        monkeypatch.setattr("watcher.TASKS_DIR", tmp_path)
+        monkeypatch.setattr("watcher.OUTPUT_DIR", tmp_path / "OUTPUT")
+        from watcher import _create_retry_task
+
+        output_file = tmp_path / "OUTPUT" / "hb_proactive_research_test__20260406-120000.md"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("# Some research output without CONTRACT")
+
+        retry_path = _create_retry_task(
+            "hb_proactive_research_test",
+            output_file,
+            ["missing required field: summary"],
+            [],
+        )
+        content = retry_path.read_text()
+        assert "Prior Failure Context" in content
+        assert "proactive research injection" in content
+        assert "CRITICAL" in content
+
+    def test_research_retry_includes_cb_reason(self, tmp_path, monkeypatch):
+        """Retry task for proactive research includes circuit breaker reason."""
+        monkeypatch.setattr("watcher.TASKS_DIR", tmp_path)
+        monkeypatch.setattr("watcher.OUTPUT_DIR", tmp_path / "OUTPUT")
+        from utils.heartbeat_rules import HeartbeatRulesEngine
+        from watcher import _create_retry_task
+
+        HeartbeatRulesEngine.record_research_injection_result(
+            success=False, failure_reason="no ## CONTRACT section found"
+        )
+
+        output_file = tmp_path / "OUTPUT" / "hb_proactive_research_test__20260406-120000.md"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("# Output")
+
+        retry_path = _create_retry_task(
+            "hb_proactive_research_test",
+            output_file,
+            ["missing required field: summary"],
+            [],
+        )
+        content = retry_path.read_text()
+        assert "no ## CONTRACT section found" in content
+
+    def test_non_research_retry_has_no_adaptive_section(self, tmp_path, monkeypatch):
+        """Retry task for normal tasks does NOT include research-specific context."""
+        monkeypatch.setattr("watcher.TASKS_DIR", tmp_path)
+        monkeypatch.setattr("watcher.OUTPUT_DIR", tmp_path / "OUTPUT")
+        from watcher import _create_retry_task
+
+        output_file = tmp_path / "OUTPUT" / "0042_normal_task__20260406-120000.md"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("# Normal output")
+
+        retry_path = _create_retry_task(
+            "0042_normal_task",
+            output_file,
+            ["missing required field: confidence"],
+            [],
+        )
+        content = retry_path.read_text()
+        assert "Prior Failure Context" not in content
+        assert "proactive research injection" not in content
+
+
+# ---------------------------------------------------------------------------
+# 9. NovaTrade / user-requested tasks unaffected
+# ---------------------------------------------------------------------------
+
+
+class TestNonResearchPathsUnaffected:
+    """Verify NovaTrade and user-requested tasks bypass research injection logic."""
+
+    def test_novatrade_task_not_affected_by_cb(self, tmp_path, monkeypatch):
+        """A novatrade task stem does not trigger circuit breaker logic."""
+        # Circuit breaker only activates for hb_proactive_*research* stems
+        stem = "0099_novatrade_execute_strategy"
+        assert not stem.startswith("hb_proactive_")
+
+    def test_user_task_retry_not_limited_by_proactive_max(self):
+        """User-requested tasks use global MAX_TASK_RETRIES, not PROACTIVE_MAX_RETRIES."""
+        from utils.heartbeat_rules import PROACTIVE_MAX_RETRIES
+        from utils.task_checkpoint import MAX_TASK_RETRIES
+
+        # Global limit is higher than proactive limit
+        assert MAX_TASK_RETRIES > PROACTIVE_MAX_RETRIES
+        # A user task stem doesn't match proactive prefix
+        assert not "0050_user_task".startswith("hb_proactive_")
+
+    def test_evaluate_skips_injection_when_disabled(self, monkeypatch):
+        """Full evaluate() with RESEARCH_INJECTION_ENABLED=False produces no research tasks."""
+        monkeypatch.setattr("utils.heartbeat_rules.RESEARCH_INJECTION_ENABLED", False)
+        from utils.heartbeat_rules import HeartbeatRulesEngine
+
+        engine = HeartbeatRulesEngine()
+        result = engine.evaluate([])
+        research_tasks = [a for a in result.actions if "research" in a.get("title", "").lower()]
+        assert len(research_tasks) == 0

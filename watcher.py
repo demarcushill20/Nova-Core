@@ -1038,6 +1038,10 @@ def _update_metrics(event: str, tool_name: str | None = None):
 def _create_retry_task(stem: str, output_file: Path, errors: list[str], warnings: list[str]) -> Path:
     """Create a retry TASK file that asks the agent to repair the contract.
 
+    For proactive research injection tasks, includes adaptive context
+    (prior failure reason from circuit breaker) so the retry is not
+    identical to the original attempt.
+
     Returns the path to the created retry task file.
     """
     retry_stem = f"{stem}__retry1"
@@ -1045,6 +1049,29 @@ def _create_retry_task(stem: str, output_file: Path, errors: list[str], warnings
 
     error_text = "\n".join(f"- {e}" for e in errors)
     warning_text = "\n".join(f"- {w}" for w in warnings) if warnings else "(none)"
+
+    # Adaptive context for research injection retries
+    adaptive_section = ""
+    is_research_proactive = stem.startswith("hb_proactive_") and "research" in stem
+    if is_research_proactive:
+        prior_reason = ""
+        try:
+            from utils.heartbeat_rules import HeartbeatRulesEngine
+
+            prior_reason = HeartbeatRulesEngine.get_last_failure_reason()
+        except Exception:
+            pass
+        adaptive_section = (
+            "\n## Prior Failure Context\n"
+            "This is a proactive research injection task. The most common failure\n"
+            "is a missing or incomplete ## CONTRACT block in the output.\n"
+        )
+        if prior_reason:
+            adaptive_section += f"Prior failure reason: {prior_reason}\n"
+        adaptive_section += (
+            "\nCRITICAL: The output report MUST end with a complete ## CONTRACT block.\n"
+            "Do not skip this step under any circumstances.\n"
+        )
 
     content = f"""\
 # Retry: Repair Contract for {stem}
@@ -1065,7 +1092,7 @@ valid `## CONTRACT` block.
 
 ## Validation warnings
 {warning_text}
-
+{adaptive_section}
 ## Instructions
 
 1. Read the output file at `{output_file}`.
