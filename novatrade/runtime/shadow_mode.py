@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -591,7 +592,8 @@ async def _main() -> None:
     from novatrade.runtime.webhook_server import create_app
 
     app = create_app(ws)
-    config = uvicorn.Config(app, host="0.0.0.0", port=8877, log_level="info", access_log=False)  # noqa: S104
+    shadow_port = int(os.environ.get("NOVATRADE_SHADOW_PORT", "8878"))
+    config = uvicorn.Config(app, host="0.0.0.0", port=shadow_port, log_level="info", access_log=False)  # noqa: S104
     server = uvicorn.Server(config)
 
     monitor_task = asyncio.create_task(monitor_loop.start())
