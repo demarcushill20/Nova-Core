@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-04-06T10:42:45Z
+Generated: 2026-04-06T10:59:11Z
 
 ## Overall: HEALTHY
 
@@ -8,7 +8,7 @@ Generated: 2026-04-06T10:42:45Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 6 |
+| Completed workflows | 7 |
 | Failed workflows | 1 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
@@ -21,9 +21,9 @@ Generated: 2026-04-06T10:42:45Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 1055 |
-| Contract failures | 52 |
-| Contract failure rate | 4.7% |
+| Contract successes | 1057 |
+| Contract failures | 53 |
+| Contract failure rate | 4.8% |
 | Budget exhaustions | 0 |
 | Policy violations | 0 |
 | Orphaned agents | 0 |
@@ -41,6 +41,7 @@ Generated: 2026-04-06T10:42:45Z
 | 0706_repair_performance_stability_regression | ? | completed | - |
 | 0708_repair_system_health_regression | ? | completed | - |
 | 0711_repair_performance_stability_regression | ? | completed | - |
+| 0713_research_system_health_gaps | ? | completed | - |
 | shift_20260405_1_system_health | ? | failed | verifier_rejected |
 | shift_20260405_4_deep_research | ? | completed | - |
 | shift_gen_pm_20260405 | ? | completed | - |
