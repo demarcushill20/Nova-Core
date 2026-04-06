@@ -153,9 +153,9 @@ class BacktestEnvironment:
 
     # --- Position sizing ---
     initial_equity: float = 100_000.0
-    risk_fraction: float = 0.01
+    risk_fraction: float = 0.0075  # 0.75% Kelly-validated risk (reduced from 1% for FTMO compliance)
     min_volume: float = 0.01
-    max_volume: float = 1.00
+    max_volume: float = 10.00  # FTMO-safe maximum for $100K accounts
 
     # --- Strategy parameters ---
     # Tightened from 0.45 per P1.2: strict rejection quality, reducing false signals

@@ -568,10 +568,13 @@ class TradingDaysTracker:
 # ---------------------------------------------------------------------------
 
 # FTMO Maximum Daily Loss = 5% of initial account balance.
-# We use a buffer (default 80% of that limit) to block new orders before
-# the hard breach, giving room for floating P&L to move.
+# We use multiple protection levels:
+# - 70% early warning: alert and reduce position sizing
+# - 80% buffer: block new orders before hard breach
+# - 100% hard limit: emergency halt
 _DEFAULT_DAILY_LOSS_PCT = 5.0  # FTMO standard
 _DEFAULT_BUFFER_PCT = 80.0  # block new orders at 80% of daily limit
+_DEFAULT_WARNING_PCT = 70.0  # early warning for drawdown scaling
 
 
 @dataclass
@@ -607,6 +610,7 @@ class FtmoDailyLossTracker:
     initial_account_size: float = 0.0
     daily_loss_pct: float = _DEFAULT_DAILY_LOSS_PCT
     buffer_pct: float = _DEFAULT_BUFFER_PCT
+    warning_pct: float = _DEFAULT_WARNING_PCT  # 70% early warning threshold
     # Internal state
     _day_key: str = field(default="", repr=False)
     _day_reference: float = field(default=0.0, repr=False)
@@ -624,6 +628,11 @@ class FtmoDailyLossTracker:
     def buffer_limit_usd(self) -> float:
         """Pre-trade buffer: deny new orders above this loss amount."""
         return self.daily_limit_usd * (self.buffer_pct / 100.0)
+
+    @property
+    def warning_limit_usd(self) -> float:
+        """Early warning threshold: trigger drawdown scaling and alerts."""
+        return self.daily_limit_usd * (self.warning_pct / 100.0)
 
     @property
     def day_reference(self) -> float:
@@ -714,6 +723,7 @@ class FtmoDailyLossTracker:
         current_loss = self._day_reference - equity
         daily_limit = self.daily_limit_usd
         buffer_limit = self.buffer_limit_usd
+        warning_limit = self.warning_limit_usd
         utilization_pct = (current_loss / daily_limit * 100.0) if daily_limit > 0 else 0.0
 
         if current_loss >= daily_limit:
@@ -726,6 +736,16 @@ class FtmoDailyLossTracker:
                     f"${self.initial_account_size:.0f}) — ref=${self._day_reference:.2f} "
                     f"equity=${equity:.2f}"
                 ),
+            )
+
+        # 70% early warning: trigger position sizing reduction (non-blocking)
+        if current_loss >= warning_limit and current_loss < buffer_limit:
+            log.warning(
+                "FTMO 70%% daily drawdown reached: loss=$%.2f >= warning=$%.2f (%.1f%% utilized) — "
+                "triggering position size scaling",
+                current_loss,
+                warning_limit,
+                utilization_pct,
             )
 
         if current_loss >= buffer_limit:
@@ -760,8 +780,10 @@ class FtmoDailyLossTracker:
             "initial_account_size": self.initial_account_size,
             "daily_loss_pct": self.daily_loss_pct,
             "buffer_pct": self.buffer_pct,
+            "warning_pct": self.warning_pct,
             "daily_limit_usd": round(daily_limit, 2),
             "buffer_limit_usd": round(self.buffer_limit_usd, 2),
+            "warning_limit_usd": round(self.warning_limit_usd, 2),
             "day_reference": round(self._day_reference, 2),
             "peak_equity_today": round(self._peak_equity_today, 2),
             "day_key": self._day_key,
@@ -777,6 +799,7 @@ class FtmoDailyLossTracker:
             "initial_account_size": self.initial_account_size,
             "daily_loss_pct": self.daily_loss_pct,
             "buffer_pct": self.buffer_pct,
+            "warning_pct": self.warning_pct,
             "day_key": self._day_key,
             "day_reference": self._day_reference,
             "peak_equity_today": self._peak_equity_today,
@@ -797,6 +820,8 @@ class FtmoDailyLossTracker:
                 self._day_reference = data.get("day_reference", 0.0)
                 self._peak_equity_today = data.get("peak_equity_today", 0.0)
                 self.initial_account_size = data.get("initial_account_size", self.initial_account_size)
+                # Load warning_pct if present (backward compatibility)
+                self.warning_pct = data.get("warning_pct", self.warning_pct)
                 self._initialized = True
                 log.info(
                     "Loaded daily loss tracker: day=%s ref=$%.2f peak=$%.2f",
@@ -805,7 +830,16 @@ class FtmoDailyLossTracker:
                     self._peak_equity_today,
                 )
                 return True
-            # Different day — will re-initialize on next check
+            # Different day — clear initialization state to force re-init
+            log.info(
+                "Daily loss tracker day change detected: stored=%s current=%s — clearing state for re-initialization",
+                data.get("day_key", "unknown"),
+                today,
+            )
+            self._day_key = ""
+            self._day_reference = 0.0
+            self._peak_equity_today = 0.0
+            self._initialized = False
             return False
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             log.warning("Failed to load daily loss tracker from %s: %s", path, exc)

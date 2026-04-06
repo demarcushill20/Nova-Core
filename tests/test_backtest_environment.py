@@ -51,9 +51,9 @@ class TestBacktestEnvironment:
     def test_default_position_sizing(self):
         env = DEFAULT_ENVIRONMENT
         assert env.initial_equity == 100_000.0
-        assert env.risk_fraction == 0.01
+        assert env.risk_fraction == 0.0075  # Updated: 0.75% Kelly-validated risk for FTMO compliance
         assert env.min_volume == 0.01
-        assert env.max_volume == 1.00
+        assert env.max_volume == 10.00  # Updated: FTMO-safe maximum for $100K accounts
 
     def test_to_dict_contains_all_keys(self):
         d = DEFAULT_ENVIRONMENT.to_dict()

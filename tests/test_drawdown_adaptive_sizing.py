@@ -97,7 +97,7 @@ class TestDrawdownAdaptiveIntegration:
             symbol="EURUSD",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            volume=0.70,  # Within expected scaled range (~0.72)
+            volume=0.50,  # Within expected scaled range (~0.51 after proportional risk + DD scaler)
             price=1.10000,
             stop_loss=1.09500,
         )
@@ -120,7 +120,7 @@ class TestDrawdownAdaptiveIntegration:
             symbol="EURUSD",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            volume=0.30,  # Very small request for survival mode
+            volume=0.15,  # Very small request for survival mode (~0.18 calculated after proportional risk)
             price=1.10000,
             stop_loss=1.09500,
         )

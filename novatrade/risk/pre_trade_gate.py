@@ -53,7 +53,7 @@ from novatrade.risk.ftmo_compliance import (  # noqa: E402
     WeekendAutoCloser,
     WeeklyLossTracker,
 )
-from novatrade.risk.position_sizer import DrawdownScaler, PositionSizer  # noqa: E402
+from novatrade.risk.position_sizer import DrawdownProportionalRisk, DrawdownScaler, PositionSizer  # noqa: E402
 from novatrade.risk.profit_cushion_protocol import ProfitCushionProtocol  # noqa: E402
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
@@ -137,6 +137,13 @@ class PreTradeGate:
             hysteresis=True,
             total_dd_enabled=True,
             loss_recovery_mode="instant",
+        )
+        # Drawdown-proportional risk adjustment (Zeno's Paradox — deep research P0)
+        # Reduces base risk_pct as total drawdown deepens, creating exponential
+        # safety margin. Compounds with DrawdownScaler's volume multipliers.
+        self._proportional_risk = DrawdownProportionalRisk(
+            base_risk_pct=0.0075,
+            enabled=True,
         )
         # Daily risk budget tracker (P1 priority from funded account survival research)
         self._daily_budget_tracker = DailyRiskBudgetTracker(
@@ -626,28 +633,53 @@ class PreTradeGate:
             )
 
         try:
-            # Calculate base volume using standard 1% equity risk
-            base_calculated = self._sizer.calculate(
-                equity=account.equity,
-                entry=request.price,
-                stop=request.stop_loss,
-            )
-
-            # Apply drawdown-adaptive scaling (P0 critical priority)
-            # Estimate daily drawdown from account balance vs configured limits
-            # This is a simplified approach - full implementation would get actual DD state
-            daily_dd_limit_pct = self._risk.max_daily_drawdown_pct  # e.g., 5.0
-            total_dd_limit_pct = self._risk.max_total_drawdown_pct  # e.g., 10.0
-
-            # Estimate drawdown usage as percentage of limits
-            # Use FTMO account_size from config, fall back to account.balance
+            # Resolve initial equity for drawdown calculations (used by both
+            # proportional risk and drawdown scaler).
             estimated_initial_equity = account.balance
             if hasattr(account, "initial_equity") and account.initial_equity > 0:
                 estimated_initial_equity = account.initial_equity
             elif self._cfg.ftmo.account_size > 0:
                 estimated_initial_equity = float(self._cfg.ftmo.account_size)
 
-            # Estimate daily start equity (simplified - same as current for now)
+            # Drawdown-proportional risk: adjust base risk_pct by drawdown depth
+            # (Zeno's Paradox — exponential safety as drawdown deepens)
+            adaptive_risk = self._proportional_risk.get_risk_pct(
+                equity=account.equity,
+                initial_balance=estimated_initial_equity,
+            )
+            if adaptive_risk <= 0:
+                tier = self._proportional_risk.get_tier_name(account.equity, estimated_initial_equity)
+                return RiskCheckResult(
+                    name="volume_sizing",
+                    passed=False,
+                    detail=(
+                        f"drawdown proportional risk = 0% (tier={tier}) — "
+                        f"account drawdown exceeds 10% of initial ${estimated_initial_equity:,.0f}"
+                    ),
+                )
+
+            risk_tier = self._proportional_risk.get_tier_name(account.equity, estimated_initial_equity)
+            if risk_tier != "normal":
+                log.info(
+                    "Drawdown-proportional risk: tier=%s, risk=%.4f%% (base=%.4f%%)",
+                    risk_tier,
+                    adaptive_risk * 100,
+                    self._proportional_risk.base_risk_pct * 100,
+                )
+
+            # Calculate base volume using drawdown-proportional risk
+            base_calculated = self._sizer.calculate(
+                equity=account.equity,
+                entry=request.price,
+                stop=request.stop_loss,
+                risk_pct=adaptive_risk,
+            )
+
+            # Apply drawdown-adaptive volume scaling (compounds with proportional risk)
+            daily_dd_limit_pct = self._risk.max_daily_drawdown_pct  # e.g., 5.0
+            total_dd_limit_pct = self._risk.max_total_drawdown_pct  # e.g., 10.0
+
+            # Estimate daily start equity
             estimated_daily_start = estimated_initial_equity
             if hasattr(account, "daily_start_equity") and account.daily_start_equity > 0:
                 estimated_daily_start = account.daily_start_equity

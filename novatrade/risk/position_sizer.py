@@ -24,6 +24,30 @@ from typing import ClassVar
 
 log = logging.getLogger("novatrade.risk.position_sizer")
 
+# ---------------------------------------------------------------------------
+# Drawdown-proportional risk tiers (Zeno's Paradox approach)
+# ---------------------------------------------------------------------------
+
+# Tier multipliers: (max_drawdown_pct, risk_multiplier)
+# As total drawdown deepens, the base risk_pct is scaled down.
+# This creates exponential safety: the closer to breach, the harder to breach.
+_DD_RISK_TIERS: list[tuple[float, float]] = [
+    (0.02, 1.00),  # 0-2% drawdown → 100% of base risk (normal)
+    (0.04, 0.70),  # 2-4% drawdown →  70% of base risk (cautious)
+    (0.06, 0.50),  # 4-6% drawdown →  50% of base risk (defensive)
+    (0.08, 0.30),  # 6-8% drawdown →  30% of base risk (survival)
+    (0.10, 0.20),  # 8-10% drawdown → 20% of base risk (emergency)
+]
+
+_TIER_NAMES: list[tuple[float, str]] = [
+    (0.10, "halt"),
+    (0.08, "emergency"),
+    (0.06, "survival"),
+    (0.04, "defensive"),
+    (0.02, "cautious"),
+    (0.00, "normal"),
+]
+
 
 class PositionSizer:
     """Calculate and validate lot sizes for FTMO-compliant trading.
@@ -386,3 +410,137 @@ class DrawdownScaler:
         scale = self.combined_scale(dd_used_pct, total_dd_used_pct)
         scaled = round(base_volume * scale, 2)
         return max(min_lot, scaled)
+
+
+class DrawdownProportionalRisk:
+    """Adjust base risk percentage based on total account drawdown depth.
+
+    Implements the "Zeno's Paradox" approach from FTMO risk management research:
+    as drawdown deepens from initial balance, the risk per trade is progressively
+    reduced, making it exponentially harder to reach the breach level.
+
+    Tiers (total drawdown from initial balance, as % of base risk):
+
+        ======== ============ ========================================
+        Drawdown Multiplier   Effect (with 0.75% base)
+        ======== ============ ========================================
+        0–2%     100%         0.75% → need 13+ losers for 10% breach
+        2–4%      70%         0.525% → need 19+ losers
+        4–6%      50%         0.375% → need 27+ losers
+        6–8%      30%         0.225% → need 44+ losers
+        8–10%     20%         0.15% → need 67+ losers
+        >10%       0%         HALT — account breached
+        ======== ============ ========================================
+
+    Combined with DrawdownScaler (which does multiplicative volume scaling),
+    this creates a two-layer defence: the risk budget shrinks AND the volume
+    is further scaled down by daily-DD / loss-streak factors.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_risk_pct: float = 0.0075,
+        enabled: bool = True,
+    ) -> None:
+        """
+        Args:
+            base_risk_pct: The baseline risk percentage (0.0075 = 0.75%).
+            enabled: When False, always returns base_risk_pct unchanged.
+        """
+        if base_risk_pct < 0:
+            raise ValueError(f"base_risk_pct must be non-negative, got {base_risk_pct}")
+        self._base_risk_pct = base_risk_pct
+        self._enabled = enabled
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @property
+    def base_risk_pct(self) -> float:
+        return self._base_risk_pct
+
+    def get_risk_pct(
+        self,
+        equity: float,
+        initial_balance: float,
+    ) -> float:
+        """Calculate risk percentage based on total account drawdown depth.
+
+        Args:
+            equity: Current account equity in USD.
+            initial_balance: Starting account balance (e.g., 100,000 for FTMO).
+
+        Returns:
+            Risk percentage as a decimal (e.g., 0.00525 for 0.525%).
+            Returns 0.0 if drawdown exceeds 10% (halt signal).
+        """
+        if not self._enabled:
+            return self._base_risk_pct
+
+        if initial_balance <= 0:
+            return self._base_risk_pct
+
+        if equity >= initial_balance:
+            return self._base_risk_pct
+
+        dd_pct = (initial_balance - equity) / initial_balance
+
+        for max_dd, multiplier in _DD_RISK_TIERS:
+            if dd_pct < max_dd:
+                return self._base_risk_pct * multiplier
+
+        # Beyond 10% — halt signal
+        return 0.0
+
+    def get_tier_name(
+        self,
+        equity: float,
+        initial_balance: float,
+    ) -> str:
+        """Return human-readable tier name for monitoring and logging."""
+        if not self._enabled or initial_balance <= 0 or equity >= initial_balance:
+            return "normal"
+
+        dd_pct = (initial_balance - equity) / initial_balance
+
+        for threshold, name in _TIER_NAMES:
+            if dd_pct >= threshold:
+                return name
+        return "normal"
+
+    def get_consecutive_losses_to_breach(
+        self,
+        equity: float,
+        initial_balance: float,
+        breach_pct: float = 0.10,
+    ) -> int:
+        """Estimate consecutive losses needed to breach from current equity.
+
+        Assumes each loss equals exactly the current risk_pct of equity.
+        This is a simplified model — actual losses vary by stop distance.
+
+        Returns:
+            Estimated number of consecutive max-risk losses to reach breach.
+            Returns 0 if already at or beyond breach.
+            Returns 999 if disabled or no drawdown.
+        """
+        if not self._enabled or initial_balance <= 0:
+            return 999
+
+        breach_equity = initial_balance * (1.0 - breach_pct)
+        if equity <= breach_equity:
+            return 0
+
+        count = 0
+        sim_equity = equity
+        while sim_equity > breach_equity and count < 999:
+            risk_pct = self.get_risk_pct(sim_equity, initial_balance)
+            if risk_pct <= 0:
+                break
+            loss = sim_equity * risk_pct
+            sim_equity -= loss
+            count += 1
+
+        return count
