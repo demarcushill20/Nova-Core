@@ -1,0 +1,15 @@
+{
+  "content": "FTMO execution optimization research (2026-04-07): Optimal order timing London-NY overlap 13:00-16:00 GMT with 0.2-0.4 pip EURUSD spreads. Rollover 22:30-00:15 CEST hard-block required (spreads 10-50x). Risk 0.5-1% per trade yields 35-67% FTMO pass rate vs <5% at 3%+. FTMO acquired OANDA Dec 2025. 10 recommendations: session window, slippage buffer, MDL circuit breaker 3.5%, news filter, weekend closure, swap Wednesday filter, limit orders, fill logger, backtest slippage, London VPS.",
+  "memory_type": "research",
+  "project": "novatrade",
+  "tags": [
+    "execution-optimization",
+    "ftmo",
+    "slippage",
+    "order-timing",
+    "prop-firm"
+  ],
+  "timestamp": "2026-04-07T00:36:09Z",
+  "shift": "shift_20260406_13_novatrade_research",
+  "confidence": "high"
+}

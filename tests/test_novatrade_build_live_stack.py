@@ -81,7 +81,7 @@ async def test_build_live_stack_seeds_history():
     from novatrade.runtime.runner import build_live_stack
 
     cfg = _make_cfg()
-    candles = _make_candles(50)
+    candles = _make_candles(100)
 
     with patch("novatrade.runtime.dry_run.DryRunAdapter.get_candles", new_callable=AsyncMock) as mock_candles:
         mock_candles.return_value = candles

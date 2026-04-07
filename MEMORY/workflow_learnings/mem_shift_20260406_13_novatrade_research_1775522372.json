@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260406_13_novatrade_research_1775522372",
+  "workflow_id": "shift_20260406_13_novatrade_research",
+  "task_summary": "Deep research on FTMO execution optimization covering order timing, slippage reduction, spread behavior, MDL mechanics, FTMO-OANDA acquisition, and competitive landscape with 10 actionable NovaTrade recommendations",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Deep research on FTMO execution optimization covering order timing, slippage reduction, spread behavior, MDL mechanics, FTMO-OANDA acquisition, and competitive landscape with 10 actionable NovaTrade recommendations"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Deep research on FTMO execution optimization covering order timing, slippage reduction, spread behavior, MDL mechanics, FTMO-OANDA acquisition, and competitive landscape with 10 actionable NovaTrade recommendations",
+  "created_at": "2026-04-07T00:39:32Z",
+  "confidence": "high"
+}
