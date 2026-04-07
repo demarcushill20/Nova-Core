@@ -17,5 +17,7 @@
   "reusable_guidance": "Resolved execution_pipeline crash loop caused by orphan process holding port 8877; killed orphan, service recovered, current score 90.5/100",
   "created_at": "2026-04-06T10:51:51Z",
   "confidence": "high",
-  "supersedes": "mem_0709_repair_execution_pipeline_regression_1775467047"
+  "supersedes": "mem_0709_repair_execution_pipeline_regression_1775467047",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0709_repair_execution_pipeline_regression_1775465559"
 }

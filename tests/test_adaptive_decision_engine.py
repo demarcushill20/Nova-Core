@@ -652,14 +652,18 @@ def test_repair_daily_cap_blocks_fifth_repair():
     """4 repair decisions today should hit the daily cap (max_repair_per_day=4)."""
     from datetime import datetime, timedelta, timezone
 
-    engine = DecisionEngine()
+    # Use zero cooldown so we isolate the daily-cap logic from the
+    # cooldown logic — avoids false positives near midnight UTC.
+    engine = DecisionEngine(config=DecisionConfig(cooldown_minutes_repair=0))
     now = datetime.now(timezone.utc)
-    # Create 4 repair decisions from today, spaced far enough apart to avoid cooldown
+    # Pin decisions to today at fixed times so they always fall within
+    # the current UTC day regardless of when the test runs.
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     recent = [
         {
             "mode": "repair",
             "target_dimension": "system_health",
-            "decided_at": (now - timedelta(hours=10 - i)).isoformat(),
+            "decided_at": (day_start + timedelta(minutes=1 + i)).isoformat(),
         }
         for i in range(4)
     ]

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0721_Implement_the_permanent_fix_conservatively__but_keep_the_research_injection_path_1775506279",
+  "workflow_id": "0721_Implement_the_permanent_fix_conservatively__but_keep_the_research_injection_path",
+  "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0721_Implement_the_permanent_fix_conservatively__but_keep_the_research_injec"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
+  "created_at": "2026-04-06T20:11:19Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_12_novatrade_testing_1775515092"
+}
