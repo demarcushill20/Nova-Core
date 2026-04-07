@@ -25,6 +25,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 WRITABLE_FOLDERS = [
+    "00-inbox",
     "20-agent-patterns",
     "30-workflow-learnings",
     "40-research",
@@ -233,19 +234,44 @@ def format_related_section(related: list[dict], domain: str | None = None) -> st
 # ---------------------------------------------------------------------------
 
 
-def vault_call(tool: str, args: dict) -> dict:
-    """Call a vault MCP tool via the vault server.
+def _make_vault_call():
+    """Create a vault_call function backed by direct imports from the MCP server."""
+    # Add project root to sys.path so tools/ is importable
+    project_root = str(Path(__file__).resolve().parent.parent)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
 
-    In production, this would use the MCP client. For the backfill script,
-    we use subprocess calls to the nova-vault tools.
-
-    This is a stub that should be replaced with actual MCP client calls
-    or direct function imports when running in the Nova-Core environment.
-    """
-    # This is the interface contract — implementations vary by environment
-    raise NotImplementedError(
-        "vault_call must be provided by the runtime environment. Use --dry-run for testing without vault access."
+    from tools.mcp_vault_server import (
+        vault_frontmatter as _vault_frontmatter,
     )
+    from tools.mcp_vault_server import (
+        vault_list as _vault_list,
+    )
+    from tools.mcp_vault_server import (
+        vault_read as _vault_read,
+    )
+    from tools.mcp_vault_server import (
+        vault_search as _vault_search,
+    )
+    from tools.mcp_vault_server import (
+        vault_update as _vault_update,
+    )
+
+    _TOOL_MAP = {
+        "vault_read": lambda args: _vault_read(**args),
+        "vault_search": lambda args: _vault_search(**args),
+        "vault_list": lambda args: _vault_list(**{("folder" if k == "path" else k): v for k, v in args.items()}),
+        "vault_update": lambda args: _vault_update(**args),
+        "vault_frontmatter": lambda args: _vault_frontmatter(**args),
+    }
+
+    def vault_call(tool: str, args: dict) -> dict:
+        fn = _TOOL_MAP.get(tool)
+        if fn is None:
+            return {"error": f"unknown tool: {tool}"}
+        return fn(args)
+
+    return vault_call
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +289,7 @@ class VaultBackfiller:
         rate_limit: int = RATE_LIMIT_WRITES_PER_WINDOW,
         rate_window: int = RATE_LIMIT_WINDOW_SECONDS,
     ):
-        self.vault_call = vault_call_fn or vault_call
+        self.vault_call = vault_call_fn or (lambda tool, args: {"error": "no vault_call_fn provided"})
         self.dry_run = dry_run
         self.rate_limit = rate_limit
         self.rate_window = rate_window
@@ -315,17 +341,17 @@ class VaultBackfiller:
         except Exception as e:
             return BackfillResult(note_path, "skipped", reason=f"frontmatter error: {e}")
 
-        fm = fm_result.get("frontmatter", {})
+        fm: dict = fm_result.get("frontmatter", {})  # type: ignore[assignment]
 
         # 4. Source safety check
-        source = fm.get("source", "")
+        source: str = fm.get("source", "")
         if source == "operator":
             return BackfillResult(note_path, "skipped", reason="source: operator (human-authored)")
         if not source:
             return BackfillResult(note_path, "skipped", reason="no source field (unknown ownership)")
 
         # 5. Extract keywords and search
-        title = fm.get("title", "")
+        title: str = fm.get("title", "")
         keywords = extract_keywords(title, content)
         if not keywords:
             return BackfillResult(note_path, "skipped", reason="no keywords extracted")
@@ -336,7 +362,7 @@ class VaultBackfiller:
         except Exception as e:
             return BackfillResult(note_path, "skipped", reason=f"search error: {e}")
 
-        results = search_result.get("results", [])
+        results: list[dict] = search_result.get("results", [])  # type: ignore[assignment]
         related = pick_top_related(results, note_path)
 
         if not related:
@@ -356,12 +382,23 @@ class VaultBackfiller:
         # Rate limit check
         self._wait_for_rate_limit()
 
+        # Split formatted section into heading + body for vault_update API
+        section_lines = section.split("\n")
+        heading_idx = next(
+            (i for i, line in enumerate(section_lines) if line.startswith("## Related Notes")),
+            0,
+        )
+        prefix = "\n".join(section_lines[:heading_idx]).strip()  # up:: field
+        body_lines = section_lines[heading_idx + 1 :]  # after heading
+        section_body = (prefix + "\n\n" + "\n".join(body_lines)).strip() if prefix else "\n".join(body_lines).strip()
+
         try:
             update_result = self.vault_call(
                 "vault_update",
                 {
                     "path": note_path,
-                    "content": section,
+                    "section_heading": "## Related Notes",
+                    "section_body": section_body,
                 },
             )
         except Exception as e:
@@ -401,7 +438,7 @@ class VaultBackfiller:
             logger.error("Failed to list folder %s: %s", folder, e)
             return []
 
-        notes = list_result.get("notes", [])
+        notes: list = list_result.get("files", [])  # type: ignore[assignment]
         results = []
         for note_info in notes:
             path = note_info if isinstance(note_info, str) else note_info.get("path", "")
@@ -485,14 +522,33 @@ def main():
     logger.info("=== Vault Backfill Links ===")
     logger.info("Mode: %s", "DRY-RUN" if args.dry_run else "LIVE")
 
-    # Note: vault_call must be provided by the runtime environment
-    # This CLI is for documentation; actual execution uses MCP tools
-    logger.error(
-        "Direct CLI execution requires MCP vault client integration. "
-        "Use this script's classes from within Nova-Core's MCP environment, "
-        "or run with --dry-run for testing."
+    try:
+        real_vault_call = _make_vault_call()
+    except ImportError as e:
+        logger.error("Failed to import vault server functions: %s", e)
+        sys.exit(1)
+
+    backfiller = VaultBackfiller(
+        vault_call_fn=real_vault_call,
+        dry_run=args.dry_run,
+        rate_limit=args.rate_limit,
     )
-    sys.exit(1)
+
+    folders = [args.folder] if args.folder else WRITABLE_FOLDERS
+    backfiller.process_all(folders)
+
+    s = backfiller.summary()
+    logger.info("=== Summary ===")
+    logger.info(
+        "Processed: %d | Updated: %d | Skipped: %d | Dry-run: %d | Links added: %d",
+        s["total_processed"],
+        s["updated"],
+        s["skipped"],
+        s["dry_run"],
+        s["total_links_added"],
+    )
+    if s["skip_reasons"]:
+        logger.info("Skip reasons: %s", s["skip_reasons"])
 
 
 if __name__ == "__main__":

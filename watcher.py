@@ -2212,7 +2212,10 @@ async def _dispatch_inner(task_path: Path):
                 f'  - "#type/diary"\n'
                 f'  - "#project/novacore"\n'
                 f'  - "#system/scheduler"\n'
+                f"related:\n"
+                f'  - "[[moc-operations]]"\n'
                 f"---\n\n"
+                f"up:: [[moc-operations]]\n\n"
                 f"## Scheduled Task Completed\n\n"
                 f"| Field | Value |\n"
                 f"|-------|-------|\n"
@@ -2224,6 +2227,8 @@ async def _dispatch_inner(task_path: Path):
                 f"| **Task Class** | {diary_class} |\n"
                 f"| **Optimized** | {diary_optimized} |\n"
                 f"| **Completed** | {diary_now.strftime('%Y-%m-%d %H:%M UTC')} |\n"
+                f"\n## Related Notes\n\n"
+                f"- [[moc-operations]] -- system operations\n"
             )
             diary_file.write_text(diary_note, encoding="utf-8")
             logger.info("SCHEDULER: diary written → %s", diary_file.name)

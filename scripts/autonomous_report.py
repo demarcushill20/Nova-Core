@@ -723,9 +723,16 @@ tags:
   - "#project/novacore"
   - "#report/heartbeat"
   - "#report/autonomous"
+related:
+  - "[[moc-operations]]"
 ---
 """
-    note = frontmatter + "\n" + body + "\n"
+    note = (
+        frontmatter
+        + "\nup:: [[moc-operations]]\n\n"
+        + body
+        + "\n\n## Related Notes\n\n- [[moc-operations]] -- system operations\n"
+    )
     vault_path.write_text(note, encoding="utf-8")
     log(f"Wrote diary note: {vault_path}")
     return vault_path

@@ -628,7 +628,17 @@ def _assemble_note(frontmatter: dict, body: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Sources that indicate Nova-Core created/manages the note
-_NOVA_CORE_SOURCES = frozenset({"nova-core-memory"})
+_NOVA_CORE_SOURCES = frozenset(
+    {
+        "nova-core-memory",
+        "autonomy-decision-engine",
+        "nova-core-scheduler",
+        "nova-core-heartbeat-report",
+        "nova-core-notifier",
+        "nova-core-report",
+        "nova-core-agent",
+    }
+)
 
 
 def _detect_note_ownership(content: str) -> str:
@@ -1082,9 +1092,15 @@ def vault_validate(frontmatter: dict, body: str = "") -> dict:
     if has_sensitive:
         errors_all.extend(sensitive_matches)
 
+    # Soft warnings (non-blocking)
+    warnings = []
+    if "related" not in frontmatter:
+        warnings.append("frontmatter missing 'related' field — consider adding wikilinks for graph connectivity")
+
     return {
         "valid": len(errors_all) == 0,
         "errors": errors_all,
+        "warnings": warnings,
         "note_size_bytes": len(assembled.encode("utf-8")),
     }
 

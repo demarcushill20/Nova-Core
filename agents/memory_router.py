@@ -601,17 +601,32 @@ class VaultAdapter:
 
             required_tag = VALID_NOTE_TYPES.get(note_type, "")
 
+            # Infer domain from folder for up:: wikilink
+            _folder_domain = {
+                "40-research": "research",
+                "30-workflow-learnings": "workflow-learnings",
+                "20-agent-patterns": "agents",
+            }
+            domain = _folder_domain.get(folder, "operations")
+
+            # Build related: from related_task_ids if available
+            related_links = []
+            if hasattr(obj, "related_task_ids") and obj.related_task_ids:
+                related_links = [f"[[{tid}]]" for tid in obj.related_task_ids[:3]]
+
             frontmatter = {
                 "type": note_type,
                 "title": obj.title[:100],
                 "confidence": obj.confidence,
                 "source": "nova-core-memory",
                 "tags": [required_tag] + [t for t in obj.tags if t != required_tag][:9],
+                "related": related_links if related_links else [f"[[moc-{domain}]]"],
             }
 
             slug = obj.memory_id.replace("/", "-").replace(" ", "-")[:60]
             path = f"{folder}/{slug}.md"
-            body = obj.content or obj.summary
+            raw_body = obj.content or obj.summary
+            body = f"up:: [[moc-{domain}]]\n\n{raw_body}\n\n## Related Notes\n"
 
         # Validate before writing (both modes)
         try:
@@ -2430,7 +2445,7 @@ class MemoryRouter:
         ctx = ctx or TraceContext.new("memory_router")
 
         engine = CompactionEngine(
-            memory_dir=self._adapters.get("memory_file", None)
+            memory_dir=self._adapters.get("memory_file", None)  # type: ignore[arg-type]
             and getattr(self._adapters["memory_file"], "_base", None),
             state_dir=self._loop_store_base.parent if self._loop_store_base else None,
         )

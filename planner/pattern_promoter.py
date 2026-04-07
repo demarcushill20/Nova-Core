@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -358,11 +359,23 @@ def _build_pattern_payload(
             "#status/active",
             "#source/auto-promoted",
         ],
+        "related": [f"[[{Path(ep).stem}]]" for ep in evidence_paths[:3]],
     }
+
+    # Infer domain for up:: field
+    _domain_map = {
+        "research": "research",
+        "code_impl": "agents",
+        "code_review": "agents",
+        "system": "operations",
+        "simple": "operations",
+    }
+    domain = _domain_map.get(task_class, "agents")
 
     # Build body from evidence
     body_parts = []
 
+    body_parts.append(f"up:: [[moc-{domain}]]\n")
     body_parts.append("## Summary\n")
     body_parts.append(
         f"Automatically promoted pattern based on {len(evidence_paths)} "
@@ -388,7 +401,7 @@ def _build_pattern_payload(
 
     body_parts.append("\n## Source Learnings\n")
     for ep in evidence_paths:
-        body_parts.append(f"- `{ep}`\n")
+        body_parts.append(f"- [[{Path(ep).stem}]]\n")
 
     body_parts.append("\n## Guidance\n")
     body_parts.append(
@@ -401,6 +414,10 @@ def _build_pattern_payload(
     body_parts.append("- **Promotion**: auto-promoted by Phase 6.5\n")
     body_parts.append(f"- **Date**: {date_str}\n")
     body_parts.append(f"- **Evidence count**: {len(evidence_paths)} workflow learnings\n")
+
+    body_parts.append("\n## Related Notes\n")
+    for ep in evidence_paths[:3]:
+        body_parts.append(f"- [[{Path(ep).stem}]] — source learning\n")
 
     body = "\n".join(body_parts)
     path = f"20-agent-patterns/{date_str}-{slug}.md"

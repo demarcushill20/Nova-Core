@@ -149,7 +149,7 @@ class TestBuildPatternPayload:
             evidence_snippets=["found useful strategy"],
         )
         assert "found useful strategy" in payload["body"]
-        assert "30-workflow-learnings/a.md" in payload["body"]
+        assert "[[a]]" in payload["body"]
 
     def test_body_contains_auto_promoted_trace(self):
         payload = _build_pattern_payload(

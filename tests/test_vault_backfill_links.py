@@ -272,7 +272,9 @@ class TestBackfiller:
         # Verify vault_update was called
         update_calls = [(t, a) for t, a in mock.call_log if t == "vault_update"]
         assert len(update_calls) == 1
-        assert "## Related Notes" in update_calls[0][1]["content"]
+        assert update_calls[0][1]["section_heading"] == "## Related Notes"
+        body = update_calls[0][1]["section_body"]
+        assert "risk-research" in body or "risk-pattern" in body
 
     def test_rate_limit_tracking(self):
         """Rate limiter tracks write timestamps."""
