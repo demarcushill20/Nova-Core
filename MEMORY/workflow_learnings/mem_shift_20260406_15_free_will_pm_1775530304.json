@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_15_free_will_pm_1775530304",
+  "workflow_id": "shift_20260406_15_free_will_pm",
+  "task_summary": "Fixed 2 test regressions \u2014 metrics key assertions (2 lines) and warmup retry mock drift (full rewrite of 4 tests with 6 wrong class names, 10 missing mocks, 2 wrong counts). 113 tests pass across changed files.",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 2 test regressions \u2014 metrics key assertions (2 lines) and warmup retry mock drift (full rewrite of 4 tests with 6 wrong class names, 10 missing mocks, 2 wrong counts). 113 tests pass across changed files."
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 2 test regressions \u2014 metrics key assertions (2 lines) and warmup retry mock drift (full rewrite of 4 tests with 6 wrong class names, 10 missing mocks, 2 wrong counts). 113 tests pass across changed files.",
+  "created_at": "2026-04-07T02:51:44Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_15_free_will_pm_1775540721"
+}

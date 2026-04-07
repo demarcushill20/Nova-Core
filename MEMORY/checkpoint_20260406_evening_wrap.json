@@ -1,0 +1,41 @@
+{
+  "session_id": "session-2026-04-06-evening",
+  "timestamp": "2026-04-07T01:28:07Z",
+  "project": "nova-core",
+  "session_summary": "Full-day evening wrap: 16 shift blocks, 28+ commits, FTMO compliance 0%->100%, DrawdownProportionalRisk shipped, 12786 tests at 99.94% pass rate. System verified GREEN for Monday market open.",
+  "open_threads": [
+    "P0: MetaAPI region fix (london->new-york in /etc/novacore/novatrade.env)",
+    "P0: Session-aware spreads NOT enabled — required for accurate cost modeling",
+    "P0: Daily equity circuit breaker NOT implemented — #1 cause of FTMO failures",
+    "P0: Operator requested active_demo transition — pending config change",
+    "P1: Economic calendar integration (CPI, GDP, PMI, retail sales)",
+    "P1: News blackout enforcement (pre-event SL/TP widening)",
+    "P1: Firm-specific risk profiles for multi-firm support",
+    "P1: Order count tracker (FTMO monitors frequency)",
+    "P2: Finnhub API integration with cache layer",
+    "P2: 5 of 6 March 24 research recommendations still not done",
+    "Monitor: Watcher memory at 65% headroom",
+    "Monitor: Strategy health YELLOW 69/100 (ranging market)",
+    "Monitor: 3 skills tripped circuit breakers"
+  ],
+  "next_actions": [
+    "Fix MetaAPI region + verify price feeds",
+    "Enable session-aware spreads",
+    "Implement daily equity circuit breaker",
+    "Monitor strategy health at Monday market open",
+    "Continue economic calendar integration"
+  ],
+  "key_decisions": [
+    "FTMO compliance: 3-tier drawdown protection (70% warning + 80% buffer + 100% limit)",
+    "Risk sizing: Kelly-validated 0.0075 risk_fraction (down from 0.01)",
+    "DrawdownProportionalRisk: Zeno's Paradox adaptive scaling 0.75% -> 0.15% -> halt",
+    "85% of funded traders fail on risk management, not strategy — validates our architecture"
+  ],
+  "metrics": {
+    "commits": "28+",
+    "tests_total": 12786,
+    "tests_pass_rate": "99.94%",
+    "ftmo_compliance_tests": 270,
+    "new_lines_of_code": 5974
+  }
+}

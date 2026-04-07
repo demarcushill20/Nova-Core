@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_13_novatrade_research_1775526503",
+  "workflow_id": "shift_20260406_13_novatrade_research",
+  "task_summary": "Deep research on FTMO challenge survival rates, funded account retention patterns, failure taxonomy, drawdown mechanics, EA/algo constraints, scaling plan optimization, and complete risk engine configuration with ready-to-implement parameters",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Deep research on FTMO challenge survival rates, funded account retention patterns, failure taxonomy, drawdown mechanics, EA/algo constraints, scaling plan optimization, and complete risk engine configuration with ready-to-implement parameters"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Deep research on FTMO challenge survival rates, funded account retention patterns, failure taxonomy, drawdown mechanics, EA/algo constraints, scaling plan optimization, and complete risk engine configuration with ready-to-implement parameters",
+  "created_at": "2026-04-07T01:48:23Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_13_novatrade_research_1775542392"
+}

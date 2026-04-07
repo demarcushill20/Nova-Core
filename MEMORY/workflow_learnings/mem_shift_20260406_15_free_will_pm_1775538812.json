@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_15_free_will_pm_1775538812",
+  "workflow_id": "shift_20260406_15_free_will_pm",
+  "task_summary": "Added autouse conftest fixture to isolate self-healing state files from test pollution, preventing spurious REDUCED tier escalations that blocked research/planning features",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added autouse conftest fixture to isolate self-healing state files from test pollution, preventing spurious REDUCED tier escalations that blocked research/planning features"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added autouse conftest fixture to isolate self-healing state files from test pollution, preventing spurious REDUCED tier escalations that blocked research/planning features",
+  "created_at": "2026-04-07T05:13:32Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_15_free_will_pm_1775540721"
+}

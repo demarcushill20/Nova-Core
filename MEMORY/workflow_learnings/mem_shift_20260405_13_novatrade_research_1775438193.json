@@ -4,10 +4,12 @@
   "task_class": "research",
   "outcome": "success",
   "confidence": "high",
-  "summary": "Researched forex market microstructure, FTMO execution quality, and slippage reduction — identified 7 gaps in NovaTrade execution pipeline with prioritized roadmap",
+  "summary": "Researched forex market microstructure, FTMO execution quality, and slippage reduction \u2014 identified 7 gaps in NovaTrade execution pipeline with prioritized roadmap",
   "guidance": "NovaTrade has good execution guardrails (spread ceiling, rollover dead zone, news blackout, entry jitter) but lacks dynamic spread monitoring, live session filter activation, economic calendar feed, and post-news re-entry delay. Priority fixes: enable check_forex_session, extend FOMC blackout to 30min, add spread anomaly detection gate.",
   "artifacts": [
     "OUTPUT/shift_20260405_13_novatrade_research__20260406-011345.md",
     "40-research/novatrade-execution-optimization-microstructure.md (Obsidian)"
-  ]
+  ],
+  "promotion_status": "superseded",
+  "superseded_by": "unknown"
 }

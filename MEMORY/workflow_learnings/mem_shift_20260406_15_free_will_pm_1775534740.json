@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_15_free_will_pm_1775534740",
+  "workflow_id": "shift_20260406_15_free_will_pm",
+  "task_summary": "Extracted shared _mock_all_heartbeat_checks() helper to eliminate 90 lines of duplicated mock setup across 3 heartbeat tests \u2014 new checks now require updating 1 place instead of 3. 158 tests pass, 0 failures.",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Extracted shared _mock_all_heartbeat_checks() helper to eliminate 90 lines of duplicated mock setup across 3 heartbeat tests \u2014 new checks now require updating 1 place instead of 3. 158 tests pass, 0 failures."
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Extracted shared _mock_all_heartbeat_checks() helper to eliminate 90 lines of duplicated mock setup across 3 heartbeat tests \u2014 new checks now require updating 1 place instead of 3. 158 tests pass, 0 failures.",
+  "created_at": "2026-04-07T04:05:40Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_15_free_will_pm_1775540721"
+}

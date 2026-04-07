@@ -11,5 +11,7 @@
   ],
   "timestamp": "2026-04-07T00:36:09Z",
   "shift": "shift_20260406_13_novatrade_research",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "unknown"
 }

@@ -1,0 +1,23 @@
+{
+  "artifact_id": "mem_shift_20260406_13_novatrade_research_1775542392",
+  "workflow_id": "shift_20260406_13_novatrade_research",
+  "task_summary": "Deep research on regime detection upgrades (HMM, BOCPD, ATR percentile, equity curve filter, WFO, multi-timeframe alignment) with gap analysis against existing NovaTrade codebase and 9 prioritized actionable recommendations",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Deep research on regime detection upgrades (HMM, BOCPD, ATR percentile, equity curve filter, WFO, multi-timeframe alignment) with gap analysis against existing NovaTrade codebase and 9 prioritized actionable recommendations"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Deep research on regime detection upgrades (HMM, BOCPD, ATR percentile, equity curve filter, WFO, multi-timeframe alignment) with gap analysis against existing NovaTrade codebase and 9 prioritized actionable recommendations",
+  "created_at": "2026-04-07T06:13:12Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260406_13_novatrade_research_1775520882",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_13_novatrade_research_1775546088"
+}

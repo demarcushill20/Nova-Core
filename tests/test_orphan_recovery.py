@@ -71,7 +71,7 @@ class TestWatcherOrphanRecovery:
         with (
             patch("watcher.TASKS_DIR", tasks_dir),
             patch("watcher.OUTPUT_DIR", output_dir),
-            patch("watcher.increment_retry", return_value=FakeCheckpoint()),
+            patch("watcher.load_checkpoint", return_value=FakeCheckpoint()),
             patch("watcher.MAX_TASK_RETRIES", 3),
             patch("watcher._last_orphan_recovery_time", 0),
         ):
@@ -181,7 +181,7 @@ class TestWatcherOrphanRecovery:
         with (
             patch("watcher.TASKS_DIR", tasks_dir),
             patch("watcher.OUTPUT_DIR", output_dir),
-            patch("watcher.increment_retry", return_value=FakeCheckpoint()),
+            patch("watcher.load_checkpoint", return_value=FakeCheckpoint()),
             patch("watcher.clear_checkpoint"),
             patch("watcher.MAX_TASK_RETRIES", 3),
             patch("watcher._last_orphan_recovery_time", 0),
@@ -215,7 +215,7 @@ class TestWatcherOrphanRecovery:
         with (
             patch("watcher.TASKS_DIR", tasks_dir),
             patch("watcher.OUTPUT_DIR", output_dir),
-            patch("watcher.increment_retry", return_value=FakeCheckpoint()),
+            patch("watcher.load_checkpoint", return_value=FakeCheckpoint()),
             patch("watcher.MAX_TASK_RETRIES", 3),
             patch("watcher._last_orphan_recovery_time", 0),
         ):

@@ -10,6 +10,7 @@ graceful cancellation, and observability.
 """
 
 import asyncio
+import fcntl
 import json
 import logging
 import os
@@ -469,16 +470,20 @@ _session_mgr = SessionManager()
 # --- Logging setup ---
 logger = logging.getLogger("watcher")
 logger.setLevel(logging.INFO)
+logger.propagate = False  # Prevent duplication via root logger handlers
 
-formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+# Guard against duplicate handlers (e.g. when module is imported by
+# both the main watcher process and the test-gate pytest subprocess).
+if not logger.handlers:
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
-file_handler = logging.FileHandler(LOG_FILE)
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
+    file_handler = logging.FileHandler(LOG_FILE)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
 # --- Shutdown handling ---
 _running = True
@@ -1008,29 +1013,40 @@ def _original_stem(stem: str) -> str:
 def _update_metrics(event: str, tool_name: str | None = None):
     """Increment a counter in STATE/metrics.json.
 
+    Uses file locking to prevent lost-update race conditions when
+    multiple concurrent workers write simultaneously.
     Never throws, never blocks.  If the file is corrupt or missing,
     it resets to an empty dict and continues.
     """
+    lock_path = METRICS_FILE.with_suffix(".lock")
     try:
-        data: dict = {}
-        if METRICS_FILE.exists():
+        with open(lock_path, "w") as lock_fd:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
             try:
-                raw = METRICS_FILE.read_text(encoding="utf-8")
-                data = json.loads(raw)
-                if not isinstance(data, dict):
-                    data = {}
-            except (json.JSONDecodeError, ValueError, OSError):
-                data = {}
+                data: dict = {}
+                if METRICS_FILE.exists():
+                    try:
+                        raw = METRICS_FILE.read_text(encoding="utf-8")
+                        data = json.loads(raw)
+                        if not isinstance(data, dict):
+                            data = {}
+                    except (json.JSONDecodeError, ValueError, OSError):
+                        data = {}
 
-        if event not in data or not isinstance(data[event], dict):
-            data[event] = {"_total": 0}
+                if event not in data or not isinstance(data[event], dict):
+                    data[event] = {"_total": 0}
 
-        data[event]["_total"] = data[event].get("_total", 0) + 1
+                data[event]["_total"] = data[event].get("_total", 0) + 1
 
-        key = tool_name or "unknown"
-        data[event][key] = data[event].get(key, 0) + 1
+                key = tool_name or "unknown"
+                data[event][key] = data[event].get(key, 0) + 1
 
-        METRICS_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                # Atomic write: write to temp file then rename
+                tmp_path = METRICS_FILE.with_suffix(".tmp")
+                tmp_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                tmp_path.rename(METRICS_FILE)
+            finally:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
     except Exception:
         pass  # Never throw, never block
 
@@ -1119,10 +1135,15 @@ valid `## CONTRACT` block.
     return retry_path
 
 
-def verify_artifacts(stem: str) -> tuple[bool, list[str]]:
+def verify_artifacts(stem: str, *, update_metrics: bool = True) -> tuple[bool, list[str]]:
     """Check that required artifacts exist after execution.
 
     Returns (passed, list_of_messages).
+
+    Args:
+        stem: task stem to verify
+        update_metrics: if False, skip metrics updates (used for
+            reflexion re-verify to prevent double-counting)
     """
     messages: list[str] = []
     passed = True
@@ -1140,16 +1161,19 @@ def verify_artifacts(stem: str) -> tuple[bool, list[str]]:
         contract_ok, contract_msgs = _check_contract(output_file)
         messages.extend(contract_msgs)
         if contract_ok:
-            _update_metrics("contract_success", stem)
-            if _is_retry_task(stem):
-                _update_metrics("retry_success", stem)
+            if update_metrics:
+                _update_metrics("contract_success", stem)
+                if _is_retry_task(stem):
+                    # Use original stem so retry_success keys match retry_issued keys
+                    _update_metrics("retry_success", _original_stem(stem))
         else:
             passed = False
-            _update_metrics("contract_failure", stem)
-            if _is_retry_task(stem):
-                _update_metrics("retry_failed", stem)
-            # --- Retry logic: create ONE retry task if eligible ---
-            _maybe_create_retry(stem, output_file, contract_msgs)
+            if update_metrics:
+                _update_metrics("contract_failure", stem)
+                if _is_retry_task(stem):
+                    _update_metrics("retry_failed", _original_stem(stem))
+                # --- Retry logic: create ONE retry task if eligible ---
+                _maybe_create_retry(stem, output_file, contract_msgs)
 
     # 3. Task-specific: 0004 requires WORK/real_autonomy_confirmed.txt
     if stem.startswith("0004"):
@@ -2019,10 +2043,16 @@ async def _dispatch_inner(task_path: Path):
                 max_attempts=MAX_SUPERVISOR_ATTEMPTS,
             )
 
-            # Re-verify after reflexion retry
-            passed, messages = verify_artifacts(stem)
+            # Re-verify after reflexion retry — skip metrics to avoid
+            # double-counting (first verify already recorded failure)
+            passed, messages = verify_artifacts(stem, update_metrics=False)
             for msg in messages:
                 logger.info("VERIFY (post-reflexion): %s", msg)
+            # Record the reflexion outcome separately
+            if passed:
+                _update_metrics("reflexion_success", stem)
+            else:
+                _update_metrics("reflexion_failure", stem)
 
             slog.event(
                 "task.reflexion_complete",

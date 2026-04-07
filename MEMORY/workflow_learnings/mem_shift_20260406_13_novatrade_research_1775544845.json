@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_13_novatrade_research_1775544845",
+  "workflow_id": "shift_20260406_13_novatrade_research",
+  "task_summary": "Market microstructure research \u2014 validated NovaTrade session infrastructure against real-world spread/liquidity data, identified 6 optimization opportunities (enable session-aware spreads, extend rollover dead zone, add slippage buffer, day-of-week modifier, session-specific thresholds, economic calendar integration)",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Market microstructure research \u2014 validated NovaTrade session infrastructure against real-world spread/liquidity data, identified 6 optimization opportunities (enable session-aware spreads, extend rollover dead zone, add slippage buffer, day-of-week modifier, session-specific thresholds, economic calendar integration)"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Market microstructure research \u2014 validated NovaTrade session infrastructure against real-world spread/liquidity data, identified 6 optimization opportunities (enable session-aware spreads, extend rollover dead zone, add slippage buffer, day-of-week modifier, session-specific thresholds, economic calendar integration)",
+  "created_at": "2026-04-07T06:54:05Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_13_novatrade_research_1775546088"
+}

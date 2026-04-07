@@ -266,6 +266,40 @@ class EvolutionQueue:
         except Exception as e:
             logger.warning("Failed to save evolution queue: %s", e)
 
+    def _prune_expired_freezes(self) -> None:
+        """Remove circuit-breaker freezes whose timestamps have all expired.
+
+        Without this, frozen_skills persisted to disk would stay frozen
+        forever because _record_fix (which prunes timestamps) only runs
+        when a new fix is completed — and no fix can complete while all
+        items are frozen, creating a permanent deadlock.
+        """
+        now = time.time()
+        cutoff = now - CIRCUIT_BREAKER_WINDOW
+        unfrozen: list[str] = []
+
+        for skill_name in list(self._frozen_skills):
+            timestamps = self._fix_timestamps.get(skill_name, [])
+            # Prune expired timestamps
+            active = [ts for ts in timestamps if ts > cutoff]
+            if active:
+                self._fix_timestamps[skill_name] = active
+            else:
+                self._fix_timestamps.pop(skill_name, None)
+
+            # Unfreeze if remaining timestamps are below threshold
+            if len(active) < CIRCUIT_BREAKER_MAX_FIXES:
+                self._frozen_skills.discard(skill_name)
+                unfrozen.append(skill_name)
+
+        if unfrozen:
+            logger.info(
+                "Pruned expired circuit-breaker freezes: %d skills unfrozen (%s)",
+                len(unfrozen),
+                ", ".join(sorted(unfrozen)),
+            )
+            self._save_history()
+
     def _load_history(self) -> None:
         """Load anti-loop history from persistent storage."""
         try:
@@ -274,6 +308,7 @@ class EvolutionQueue:
                 self._fix_timestamps = {k: v for k, v in data.get("fix_timestamps", {}).items()}
                 self._frozen_skills = set(data.get("frozen_skills", []))
                 self._last_evolution = {k: v for k, v in data.get("last_evolution", {}).items()}
+                self._prune_expired_freezes()
         except Exception as e:
             logger.warning("Failed to load evolution history: %s", e)
 

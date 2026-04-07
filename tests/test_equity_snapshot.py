@@ -90,7 +90,9 @@ class TestEquitySnapshotStaleness:
         state_dir = tmp_path / "STATE" / "novatrade"
         state_dir.mkdir(parents=True)
 
-        recent_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        now = datetime.now(timezone.utc)
+        # Stay within the same clock-hour to avoid flaky hour-boundary crossings
+        recent_time = now.replace(minute=max(now.minute - 1, 0), second=0, microsecond=0).isoformat()
         eq_data = {
             "snapshots": [
                 {"equity": 100000.0, "timestamp": recent_time, "source": "live"},
@@ -111,7 +113,9 @@ class TestEquitySnapshotStaleness:
         state_dir = tmp_path / "STATE" / "novatrade"
         state_dir.mkdir(parents=True)
 
-        recent_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        now = datetime.now(timezone.utc)
+        # Stay within the same clock-hour to avoid flaky hour-boundary crossings
+        recent_time = now.replace(minute=max(now.minute - 1, 0), second=0, microsecond=0).isoformat()
         eq_data = {
             "snapshots": [
                 {"equity": 100000.0, "timestamp": recent_time, "source": "live"},

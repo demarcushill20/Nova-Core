@@ -1,0 +1,37 @@
+{
+  "session_id": "session-2026-04-06-evening-wrap-v2",
+  "timestamp": "2026-04-07T07:16:54Z",
+  "project": "nova-core",
+  "session_summary": "Definitive evening wrap for 2026-04-06. 16 shift blocks executed (1-5 morning, 9-16 afternoon/evening). 23 commits, 12,763+ tests at 99.94% pass rate. Major features: DrawdownProportionalRisk (Zeno's Paradox), FTMO compliance 0%->100%, degradation monitoring (126 tests), MetaApi retry/backoff, startup reliability 9%->90%+. Watcher log duplication fixed (handler dedup + propagation + test isolation). 7 deep research reports: regime detection, MT5 EA reliability, market microstructure, risk of ruin/Kelly Criterion, economic calendar, anti-overfitting, volatility management. System GREEN for Monday market open. Runner PID 2005863, FLAT at $100,200.62.",
+  "open_threads": [
+    "MetaAPI region fix (london -> new-york) — P0 blocker for live price feeds",
+    "active_demo mode transition — operator approved, config change pending",
+    "8 test failures — all test-fixture/stale-API, zero production impact",
+    "Finnhub economic calendar integration — researched, not implemented",
+    "HMM regime detection — researched, not implemented",
+    "FOK rejection retry logic — needed in MetaAPI adapter",
+    "Dead-man's switch / external watchdog — absent",
+    "Walk-forward optimization pipeline — designed, not built",
+    "Market microstructure optimizations — 6 opportunities identified",
+    "Evolution queue — deadlock fixed, 31 items dequeue-able, monitor processing"
+  ],
+  "next_actions": [
+    "P0: MetaAPI region fix (london -> new-york) — unblocks live trading",
+    "P0: Verify FTMO compliance on Monday market open",
+    "P1: Complete active_demo mode transition",
+    "P1: Implement Finnhub economic calendar (replaces static 26-event calendar)",
+    "P2: Fix 8 remaining test failures (test-fixture issues)",
+    "P2: Implement FOK rejection retry logic in MetaAPI adapter",
+    "P3: Begin HMM regime detection prototype",
+    "P3: Add HealthChecks.io dead-man's switch",
+    "P3: Implement session-aware spread model"
+  ],
+  "key_decisions": [
+    "Risk reduced 1.0% -> 0.75% (Kelly-validated) for FTMO challenge phase",
+    "DrawdownProportionalRisk (Zeno's Paradox) adopted for adaptive risk scaling",
+    "Research injection feature-gated OFF pending controlled re-enablement",
+    "Finnhub recommended as economic calendar API",
+    "Keltner Channel trailing stops recommended over ATR trailing",
+    "0.5% risk/trade for funded phase (70x safety margin over 1.0%)"
+  ]
+}

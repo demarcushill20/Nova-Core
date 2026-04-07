@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_13_novatrade_research_1775523366",
+  "workflow_id": "shift_20260406_13_novatrade_research",
+  "task_summary": "Deep research on FTMO execution optimization covering 12 sub-topics \u2014 timing, slippage, order types, platform infrastructure, failure pitfalls, spreads, 2026 rule changes, latency, multi-pair execution, exit optimization, weekend gaps, and scaling plan",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Deep research on FTMO execution optimization covering 12 sub-topics \u2014 timing, slippage, order types, platform infrastructure, failure pitfalls, spreads, 2026 rule changes, latency, multi-pair execution, exit optimization, weekend gaps, and scaling plan"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Deep research on FTMO execution optimization covering 12 sub-topics \u2014 timing, slippage, order types, platform infrastructure, failure pitfalls, spreads, 2026 rule changes, latency, multi-pair execution, exit optimization, weekend gaps, and scaling plan",
+  "created_at": "2026-04-07T00:56:06Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_13_novatrade_research_1775542392"
+}

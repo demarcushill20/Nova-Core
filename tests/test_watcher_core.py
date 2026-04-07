@@ -4,6 +4,7 @@ Covers: _task_stem, _find_recent_output, parse_frontmatter, _check_scheduled,
 get_pending_tasks, _check_contract, _quick_contract_check, _is_retry_task.
 """
 
+import json
 import os
 import tempfile
 import time
@@ -632,6 +633,106 @@ class TestReapStaleTasks(unittest.TestCase):
 
         reaped = watcher.reap_stale_tasks(force=True)
         self.assertEqual(reaped, [])
+
+
+class TestUpdateMetrics(unittest.TestCase):
+    """Tests for _update_metrics with file locking."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.orig_metrics = watcher.METRICS_FILE
+        watcher.METRICS_FILE = Path(self.tmpdir) / "metrics.json"
+
+    def tearDown(self):
+        watcher.METRICS_FILE = self.orig_metrics
+        import shutil
+
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_basic_increment(self):
+        """Single increment creates correct structure."""
+        watcher._update_metrics("contract_success", "task_001")
+        data = json.loads(watcher.METRICS_FILE.read_text())
+        self.assertEqual(data["contract_success"]["_total"], 1)
+        self.assertEqual(data["contract_success"]["task_001"], 1)
+
+    def test_multiple_increments(self):
+        """Multiple increments accumulate correctly."""
+        for _ in range(5):
+            watcher._update_metrics("contract_success", "task_002")
+        data = json.loads(watcher.METRICS_FILE.read_text())
+        self.assertEqual(data["contract_success"]["_total"], 5)
+        self.assertEqual(data["contract_success"]["task_002"], 5)
+
+    def test_concurrent_increments(self):
+        """Concurrent threads don't lose updates (locking test)."""
+        import threading
+
+        errors = []
+
+        def increment():
+            try:
+                for _ in range(50):
+                    watcher._update_metrics("test_event", "concurrent_task")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=increment) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [])
+        data = json.loads(watcher.METRICS_FILE.read_text())
+        # 4 threads × 50 increments = 200
+        self.assertEqual(data["test_event"]["_total"], 200)
+        self.assertEqual(data["test_event"]["concurrent_task"], 200)
+
+    def test_corrupt_file_recovery(self):
+        """Corrupt JSON file is handled gracefully."""
+        watcher.METRICS_FILE.write_text("NOT VALID JSON{{{")
+        watcher._update_metrics("recovery_test", "task_003")
+        data = json.loads(watcher.METRICS_FILE.read_text())
+        self.assertEqual(data["recovery_test"]["_total"], 1)
+
+    def test_multiple_events(self):
+        """Different events are tracked independently."""
+        watcher._update_metrics("contract_success", "task_004")
+        watcher._update_metrics("contract_failure", "task_005")
+        data = json.loads(watcher.METRICS_FILE.read_text())
+        self.assertEqual(data["contract_success"]["_total"], 1)
+        self.assertEqual(data["contract_failure"]["_total"], 1)
+
+
+class TestVerifyArtifactsMetricsFlag(unittest.TestCase):
+    """Tests for verify_artifacts update_metrics parameter."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.orig_output = watcher.OUTPUT_DIR
+        self.orig_metrics = watcher.METRICS_FILE
+        watcher.OUTPUT_DIR = Path(self.tmpdir)
+        watcher.METRICS_FILE = Path(self.tmpdir) / "metrics.json"
+
+    def tearDown(self):
+        watcher.OUTPUT_DIR = self.orig_output
+        watcher.METRICS_FILE = self.orig_metrics
+        import shutil
+
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_no_metrics_when_disabled(self):
+        """verify_artifacts with update_metrics=False skips metric writes."""
+        # Create a valid output file
+        output = Path(self.tmpdir) / "test_stem__20260407-010000.md"
+        output.write_text(
+            "# Test\n\n## CONTRACT\nsummary: test\nverification: done\nconfidence: high\nfiles_changed: none\n"
+        )
+
+        watcher.verify_artifacts("test_stem", update_metrics=False)
+        # Metrics file should not exist (no writes happened)
+        self.assertFalse(watcher.METRICS_FILE.exists())
 
 
 if __name__ == "__main__":

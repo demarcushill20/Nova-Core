@@ -1,0 +1,23 @@
+{
+  "artifact_id": "mem_shift_20260406_15_free_will_pm_1775540721",
+  "workflow_id": "shift_20260406_15_free_will_pm",
+  "task_summary": "Fixed permanent deadlock in skill evolution circuit breaker \u2014 expired freezes never pruned on load, blocking all 33 queued items for 7+ days",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed permanent deadlock in skill evolution circuit breaker \u2014 expired freezes never pruned on load, blocking all 33 queued items for 7+ days"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed permanent deadlock in skill evolution circuit breaker \u2014 expired freezes never pruned on load, blocking all 33 queued items for 7+ days",
+  "created_at": "2026-04-07T05:45:21Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260406_15_free_will_pm_1775525210",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_15_free_will_pm_1775549130"
+}

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_15_free_will_pm_1775545213",
+  "workflow_id": "shift_20260406_15_free_will_pm",
+  "task_summary": "Fixed watcher log duplication via handler dedup guard, propagation fix, and test log isolation fixture",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed watcher log duplication via handler dedup guard, propagation fix, and test log isolation fixture"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed watcher log duplication via handler dedup guard, propagation fix, and test log isolation fixture",
+  "created_at": "2026-04-07T07:00:13Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_15_free_will_pm_1775549130"
+}

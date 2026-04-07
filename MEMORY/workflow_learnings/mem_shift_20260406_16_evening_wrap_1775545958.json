@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_16_evening_wrap_1775545958",
+  "workflow_id": "shift_20260406_16_evening_wrap",
+  "task_summary": "Definitive evening wrap for 2026-04-06 \u2014 23 commits, 16 shift blocks, 8 research topics, system GREEN for Monday",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Definitive evening wrap for 2026-04-06 \u2014 23 commits, 16 shift blocks, 8 research topics, system GREEN for Monday"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_16_evening_wrap"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Definitive evening wrap for 2026-04-06 \u2014 23 commits, 16 shift blocks, 8 research topics, system GREEN for Monday",
+  "created_at": "2026-04-07T07:12:38Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_16_evening_wrap_1775546586"
+}

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_13_novatrade_research_1775524218",
+  "workflow_id": "shift_20260406_13_novatrade_research",
+  "task_summary": "Comprehensive prop firm landscape research comparing FTMO, FundedNext, The5%ers, and TopStep \u2014 rules, drawdown models, algo compliance, failure analysis, and strategic recommendations for NovaTrade",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Comprehensive prop firm landscape research comparing FTMO, FundedNext, The5%ers, and TopStep \u2014 rules, drawdown models, algo compliance, failure analysis, and strategic recommendations for NovaTrade"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Comprehensive prop firm landscape research comparing FTMO, FundedNext, The5%ers, and TopStep \u2014 rules, drawdown models, algo compliance, failure analysis, and strategic recommendations for NovaTrade",
+  "created_at": "2026-04-07T01:10:18Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_13_novatrade_research_1775542392"
+}

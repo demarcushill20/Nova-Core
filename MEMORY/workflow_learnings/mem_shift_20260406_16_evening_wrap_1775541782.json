@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_16_evening_wrap_1775541782",
+  "workflow_id": "shift_20260406_16_evening_wrap",
+  "task_summary": "Evening wrap summarizing 14 shift blocks \u2014 22 commits, 3 features, 6 bugs fixed, 4 research outputs, 99.94% test health, FTMO GREEN for Monday",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Evening wrap summarizing 14 shift blocks \u2014 22 commits, 3 features, 6 bugs fixed, 4 research outputs, 99.94% test health, FTMO GREEN for Monday"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_16_evening_wrap"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Evening wrap summarizing 14 shift blocks \u2014 22 commits, 3 features, 6 bugs fixed, 4 research outputs, 99.94% test health, FTMO GREEN for Monday",
+  "created_at": "2026-04-07T06:03:02Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_16_evening_wrap_1775542735"
+}

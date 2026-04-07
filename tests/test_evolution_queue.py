@@ -270,6 +270,7 @@ class TestQueuePersistence:
         req = _make_request()
         q.enqueue(req)
         dequeued = q.dequeue()
+        assert dequeued is not None
         q.complete_evolution(dequeued, success=True)
         assert (tmp_path / "evolution_history.json").exists()
 
@@ -321,6 +322,7 @@ class TestCircuitBreaker:
             )
             queue.enqueue(req)
             dequeued = queue.dequeue()
+            assert dequeued is not None
             queue.complete_evolution(dequeued, success=False)
             queue._last_evolution.pop(skill, None)
 
@@ -338,6 +340,7 @@ class TestCircuitBreaker:
         req = _make_request(skill_name=skill, evolution_type="FIX")
         queue.enqueue(req)
         dequeued = queue.dequeue()
+        assert dequeued is not None
         queue.complete_evolution(dequeued, success=False)
 
         # Old timestamps should be cleaned, only 1 recent fix
@@ -381,14 +384,50 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_persists_across_reload(self, tmp_path: Path) -> None:
         q1 = EvolutionQueue(state_dir=str(tmp_path))
+        now = time.time()
         with q1._lock:
             q1._frozen_skills.add("persisted-freeze")
-            q1._fix_timestamps["persisted-freeze"] = [time.time()]
+            # Must have >= CIRCUIT_BREAKER_MAX_FIXES recent timestamps
+            # to remain frozen after load-time pruning
+            q1._fix_timestamps["persisted-freeze"] = [now - 100, now - 50, now]
             q1._save_history()
 
         q2 = EvolutionQueue(state_dir=str(tmp_path))
         assert q2.is_frozen("persisted-freeze") is True
         assert "persisted-freeze" in q2._fix_timestamps
+
+    def test_expired_freezes_pruned_on_load(self, tmp_path: Path) -> None:
+        """Frozen skills with all timestamps outside the 24h window
+        must be unfrozen on reload — otherwise the pipeline deadlocks."""
+        q1 = EvolutionQueue(state_dir=str(tmp_path))
+        old_ts = time.time() - CIRCUIT_BREAKER_WINDOW - 3600  # 25h ago
+        with q1._lock:
+            q1._frozen_skills.add("stale-skill")
+            q1._fix_timestamps["stale-skill"] = [old_ts - 200, old_ts - 100, old_ts]
+            q1._save_history()
+
+        q2 = EvolutionQueue(state_dir=str(tmp_path))
+        assert q2.is_frozen("stale-skill") is False
+        assert "stale-skill" not in q2._fix_timestamps
+
+    def test_partial_expiry_keeps_freeze_if_still_above_threshold(self, tmp_path: Path) -> None:
+        """If some timestamps expired but enough remain, keep the freeze."""
+        q1 = EvolutionQueue(state_dir=str(tmp_path))
+        now = time.time()
+        old_ts = now - CIRCUIT_BREAKER_WINDOW - 3600  # expired
+        with q1._lock:
+            q1._frozen_skills.add("mixed-skill")
+            q1._fix_timestamps["mixed-skill"] = [
+                old_ts,  # expired
+                now - 100,  # active
+                now - 50,  # active
+                now,  # active
+            ]
+            q1._save_history()
+
+        q2 = EvolutionQueue(state_dir=str(tmp_path))
+        assert q2.is_frozen("mixed-skill") is True
+        assert len(q2._fix_timestamps["mixed-skill"]) == 3  # expired one pruned
 
     def test_get_frozen_skills(self, queue: EvolutionQueue) -> None:
         with queue._lock:
@@ -411,6 +450,7 @@ class TestCooldown:
         req = _make_request(skill_name="hot-skill")
         queue.enqueue(req)
         dequeued = queue.dequeue()
+        assert dequeued is not None
         queue.complete_evolution(dequeued, success=True)
 
         # Immediately try to enqueue again — should be in cooldown
@@ -425,6 +465,7 @@ class TestCooldown:
         req = _make_request(skill_name="cooled-skill")
         queue.enqueue(req)
         dequeued = queue.dequeue()
+        assert dequeued is not None
         queue.complete_evolution(dequeued, success=True)
 
         # Simulate cooldown expiry
@@ -471,6 +512,7 @@ class TestAuditTrail:
         req = _make_request(skill_name="audited-skill", task_id="task_audit")
         q.enqueue(req)
         dequeued = q.dequeue()
+        assert dequeued is not None
         q.complete_evolution(dequeued, success=True)
 
         audit_path = tmp_path / "evolution_audit.jsonl"
@@ -511,6 +553,7 @@ class TestAuditTrail:
         req = _make_request(attempt_count=2)
         q.enqueue(req)
         dequeued = q.dequeue()
+        assert dequeued is not None
         q.complete_evolution(dequeued, success=False)
 
         audit_path = tmp_path / "evolution_audit.jsonl"

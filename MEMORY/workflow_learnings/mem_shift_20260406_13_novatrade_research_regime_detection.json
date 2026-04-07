@@ -1,0 +1,24 @@
+{
+  "task_class": "research",
+  "shift_block": "shift_20260406_13_novatrade_research",
+  "timestamp": "2026-04-07T06:06:11Z",
+  "topic": "Regime Detection & Adaptive Parameter Tuning",
+  "outcome": "verified",
+  "confidence": "high",
+  "summary": "Researched 6 regime detection upgrades for NovaTrade: HMM-based latent state detection (2-5 bar latency vs 14-bar ATR), BOCPD for abrupt shifts, ATR percentile zones, regime-conditional parameter tables, equity curve trading filter, and automated circuit breaker tiers. All mapped against existing codebase (regime_detector.py, degradation_detector.py, risk_engine.py). Top quick wins: ATR percentile zones and regime-conditional params.",
+  "key_insights": [
+    "HMM reduces regime detection latency from 14 bars to 2-5 bars by outputting state probabilities instead of categorical labels",
+    "ATR percentile zones (vs raw ATR ratio) give 5-tier granularity with extreme zone auto-reducing risk to 0.5%",
+    "Equity curve filter is a leading indicator of CUSUM RED signals - catches degradation faster",
+    "Regime-conditional parameter tables give 80% of walk-forward optimization benefit with zero overfitting risk",
+    "BOCPD superior to CUSUM for detecting abrupt regime shifts (central bank events, liquidity shocks)"
+  ],
+  "actionable_items": [
+    "Add atr_percentile field to RegimeSnapshot in regime_detector.py",
+    "Create REGIME_PARAMS dict in config.py for per-regime parameter overrides",
+    "Implement equity_curve_filter.py with 20-trade MA and 10%/25% deviation thresholds",
+    "Add hmmlearn to requirements and create hmm_regime_detector.py",
+    "Wire automated circuit breaker tiers into risk_engine.py evaluate_portfolio_risk()"
+  ],
+  "supersedes": "unknown"
+}

@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Shipped all pending changes \u2014 committed 24 files (archived stale learnings, added new session memories, updated heartbeat/tests) and pushed 7 commits to origin/main",
   "created_at": "2026-04-07T00:27:11Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0724_Ok_lets__ship_1775522621"
 }

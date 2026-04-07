@@ -246,7 +246,7 @@ def test_retry_success_metric(tmp_path):
     assert passed is True
     data = json.loads(metrics.read_text(encoding="utf-8"))
     assert data["retry_success"]["_total"] == 1
-    assert data["retry_success"]["0041_broken__retry1"] == 1
+    assert data["retry_success"]["0041_broken"] == 1
     assert data["contract_success"]["_total"] == 1
 
 
@@ -272,7 +272,7 @@ def test_retry_failure_metric(tmp_path):
     assert passed is False
     data = json.loads(metrics.read_text(encoding="utf-8"))
     assert data["retry_failed"]["_total"] == 1
-    assert data["retry_failed"]["0041_broken__retry1"] == 1
+    assert data["retry_failed"]["0041_broken"] == 1
     assert data["contract_failure"]["_total"] == 1
     # No retry_issued because retry tasks don't chain
     assert "retry_issued" not in data

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_15_free_will_pm_1775525210",
+  "workflow_id": "shift_20260406_15_free_will_pm",
+  "task_summary": "Fixed heartbeat test 90s timeout by mocking memory_triggers.fire (prevents OTel/PostHog daemon threads), added missing mocks, fixed orphan recovery stale patch target \u2014 67 tests pass in <2s",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed heartbeat test 90s timeout by mocking memory_triggers.fire (prevents OTel/PostHog daemon threads), added missing mocks, fixed orphan recovery stale patch target \u2014 67 tests pass in <2s"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed heartbeat test 90s timeout by mocking memory_triggers.fire (prevents OTel/PostHog daemon threads), added missing mocks, fixed orphan recovery stale patch target \u2014 67 tests pass in <2s",
+  "created_at": "2026-04-07T01:26:50Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_15_free_will_pm_1775540721"
+}

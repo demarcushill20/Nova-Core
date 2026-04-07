@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_16_evening_wrap_1775544380",
+  "workflow_id": "shift_20260406_16_evening_wrap",
+  "task_summary": "Comprehensive evening wrap summarizing 16 shift blocks \u2014 28+ commits, 5 major features, 270/270 FTMO tests, system GREEN for Monday market open",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Comprehensive evening wrap summarizing 16 shift blocks \u2014 28+ commits, 5 major features, 270/270 FTMO tests, system GREEN for Monday market open"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_16_evening_wrap"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Comprehensive evening wrap summarizing 16 shift blocks \u2014 28+ commits, 5 major features, 270/270 FTMO tests, system GREEN for Monday market open",
+  "created_at": "2026-04-07T06:46:20Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_16_evening_wrap_1775546586"
+}

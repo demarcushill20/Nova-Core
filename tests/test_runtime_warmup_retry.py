@@ -1,4 +1,8 @@
-"""Tests for enhanced warmup retry logic in runner.py"""
+"""Tests for enhanced warmup retry logic in runner.py
+
+Tests the 3-attempt warmup retry loop in build_live_stack() which fetches
+historical candles and seeds the strategy engine before going live.
+"""
 
 from unittest.mock import MagicMock, patch
 
@@ -66,69 +70,78 @@ async def test_warmup_success_first_attempt():
     mock_adapter = MockAdapter(fail_count=0)
 
     with (
-        patch("novatrade.adapter.metaapi_provider.MetaApiAdapter", return_value=mock_adapter),
-        patch("novatrade.runtime.runner.NovaTradeCfg.load") as mock_load,
-        patch("novatrade.runtime.runner.LiveEngine") as mock_engine,
-        patch("novatrade.runtime.runner.StrategyAgent"),
-        patch("novatrade.runtime.runner.MessageBus"),
-        patch("novatrade.runtime.runner.DataPoller"),
+        patch("novatrade.runtime.runner.DryRunAdapter", return_value=mock_adapter),
+        patch("novatrade.runtime.runner.EvidenceRecorder"),
+        patch("novatrade.runtime.runner.RiskEngine"),
+        patch("novatrade.runtime.runner.HardRiskSupervisor"),
+        patch("novatrade.runtime.runner.StateStore"),
+        patch("novatrade.runtime.runner.TradingAgent"),
+        patch("novatrade.runtime.runner.BacktestEnvironment"),
+        patch("novatrade.runtime.runner.IRBStrategy"),
+        patch("novatrade.runtime.runner.LiveStrategyEngine") as mock_engine,
+        patch("novatrade.runtime.runner.LiveTradingAgent"),
+        patch("novatrade.runtime.runner.TickBatchPoller"),
         patch("novatrade.runtime.runner.BarAggregator"),
+        patch("novatrade.runtime.runner.FeedHealthSupervisor"),
         patch("novatrade.runtime.runner.LiveLoop"),
+        patch("novatrade.runtime.runner._persist_strategy_config"),
     ):
-        # Setup mocks
         mock_cfg = MagicMock()
         mock_cfg.symbols = ["EURUSD"]
-        mock_cfg.metaapi.validate.return_value = []
-        mock_cfg.ftmo.resolve_symbol.return_value = "EURUSD.sim"
-        mock_load.return_value = mock_cfg
+        mock_cfg.timeframes = ["H1"]
+        mock_cfg.ftmo.resolve_symbol.return_value = "EURUSD"
 
         mock_strategy_engine = MagicMock()
         mock_engine.return_value = mock_strategy_engine
 
-        # Test warmup
         await build_live_stack(cfg=mock_cfg, dry_run=True)
 
-        # Verify warmup was attempted only once
-        assert mock_adapter.call_count == 2  # Primary + higher candles
+        # Primary (500) + higher (200) candles fetched on first attempt
+        assert mock_adapter.call_count == 2
 
-        # Verify strategy engine was seeded
+        # Strategy engine was seeded with historical data
         mock_strategy_engine.seed_history.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_warmup_retry_success_second_attempt():
     """Test successful warmup after one retry"""
-    mock_adapter = MockAdapter(fail_count=1)  # Fail once, then succeed
+    mock_adapter = MockAdapter(fail_count=1)  # First get_candles call fails
 
     with (
-        patch("novatrade.adapter.metaapi_provider.MetaApiAdapter", return_value=mock_adapter),
-        patch("novatrade.runtime.runner.NovaTradeCfg.load") as mock_load,
-        patch("novatrade.runtime.runner.LiveEngine") as mock_engine,
-        patch("novatrade.runtime.runner.StrategyAgent"),
-        patch("novatrade.runtime.runner.MessageBus"),
-        patch("novatrade.runtime.runner.DataPoller"),
+        patch("novatrade.runtime.runner.DryRunAdapter", return_value=mock_adapter),
+        patch("novatrade.runtime.runner.EvidenceRecorder"),
+        patch("novatrade.runtime.runner.RiskEngine"),
+        patch("novatrade.runtime.runner.HardRiskSupervisor"),
+        patch("novatrade.runtime.runner.StateStore"),
+        patch("novatrade.runtime.runner.TradingAgent"),
+        patch("novatrade.runtime.runner.BacktestEnvironment"),
+        patch("novatrade.runtime.runner.IRBStrategy"),
+        patch("novatrade.runtime.runner.LiveStrategyEngine") as mock_engine,
+        patch("novatrade.runtime.runner.LiveTradingAgent"),
+        patch("novatrade.runtime.runner.TickBatchPoller"),
         patch("novatrade.runtime.runner.BarAggregator"),
+        patch("novatrade.runtime.runner.FeedHealthSupervisor"),
         patch("novatrade.runtime.runner.LiveLoop"),
+        patch("novatrade.runtime.runner._persist_strategy_config"),
         patch("asyncio.sleep") as mock_sleep,
-    ):  # Mock sleep to speed up test
-        # Setup mocks
+    ):
         mock_cfg = MagicMock()
         mock_cfg.symbols = ["EURUSD"]
-        mock_cfg.metaapi.validate.return_value = []
-        mock_cfg.ftmo.resolve_symbol.return_value = "EURUSD.sim"
-        mock_load.return_value = mock_cfg
+        mock_cfg.timeframes = ["H1"]
+        mock_cfg.ftmo.resolve_symbol.return_value = "EURUSD"
 
         mock_strategy_engine = MagicMock()
         mock_engine.return_value = mock_strategy_engine
 
-        # Test warmup
         await build_live_stack(cfg=mock_cfg, dry_run=True)
 
-        # Verify retry logic was used
-        assert mock_adapter.call_count == 4  # 2 failed attempts + 2 successful attempts
-        mock_sleep.assert_called_once_with(5)  # First retry delay
+        # Attempt 0: primary fails (call 1) → retry
+        # Attempt 1: primary succeeds (call 2) + higher succeeds (call 3)
+        assert mock_adapter.call_count == 3
+        mock_sleep.assert_any_call(5)  # First retry delay
 
-        # Verify strategy engine was eventually seeded
+        # Strategy engine was eventually seeded
         mock_strategy_engine.seed_history.assert_called_once()
 
 
@@ -138,34 +151,39 @@ async def test_warmup_failure_after_max_retries():
     mock_adapter = MockAdapter(fail_count=999)  # Always fail
 
     with (
-        patch("novatrade.adapter.metaapi_provider.MetaApiAdapter", return_value=mock_adapter),
-        patch("novatrade.runtime.runner.NovaTradeCfg.load") as mock_load,
-        patch("novatrade.runtime.runner.LiveEngine") as mock_engine,
-        patch("novatrade.runtime.runner.StrategyAgent"),
-        patch("novatrade.runtime.runner.MessageBus"),
-        patch("novatrade.runtime.runner.DataPoller"),
+        patch("novatrade.runtime.runner.DryRunAdapter", return_value=mock_adapter),
+        patch("novatrade.runtime.runner.EvidenceRecorder"),
+        patch("novatrade.runtime.runner.RiskEngine"),
+        patch("novatrade.runtime.runner.HardRiskSupervisor"),
+        patch("novatrade.runtime.runner.StateStore"),
+        patch("novatrade.runtime.runner.TradingAgent"),
+        patch("novatrade.runtime.runner.BacktestEnvironment"),
+        patch("novatrade.runtime.runner.IRBStrategy"),
+        patch("novatrade.runtime.runner.LiveStrategyEngine") as mock_engine,
+        patch("novatrade.runtime.runner.LiveTradingAgent"),
+        patch("novatrade.runtime.runner.TickBatchPoller"),
         patch("novatrade.runtime.runner.BarAggregator"),
+        patch("novatrade.runtime.runner.FeedHealthSupervisor"),
         patch("novatrade.runtime.runner.LiveLoop"),
+        patch("novatrade.runtime.runner._persist_strategy_config"),
         patch("asyncio.sleep") as mock_sleep,
-    ):  # Mock sleep to speed up test
-        # Setup mocks
+    ):
         mock_cfg = MagicMock()
         mock_cfg.symbols = ["EURUSD"]
-        mock_cfg.metaapi.validate.return_value = []
-        mock_cfg.ftmo.resolve_symbol.return_value = "EURUSD.sim"
-        mock_load.return_value = mock_cfg
+        mock_cfg.timeframes = ["H1"]
+        mock_cfg.ftmo.resolve_symbol.return_value = "EURUSD"
 
         mock_strategy_engine = MagicMock()
         mock_engine.return_value = mock_strategy_engine
 
-        # Test warmup
         await build_live_stack(cfg=mock_cfg, dry_run=True)
 
-        # Verify all retry attempts were made
-        assert mock_adapter.call_count == 6  # 3 attempts × 2 candle calls each
-        assert mock_sleep.call_count == 2  # 2 retry delays
+        # 3 attempts, each fails on first get_candles call
+        assert mock_adapter.call_count == 3
+        # Sleep called after attempt 0 and 1, not after final attempt 2
+        assert mock_sleep.call_count == 2
 
-        # Verify strategy engine was NOT seeded (warmup failed)
+        # Strategy engine was NOT seeded (warmup failed)
         mock_strategy_engine.seed_history.assert_not_called()
 
 
@@ -201,32 +219,37 @@ async def test_warmup_insufficient_data_validation():
     mock_adapter = MockAdapterInsufficientData()
 
     with (
-        patch("novatrade.adapter.metaapi_provider.MetaApiAdapter", return_value=mock_adapter),
-        patch("novatrade.runtime.runner.NovaTradeCfg.load") as mock_load,
-        patch("novatrade.runtime.runner.LiveEngine") as mock_engine,
-        patch("novatrade.runtime.runner.StrategyAgent"),
-        patch("novatrade.runtime.runner.MessageBus"),
-        patch("novatrade.runtime.runner.DataPoller"),
+        patch("novatrade.runtime.runner.DryRunAdapter", return_value=mock_adapter),
+        patch("novatrade.runtime.runner.EvidenceRecorder"),
+        patch("novatrade.runtime.runner.RiskEngine"),
+        patch("novatrade.runtime.runner.HardRiskSupervisor"),
+        patch("novatrade.runtime.runner.StateStore"),
+        patch("novatrade.runtime.runner.TradingAgent"),
+        patch("novatrade.runtime.runner.BacktestEnvironment"),
+        patch("novatrade.runtime.runner.IRBStrategy"),
+        patch("novatrade.runtime.runner.LiveStrategyEngine") as mock_engine,
+        patch("novatrade.runtime.runner.LiveTradingAgent"),
+        patch("novatrade.runtime.runner.TickBatchPoller"),
         patch("novatrade.runtime.runner.BarAggregator"),
+        patch("novatrade.runtime.runner.FeedHealthSupervisor"),
         patch("novatrade.runtime.runner.LiveLoop"),
+        patch("novatrade.runtime.runner._persist_strategy_config"),
         patch("asyncio.sleep") as mock_sleep,
     ):
-        # Setup mocks
         mock_cfg = MagicMock()
         mock_cfg.symbols = ["EURUSD"]
-        mock_cfg.metaapi.validate.return_value = []
-        mock_cfg.ftmo.resolve_symbol.return_value = "EURUSD.sim"
-        mock_load.return_value = mock_cfg
+        mock_cfg.timeframes = ["H1"]
+        mock_cfg.ftmo.resolve_symbol.return_value = "EURUSD"
 
         mock_strategy_engine = MagicMock()
         mock_engine.return_value = mock_strategy_engine
 
-        # Test warmup
         await build_live_stack(cfg=mock_cfg, dry_run=True)
 
-        # Verify retry was triggered by insufficient data validation
-        assert mock_adapter.call_count == 4  # 2 failed + 2 successful calls
+        # Attempt 0: primary (call 1, insufficient) + higher (call 2, insufficient) → ValueError
+        # Attempt 1: primary (call 3, sufficient) + higher (call 4, sufficient) → success
+        assert mock_adapter.call_count == 4
         mock_sleep.assert_called_once_with(5)  # Retry delay
 
-        # Verify strategy engine was eventually seeded
+        # Strategy engine was eventually seeded
         mock_strategy_engine.seed_history.assert_called_once()

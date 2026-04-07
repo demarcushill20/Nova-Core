@@ -1,0 +1,49 @@
+{
+  "timestamp": "2026-04-07T00:48:26Z",
+  "session_context": "shift_20260406_13_novatrade_research",
+  "task_class": "research",
+  "outcome": "success",
+  "confidence": "high",
+  "summary": "Deep research on FTMO execution optimization covering 12 sub-topics: timing, slippage, order types, platform infrastructure, failure pitfalls, spreads, 2026 rule changes, latency, multi-pair execution, exit optimization, weekend gaps, and scaling plan",
+  "key_findings": [
+    "FTMO injects 200ms execution delay on all orders \u2014 must account for in backtests",
+    "Best Day Rule (NEW 2026): single day profit cannot exceed 50% of total positive days' profit",
+    "Weekend gaps occur ~20% of weekends; EUR/USD worst case 150 pips; close by Friday 19:00 UTC",
+    "FTMO scaling: 25% balance increase per 4-month cycle, 10% profit + 2 payouts required, upgrades to 90% split",
+    "At $200K+ accounts, split orders into 2-3 sub-orders to reduce market impact",
+    "EUR/USD-GBP/USD correlation +75-90: reduce combined size by 30%+ when >0.70",
+    "News restriction on funded accounts: 2-min blackout around NFP/CPI/FOMC",
+    "Time limit now UNLIMITED for challenges (was 30/60 days)",
+    "1-Step Challenge option: 10% target, 3% recalculating daily loss",
+    "ATR(14) x 0.8 trailing for intraday, x 1.5 for swing; 50/50 partial close at 3R",
+    "Max 2000 server requests/day for EAs (target <500)",
+    "FTMO acquired OANDA \u2014 expect shift toward real-market execution",
+    "Challenge pass rate only 8-10%; true payout rate ~1.6-2%",
+    "All-in EURUSD cost ~0.7 pips (0.4 spread + $3/lot commission)"
+  ],
+  "implementation_priorities": {
+    "P0_pre_live": [
+      "Best Day Rule compliance tracker",
+      "News calendar integration",
+      "Friday auto-close",
+      "Daily loss circuit breaker at 4%"
+    ],
+    "P1_before_scaling": [
+      "Spread monitor",
+      "Correlation-adjusted sizing",
+      "Session-restricted trading",
+      "Slippage tracking"
+    ],
+    "P2_scaling": [
+      "ATR trailing stops",
+      "Order splitting at $200K+",
+      "Pair restriction scaling"
+    ]
+  },
+  "guidance": "FTMO execution optimization research with 12 actionable implementation recommendations for NovaTrade automated trading system",
+  "output_file": "OUTPUT/shift_20260406_13_novatrade_research__20260407-004826.md",
+  "vault_note": "40-research/ftmo-execution-optimization-2026.md",
+  "promotion_status": "superseded",
+  "superseded_by": "unknown",
+  "supersedes": "unknown"
+}

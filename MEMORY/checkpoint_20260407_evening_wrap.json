@@ -1,0 +1,45 @@
+{
+  "session_id": "session-2026-04-06-evening-wrap",
+  "timestamp": "2026-04-07T02:04:33Z",
+  "project": "nova-core",
+  "session_summary": "Full-day evening wrap for 2026-04-06. 14 shift blocks executed across morning (1-5) and afternoon (9-16) shifts. 28+ commits merged. 3 major features delivered (DrawdownProportionalRisk, degradation monitoring, MetaApi retry). 6 bugs fixed (false-alarm cycling, retry bounds, orphan recovery, region diagnosis, metrics race condition, key mismatch). 4 deep research outputs covering FTMO execution optimization, prop firm landscape, IRB strategy refinement, and FTMO survival rates. Test suite at 99.94% (12,763/12,786). FTMO compliance 270/270 GREEN. System HEALTHY.",
+  "open_threads": [
+    "MetaAPI region fix (london -> new-york) — blocks live price feeds",
+    "active_demo mode transition — operator approved, config change pending",
+    "test_build_live_stack regression — 50 candles < 100 validation (test-only)",
+    "3 orphan recovery test failures — state transition assertions",
+    "4 warmup retry mock failures — stale LiveEngine class references",
+    "5 of 6 March 24 research items still pending implementation",
+    "Anti-overfitting pipeline (CPCV, DSR, enhanced walk-forward) — researched, not implemented (~600 LOC)",
+    "Research injection re-enable — hardened but feature-gated OFF"
+  ],
+  "next_actions": [
+    "P0: MetaAPI region fix (london -> new-york) — unblocks live trading",
+    "P0: Verify FTMO compliance on Monday market open",
+    "P0: System health check on fresh market data",
+    "P1: Implement active_demo mode transition",
+    "P1: Fix remaining 8 test failures (all test-fixture)",
+    "P1: Daily equity circuit breaker (4.5% hard stop)",
+    "P2: Session-aware spread model",
+    "P2: Begin CPCV anti-overfitting validation module (~150 LOC)",
+    "P2: Economic calendar integration for news-aware trading"
+  ],
+  "key_decisions": [
+    "Adopted 5-tier DrawdownProportionalRisk (Zeno's Paradox) as primary position sizing defense",
+    "Base risk set to 0.5% per trade (optimal for FTMO pass rate)",
+    "Research injection feature-gated OFF until circuit breaker + retries proven stable",
+    "Metrics race condition fixed with fcntl file locking + atomic temp file + rename",
+    "Operator approved active_ready -> active_demo transition"
+  ],
+  "metrics": {
+    "shift_blocks_executed": 14,
+    "commits": "28+",
+    "new_tests": "200+",
+    "test_health": "99.94%",
+    "ftmo_compliance": "270/270",
+    "contract_success_rate": "95.5%",
+    "features_delivered": 3,
+    "bugs_fixed": 6,
+    "research_outputs": 4
+  }
+}

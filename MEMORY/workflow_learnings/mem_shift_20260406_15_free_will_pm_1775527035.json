@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_15_free_will_pm_1775527035",
+  "workflow_id": "shift_20260406_15_free_will_pm",
+  "task_summary": "Fixed metrics race condition (fcntl locking), double-counting (reflexion re-verify skips metrics), and key mismatch (retry stems normalized) \u2014 reconciled corrupted data, added 6 tests, 117 pass",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed metrics race condition (fcntl locking), double-counting (reflexion re-verify skips metrics), and key mismatch (retry stems normalized) \u2014 reconciled corrupted data, added 6 tests, 117 pass"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed metrics race condition (fcntl locking), double-counting (reflexion re-verify skips metrics), and key mismatch (retry stems normalized) \u2014 reconciled corrupted data, added 6 tests, 117 pass",
+  "created_at": "2026-04-07T01:57:15Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_15_free_will_pm_1775540721"
+}

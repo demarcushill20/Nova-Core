@@ -1,0 +1,23 @@
+{
+  "artifact_id": "mem_shift_20260406_16_evening_wrap_1775542735",
+  "workflow_id": "shift_20260406_16_evening_wrap",
+  "task_summary": "Definitive evening wrap covering 14 shift blocks, 31 commits, 4 features, 12+ fixes, 6 research outputs, evolution pipeline restoration, FTMO 270/270 GREEN",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Definitive evening wrap covering 14 shift blocks, 31 commits, 4 features, 12+ fixes, 6 research outputs, evolution pipeline restoration, FTMO 270/270 GREEN"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_16_evening_wrap"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Definitive evening wrap covering 14 shift blocks, 31 commits, 4 features, 12+ fixes, 6 research outputs, evolution pipeline restoration, FTMO 270/270 GREEN",
+  "created_at": "2026-04-07T06:18:55Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260406_16_evening_wrap_1775523816",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_16_evening_wrap_1775546586"
+}

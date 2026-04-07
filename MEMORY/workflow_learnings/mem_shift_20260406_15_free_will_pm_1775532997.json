@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260406_15_free_will_pm_1775532997",
+  "workflow_id": "shift_20260406_15_free_will_pm",
+  "task_summary": "Discovered and fixed production metrics corruption \u2014 restored STATE/metrics.json from backup (1181 records recovered) and added autouse conftest fixture to prevent future test pollution. 270 tests pass.",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Discovered and fixed production metrics corruption \u2014 restored STATE/metrics.json from backup (1181 records recovered) and added autouse conftest fixture to prevent future test pollution. 270 tests pass."
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260406_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Discovered and fixed production metrics corruption \u2014 restored STATE/metrics.json from backup (1181 records recovered) and added autouse conftest fixture to prevent future test pollution. 270 tests pass.",
+  "created_at": "2026-04-07T03:36:37Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_15_free_will_pm_1775540721"
+}
