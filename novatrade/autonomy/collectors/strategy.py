@@ -267,47 +267,66 @@ class StrategyCollector(BaseCollector):
         return score, float(count)
 
     def _check_silent_failure(self) -> tuple[float, float]:
-        """Detect silent failure: market hours + no signals for 4+ hours.
+        """Detect silent failure with regime-aware thresholds.
 
-        Uses strategy-specific data (trade_journal.jsonl, signal_log.json)
-        instead of generic OUTPUT/ file activity.
+        Uses persisted regime classification and session leniency to adjust
+        silence thresholds instead of a flat 4-hour check.  During ranging/quiet
+        regimes or low-activity sessions, longer silence is expected and scored
+        accordingly.
         """
         now = datetime.now(timezone.utc)
 
-        # Simple market hours check (Mon-Fri, 07:00-21:00 UTC covers London+NY)
+        # Weekend — no trading expected
         if now.weekday() >= 5:
-            # Weekend — no trading expected
             return 85.0, 0.0
 
-        if now.hour < 7 or now.hour >= 21:
-            # Off-hours
+        # Load regime from persisted state (written by live_loop health monitor)
+        regime = self._load_current_regime()
+
+        # Import regime thresholds and session detection
+        from novatrade.monitor.signal_monitor import (
+            REGIME_MULTIPLIERS,
+            SESSION_LENIENCY,
+            get_session,
+        )
+
+        session = get_session(now)
+        if session == "weekend":
             return 85.0, 0.0
 
-        # During market hours — check strategy-specific signal freshness
-        cutoff_4h = time.time() - 4 * 3600
+        thresholds = REGIME_MULTIPLIERS.get(regime, REGIME_MULTIPLIERS["ranging"])
+        leniency = SESSION_LENIENCY.get(session, 1.0)
+
+        # Apply session leniency to stale thresholds (wider during Asian)
+        stale_red_hours = thresholds["stale_red_hours"] / max(leniency, 0.1)
+
+        # Check signal_stats.json first (most current if live runtime is persisting)
+        signal_rate = self._load_signal_stats_rate()
+        if signal_rate > 0:
+            return 100.0, 0.0
+
+        # Fallback: check trade_journal.jsonl and signal_log.json
+        cutoff_red = time.time() - stale_red_hours * 3600
 
         # 1. Check trade_journal.jsonl for recent trade events
         trades = self._load_trade_log()
-        recent_trades = [t for t in trades if t.get("timestamp", 0) >= cutoff_4h]
+        recent_trades = [t for t in trades if t.get("timestamp", 0) >= cutoff_red]
         if recent_trades:
-            return 100.0, 0.0  # trades in last 4h — definitely not silent
+            return 100.0, 0.0  # trades within regime-aware window
 
         # 2. Check signal_log.json for recent signals
         signals = self._load_signal_log()
-        recent_signals = 0
-        for s in signals:
-            ts = s.get("timestamp", 0)
-            if ts >= cutoff_4h:
-                recent_signals += 1
-            elif s.get("type") == "aggregate" and s.get("count", 0) > 0:
-                # Aggregate entries from live_metrics fallback
-                recent_signals += s.get("count", 0)
-
+        recent_signals = sum(1 for s in signals if s.get("timestamp", 0) >= cutoff_red)
         if recent_signals > 0:
-            return 100.0, 0.0  # signals in last 4h — not silent
+            return 100.0, 0.0  # signals within regime-aware window
 
-        # No strategy-specific activity during market hours → silent failure
-        return 0.0, 4.0  # raw_value = hours of silence
+        # 3. Check pipeline liveness — ticks/bars flowing = strategy waiting, not crashed
+        live_metrics = self._load_live_metrics()
+        if live_metrics and live_metrics.get("ticks", 0) > 0:
+            return 40.0, stale_red_hours  # pipeline alive, strategy just has no setups
+
+        # No activity beyond regime-aware threshold → silent failure
+        return 0.0, stale_red_hours
 
     def _check_backtest_alignment(self) -> tuple[float, float]:
         """Check backtest vs live performance alignment.
@@ -587,6 +606,33 @@ class StrategyCollector(BaseCollector):
             return int(data.get("signals_1h", 0))
         except (json.JSONDecodeError, OSError, ValueError, TypeError):
             return 0
+
+    def _load_current_regime(self) -> str:
+        """Load current regime from STATE/novatrade/regime.json."""
+        path = Path(self.base_path) / "STATE" / "novatrade" / "regime.json"
+        if not path.exists():
+            return "ranging"
+        try:
+            age_min = (time.time() - path.stat().st_mtime) / 60.0
+            if age_min > 30:  # stale regime — fall back to default
+                return "ranging"
+            data = json.loads(path.read_text())
+            return data.get("regime", "ranging")
+        except (json.JSONDecodeError, OSError):
+            return "ranging"
+
+    def _load_live_metrics(self) -> dict | None:
+        """Load live_metrics.json for pipeline liveness check."""
+        path = Path(self.base_path) / "STATE" / "novatrade" / "live_metrics.json"
+        if not path.exists():
+            return None
+        try:
+            age_min = (time.time() - path.stat().st_mtime) / 60.0
+            if age_min > 10:
+                return None
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
 
     def _check_signal_pipeline_health(self) -> tuple[float, float]:
         """Check if the signal pipeline components are operational.

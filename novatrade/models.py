@@ -72,6 +72,8 @@ class HealthState(Enum):
 # Order models
 # ---------------------------------------------------------------------------
 
+VOLUME_AUTO_SIZE: float = -1.0  # sentinel: let risk engine calculate volume
+
 
 @dataclass
 class OrderRequest:
@@ -91,8 +93,8 @@ class OrderRequest:
     max_slippage_pips: float | None = None  # per-order slippage override (None = use config default)
 
     def __post_init__(self) -> None:
-        if self.volume <= 0:
-            raise ValueError(f"volume must be positive, got {self.volume}")
+        if self.volume <= 0 and self.volume != VOLUME_AUTO_SIZE:
+            raise ValueError(f"volume must be positive or VOLUME_AUTO_SIZE, got {self.volume}")
         if self.order_type in (OrderType.LIMIT, OrderType.STOP) and self.price is None:
             raise ValueError(f"{self.order_type.value} orders require a price")
 

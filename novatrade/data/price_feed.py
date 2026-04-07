@@ -45,7 +45,7 @@ class TickBatchPoller:
         self,
         adapter: MT5Adapter,
         symbols: list[str],
-        interval: float = 2.0,
+        interval: float = 5.0,
         broker_map: dict[str, str] | None = None,
     ) -> None:
         if interval <= 0:
@@ -63,7 +63,7 @@ class TickBatchPoller:
         self.polls: int = 0
         self.errors: int = 0
         self._consecutive_errors: int = 0
-        self._CONSECUTIVE_ERROR_THRESHOLD: int = 10  # trigger resub after N errors
+        self._CONSECUTIVE_ERROR_THRESHOLD: int = 5  # trigger resub after N errors
 
     @property
     def running(self) -> bool:
@@ -143,7 +143,7 @@ class TickBatchPoller:
 
                         # Rate-limit backoff: sleep until recommended retry time
                         if "TooManyRequests" in type(exc).__name__:
-                            backoff = min(30 * self._consecutive_errors, 300)
+                            backoff = min(5 * (2 ** (self._consecutive_errors - 1)), 120)
                             log.warning(
                                 "Rate limited polling %s — backing off %ds (consecutive=%d)",
                                 symbol,

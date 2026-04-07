@@ -157,7 +157,7 @@ class PositionSizer:
         if calculated <= 0:
             return False, f"calculated volume is {calculated} (non-positive)"
         if requested <= 0:
-            return False, f"requested volume is {requested} (non-positive)"
+            return True, f"volume auto-sized: using calculated={calculated:.2f}"
 
         # Under-sizing is always safe (conservative risk)
         if requested <= calculated:

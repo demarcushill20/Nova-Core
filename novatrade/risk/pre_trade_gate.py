@@ -788,6 +788,15 @@ class PreTradeGate:
                 detail=f"sizing calculation failed: {exc} — skipped",
             )
 
+        if request.volume <= 0:
+            # Auto-size: use risk-calculated volume instead of rejecting
+            request.volume = calculated
+            return RiskCheckResult(
+                name="volume_sizing",
+                passed=True,
+                detail=f"volume auto-sized to {calculated:.2f} lots",
+            )
+
         ok, reason = self._sizer.validate(
             requested=request.volume,
             calculated=calculated,

@@ -64,8 +64,19 @@ class TestOrderRequest:
                 symbol="EURUSD",
                 side=OrderSide.BUY,
                 order_type=OrderType.MARKET,
-                volume=-1.0,
+                volume=-2.0,
             )
+
+    def test_auto_size_sentinel_accepted(self):
+        from novatrade.models import VOLUME_AUTO_SIZE
+
+        req = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=VOLUME_AUTO_SIZE,
+        )
+        assert req.volume == VOLUME_AUTO_SIZE
 
     def test_limit_without_price_rejected(self):
         with pytest.raises(ValueError, match="LIMIT orders require a price"):

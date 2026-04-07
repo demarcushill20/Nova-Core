@@ -285,8 +285,9 @@ def validate_alert(payload: dict) -> tuple[str | None, str]:
             return "entry_price must be a positive number", ""
         if not isinstance(payload.get("stop_loss"), (int, float)) or payload["stop_loss"] <= 0:
             return "stop_loss must be a positive number", ""
-        if not isinstance(payload.get("volume"), (int, float)) or payload["volume"] <= 0:
-            return "volume must be a positive number", ""
+        if "volume" in payload and not isinstance(payload["volume"], (int, float)):
+            return "volume must be a number", ""
+        # volume <= 0 or missing is allowed — triggers auto-sizing in PreTradeGate
         ot = payload.get("order_type")
         if ot not in ("BUY_STOP", "SELL_STOP"):
             return f"invalid order_type: {ot!r}", ""
@@ -629,12 +630,17 @@ class TradingAgent:
                     exc,
                 )
 
-        # Build OrderRequest
+        # Build OrderRequest — auto-size if volume is missing or zero
+        from novatrade.models import VOLUME_AUTO_SIZE
+
+        raw_volume = payload.get("volume", 0)
+        order_volume = VOLUME_AUTO_SIZE if (not raw_volume or raw_volume <= 0) else raw_volume
+
         order_req = OrderRequest(
             symbol=broker_symbol,
             side=side,
             order_type=OrderType.STOP,
-            volume=payload["volume"],
+            volume=order_volume,
             price=payload["entry_price"],
             stop_loss=payload["stop_loss"],
             idempotency_key=idem_key,

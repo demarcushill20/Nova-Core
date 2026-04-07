@@ -466,6 +466,11 @@ class LiveStrategyEngine:
             "position_bars_held": self._position.bars_held if self._position else None,
         }
 
+    @property
+    def h1_candles(self) -> list[Candle]:
+        """Read-only access to the H1 candle buffer for regime classification."""
+        return list(self._h1_candles)
+
     # ------------------------------------------------------------------
     # Internal: entry evaluation
     # ------------------------------------------------------------------
