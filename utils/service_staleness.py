@@ -234,6 +234,28 @@ class RestartResult:
     detail: str
 
 
+def _watcher_has_active_tasks() -> bool:
+    """Check if the watcher has active worker tasks (PID files in STATE/running/).
+
+    Returns True if any PID file in STATE/running/ corresponds to a live process,
+    meaning the watcher is actively executing tasks and should not be restarted.
+    """
+    running_dir = BASE / "STATE" / "running"
+    if not running_dir.is_dir():
+        return False
+    for pid_file in running_dir.glob("*.pid"):
+        try:
+            pid = int(pid_file.read_text().strip())
+            # Check if process is alive (signal 0 = existence check)
+            import os
+
+            os.kill(pid, 0)
+            return True
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            continue
+    return False
+
+
 def restart_service(service: str) -> RestartResult:
     """Restart a systemd service.  Returns RestartResult.
 
@@ -243,6 +265,14 @@ def restart_service(service: str) -> RestartResult:
     """
     if service not in SERVICE_CODE_PATHS:
         return RestartResult(service, False, f"unknown service: {service}")
+
+    # Guard: don't restart the watcher while it has active tasks
+    if service == "novacore-watcher" and _watcher_has_active_tasks():
+        return RestartResult(
+            service,
+            False,
+            "deferred — watcher has active tasks (PID files in STATE/running/)",
+        )
 
     try:
         result = subprocess.run(

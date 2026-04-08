@@ -179,7 +179,7 @@ class TestAccountMode:
             [],
         )
         assert not decision.denied
-        passed = {c.name for c in decision.passed_checks}
+        passed = {c.name for c in decision.checks if c.passed}
         assert "account_mode" in passed
 
 
@@ -820,13 +820,9 @@ class TestSpreadVsAvg:
             return fake_now
 
         # Low max_spread_pips so feed stays HEALTHY despite the test spreads
-        supervisor = FeedHealthSupervisor(
-            FeedHealthConfig(max_spread_pips=50.0), clock=clock
-        )
+        supervisor = FeedHealthSupervisor(FeedHealthConfig(max_spread_pips=50.0), clock=clock)
         for sp in spreads_pips:
-            supervisor.on_tick(
-                Tick(symbol="EURUSD", bid=1.10000, ask=1.10000 + sp * 0.0001, timestamp=fake_now)
-            )
+            supervisor.on_tick(Tick(symbol="EURUSD", bid=1.10000, ask=1.10000 + sp * 0.0001, timestamp=fake_now))
         return supervisor
 
     def test_no_price_skips(self):

@@ -14,6 +14,7 @@ from utils.service_staleness import (
     _get_latest_commit_time,
     _get_service_start_time,
     _is_service_active,
+    _watcher_has_active_tasks,
     check_all_staleness,
     check_staleness,
     restart_service,
@@ -368,6 +369,68 @@ class TestRestartStaleServices:
 # ---------------------------------------------------------------------------
 # RestartResult dataclass
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _watcher_has_active_tasks
+# ---------------------------------------------------------------------------
+
+
+class TestWatcherActiveTaskGuard:
+    """Guard that prevents watcher restart when tasks are in-flight."""
+
+    def test_no_running_dir(self, tmp_path):
+        with patch("utils.service_staleness.BASE", tmp_path):
+            assert _watcher_has_active_tasks() is False
+
+    def test_empty_running_dir(self, tmp_path):
+        (tmp_path / "STATE" / "running").mkdir(parents=True)
+        with patch("utils.service_staleness.BASE", tmp_path):
+            assert _watcher_has_active_tasks() is False
+
+    def test_pid_file_with_dead_process(self, tmp_path):
+        running_dir = tmp_path / "STATE" / "running"
+        running_dir.mkdir(parents=True)
+        (running_dir / "test_task.pid").write_text("999999999")  # unlikely PID
+        with patch("utils.service_staleness.BASE", tmp_path):
+            assert _watcher_has_active_tasks() is False
+
+    def test_pid_file_with_live_process(self, tmp_path):
+        import os
+
+        running_dir = tmp_path / "STATE" / "running"
+        running_dir.mkdir(parents=True)
+        (running_dir / "test_task.pid").write_text(str(os.getpid()))
+        with patch("utils.service_staleness.BASE", tmp_path):
+            assert _watcher_has_active_tasks() is True
+
+    def test_restart_deferred_when_active_tasks(self):
+        with patch("utils.service_staleness._watcher_has_active_tasks", return_value=True):
+            result = restart_service("novacore-watcher")
+            assert result.success is False
+            assert "deferred" in result.detail
+            assert "active tasks" in result.detail
+
+    def test_restart_proceeds_when_no_active_tasks(self):
+        with (
+            patch("utils.service_staleness._watcher_has_active_tasks", return_value=False),
+            patch("subprocess.run") as mock_run,
+            patch("utils.service_staleness._is_service_active", return_value=True),
+        ):
+            mock_run.return_value = _mock_run(returncode=0)
+            result = restart_service("novacore-watcher")
+            assert result.success is True
+
+    def test_guard_only_applies_to_watcher(self):
+        """Other services should not be affected by the active-task guard."""
+        with (
+            patch("utils.service_staleness._watcher_has_active_tasks", return_value=True),
+            patch("subprocess.run") as mock_run,
+            patch("utils.service_staleness._is_service_active", return_value=True),
+        ):
+            mock_run.return_value = _mock_run(returncode=0)
+            result = restart_service("novacore-novatrade")
+            assert result.success is True
 
 
 class TestRestartResult:

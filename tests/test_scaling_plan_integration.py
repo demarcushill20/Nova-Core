@@ -90,6 +90,8 @@ class TestScalingPlanIntegration:
                 scaling_config.cycle_length_months = 4
                 scaling_config.target_profit_pct = 10.0
                 scaling_config.timezone = "Europe/Prague"
+                scaling_config.notification_cooldown_seconds = 3600
+                scaling_config.equity_change_threshold = 10.0
                 scaling_config.enable_calendar_events = True
                 scaling_config.reminder_days_before = [30, 14, 7, 3, 1]
                 scaling_config.auto_submit_scaling = False
@@ -178,6 +180,8 @@ class TestScalingPlanIntegration:
                 scaling_config.cycle_length_months = 4
                 scaling_config.target_profit_pct = 10.0
                 scaling_config.timezone = "Europe/Prague"
+                scaling_config.notification_cooldown_seconds = 3600
+                scaling_config.equity_change_threshold = 10.0
 
                 profit_config = mock_profit_config.return_value
                 profit_config.state_file_path = self.profit_state_file
@@ -364,6 +368,8 @@ class TestScalingPlanIntegration:
                 scaling_config.cycle_length_months = 4
                 scaling_config.target_profit_pct = 10.0
                 scaling_config.timezone = "Europe/Prague"
+                scaling_config.notification_cooldown_seconds = 3600
+                scaling_config.equity_change_threshold = 10.0
 
                 profit_config = mock_profit_config.return_value
                 profit_config.state_file_path = self.profit_state_file
@@ -462,6 +468,8 @@ class TestScalingPlanIntegration:
                 scaling_config.cycle_length_months = 4
                 scaling_config.target_profit_pct = 10.0
                 scaling_config.timezone = "Europe/Prague"
+                scaling_config.notification_cooldown_seconds = 3600
+                scaling_config.equity_change_threshold = 10.0
 
                 profit_config = mock_profit_config.return_value
                 profit_config.state_file_path = self.profit_state_file

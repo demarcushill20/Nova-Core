@@ -347,6 +347,7 @@ class TestScalingPlanCalendar:
         """Test scaling application submission process."""
         self.setUp()
         try:
+            self.config.auto_submit_scaling = True
             calendar = ScalingPlanCalendar(self.config)
 
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
@@ -435,7 +436,7 @@ class TestScalingPlanCalendar:
             start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
             calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
 
-            # Track equity progression
+            # Track equity progression (values differ by > $10 threshold)
             equity_updates = [102000, 105000, 108000, 106000, 111000, 109000]
 
             for equity in equity_updates:
@@ -453,3 +454,54 @@ class TestScalingPlanCalendar:
             assert cycle.current_profit_pct == 9.0  # 9% profit at current equity
         finally:
             self.tearDown()
+
+    def test_equity_change_threshold_skips_small_changes(self):
+        """Test that equity updates below the threshold are skipped."""
+        self.setUp()
+        try:
+            self.config.equity_change_threshold = 50.0  # $50 threshold
+            calendar = ScalingPlanCalendar(self.config)
+
+            start_date = datetime(2026, 4, 1, tzinfo=ZoneInfo("Europe/Prague"))
+            calendar.initialize_cycle(starting_equity=100000.0, cycle_start_date=start_date)
+
+            # First update: 102000 — processes (no previous processed equity)
+            calendar.update_equity(102000.0)
+            cycle = calendar.get_current_cycle()
+            assert cycle.current_equity == 102000.0
+
+            # Second update: 102010 — skipped (only $10 change, below $50 threshold)
+            calendar.update_equity(102010.0)
+            cycle = calendar.get_current_cycle()
+            assert cycle.current_equity == 102000.0  # Still at previous value
+
+            # Third update: 102100 — processes ($100 change from last processed)
+            calendar.update_equity(102100.0)
+            cycle = calendar.get_current_cycle()
+            assert cycle.current_equity == 102100.0
+        finally:
+            self.tearDown()
+
+    def test_notification_rate_limiting(self):
+        """Test that notification rate-limiter suppresses duplicate sends."""
+        from unittest.mock import patch
+
+        from novatrade.risk.scaling_plan_calendar import _notification_rate_limiter, _send_scaling_notification
+
+        # Clear rate limiter state
+        _notification_rate_limiter.clear()
+
+        with (
+            patch("novatrade.risk.scaling_plan_calendar.os.environ.get", return_value="test"),
+            patch("novatrade.risk.scaling_plan_calendar.urllib.request.urlopen") as mock_urlopen,
+        ):
+            # First call should go through
+            _send_scaling_notification("Test message for dedup", cooldown_seconds=3600)
+            assert mock_urlopen.call_count == 1
+
+            # Second identical call should be suppressed
+            _send_scaling_notification("Test message for dedup", cooldown_seconds=3600)
+            assert mock_urlopen.call_count == 1  # Still 1, not 2
+
+        # Clean up
+        _notification_rate_limiter.clear()

@@ -85,6 +85,13 @@ Nova-Memory is the primary cross-session memory system. It persists across all C
 - Ephemeral task state (use TASKS/ for that)
 - Raw file contents (store summaries/insights instead)
 
+## Skill Creation Policy
+
+- **Never auto-create skills during autonomous workflows.** Skills should only be created when the operator explicitly requests it (e.g., "turn this into a skill", "create a skill for X").
+- Do not capture patterns, workflow learnings, or debugging techniques as new skills unless asked.
+- Store reusable patterns in Fusion Memory or Obsidian vault notes instead — skills are heavyweight and add per-message token overhead.
+- If a pattern seems genuinely worth promoting to a skill, note it in the session checkpoint for the operator to decide later.
+
 ## Runbook
 
 ```bash

@@ -15,6 +15,7 @@ Key Features:
 import json
 import logging
 import os
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -28,8 +29,27 @@ from dateutil.relativedelta import relativedelta
 log = logging.getLogger(__name__)
 
 
-def _send_scaling_notification(text: str) -> None:
-    """Send FTMO scaling notification via Telegram using NovaCore infrastructure."""
+_notification_rate_limiter: dict[str, float] = {}  # message_key -> monotonic timestamp
+
+
+def _send_scaling_notification(text: str, cooldown_seconds: int = 3600) -> None:
+    """Send FTMO scaling notification via Telegram using NovaCore infrastructure.
+
+    Rate-limited: identical message keys are suppressed within cooldown_seconds.
+    """
+    # Never send real notifications during test runs
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("NOVATRADE_TESTING"):
+        log.debug(f"Scaling notification suppressed (test env): {text[:80]}")
+        return
+
+    # Rate-limit by first 60 chars of text to deduplicate near-identical messages
+    message_key = text[:60]
+    now = time.monotonic()
+    last_sent = _notification_rate_limiter.get(message_key, 0.0)
+    if now - last_sent < cooldown_seconds:
+        log.debug(f"Scaling notification suppressed (rate-limited): {text[:80]}")
+        return
+
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("ALLOWED_CHAT_ID", "")
     if not token or not chat_id:
@@ -44,6 +64,7 @@ def _send_scaling_notification(text: str) -> None:
     try:
         req = urllib.request.Request(url, data=data, method="POST")  # noqa: S310
         urllib.request.urlopen(req, timeout=15)  # noqa: S310
+        _notification_rate_limiter[message_key] = now
         log.info(f"Scaling notification sent: {text}")
     except Exception as e:
         log.error(f"Failed to send scaling notification: {e}")
@@ -128,9 +149,13 @@ class ScalingPlanConfig:
     auto_submit_scaling: bool = False  # Requires manual approval for now
     notification_enabled: bool = True
 
-    # State persistence
-    state_file_path: str = "/tmp/novatrade_scaling_plan_state.json"  # noqa: S108
+    # State persistence — use persistent STATE/ dir, not volatile /tmp
+    state_file_path: str = str(Path.home() / "nova-core" / "STATE" / "novatrade" / "scaling_plan_state.json")
     auto_save: bool = True
+
+    # Notification rate-limiting
+    notification_cooldown_seconds: int = 3600  # 1 hour between same-type notifications
+    equity_change_threshold: float = 10.0  # Min equity change ($) to trigger processing
 
 
 class ScalingPlanCalendar:
@@ -156,6 +181,8 @@ class ScalingPlanCalendar:
         self.config = config or ScalingPlanConfig()
         self._current_cycle: ScalingCycle | None = None
         self._state_loaded = False
+        self._last_notification_ts: dict[str, float] = {}  # type -> monotonic timestamp
+        self._last_processed_equity: float | None = None
         self._load_state()
 
     def initialize_cycle(self, starting_equity: float, cycle_start_date: datetime | None = None) -> ScalingCycle:
@@ -168,6 +195,18 @@ class ScalingPlanCalendar:
         Returns:
             Newly created scaling cycle
         """
+        # Guard: never overwrite an existing active/eligible/submitted cycle
+        if self._current_cycle and self._current_cycle.cycle_status in (
+            "active",
+            "scaling_eligible",
+            "scaling_submitted",
+        ):
+            log.info(
+                f"Skipping cycle init — existing cycle {self._current_cycle.cycle_id} "
+                f"is {self._current_cycle.cycle_status}"
+            )
+            return self._current_cycle
+
         if cycle_start_date is None:
             tz = ZoneInfo(self.config.timezone)
             cycle_start_date = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -221,20 +260,33 @@ class ScalingPlanCalendar:
             log.warning("No active scaling cycle - cannot update equity")
             return
 
+        # Skip processing if equity hasn't changed meaningfully
+        if (
+            self._last_processed_equity is not None
+            and abs(current_equity - self._last_processed_equity) < self.config.equity_change_threshold
+        ):
+            return
+
+        self._last_processed_equity = current_equity
+
         # Update equity tracking
         previous_equity = self._current_cycle.current_equity
         self._current_cycle.current_equity = current_equity
         self._current_cycle.peak_equity = max(self._current_cycle.peak_equity, current_equity)
 
-        # Check for scaling eligibility transition
-        was_eligible = (
-            previous_equity - self._current_cycle.starting_equity
-        ) >= self._current_cycle.target_profit_amount
-        is_eligible = self._current_cycle.is_scaling_eligible
+        # Check for scaling eligibility transition — only if not already notified
+        if self._current_cycle.scaling_eligible_date is None and self._current_cycle.cycle_status not in (
+            "scaling_eligible",
+            "scaling_submitted",
+            "completed",
+        ):
+            was_eligible = (
+                previous_equity - self._current_cycle.starting_equity
+            ) >= self._current_cycle.target_profit_amount
+            is_eligible = self._current_cycle.is_scaling_eligible
 
-        if is_eligible and not was_eligible:
-            # Just became scaling eligible!
-            self._handle_scaling_eligible()
+            if is_eligible and not was_eligible:
+                self._handle_scaling_eligible()
 
         # Update cycle status
         self._update_cycle_status()
@@ -319,6 +371,14 @@ class ScalingPlanCalendar:
         """
         if not self._current_cycle or not self._current_cycle.is_scaling_eligible:
             log.warning("Cannot submit scaling - cycle not eligible")
+            return False
+
+        # Safety: require explicit auto_submit_scaling=True or manual invocation
+        if not self.config.auto_submit_scaling:
+            log.warning(
+                "Scaling submission blocked — auto_submit_scaling is False. "
+                "Operator must submit manually or set auto_submit_scaling=True."
+            )
             return False
 
         # Enhanced FTMO scaling submission process with proper logging and validation
@@ -436,8 +496,19 @@ class ScalingPlanCalendar:
         log.info(f"Generated {len(events)} calendar events for cycle {cycle.cycle_id}")
 
     def _handle_scaling_eligible(self) -> None:
-        """Handle transition to scaling eligible status."""
+        """Handle transition to scaling eligible status.
+
+        Guards against duplicate notifications — only fires once per cycle.
+        """
         if not self._current_cycle:
+            return
+
+        # Guard: already notified for this cycle — do not fire again
+        if self._current_cycle.scaling_eligible_date is not None:
+            return
+
+        # Guard: already submitted — don't regress status
+        if self._current_cycle.scaling_submitted_date is not None:
             return
 
         # Record scaling eligibility

@@ -1058,6 +1058,44 @@ _HIGH_IMPACT_EVENTS: list[dict] = [
             "2026-10-29",
         ],
     },
+    {
+        "name": "US_CPI",
+        "time_utc": "13:30",
+        "currency": "USD",
+        "dates": [
+            "2026-01-14",  # Jan (released mid-Jan for Dec data)
+            "2026-02-12",  # Feb (released mid-Feb for Jan data)
+            "2026-03-11",  # Mar (released mid-Mar for Feb data)
+            "2026-04-10",  # Apr (released mid-Apr for Mar data)
+            "2026-05-13",  # May (released mid-May for Apr data)
+            "2026-06-10",  # Jun (released mid-Jun for May data)
+            "2026-07-16",  # Jul (released mid-Jul for Jun data)
+            "2026-08-12",  # Aug (released mid-Aug for Jul data)
+            "2026-09-11",  # Sep (released mid-Sep for Aug data)
+            "2026-10-14",  # Oct (released mid-Oct for Sep data)
+            "2026-11-12",  # Nov (released mid-Nov for Oct data)
+            "2026-12-10",  # Dec (released mid-Dec for Nov data)
+        ],
+    },
+    {
+        "name": "EUR_CPI",
+        "time_utc": "10:00",
+        "currency": "EUR",
+        "dates": [
+            "2026-01-31",  # Jan (released end-Jan for Dec data)
+            "2026-02-28",  # Feb (released end-Feb for Jan data)
+            "2026-03-31",  # Mar (released end-Mar for Feb data)
+            "2026-04-30",  # Apr (released end-Apr for Mar data)
+            "2026-05-29",  # May (released end-May for Apr data)
+            "2026-06-30",  # Jun (released end-Jun for May data)
+            "2026-07-31",  # Jul (released end-Jul for Jun data)
+            "2026-08-31",  # Aug (released end-Aug for Jul data)
+            "2026-09-30",  # Sep (released end-Sep for Aug data)
+            "2026-10-30",  # Oct (released end-Oct for Sep data)
+            "2026-11-30",  # Nov (released end-Nov for Oct data)
+            "2026-12-31",  # Dec (released end-Dec for Nov data)
+        ],
+    },
 ]
 
 

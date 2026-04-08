@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # Module-level reference for testability — patch this, not time.time,
 # to avoid poisoning the global time module during tests.
@@ -1101,13 +1101,39 @@ class PreTradeGate:
             ),
         )
 
+    def _get_london_fix_window_utc(self, utc_dt: datetime) -> tuple[int, int, int, int]:
+        """Calculate DST-aware London Fix window in UTC.
+
+        The London Fix occurs at 4pm London time (15:57:30-16:02:30 window).
+        We use a conservative ±15 minute window around 4pm London.
+
+        BST (late Mar–late Oct): 4pm London = 15:00 UTC → window 14:45–15:15 UTC
+        GMT (late Oct–late Mar): 4pm London = 16:00 UTC → window 15:45–16:15 UTC
+
+        Returns:
+            (start_hour, start_minute, end_hour, end_minute) in UTC
+        """
+        london_tz = ZoneInfo("Europe/London")
+
+        # Get 4pm London time for the current date
+        london_date = utc_dt.astimezone(london_tz).date()
+        london_4pm = datetime.combine(london_date, datetime.min.time().replace(hour=16), tzinfo=london_tz)
+
+        # Convert to UTC to see the offset
+        utc_4pm = london_4pm.astimezone(timezone.utc)
+
+        # Calculate 15-minute window around the UTC equivalent of 4pm London using timedelta
+        start_utc = utc_4pm - timedelta(minutes=15)
+        end_utc = utc_4pm + timedelta(minutes=15)
+
+        return start_utc.hour, start_utc.minute, end_utc.hour, end_utc.minute
+
     def _check_london_fix(self, now: float) -> RiskCheckResult:
         """Deny trading during the London 4PM Fix window.
 
-        The London Fix (15:45-16:15 UTC) is when benchmark FX rates are set.
-        Spreads widen, volatility spikes, and FTMO may flag trading during
-        this period as suspicious EA behavior targeting fix-related price
-        movements.
+        The London Fix window is DST-aware: 14:45-15:15 UTC during BST,
+        15:45-16:15 UTC during GMT. Spreads widen, volatility spikes, and
+        FTMO may flag trading during this period as suspicious EA behavior.
         """
         if not self._risk.london_fix_avoidance_enabled:
             return RiskCheckResult(
@@ -1118,17 +1144,20 @@ class PreTradeGate:
 
         utc_dt = datetime.fromtimestamp(now, tz=timezone.utc)
         current_minutes = utc_dt.hour * 60 + utc_dt.minute
-        start_minutes = self._risk.london_fix_start_hour_utc * 60 + self._risk.london_fix_start_minute_utc
-        end_minutes = self._risk.london_fix_end_hour_utc * 60 + self._risk.london_fix_end_minute_utc
+
+        # Get DST-aware London Fix window
+        start_hour, start_minute, end_hour, end_minute = self._get_london_fix_window_utc(utc_dt)
+        start_minutes = start_hour * 60 + start_minute
+        end_minutes = end_hour * 60 + end_minute
 
         if start_minutes <= current_minutes < end_minutes:
             return RiskCheckResult(
                 name="london_fix",
                 passed=False,
                 detail=(
-                    f"in London Fix window "
-                    f"({self._risk.london_fix_start_hour_utc:02d}:{self._risk.london_fix_start_minute_utc:02d}"
-                    f"-{self._risk.london_fix_end_hour_utc:02d}:{self._risk.london_fix_end_minute_utc:02d} UTC), "
+                    f"in DST-aware London Fix window "
+                    f"({start_hour:02d}:{start_minute:02d}"
+                    f"-{end_hour:02d}:{end_minute:02d} UTC), "
                     f"current={utc_dt.hour:02d}:{utc_dt.minute:02d} UTC"
                 ),
             )
@@ -1136,9 +1165,9 @@ class PreTradeGate:
             name="london_fix",
             passed=True,
             detail=(
-                f"outside London Fix window "
-                f"({self._risk.london_fix_start_hour_utc:02d}:{self._risk.london_fix_start_minute_utc:02d}"
-                f"-{self._risk.london_fix_end_hour_utc:02d}:{self._risk.london_fix_end_minute_utc:02d} UTC), "
+                f"outside DST-aware London Fix window "
+                f"({start_hour:02d}:{start_minute:02d}"
+                f"-{end_hour:02d}:{end_minute:02d} UTC), "
                 f"current={utc_dt.hour:02d}:{utc_dt.minute:02d} UTC"
             ),
         )
@@ -1363,8 +1392,8 @@ class PreTradeGate:
             )
             log.info(f"Started new profit cushion cycle: equity=${starting_equity:,.2f}")
 
-            # Also initialize scaling calendar for the same cycle
-            if self._scaling_calendar:
+            # Also initialize scaling calendar for the same cycle (only if no active cycle)
+            if self._scaling_calendar and not self._scaling_calendar.get_current_cycle():
                 self._scaling_calendar.initialize_cycle(
                     starting_equity=starting_equity, cycle_start_date=cycle_start_date
                 )

@@ -202,7 +202,7 @@ def _adapter_type_name(adapter: MT5Adapter) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_stack(
+async def build_stack(
     cfg: NovaTradeCfg | None = None,
     *,
     mode: LaunchMode | None = None,
@@ -241,6 +241,13 @@ def build_stack(
     # --- Adapter ---
     adapter = _create_adapter(cfg, mode)
     is_dry_run = isinstance(adapter, DryRunAdapter)
+
+    # Connect non-dry-run adapters (e.g. MetaApiAdapter)
+    if not is_dry_run:
+        status = await adapter.connect()
+        if not status.connected:
+            raise RuntimeError(f"Adapter connection failed: {status.message}")
+        log.info("build_stack: adapter connected")
 
     # For active adapter modes, cfg.dry_run must be False to allow orders
     # through the pre-trade gate. For dry-run, the DryRunAdapter is the
@@ -314,7 +321,7 @@ def build_stack(
         risk_engine_halted=risk_engine.halted,
         agent_initialized=True,
         monitor_initialized=True,
-        adapter_connected=is_dry_run,  # DryRunAdapter is always "connected"
+        adapter_connected=True,  # DryRunAdapter always "connected"; MetaApiAdapter connected above
         adapter_type=_adapter_type_name(adapter),
     )
 
@@ -391,6 +398,51 @@ def _persist_strategy_config(
 
 
 # ---------------------------------------------------------------------------
+# Live preflight validation
+# ---------------------------------------------------------------------------
+
+
+def _validate_live_preflight(
+    cfg: NovaTradeCfg,
+    *,
+    shadow: bool,
+    dry_run: bool,
+) -> None:
+    """Lightweight preflight validation for the live pipeline.
+
+    Unlike the full launch gate (designed for webhook/TradingView pipeline),
+    this checks only what matters for Python-native trading:
+    symbols, risk config, adapter credentials, and FTMO profile.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not cfg.symbols:
+        errors.append("No trading symbols configured")
+
+    risk_errors = cfg.risk.validate()
+    errors.extend(risk_errors)
+
+    if not cfg.data_dir:
+        errors.append("data_dir is not set")
+
+    if not dry_run and not shadow:
+        meta_errors = cfg.metaapi.validate()
+        if meta_errors:
+            errors.extend(meta_errors)
+        if not cfg.ftmo.enabled:
+            warnings.append("FTMO profile not enabled — drawdown limits may not match prop-firm rules")
+
+    for w in warnings:
+        log.warning("live preflight: %s", w)
+
+    if errors:
+        raise RuntimeError(f"Live pipeline preflight failed: {'; '.join(errors)}")
+
+    log.info("live preflight: PASSED (%d warnings)", len(warnings))
+
+
+# ---------------------------------------------------------------------------
 # Live stack builder (full-Python pipeline, no TradingView)
 # ---------------------------------------------------------------------------
 
@@ -421,6 +473,10 @@ async def build_live_stack(
             is set, uses default BacktestEnvironment parameters.
     """
     cfg = cfg or NovaTradeCfg.load()
+
+    # --- Preflight validation ---
+    _validate_live_preflight(cfg, shadow=shadow, dry_run=dry_run)
+
     symbol = cfg.symbols[0]
 
     if len(cfg.symbols) > 1:
@@ -451,6 +507,12 @@ async def build_live_stack(
         if not status.connected:
             raise RuntimeError(f"MetaApiAdapter connection failed: {status.message}")
         log.info("build_live_stack: adapter connected")
+
+    # For non-shadow/non-dry-run modes, ensure cfg.dry_run=False so the
+    # pre-trade gate allows real orders through MetaApiAdapter.
+    # Mirrors the same fix in build_stack() (line 255).
+    if not dry_run and not shadow:
+        cfg.dry_run = False
 
     # --- Account balance (CRITICAL: must succeed) ---
     try:
@@ -705,8 +767,16 @@ async def build_live_stack(
                 exc_info=True,
             )
 
+    # --- Post-Trade Verifier ---
+    verifier = None
+    if not shadow and not dry_run:
+        from novatrade.monitor.post_trade_verifier import PostTradeVerifier
+
+        verifier = PostTradeVerifier(env)
+        log.info("build_live_stack: post-trade verifier enabled")
+
     # --- Live Trading Agent ---
-    live_agent = LiveTradingAgent(agent, strategy_engine, cfg, campaign="irb-live")
+    live_agent = LiveTradingAgent(agent, strategy_engine, cfg, campaign="irb-live", verifier=verifier)
 
     # --- Tick Pipeline ---
     poller = TickBatchPoller(adapter, cfg.symbols, interval=poll_interval, broker_map=broker_map)
@@ -978,22 +1048,26 @@ def main() -> None:
         if pipeline != "webhook":
             log.warning("unknown pipeline %r — falling back to webhook", pipeline)
         log.info("selected pipeline: WEBHOOK")
-        try:
-            ws, loop, readiness = build_stack()
-        except RuntimeError as exc:
-            log_crash(type(exc), exc, exc.__traceback__, "webhook_stack_build")
-            log.error("STARTUP FAILED: %s", exc)
-            sys.exit(1)
-        except Exception as exc:
-            log_crash(type(exc), exc, exc.__traceback__, "webhook_stack_build_unexpected")
-            log.error("STARTUP FAILED with unexpected error: %s", exc)
-            sys.exit(1)
 
-        report = generate_readiness_report(readiness)
-        log.info("\n%s", report)
+        async def _start_webhook() -> None:
+            try:
+                ws, loop, readiness = await build_stack()
+            except RuntimeError as exc:
+                log_crash(type(exc), exc, exc.__traceback__, "webhook_stack_build")
+                log.error("STARTUP FAILED: %s", exc)
+                sys.exit(1)
+            except Exception as exc:
+                log_crash(type(exc), exc, exc.__traceback__, "webhook_stack_build_unexpected")
+                log.error("STARTUP FAILED with unexpected error: %s", exc)
+                sys.exit(1)
+
+            report = generate_readiness_report(readiness)
+            log.info("\n%s", report)
+
+            await run_server(ws, loop, host=host, port=port)
 
         try:
-            asyncio.run(run_server(ws, loop, host=host, port=port))
+            asyncio.run(_start_webhook())
         except Exception as exc:
             log_crash(type(exc), exc, exc.__traceback__, "webhook_pipeline_runtime")
             log.error("Webhook pipeline failed at runtime: %s", exc)

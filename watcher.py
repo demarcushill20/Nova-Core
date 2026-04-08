@@ -150,6 +150,7 @@ ARTIFACT_WINDOW = 600  # seconds — OUTPUT file must be this recent
 MAX_SUPERVISOR_ATTEMPTS = 2  # total attempts per task (1 original + up to 1 retry)
 MAX_CONCURRENT_TASKS = int(os.environ.get("NOVA_MAX_CONCURRENT_TASKS", "2"))  # Phase 4.3
 STALE_TASK_AGE_HOURS = 12  # auto-mark pending .md tasks as .done after this many hours untouched
+STALE_SHIFT_BLOCK_HOURS = 3  # auto-mark shift blocks as .done if scheduled_at is this far in the past
 STALE_REAP_INTERVAL = 3600  # seconds between staleness reaper runs (1 hour)
 JIT_SHIFT_INTERVAL = 1800  # seconds between JIT shift generation runs (30 min)
 
@@ -713,6 +714,38 @@ def reap_stale_tasks(*, force: bool = False) -> list[str]:
         fm = parse_frontmatter(p)
         if not _check_scheduled(fm.get("scheduled_at")):
             continue
+
+        # Shift-block-aware expiry: if a shift block's scheduled_at is far
+        # enough in the past, reap it immediately — don't wait 12 hours.
+        # This prevents stale blocks from clogging the queue when the watcher
+        # falls behind due to session cap exhaustion or carryover tasks.
+        sched_at = fm.get("scheduled_at")
+        is_shift_block = fm.get("type") == "shift_block"
+        if is_shift_block and sched_at is not None:
+            try:
+                if isinstance(sched_at, str):
+                    sched_dt = datetime.fromisoformat(sched_at)
+                elif isinstance(sched_at, datetime):
+                    sched_dt = sched_at
+                else:
+                    sched_dt = None
+                if sched_dt is not None:
+                    now_dt = datetime.now(tz=sched_dt.tzinfo)
+                    hours_past = (now_dt - sched_dt).total_seconds() / 3600
+                    if hours_past >= STALE_SHIFT_BLOCK_HOURS:
+                        done_path = p.with_name(f"{p.stem}.md.done")
+                        p.rename(done_path)
+                        logger.info(
+                            "STALE REAPER (shift-block): %s → %s (%.1fh past scheduled_at)",
+                            p.name,
+                            done_path.name,
+                            hours_past,
+                        )
+                        reaped.append(p.name)
+                        continue
+            except (ValueError, TypeError, OSError) as exc:
+                logger.warning("STALE REAPER: shift-block expiry check failed for %s: %s", p.name, exc)
+
         try:
             mtime = p.stat().st_mtime
         except OSError:

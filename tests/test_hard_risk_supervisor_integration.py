@@ -300,7 +300,7 @@ class TestHardRiskSupervisorIntegration:
         from novatrade.runtime.runner import build_stack
 
         # This tests that our changes to build_stack work correctly
-        ws, loop, readiness = build_stack(cfg, mode=LaunchMode.DRY_RUN)
+        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
 
         # Verify supervisor is wired
         assert ws.agent._supervisor is not None

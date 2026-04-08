@@ -26,6 +26,7 @@ from typing import Any, ClassVar
 
 from novatrade.config import NovaTradeCfg
 from novatrade.execution.trading_agent import AgentResult, AgentState, TradingAgent
+from novatrade.monitor.post_trade_verifier import PostTradeVerifier, _VerificationContext
 from novatrade.strategy.live_engine import LiveSignal, LiveStrategyEngine, SignalType
 
 log = logging.getLogger("novatrade.execution.live_trading_agent")
@@ -127,11 +128,14 @@ class LiveTradingAgent:
         strategy_engine: LiveStrategyEngine,
         cfg: NovaTradeCfg,
         campaign: str = "irb-live",
+        verifier: PostTradeVerifier | None = None,
     ) -> None:
         self._trading_agent = trading_agent
         self._strategy_engine = strategy_engine
         self._cfg = cfg
         self._campaign = campaign
+        self._verifier = verifier
+        self._pending_verification: dict[str, _VerificationContext] = {}
 
     # -- Properties --------------------------------------------------------
 
@@ -275,6 +279,29 @@ class LiveTradingAgent:
             order_id=position_id,
         )
 
+        # --- Snapshot candle buffers for post-trade verification ---
+        if self._verifier:
+            try:
+                # Resolve entry bar timestamp from the engine's last bar
+                entry_bar_ts = 0.0
+                h1_buf = self._strategy_engine._h1_candles
+                if h1_buf:
+                    entry_bar_ts = h1_buf[-1].timestamp
+
+                trade_side = "LONG" if agent._state == AgentState.LONG else "SHORT"
+                self._pending_verification[position_id] = _VerificationContext(
+                    position_id=position_id,
+                    symbol=symbol,
+                    side=trade_side,
+                    entry_price=fill_price,
+                    stop_loss=stop_loss,
+                    entry_bar_timestamp=entry_bar_ts,
+                    h1_snapshot=list(self._strategy_engine._h1_candles),
+                    h4_snapshot=list(self._strategy_engine._h4_candles),
+                )
+            except Exception:
+                log.exception("Failed to snapshot candle buffers for verification (best-effort)")
+
     def on_broker_close(
         self,
         position_id: str,
@@ -311,6 +338,32 @@ class LiveTradingAgent:
                 "TradingAgent updated but engine did not. TradingAgent has authoritative state.",
                 position_id,
             )
+
+        # --- Post-trade verification (best-effort, never crashes pipeline) ---
+        ctx = self._pending_verification.pop(position_id, None)
+        if ctx and self._verifier:
+            try:
+                self._verifier.verify_trade(
+                    position_id=ctx.position_id,
+                    symbol=ctx.symbol,
+                    side=ctx.side,
+                    entry_price=ctx.entry_price,
+                    stop_loss=ctx.stop_loss,
+                    entry_bar_timestamp=ctx.entry_bar_timestamp,
+                    h1_candles=ctx.h1_snapshot,
+                    h4_candles=ctx.h4_snapshot,
+                )
+                if self._verifier.should_alert():
+                    summary = self._verifier.get_summary()
+                    log.warning(
+                        "POST-TRADE DRIFT ALERT: mismatch rate %.1f%% exceeds %.1f%% threshold "
+                        "over last %d trades — review strategy alignment",
+                        summary.mismatch_rate * 100,
+                        self._verifier._alert_threshold * 100,
+                        summary.total_verified,
+                    )
+            except Exception:
+                log.exception("Post-trade verification failed for position=%s (best-effort)", position_id)
 
     # -- Post-trade validation hook ----------------------------------------
 

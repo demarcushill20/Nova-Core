@@ -170,6 +170,31 @@ def log_trade_reject(
     )
 
 
+def log_trade_verify(
+    *,
+    position_id: str,
+    symbol: str,
+    side: str,
+    verdict: str,
+    match_score: float,
+    detail: str,
+    strategy: str = "IRB",
+) -> None:
+    """Record a post-trade verification result."""
+    _append_entry(
+        {
+            "event": "VERIFY",
+            "position_id": position_id,
+            "symbol": symbol,
+            "side": side,
+            "verdict": verdict,
+            "match_score": match_score,
+            "detail": detail,
+            "strategy": strategy,
+        }
+    )
+
+
 def rotate_now() -> dict:
     """Force an immediate rotation regardless of line count.
 

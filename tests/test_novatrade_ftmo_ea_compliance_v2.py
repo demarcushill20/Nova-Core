@@ -1,7 +1,7 @@
 """Tests for FTMO EA compliance v2: London Fix avoidance, SL mod counter, lot rolling average.
 
 These features enhance FTMO EA detection resistance by:
-- Avoiding the London Fix benchmark window (15:45-16:15 UTC)
+- Avoiding the DST-aware London Fix benchmark window (shifts with BST/GMT)
 - Tracking SL modification frequency per position and per day
 - Providing lot-size rolling average metrics for monitoring
 """
@@ -66,11 +66,16 @@ def _order(**overrides) -> OrderRequest:
 
 
 class TestLondonFixAvoidance:
-    """Tests for the London Fix avoidance window (15:45-16:15 UTC) in PreTradeGate."""
+    """Tests for the DST-aware London Fix avoidance window in PreTradeGate.
 
-    def _make_ts(self, hour: int, minute: int = 0) -> float:
-        """Create a UTC timestamp for 2026-03-25 at the given hour:minute."""
-        return datetime(2026, 3, 25, hour, minute, tzinfo=timezone.utc).timestamp()
+    The London Fix is at 4pm London time. The UTC window shifts with DST:
+      GMT (late Oct–late Mar): 15:45–16:15 UTC
+      BST (late Mar–late Oct): 14:45–15:15 UTC
+    """
+
+    def _make_ts(self, hour: int, minute: int = 0, *, month: int = 3, day: int = 25) -> float:
+        """Create a UTC timestamp for 2026-MM-DD at the given hour:minute."""
+        return datetime(2026, month, day, hour, minute, tzinfo=timezone.utc).timestamp()
 
     def test_blocks_during_london_fix_window(self):
         """Orders at 15:45, 15:50, 16:00, and 16:14 should all have 'london_fix' check fail."""
@@ -113,47 +118,57 @@ class TestLondonFixAvoidance:
         assert len(london_checks) == 1
         assert london_checks[0].passed
 
-    def test_custom_window(self):
-        """Custom start/end times should be respected."""
-        gate = PreTradeGate(
-            _cfg(
-                risk={
-                    "london_fix_avoidance_enabled": True,
-                    "london_fix_start_hour_utc": 15,
-                    "london_fix_start_minute_utc": 30,
-                    "london_fix_end_hour_utc": 16,
-                    "london_fix_end_minute_utc": 30,
-                }
-            )
-        )
+    def test_bst_window_shifts_earlier(self):
+        """During BST (summer), the London Fix window shifts to 14:45-15:15 UTC."""
+        gate = PreTradeGate(_cfg(risk={"london_fix_avoidance_enabled": True}))
 
-        # 15:30 should be blocked (start of custom window)
-        ts = self._make_ts(15, 30)
+        # July 1 is firmly in BST: 4pm London = 15:00 UTC → window 14:45-15:15 UTC
+        # 14:45 should be blocked (start of BST window)
+        ts = self._make_ts(14, 45, month=7, day=1)
         with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
-        assert not london_checks[0].passed
+        assert not london_checks[0].passed, "14:45 UTC should be blocked during BST"
 
-        # 16:29 should be blocked (still inside custom window)
-        ts = self._make_ts(16, 29)
+        # 15:00 should be blocked (middle of BST window)
+        ts = self._make_ts(15, 0, month=7, day=1)
         with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
-        assert not london_checks[0].passed
+        assert not london_checks[0].passed, "15:00 UTC should be blocked during BST"
 
-        # 16:30 should pass (end of custom window, exclusive)
-        ts = self._make_ts(16, 30)
+        # 15:15 should pass (end of BST window, exclusive)
+        ts = self._make_ts(15, 15, month=7, day=1)
         with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
-        assert london_checks[0].passed
+        assert london_checks[0].passed, "15:15 UTC should pass during BST (exclusive end)"
 
-        # 15:29 should pass (before custom window)
-        ts = self._make_ts(15, 29)
+        # 14:44 should pass (before BST window)
+        ts = self._make_ts(14, 44, month=7, day=1)
         with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
             decision = gate.evaluate(_order(), _account(), [])
         london_checks = [c for c in decision.checks if c.name == "london_fix"]
-        assert london_checks[0].passed
+        assert london_checks[0].passed, "14:44 UTC should pass during BST (before window)"
+
+    def test_gmt_window_unchanged(self):
+        """During GMT (winter), the London Fix window remains at 15:45-16:15 UTC."""
+        gate = PreTradeGate(_cfg(risk={"london_fix_avoidance_enabled": True}))
+
+        # January 15 is firmly in GMT: 4pm London = 16:00 UTC → window 15:45-16:15 UTC
+        # 16:00 should be blocked
+        ts = self._make_ts(16, 0, month=1, day=15)
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
+            decision = gate.evaluate(_order(), _account(), [])
+        london_checks = [c for c in decision.checks if c.name == "london_fix"]
+        assert not london_checks[0].passed, "16:00 UTC should be blocked during GMT"
+
+        # 14:50 should pass (the BST window time should NOT block during GMT)
+        ts = self._make_ts(14, 50, month=1, day=15)
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=ts):
+            decision = gate.evaluate(_order(), _account(), [])
+        london_checks = [c for c in decision.checks if c.name == "london_fix"]
+        assert london_checks[0].passed, "14:50 UTC should pass during GMT (BST window doesn't apply)"
 
 
 # ===========================================================================

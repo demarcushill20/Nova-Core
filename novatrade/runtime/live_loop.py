@@ -212,9 +212,75 @@ class LiveLoop:
 
     def snapshot(self) -> dict[str, Any]:
         """Point-in-time snapshot of the entire live stack."""
+        # Get basic live metrics
+        basic_metrics = self._metrics.to_dict()
+
+        # Merge with V5 enhanced metrics for S7 performance monitoring
+        try:
+            from novatrade.monitor.v5_metrics_collector import get_metrics_collector
+
+            v5_collector = get_metrics_collector()
+            v5_summary = v5_collector.get_summary_stats()
+
+            # Merge V5 metrics into basic metrics for PerformanceAnalyzer consumption
+            enhanced_metrics = basic_metrics.copy()
+
+            # Add partial exit metrics
+            if "partial_exits" in v5_summary:
+                pe_stats = v5_summary["partial_exits"]
+                enhanced_metrics.update(
+                    {
+                        "partial_exits": pe_stats.get("partial_exits_count", 0),
+                        "total_trades": pe_stats.get("total_trades", 0),
+                        "avg_partial_profit": pe_stats.get("avg_partial_profit", 0.0),
+                        "partial_to_breakeven": pe_stats.get("partial_to_breakeven", 0),
+                    }
+                )
+
+            # Add timeframe signal metrics
+            if "timeframe_signals" in v5_summary:
+                tf_stats = v5_summary["timeframe_signals"]
+                enhanced_metrics.update(
+                    {
+                        "m5_signals_1h": tf_stats.get("m5_signals_1h", 0),
+                        "h1_signals_1h": tf_stats.get("h1_signals_1h", 0),
+                        "mtf_aligned_signals": tf_stats.get("mtf_aligned_signals", 0),
+                        "mtf_checked_signals": tf_stats.get("mtf_checked_signals", 0),
+                    }
+                )
+
+            # Add trade efficiency metrics
+            if "trade_efficiency" in v5_summary:
+                te_stats = v5_summary["trade_efficiency"]
+                enhanced_metrics.update(
+                    {
+                        "avg_trade_duration_hours": te_stats.get("avg_duration_hours", 0.0),
+                    }
+                )
+
+            # Add volume execution metrics
+            if "volume_execution" in v5_summary:
+                vol_stats = v5_summary["volume_execution"]
+                enhanced_metrics.update(
+                    {
+                        "target_volume_sum": vol_stats.get("target_volume_sum", 1.0),
+                        "actual_volume_sum": vol_stats.get("actual_volume_sum", 1.0),
+                    }
+                )
+
+            # Add current timeframe from strategy config
+            enhanced_metrics["timeframe"] = getattr(self._strategy_engine._config, "timeframe", "H1")
+
+            basic_metrics = enhanced_metrics
+        except ImportError:
+            # V5MetricsCollector not available, use basic metrics
+            pass
+        except Exception as e:
+            log.warning(f"Failed to merge V5 metrics: {e}")
+
         return {
             "running": self._running,
-            "metrics": self._metrics.to_dict(),
+            "metrics": basic_metrics,
             "strategy_state": self._strategy_engine.snapshot(),
             "feed_health": self._supervisor.stats,
             "poller": self._poller.stats,
@@ -584,6 +650,20 @@ class LiveLoop:
         if attr is not None:
             current = getattr(self._metrics, attr)
             setattr(self._metrics, attr, current + 1)
+
+        # S7: Record signal generation with V5 metrics collector
+        try:
+            from novatrade.monitor.v5_metrics_collector import get_metrics_collector
+
+            timeframe = getattr(self._strategy_engine._config, "timeframe", "H1")
+            v5_collector = get_metrics_collector()
+            v5_collector.record_signal_generation(
+                timeframe=timeframe,
+                signal_type=signal_type.value.lower(),
+                mtf_aligned=False,  # Default - could enhance with actual MTF validation results
+            )
+        except Exception as e:
+            log.debug(f"Failed to record V5 signal metrics: {e}")
 
     def _persist_signal_metrics(self) -> None:
         """Write live metrics to STATE/novatrade/live_metrics.json for autonomy collectors."""

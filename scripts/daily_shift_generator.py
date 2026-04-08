@@ -1004,9 +1004,16 @@ def build_shift_task(
             f"scheduler_optimized: {str(scheduler_optimized).lower()}\n"
         )
 
+    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    # Shift blocks expire 180 minutes after scheduled_at — prevents stale blocks
+    # from clogging the queue if the watcher falls behind or hits a session cap.
+    expiry_minutes = 180
+
     content = f"""\
 ---
 scheduled_at: {scheduled_at}
+generated_at: {generated_at}
+expiry_minutes: {expiry_minutes}
 priority: high
 shift_block: {n}
 shift_date: {shift_date}

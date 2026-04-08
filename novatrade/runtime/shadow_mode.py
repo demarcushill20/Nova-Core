@@ -571,10 +571,14 @@ class ShadowModeRunner:
 
 async def _main() -> None:
     """Async entrypoint for shadow mode."""
+    from novatrade.runtime.launch_gate import LaunchMode
     from novatrade.runtime.runner import build_live_stack, build_stack
 
-    log.info("shadow mode: building webhook stack...")
-    ws, monitor_loop, readiness = build_stack()
+    # Shadow mode should always use DRY_RUN mode to avoid launch gate validation issues
+    shadow_mode = LaunchMode.DRY_RUN
+
+    log.info("shadow mode: building webhook stack (mode=%s)...", shadow_mode.value)
+    ws, monitor_loop, readiness = await build_stack(mode=shadow_mode)
 
     log.info("shadow mode: building live stack (shadow=True)...")
     live_loop = await build_live_stack(shadow=True)

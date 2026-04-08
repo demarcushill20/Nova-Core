@@ -188,11 +188,11 @@ class TestValidate:
         assert ok is False
         assert "non-positive" in reason
 
-    def test_zero_requested(self):
+    def test_zero_requested_auto_sizes(self):
         sizer = PositionSizer()
         ok, reason = sizer.validate(requested=0.0, calculated=0.20)
-        assert ok is False
-        assert "non-positive" in reason
+        assert ok is True
+        assert "auto-sized" in reason
 
     def test_slightly_under(self):
         sizer = PositionSizer()

@@ -4,6 +4,13 @@ Wraps the existing classify_regimes() from evaluation/durability and provides
 a lightweight interface for the heartbeat/ops monitor to determine current
 market conditions: LOW_VOL, NORMAL, HIGH_VOL, TRENDING.
 
+Includes 5-zone ATR percentile classification for risk scaling:
+  compression (0-10th) → 0% risk (no trade)
+  low_vol (10-30th) → 50% risk
+  normal (30-70th) → 100% risk
+  elevated (70-90th) → 75% risk
+  extreme (90-100th) → 0% risk (no trade)
+
 State persisted to STATE/novatrade/regime.json.
 """
 
@@ -20,14 +27,48 @@ log = logging.getLogger(__name__)
 STATE_DIR = Path("/home/nova/nova-core/STATE/novatrade")
 REGIME_FILE = STATE_DIR / "regime.json"
 
+# ATR zone boundaries (percentile thresholds)
+ATR_ZONE_THRESHOLDS: dict[str, tuple[float, float]] = {
+    "compression": (0.0, 10.0),
+    "low_vol": (10.0, 30.0),
+    "normal": (30.0, 70.0),
+    "elevated": (70.0, 90.0),
+    "extreme": (90.0, 100.1),  # 100.1 to include 100th percentile
+}
+
+# Risk scaling factor per ATR zone
+ATR_ZONE_RISK_FACTOR: dict[str, float] = {
+    "compression": 0.0,
+    "low_vol": 0.5,
+    "normal": 1.0,
+    "elevated": 0.75,
+    "extreme": 0.0,
+}
+
+
+def classify_atr_zone(percentile: float) -> str:
+    """Map an ATR percentile rank (0-100) to a 5-zone label."""
+    for zone, (lo, hi) in ATR_ZONE_THRESHOLDS.items():
+        if lo <= percentile < hi:
+            return zone
+    return "normal"
+
+
+def atr_zone_risk_factor(zone: str) -> float:
+    """Return the risk scaling factor for a given ATR zone."""
+    return ATR_ZONE_RISK_FACTOR.get(zone, 1.0)
+
 
 @dataclass
 class RegimeSnapshot:
-    """Current market regime classification."""
+    """Current market regime classification with ATR percentile zones."""
 
     regime: str  # "quiet", "ranging", "trending", "volatile"
     atr_current: float = 0.0
     atr_mean: float = 0.0
+    atr_percentile: float = 50.0  # 0-100 percentile rank
+    atr_zone: str = "normal"  # compression/low_vol/normal/elevated/extreme
+    atr_zone_risk_factor: float = 1.0  # 0.0-1.0 risk multiplier
     symbol: str = "EURUSD"
     timeframe: str = "M5"
     candle_count: int = 0
@@ -40,6 +81,11 @@ class RegimeSnapshot:
     @property
     def is_high_vol(self) -> bool:
         return self.regime == "volatile"
+
+    @property
+    def trading_allowed(self) -> bool:
+        """Whether ATR zone permits trading (non-zero risk factor)."""
+        return self.atr_zone_risk_factor > 0.0
 
 
 def classify_live_regime(
@@ -76,27 +122,46 @@ def classify_live_regime(
     last_candle = candles[-1]
     current_regime = regime_map.get(last_candle.timestamp, "ranging")
 
-    # Compute current ATR for the snapshot
+    # Compute ATR values for all candles to derive percentile ranking
     atr_current = 0.0
     atr_mean = 0.0
+    atr_percentile = 50.0
+    all_atrs: list[float] = []
+
     if len(candles) > atr_period:
-        trs = []
-        for i in range(max(1, len(candles) - atr_period), len(candles)):
+        # Compute true ranges for all candles
+        all_trs = []
+        for i in range(1, len(candles)):
             tr = max(
                 candles[i].high - candles[i].low,
                 abs(candles[i].high - candles[i - 1].close),
                 abs(candles[i].low - candles[i - 1].close),
             )
-            trs.append(tr)
-        if trs:
-            atr_current = sum(trs) / len(trs)
-            # Mean over all valid ATR windows
-            atr_mean = atr_current  # simplified for live use
+            all_trs.append(tr)
+
+        # Rolling ATR for each candle (simple moving average of TRs)
+        for i in range(atr_period - 1, len(all_trs)):
+            window = all_trs[i - atr_period + 1 : i + 1]
+            all_atrs.append(sum(window) / len(window))
+
+        if all_atrs:
+            atr_current = all_atrs[-1]
+            atr_mean = sum(all_atrs) / len(all_atrs)
+
+            # Percentile rank: % of historical ATRs that are <= current
+            count_below = sum(1 for a in all_atrs if a <= atr_current)
+            atr_percentile = (count_below / len(all_atrs)) * 100.0
+
+    zone = classify_atr_zone(atr_percentile)
+    risk_factor = atr_zone_risk_factor(zone)
 
     snap = RegimeSnapshot(
         regime=current_regime,
         atr_current=round(atr_current, 6),
         atr_mean=round(atr_mean, 6),
+        atr_percentile=round(atr_percentile, 1),
+        atr_zone=zone,
+        atr_zone_risk_factor=risk_factor,
         symbol=symbol,
         timeframe=timeframe,
         candle_count=len(candles),

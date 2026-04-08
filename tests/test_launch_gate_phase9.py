@@ -411,11 +411,12 @@ class TestReadinessReport:
 class TestRunnerBuildStack:
     """Tests for the updated runner.build_stack()."""
 
-    def test_build_stack_dry_run(self):
+    @pytest.mark.asyncio
+    async def test_build_stack_dry_run(self):
         from novatrade.runtime.runner import build_stack
 
         cfg = _cfg(dry_run=True)
-        ws, loop, readiness = build_stack(cfg, mode=LaunchMode.DRY_RUN)
+        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
         assert ws.dry_run is True
         assert ws.launch_mode == LaunchMode.DRY_RUN
         assert ws.adapter_type == "DryRunAdapter"
@@ -423,15 +424,17 @@ class TestRunnerBuildStack:
         assert ws.risk_engine is not None
         assert readiness.verdict == ReadinessVerdict.READY_FOR_ACTIVE_DEMO
 
-    def test_build_stack_forces_dry_run_adapter(self):
+    @pytest.mark.asyncio
+    async def test_build_stack_forces_dry_run_adapter(self):
         """In dry_run mode, adapter is always DryRunAdapter."""
         from novatrade.runtime.runner import build_stack
 
         cfg = _cfg(dry_run=True)
-        ws, loop, readiness = build_stack(cfg, mode=LaunchMode.DRY_RUN)
+        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
         assert isinstance(ws.agent._adapter, DryRunAdapter)
 
-    def test_build_stack_active_ready_fails_without_credentials(self):
+    @pytest.mark.asyncio
+    async def test_build_stack_active_ready_fails_without_credentials(self):
         """active_ready mode fails explicitly without MetaApi credentials."""
         from novatrade.runtime.runner import build_stack
 
@@ -439,9 +442,10 @@ class TestRunnerBuildStack:
         cfg.metaapi.token = ""
         cfg.metaapi.account_id = ""
         with pytest.raises(RuntimeError, match="METAAPI_TOKEN"):
-            build_stack(cfg, mode=LaunchMode.ACTIVE_READY)
+            await build_stack(cfg, mode=LaunchMode.ACTIVE_READY)
 
-    def test_build_stack_active_demo_fails_without_confirmations(self):
+    @pytest.mark.asyncio
+    async def test_build_stack_active_demo_fails_without_confirmations(self):
         """active_demo mode fails without operator confirmations."""
         from novatrade.runtime.runner import build_stack
 
@@ -456,13 +460,14 @@ class TestRunnerBuildStack:
             mock_adapter = DryRunAdapter()
             mock_create.return_value = mock_adapter
             with pytest.raises(RuntimeError, match="launch gate"):
-                build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
+                await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
 
-    def test_build_stack_records_startup_events(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_build_stack_records_startup_events(self, tmp_path):
         from novatrade.runtime.runner import build_stack
 
         cfg = _cfg(dry_run=True, data_dir=tmp_path)
-        ws, loop, readiness = build_stack(cfg, mode=LaunchMode.DRY_RUN)
+        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
         records = ws.recorder.load()
         events = [r.data.get("event") for r in records]
         assert "STARTUP_VALIDATION" in events

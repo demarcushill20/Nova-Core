@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-04-07T13:05:02Z
+Generated: 2026-04-08T06:13:11Z
 
 ## Overall: HEALTHY
 
@@ -8,8 +8,8 @@ Generated: 2026-04-07T13:05:02Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 11 |
-| Failed workflows | 2 |
+| Completed workflows | 5 |
+| Failed workflows | 1 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
 | Completed delegations | 0 |
@@ -21,9 +21,9 @@ Generated: 2026-04-07T13:05:02Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 1148 |
+| Contract successes | 1190 |
 | Contract failures | 53 |
-| Contract failure rate | 4.4% |
+| Contract failure rate | 4.3% |
 | Budget exhaustions | 0 |
 | Policy violations | 0 |
 | Orphaned agents | 0 |
@@ -37,19 +37,12 @@ Generated: 2026-04-07T13:05:02Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| 0716_I_haven_t_seen_any_trades_from_novatrade_since_market_open_can_you_investigate_o | ? | completed | - |
-| 0717_research_execution_pipeline_gaps | ? | completed | - |
-| 0721_Implement_the_permanent_fix_conservatively__but_keep_the_research_injection_path | ? | completed | - |
-| hb_proactive_20260406_160119_hb_research_injection | ? | failed | verifier_rejected |
-| hb_proactive_20260406_163057_hb_research_injection | ? | failed | verifier_rejected |
-| hb_proactive_20260406_180046_hb_research_injection | ? | completed | - |
-| hb_proactive_20260406_183446_hb_research_injection | ? | completed | - |
-| shift_20260406_10_novatrade_impl | ? | completed | - |
-| shift_20260406_11_novatrade_impl2 | ? | completed | - |
-| shift_20260406_12_novatrade_testing | ? | completed | - |
-| shift_20260406_14_novatrade_monitoring | ? | completed | - |
-| shift_20260406_9_novatrade_status | ? | completed | - |
-| shift_gen_pm_20260406 | ? | completed | - |
+| 0728_Can_you_investigate_this____AUTONOMY_ESCALATE__strategy_validity | ? | completed | - |
+| 0729_Can_you_investigate_this__18_tasks_pending__30min___queue_may_need_attention | ? | completed | - |
+| 0731_Did_you_finish_the_investigation_ | ? | completed | - |
+| shift_20260407_6_testing_quality | ? | failed | verifier_rejected |
+| shift_20260407_7_memory_hygiene | ? | completed | - |
+| shift_gen_pm_20260407 | ? | completed | - |
 
 ## Health Findings
 

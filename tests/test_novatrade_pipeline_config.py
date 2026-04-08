@@ -219,8 +219,8 @@ def test_main_selects_webhook_by_default():
     with (
         patch.dict(os.environ, {}, clear=False),
         patch("novatrade.runtime.runner.build_stack") as mock_build,
-        patch("novatrade.runtime.runner.asyncio"),
         patch("novatrade.runtime.runner.generate_readiness_report", return_value="OK"),
+        patch("novatrade.runtime.runner.run_server"),
     ):
         os.environ.pop("NOVATRADE_PIPELINE", None)
         mock_build.return_value = (None, None, None)

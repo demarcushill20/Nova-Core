@@ -267,10 +267,11 @@ class TestValidateAlert:
         assert err is not None
         assert "entry_price" in err
 
-    def test_zero_volume(self):
-        err, _ = validate_alert(_signal_payload(volume=0))
-        assert err is not None
-        assert "volume" in err
+    def test_zero_volume_triggers_auto_sizing(self):
+        """volume=0 is allowed — triggers auto-sizing in PreTradeGate."""
+        err, action = validate_alert(_signal_payload(volume=0))
+        assert err is None
+        assert action == "PLACE_STOP_ORDER"
 
     def test_invalid_order_type(self):
         err, _ = validate_alert(_signal_payload(order_type="MARKET"))

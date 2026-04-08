@@ -24,8 +24,8 @@ class SpreadModelConfig:
     """Immutable spread model configuration.
 
     Default: EURUSD with 1.0 pip average spread (OANDA demo typical).
-    Session-specific spreads are defined but disabled by default —
-    use_session_spreads=True enables Phase 7 session-aware costing.
+    Session-specific spreads are defined but disabled by default.
+    Phase 7+ will enable session-aware costing via use_session_spreads=True.
     """
 
     pair: str = "EURUSD"
@@ -47,7 +47,7 @@ class SpreadModelConfig:
     """Spread during London/NY overlap (peak liquidity)."""
 
     use_session_spreads: bool = False
-    """Use session-specific spreads instead of avg. Phase 7 enables this."""
+    """Use session-specific spreads instead of avg. Phase 7+ will enable this."""
 
     def version_hash(self) -> str:
         """SHA-256 hash of all config fields + VERSION for identity tracking."""

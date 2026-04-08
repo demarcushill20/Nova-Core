@@ -920,12 +920,13 @@ class TestBuildStatus:
 class TestRunnerBuildStack:
     """Tests for the runner.build_stack() factory."""
 
-    def test_build_stack_dry_run(self):
+    @pytest.mark.asyncio
+    async def test_build_stack_dry_run(self):
         from novatrade.runtime.launch_gate import LaunchMode
         from novatrade.runtime.runner import build_stack
 
         cfg = _cfg(dry_run=True)
-        ws, loop, readiness = build_stack(cfg, mode=LaunchMode.DRY_RUN)
+        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
         assert ws.dry_run is True
         assert ws.agent is not None
         assert ws.risk_engine is not None
@@ -933,12 +934,13 @@ class TestRunnerBuildStack:
         assert ws.recorder is not None
         assert loop is not None
 
-    def test_build_stack_forces_dry_run(self):
+    @pytest.mark.asyncio
+    async def test_build_stack_forces_dry_run(self):
         """In dry_run mode, adapter is always DryRunAdapter."""
         from novatrade.runtime.launch_gate import LaunchMode
         from novatrade.runtime.runner import build_stack
 
         cfg = _cfg(dry_run=True)
-        ws, loop, readiness = build_stack(cfg, mode=LaunchMode.DRY_RUN)
+        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
         # The adapter used by the agent should be DryRunAdapter
         assert isinstance(ws.agent._adapter, DryRunAdapter)
