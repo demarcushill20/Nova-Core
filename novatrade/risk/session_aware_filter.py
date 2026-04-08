@@ -59,6 +59,7 @@ class SessionAwareConfig:
     allow_premium_sessions: bool = True  # Allow overlap + major sessions
     allow_asian_session: bool = True  # Allow Asian session trading
     block_transition_periods: bool = False  # Block 30min before/after major session changes
+    transition_window_minutes: int = 30  # Minutes to block before/after session transitions
 
     # Quality thresholds
     minimum_quality: SessionQuality = SessionQuality.ACCEPTABLE
@@ -109,6 +110,49 @@ class SessionAwareFilter:
 
         return SessionInfo(session=session, quality=quality, reason=reason, hour_utc=hour_utc)
 
+    def _is_transition_period(self, timestamp: dt.datetime) -> tuple[bool, str | None]:
+        """Check if the given timestamp falls within a session transition period.
+
+        Args:
+            timestamp: UTC datetime to check.
+
+        Returns:
+            (is_transition, reason) tuple. Reason is provided if transition detected.
+        """
+        if not self._config.block_transition_periods:
+            return False, None
+
+        # Major session transition hours (UTC)
+        transition_hours = [0, 8, 13, 16, 21]  # Asian open, London open, NY open, London close, NY close
+        window_minutes = self._config.transition_window_minutes
+
+        current_hour = timestamp.hour
+        current_minute = timestamp.minute
+
+        # Convert current time to total minutes from midnight
+        current_total_minutes = current_hour * 60 + current_minute
+
+        for transition_hour in transition_hours:
+            transition_minutes = transition_hour * 60
+
+            # Check if within window before or after transition
+            if (
+                abs(current_total_minutes - transition_minutes) <= window_minutes
+                or abs((current_total_minutes + 24 * 60) - transition_minutes) <= window_minutes  # Handle day boundary
+                or abs(current_total_minutes - (transition_minutes + 24 * 60)) <= window_minutes  # Handle day boundary
+            ):
+                transition_name = {
+                    0: "Asian session open",
+                    8: "London session open / Asian close",
+                    13: "New York session open / London-NY overlap begin",
+                    16: "London session close / London-NY overlap end",
+                    21: "New York session close",
+                }[transition_hour]
+
+                return True, f"Transition period: {transition_name} (±{window_minutes}min)"
+
+        return False, None
+
     def is_trading_allowed(self, timestamp: dt.datetime | None = None) -> bool:
         """Check if trading is allowed at the given time.
 
@@ -155,6 +199,10 @@ class SessionAwareFilter:
         Returns:
             (quality, reason) tuple explaining the assessment.
         """
+        # Check for session transition periods first
+        is_transition, transition_reason = self._is_transition_period(timestamp)
+        if is_transition:
+            return (SessionQuality.POOR, f"Session transition blocked: {transition_reason}")
         if session is None:
             # Gap between NY close (21 UTC) and Asian open (0 UTC).
             # Market is still open on weekdays — lower volume but tradeable.
@@ -228,7 +276,7 @@ def create_london_ny_focus_filter() -> SessionAwareFilter:
         allow_premium_sessions=True,  # Allow all premium sessions
         allow_asian_session=True,  # Allow Asian but it's lower quality
         minimum_quality=SessionQuality.ACCEPTABLE,  # Accept Asian if needed
-        block_transition_periods=False,  # Don't block transitions for now
+        block_transition_periods=True,  # Enable transition period blocking for optimal execution
     )
     return SessionAwareFilter(config)
 

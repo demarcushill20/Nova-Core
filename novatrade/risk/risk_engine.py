@@ -311,7 +311,7 @@ class RiskEngine:
             allow_premium_sessions=True,  # Always allow premium sessions
             allow_asian_session=self._risk.session_allow_asian,
             minimum_quality=min_quality,
-            block_transition_periods=False,  # TODO: Future enhancement
+            block_transition_periods=True,  # Enable transition period blocking for FTMO safety
         )
 
         return SessionAwareFilter(config)
