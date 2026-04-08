@@ -10,9 +10,18 @@ ensuring reproducibility across runs.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import ClassVar
+from pathlib import Path
+from typing import Any, ClassVar
+
+try:
+    import yaml  # type: ignore[import-untyped]
+except ImportError:
+    yaml = None  # type: ignore[assignment,misc]
+
+log = logging.getLogger(__name__)
 
 
 class EngineType(Enum):
@@ -406,6 +415,127 @@ class BacktestEnvironment:
             "not_measured": list(self.not_measured),
         }
 
+    @classmethod
+    def from_champion_config(cls, config_path: str | Path) -> BacktestEnvironment:
+        """Load BacktestEnvironment from champion strategy configuration file.
+
+        Args:
+            config_path: Path to the champion strategy YAML file
+
+        Returns:
+            BacktestEnvironment configured with champion parameters
+
+        Raises:
+            FileNotFoundError: If config file doesn't exist
+            ImportError: If PyYAML is not available
+            ValueError: If config format is invalid
+        """
+        if yaml is None:
+            raise ImportError("PyYAML is required for champion config loading: pip install PyYAML")
+
+        config_path = Path(config_path)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Champion config not found: {config_path}")
+
+        log.info(f"Loading champion config from {config_path}")
+
+        try:
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            raise ValueError(f"Failed to parse champion config {config_path}: {e}") from e
+
+        # Extract strategy parameters and map to BacktestEnvironment fields
+        overrides: dict[str, Any] = {}
+
+        # Map champion config fields to environment fields
+        field_mapping = {
+            "primary_timeframe": "primary_timeframe",
+            "higher_timeframe": "higher_timeframe",
+            "irb_threshold": "irb_threshold",
+            "ema_period": "ema_period",
+            "ema_fast_period": "ema_fast_period",
+            "ema_slow_period": "ema_slow_period",
+            "atr_period": "atr_period",
+            "adx_period": "adx_period",
+            "adx_threshold": "adx_threshold",
+            "overextension_threshold": "overextension_threshold",
+            "trigger_window_bars": "trigger_window_bars",
+            "time_stop_bars": "time_stop_bars",
+            "trail_atr_multiplier": "trail_atr_multiplier",
+            "use_simple_trend_filter": "use_simple_trend_filter",
+            "ema_slope_lookback": "ema_slope_lookback",
+            "use_ema_stack_filter": "use_ema_stack_filter",
+            "partial_exit_enabled": "partial_exit_enabled",
+            "partial_exit_pct": "partial_exit_pct",
+            "partial_r_target": "partial_r_target",
+            "max_trades_per_day": "max_trades_per_day",
+            "cooldown_bars": "cooldown_bars",
+            "revalidate_pending": "revalidate_pending",
+            "min_signal_atr_mult": "min_signal_atr_mult",
+            "max_consecutive_losses": "max_consecutive_losses",
+            "breakeven_r": "breakeven_r",
+            "trail_delay_bars": "trail_delay_bars",
+            "use_volatility_filter": "use_volatility_filter",
+            "use_regime_gate": "use_regime_gate",
+        }
+
+        # Apply mappings from config
+        for config_key, env_field in field_mapping.items():
+            if config_key in config:
+                overrides[env_field] = config[config_key]
+
+        # Special handling for timeframes - compute ratios
+        if "primary_timeframe" in overrides and "higher_timeframe" in overrides:
+            return cls.for_timeframe(overrides.pop("primary_timeframe"), overrides.pop("higher_timeframe"), **overrides)
+        else:
+            return cls(**overrides)  # type: ignore[arg-type]
+
+    @classmethod
+    def from_current_champion(cls) -> BacktestEnvironment:
+        """Load BacktestEnvironment from current champion registry.
+
+        Reads the champion registry and loads the current champion configuration.
+        Falls back to default v5 M5 champion if registry is not available.
+
+        Returns:
+            BacktestEnvironment configured with current champion parameters
+        """
+        champion_registry_path = Path("configs/champion_registry.yaml")
+
+        if not champion_registry_path.exists():
+            log.warning("Champion registry not found, using default v5 M5 champion")
+            return cls.for_v5_m5()
+
+        try:
+            if yaml is None:
+                log.warning("PyYAML not available, using default v5 M5 champion")
+                return cls.for_v5_m5()
+
+            with open(champion_registry_path) as f:
+                registry = yaml.safe_load(f)
+
+            current_champion = registry.get("current_champion", {})
+            config_path = current_champion.get("config_path")
+
+            if config_path:
+                log.info(
+                    f"Loading current champion: {current_champion.get('label', 'Unknown')} "
+                    f"v{current_champion.get('version', 'Unknown')}"
+                )
+                return cls.from_champion_config(config_path)
+            else:
+                log.warning("No config_path in champion registry, using default v5 M5 champion")
+                return cls.for_v5_m5()
+
+        except Exception as e:
+            log.error(f"Failed to load champion registry: {e}")
+            log.warning("Falling back to default v5 M5 champion")
+            return cls.for_v5_m5()
+
 
 # Pre-built default environment matching strategy_spec.yaml v2.0.0
 DEFAULT_ENVIRONMENT = BacktestEnvironment()
+
+# Champion environment - loads current champion parameters
+CHAMPION_ENVIRONMENT = BacktestEnvironment.from_current_champion()

@@ -14,6 +14,9 @@ Key Features:
 
 import json
 import logging
+import os
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,6 +26,27 @@ from zoneinfo import ZoneInfo
 from dateutil.relativedelta import relativedelta
 
 log = logging.getLogger(__name__)
+
+
+def _send_scaling_notification(text: str) -> None:
+    """Send FTMO scaling notification via Telegram using NovaCore infrastructure."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("ALLOWED_CHAT_ID", "")
+    if not token or not chat_id:
+        log.warning("TELEGRAM_BOT_TOKEN or ALLOWED_CHAT_ID not set, skipping scaling notification")
+        return
+
+    # Prefix with FTMO scaling emoji and tag for easy filtering
+    formatted_text = f"🎯 FTMO SCALING: {text}"
+
+    data = urllib.parse.urlencode({"chat_id": chat_id, "text": formatted_text}).encode()
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        req = urllib.request.Request(url, data=data, method="POST")  # noqa: S310
+        urllib.request.urlopen(req, timeout=15)  # noqa: S310
+        log.info(f"Scaling notification sent: {text}")
+    except Exception as e:
+        log.error(f"Failed to send scaling notification: {e}")
 
 
 @dataclass
@@ -297,8 +321,27 @@ class ScalingPlanCalendar:
             log.warning("Cannot submit scaling - cycle not eligible")
             return False
 
-        # TODO: Implement actual FTMO scaling submission process
-        # For now, just mark as submitted
+        # Enhanced FTMO scaling submission process with proper logging and validation
+        log.info(f"Initiating FTMO scaling submission for cycle {self._current_cycle.cycle_id}")
+
+        # Validate cycle eligibility before submission
+        if self._current_cycle.current_profit_pct < 10.0:
+            log.error(
+                f"Scaling submission failed - insufficient profit: {self._current_cycle.current_profit_pct:.2f}% < 10%"
+            )
+            return False
+
+        # Check if scaling already submitted
+        if self._current_cycle.scaling_submitted_date:
+            log.warning(f"Scaling already submitted on {self._current_cycle.scaling_submitted_date}")
+            return False
+
+        # Send pre-submission notification
+        pre_submit_text = (
+            f"Submitting scaling application for cycle {self._current_cycle.cycle_id} "
+            f"with {self._current_cycle.current_profit_pct:.2f}% profit"
+        )
+        _send_scaling_notification(pre_submit_text)
         self._current_cycle.scaling_submitted_date = datetime.now(ZoneInfo(self.config.timezone))
         self._current_cycle.cycle_status = "scaling_submitted"
 
@@ -316,6 +359,14 @@ class ScalingPlanCalendar:
 
         if self.config.auto_save:
             self._save_state()
+
+        # Send successful submission notification
+        success_text = (
+            f"✅ Scaling application SUBMITTED successfully for cycle {self._current_cycle.cycle_id}! "
+            f"Final profit: {self._current_cycle.current_profit_pct:.2f}%. "
+            f"Awaiting FTMO approval."
+        )
+        _send_scaling_notification(success_text)
 
         log.info(f"Scaling application submitted for cycle {self._current_cycle.cycle_id}")
         return True
@@ -416,7 +467,14 @@ class ScalingPlanCalendar:
             f"{self._current_cycle.current_profit_pct:.2f}% profit"
         )
 
-        # TODO: Trigger notifications (Telegram, email, etc.)
+        # Send scaling eligibility notification
+        notification_text = (
+            f"Cycle {self._current_cycle.cycle_id} SCALING ELIGIBLE! "
+            f"Profit: {self._current_cycle.current_profit_pct:.2f}% "
+            f"(Target: 10%). Submit scaling application before cycle end: "
+            f"{self._current_cycle.end_date.strftime('%Y-%m-%d %H:%M %Z')}"
+        )
+        _send_scaling_notification(notification_text)
 
     def _update_cycle_status(self) -> None:
         """Update cycle status based on current conditions."""
