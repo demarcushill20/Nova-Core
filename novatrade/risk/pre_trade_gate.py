@@ -59,7 +59,7 @@ from novatrade.risk.profit_cushion_protocol import ProfitCushionProtocol  # noqa
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
 # Modes that the MVP is allowed to trade in.
-_MVP_ALLOWED_MODES = frozenset({AccountMode.DEMO})
+_MVP_ALLOWED_MODES = frozenset({AccountMode.DEMO, AccountMode.FUNDED_PRESERVATION})
 
 
 def _pip_value_for_symbol(symbol: str) -> float:
@@ -229,6 +229,7 @@ class PreTradeGate:
         checks.append(self._daily_loss_tracker.check(account.balance, account.equity))
         checks.append(self._check_daily_budget(request, account))
         checks.append(self._check_spread(price))
+        checks.append(self._check_spread_vs_avg(request.symbol, price))
         checks.append(self._check_weekend(now))
         checks.append(self._check_news(request.symbol, now))
         checks.append(self._check_gap_spread(price))
@@ -961,6 +962,69 @@ class PreTradeGate:
             name="spread",
             passed=True,
             detail=f"spread={spread_points:.1f}pts, ceiling={ceiling:.1f}",
+        )
+
+    def _check_spread_vs_avg(self, symbol: str, price: SymbolPrice | None) -> RiskCheckResult:
+        """Deny if current spread is abnormally wide relative to session avg.
+
+        Uses the FeedHealthSupervisor's rolling spread history to compare the
+        live spread against the session average.  A spread of 2x the rolling
+        average signals a liquidity dip (e.g. news, session transition) where
+        fill quality will be poor — even if the absolute ceiling hasn't been
+        breached.
+        """
+        multiplier = self._risk.spread_vs_avg_multiplier
+        if multiplier <= 0.0:
+            return RiskCheckResult(
+                name="spread_vs_avg",
+                passed=True,
+                detail="spread_vs_avg filter disabled",
+            )
+
+        if price is None:
+            return RiskCheckResult(
+                name="spread_vs_avg",
+                passed=True,
+                detail="no price data — skipped",
+            )
+
+        if self._feed_health is None:
+            return RiskCheckResult(
+                name="spread_vs_avg",
+                passed=True,
+                detail="no feed health supervisor — skipped",
+            )
+
+        snap = self._feed_health.get_snapshot(symbol)
+
+        # Need a meaningful average — skip if not enough history yet
+        if snap.avg_spread_pips <= 0.0:
+            return RiskCheckResult(
+                name="spread_vs_avg",
+                passed=True,
+                detail="insufficient spread history — skipped",
+            )
+
+        current = snap.current_spread_pips
+        threshold = snap.avg_spread_pips * multiplier
+
+        if current > threshold:
+            return RiskCheckResult(
+                name="spread_vs_avg",
+                passed=False,
+                detail=(
+                    f"spread {current:.2f} pips > {multiplier:.1f}x avg "
+                    f"{snap.avg_spread_pips:.2f} pips (threshold={threshold:.2f})"
+                ),
+            )
+
+        return RiskCheckResult(
+            name="spread_vs_avg",
+            passed=True,
+            detail=(
+                f"spread={current:.2f}pips, avg={snap.avg_spread_pips:.2f}pips, "
+                f"ratio={current / snap.avg_spread_pips:.1f}x (limit={multiplier:.1f}x)"
+            ),
         )
 
     def _check_weekend(self, now: float) -> RiskCheckResult:
