@@ -43,7 +43,12 @@ log = logging.getLogger("novatrade.runtime.webhook")
 
 @dataclass
 class WebhookState:
-    """Shared state injected into the FastAPI app at startup."""
+    """Shared state injected into the FastAPI app at startup.
+
+    Canonical runtime state: ``adapter_connected`` is the single truth
+    source for adapter connectivity.  All consumers (/health, /readiness,
+    MonitorLoop, watchdog) MUST read from this property.
+    """
 
     agent: TradingAgent | None = None
     risk_engine: RiskEngine | None = None
@@ -59,6 +64,17 @@ class WebhookState:
     alerts_processed: int = 0
     alerts_rejected: int = 0
     last_alert_time: float = 0.0
+
+    @property
+    def adapter_connected(self) -> bool:
+        """Canonical adapter connectivity — single source of truth.
+
+        Reads the real ``_connected`` flag from the adapter object.
+        Falls back to ``dry_run`` when no adapter is available
+        (DryRunAdapter is always considered "connected").
+        """
+        adapter = self.agent._adapter if self.agent else None
+        return getattr(adapter, "_connected", self.dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +185,7 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
             "dry_run": ws.dry_run,
             "launch_mode": ws.launch_mode.value,
             "adapter_type": ws.adapter_type,
+            "adapter_connected": ws.adapter_connected,
             "agent_state": agent_state,
             "risk_halted": halted,
             "supervisor_halted": sv_halted,
@@ -211,7 +228,7 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
             risk_engine_halted=ws.risk_engine.halted if ws.risk_engine else False,
             agent_initialized=ws.agent is not None,
             monitor_initialized=ws.monitor is not None,
-            adapter_connected=getattr(ws.agent._adapter if ws.agent else None, "_connected", ws.dry_run),
+            adapter_connected=ws.adapter_connected,
             adapter_type=ws.adapter_type,
         )
         return r.to_dict()

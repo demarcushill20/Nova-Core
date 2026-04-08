@@ -342,6 +342,9 @@ async def build_stack(
         started_at=time.time(),
     )
 
+    # --- Wire WebhookState into MonitorLoop for canonical health state ---
+    loop._webhook_state = ws
+
     # --- Active demo gate check ---
     if mode == LaunchMode.ACTIVE_DEMO and readiness.verdict != ReadinessVerdict.READY_FOR_ACTIVE_DEMO:
         log.error(

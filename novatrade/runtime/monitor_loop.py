@@ -19,6 +19,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from novatrade.models import EvidenceRecord, EvidenceType
 from novatrade.monitor.ops_monitor import CycleResult, OpsMonitor
@@ -30,6 +31,9 @@ from novatrade.monitor.watchdog import (
     WatchdogVerdict,
 )
 from novatrade.validation.evidence import EvidenceRecorder
+
+if TYPE_CHECKING:
+    from novatrade.runtime.webhook_server import WebhookState
 
 log = logging.getLogger("novatrade.runtime.monitor_loop")
 
@@ -76,6 +80,7 @@ class MonitorLoop:
         recorder: EvidenceRecorder | None = None,
         max_cycles: int = 0,
         watchdog_config: WatchdogConfig | None = None,
+        webhook_state: WebhookState | None = None,
     ) -> None:
         self._monitor = monitor
         self._interval = interval_seconds
@@ -86,6 +91,7 @@ class MonitorLoop:
         self.stats = LoopStats()
         self._watchdog = TradeStallWatchdog(watchdog_config)
         self._watchdog_cycle_counter = 0
+        self._webhook_state = webhook_state
         # Run watchdog every N monitor cycles (default: every other cycle)
         self._watchdog_every_n = max(1, int(
             (watchdog_config or WatchdogConfig()).check_interval_seconds / interval_seconds
@@ -201,12 +207,14 @@ class MonitorLoop:
         self._watchdog_cycle_counter += 1
         if self._watchdog_cycle_counter >= self._watchdog_every_n:
             self._watchdog_cycle_counter = 0
-            self._run_watchdog_check(result)
+            verdict = self._run_watchdog_check(result)
+            if verdict and verdict.level in (AnomalyLevel.MAJOR, AnomalyLevel.CRITICAL):
+                await self.attempt_remediation(verdict)
 
         return result
 
     def _run_watchdog_check(self, cycle_result: CycleResult | None) -> WatchdogVerdict | None:
-        """Collect runtime snapshot and run watchdog evaluation."""
+        """Collect runtime snapshot, run watchdog, and attempt bounded remediation."""
         try:
             snapshot = self._build_health_snapshot(cycle_result)
             verdict = self._watchdog.evaluate(snapshot)
@@ -221,27 +229,115 @@ class MonitorLoop:
             log.error("watchdog evaluation failed: %s", exc)
             return None
 
+    # --- Bounded auto-remediation -------------------------------------------
+    # Contract: attempt ONE reconnect → ONE rollback → escalate and stop.
+    # Never retries, never loops, never makes things worse.
+
+    _remediation_attempted: bool = False
+
+    async def attempt_remediation(self, verdict: WatchdogVerdict) -> bool:
+        """Attempt bounded auto-remediation for a watchdog anomaly.
+
+        Returns True if remediation succeeded, False otherwise.
+        This method is safe to call from the monitor loop after a
+        watchdog verdict. It will only attempt remediation ONCE per
+        MonitorLoop lifetime to prevent repair loops.
+        """
+        from novatrade.monitor.watchdog import EvidenceSignal
+
+        if self._remediation_attempted:
+            log.warning("remediation: already attempted this session — skipping")
+            return False
+
+        if verdict.level not in (AnomalyLevel.MAJOR, AnomalyLevel.CRITICAL):
+            return False
+
+        if not verdict.evidence.has(EvidenceSignal.ADAPTER_DISCONNECTED):
+            log.info("remediation: anomaly is not adapter-related — skipping auto-fix")
+            return False
+
+        self._remediation_attempted = True
+        self._record("REMEDIATION_STARTED", {
+            "level": verdict.level.value,
+            "signals": [s.value for s in verdict.evidence.signals],
+        })
+
+        # Step 1: Attempt adapter reconnect
+        adapter = self._monitor._adapter
+        if hasattr(adapter, "connect"):
+            log.warning("remediation step 1: attempting adapter reconnect")
+            try:
+                status = await adapter.connect()
+                if status.connected:
+                    log.info("remediation step 1: reconnect SUCCEEDED")
+                    self._record("REMEDIATION_RECONNECT_OK", {"message": status.message})
+                    return True
+                log.warning("remediation step 1: reconnect failed: %s", status.message)
+                self._record("REMEDIATION_RECONNECT_FAILED", {"message": status.message})
+            except Exception as exc:
+                log.error("remediation step 1: reconnect exception: %s", exc)
+                self._record("REMEDIATION_RECONNECT_FAILED", {"error": str(exc)[:300]})
+
+        # Step 2: Attempt rollback to dry-run (service-level recovery)
+        ws = self._webhook_state
+        if ws is not None:
+            log.warning("remediation step 2: rolling back to dry-run adapter")
+            try:
+                from novatrade.runtime.runner import rollback_to_dry_run
+
+                rollback_to_dry_run(ws, self._recorder)
+                log.info("remediation step 2: rollback to dry-run SUCCEEDED")
+                self._record("REMEDIATION_ROLLBACK_OK", {})
+                return True
+            except Exception as exc:
+                log.error("remediation step 2: rollback failed: %s", exc)
+                self._record("REMEDIATION_ROLLBACK_FAILED", {"error": str(exc)[:300]})
+
+        # Step 3: Escalate — nothing more we can safely do
+        log.critical(
+            "remediation EXHAUSTED: adapter reconnect and rollback both failed. "
+            "Manual intervention required."
+        )
+        self._record("REMEDIATION_EXHAUSTED", {
+            "level": verdict.level.value,
+            "diagnosis": verdict.diagnosis[:500],
+        })
+        return False
+
     def _build_health_snapshot(self, cycle_result: CycleResult | None) -> RuntimeHealthSnapshot:
-        """Build a RuntimeHealthSnapshot from current monitor state."""
+        """Build a RuntimeHealthSnapshot from canonical WebhookState.
+
+        Uses WebhookState.adapter_connected as the single source of truth
+        for adapter connectivity, and reads webhook alert counters directly.
+        Falls back to monitor internals when WebhookState is not available.
+        """
+        ws = self._webhook_state
         monitor = self._monitor
-        adapter = monitor._adapter
+
+        # Adapter connectivity: canonical source is WebhookState
+        if ws is not None:
+            adapter_connected = ws.adapter_connected
+            last_alert_time = ws.last_alert_time
+            alerts_received = ws.alerts_received
+            alerts_rejected = ws.alerts_rejected
+            alerts_processed = ws.alerts_processed
+            started_at = ws.started_at
+        else:
+            # Fallback: read from monitor internals (pre-Phase-2 path)
+            adapter = monitor._adapter
+            adapter_connected = getattr(adapter, "_connected", False)
+            last_alert_time = 0.0
+            alerts_received = 0
+            alerts_rejected = 0
+            alerts_processed = 0
+            started_at = 0.0
+
+        # Trade timing from agent (if available)
         agent = monitor._agent
+        last_trade_time = getattr(agent, "_last_trade_time", 0.0) if agent else 0.0
+        trades_today = getattr(agent, "_trades_today", 0) if agent else 0
 
-        adapter_connected = getattr(adapter, "_connected", True)
-
-        # Gather last_alert_time and counters from the webhook state
-        # if accessible, otherwise use agent-level info
-        last_alert_time = 0.0
-        alerts_received = 0
-        alerts_rejected = 0
-        last_trade_time = 0.0
-        last_quote_time = 0.0
-        trades_today = 0
-
-        # Agent state provides trade timing
-        if agent is not None:
-            last_trade_time = getattr(agent, "_last_trade_time", 0.0)
-            trades_today = getattr(agent, "_trades_today", 0)
+        uptime = (time.time() - started_at) if started_at > 0 else 0.0
 
         return RuntimeHealthSnapshot(
             adapter_connected=adapter_connected,
@@ -249,16 +345,14 @@ class MonitorLoop:
             webhook_server_up=True,  # if monitor loop is running, server is up
             last_alert_time=last_alert_time,
             last_trade_time=last_trade_time,
-            last_quote_time=last_quote_time,
+            last_quote_time=0.0,
             alerts_received_total=alerts_received,
             alerts_rejected_total=alerts_rejected,
             trades_executed_today=trades_today,
             monitor_cycles_failed=self.stats.cycles_failed,
             consecutive_startup_failures=0,
             risk_halted=monitor._risk_engine.halted if monitor._risk_engine else False,
-            uptime_seconds=time.time() - self.stats.last_cycle_time
-            if self.stats.cycles_run <= 1
-            else time.time() - (self.stats.last_cycle_time - self.stats.total_elapsed_ms / 1000),
+            uptime_seconds=uptime,
         )
 
     def _record(self, event_name: str, data: dict) -> None:
