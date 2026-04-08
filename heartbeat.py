@@ -256,6 +256,7 @@ SERVICES = [
 TELEGRAM_COOLDOWN_DEFAULT = 1800  # 30 minutes for general agent alerts
 TELEGRAM_COOLDOWN_COST = 14400  # 4 hours for cost alerts
 TELEGRAM_COOLDOWN_TIER = 14400  # 4 hours for degradation tier alerts (same tier re-triggers aren't news)
+TELEGRAM_COOLDOWN_SCALING = 86400  # 24 hours for FTMO scaling alerts (persistent state, not urgent per-cycle)
 TELEGRAM_COOLDOWN_FILE = STATE_DIR / "telegram_cooldown.json"
 
 
@@ -1163,9 +1164,12 @@ def _telegram_cooldown_gate(message: str, cooldown_secs: int | None = None) -> b
     Cost-related messages get a longer cooldown automatically.
     """
     if cooldown_secs is None:
-        # Auto-detect: cost alerts get 4-hour cooldown, others 30 min
+        # Auto-detect: scaling/FTMO alerts get 24-hour cooldown,
+        # cost alerts get 4-hour cooldown, others 30 min.
         lower = message.lower()
-        if "cost" in lower or "budget" in lower or "spend" in lower:
+        if "scaling" in lower and ("ftmo" in lower or "eligible" in lower or "profit" in lower):
+            cooldown_secs = TELEGRAM_COOLDOWN_SCALING
+        elif "cost" in lower or "budget" in lower or "spend" in lower:
             cooldown_secs = TELEGRAM_COOLDOWN_COST
         else:
             cooldown_secs = TELEGRAM_COOLDOWN_DEFAULT

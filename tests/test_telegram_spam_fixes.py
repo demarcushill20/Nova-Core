@@ -133,6 +133,42 @@ class TestTelegramCooldownGate:
         data = json.loads(cooldown_file.read_text())
         assert len(data) == 1
 
+    def test_scaling_alert_gets_24h_cooldown(self, tmp_path, monkeypatch):
+        """FTMO scaling-eligible messages should auto-detect 24-hour cooldown.
+
+        Regression guard for the 'FTMO SCALING spam every 30 min' bug: the
+        scaling-eligible state is persistent once reached, so the LLM heartbeat
+        agent kept generating the same notification every heartbeat cycle.
+        The 30-min default cooldown matched the 30-min heartbeat interval,
+        allowing the message through every cycle.
+        """
+        _patch_cooldown_file(tmp_path, monkeypatch)
+        from heartbeat import TELEGRAM_COOLDOWN_SCALING, _telegram_cooldown_gate
+
+        msg = (
+            "\U0001f3af FTMO SCALING: Cycle ftmo_cycle_20260401 SCALING ELIGIBLE! "
+            "Profit: 11.00% (Target: 10%). Submit scaling application before cycle end."
+        )
+        # First send allowed
+        assert _telegram_cooldown_gate(msg) is True
+        # Second send suppressed (auto-detected as scaling alert, 24h cooldown)
+        assert _telegram_cooldown_gate(msg) is False
+        # Cooldown is 24 hours
+        assert TELEGRAM_COOLDOWN_SCALING >= 24 * 3600
+
+    def test_scaling_alert_with_different_profit_still_deduped(self, tmp_path, monkeypatch):
+        """Scaling messages with different profit values should still dedupe.
+
+        The fingerprint strips digits, so 11.00% and 12.50% should match.
+        """
+        _patch_cooldown_file(tmp_path, monkeypatch)
+        from heartbeat import _telegram_cooldown_gate
+
+        msg1 = "FTMO SCALING: Cycle ftmo_cycle_20260401 SCALING ELIGIBLE! Profit: 11.00%"
+        msg2 = "FTMO SCALING: Cycle ftmo_cycle_20260401 SCALING ELIGIBLE! Profit: 12.50%"
+        assert _telegram_cooldown_gate(msg1) is True
+        assert _telegram_cooldown_gate(msg2) is False  # same fingerprint after digit stripping
+
     def test_tier_alerts_dedupe_by_title_only(self, tmp_path, monkeypatch):
         """Degradation-tier alerts should dedupe on the tier title regardless of
         the varying reason in the detail field, with a 4-hour cooldown.
