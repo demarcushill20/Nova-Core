@@ -321,7 +321,7 @@ async def build_stack(
         risk_engine_halted=risk_engine.halted,
         agent_initialized=True,
         monitor_initialized=True,
-        adapter_connected=True,  # DryRunAdapter always "connected"; MetaApiAdapter connected above
+        adapter_connected=getattr(adapter, "_connected", is_dry_run),
         adapter_type=_adapter_type_name(adapter),
     )
 

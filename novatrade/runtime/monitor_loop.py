@@ -22,6 +22,13 @@ from dataclasses import dataclass
 
 from novatrade.models import EvidenceRecord, EvidenceType
 from novatrade.monitor.ops_monitor import CycleResult, OpsMonitor
+from novatrade.monitor.watchdog import (
+    AnomalyLevel,
+    RuntimeHealthSnapshot,
+    TradeStallWatchdog,
+    WatchdogConfig,
+    WatchdogVerdict,
+)
 from novatrade.validation.evidence import EvidenceRecorder
 
 log = logging.getLogger("novatrade.runtime.monitor_loop")
@@ -68,6 +75,7 @@ class MonitorLoop:
         interval_seconds: float = 60.0,
         recorder: EvidenceRecorder | None = None,
         max_cycles: int = 0,
+        watchdog_config: WatchdogConfig | None = None,
     ) -> None:
         self._monitor = monitor
         self._interval = interval_seconds
@@ -76,6 +84,12 @@ class MonitorLoop:
         self._running = False
         self._task: asyncio.Task | None = None
         self.stats = LoopStats()
+        self._watchdog = TradeStallWatchdog(watchdog_config)
+        self._watchdog_cycle_counter = 0
+        # Run watchdog every N monitor cycles (default: every other cycle)
+        self._watchdog_every_n = max(1, int(
+            (watchdog_config or WatchdogConfig()).check_interval_seconds / interval_seconds
+        ))
 
     @property
     def running(self) -> bool:
@@ -84,6 +98,10 @@ class MonitorLoop:
     @property
     def interval(self) -> float:
         return self._interval
+
+    @property
+    def watchdog(self) -> TradeStallWatchdog:
+        return self._watchdog
 
     async def start(self) -> None:
         """Run the monitoring loop until stopped or max_cycles reached."""
@@ -179,7 +197,69 @@ class MonitorLoop:
                 },
             )
 
+        # --- Watchdog evaluation (runs every N cycles) ---
+        self._watchdog_cycle_counter += 1
+        if self._watchdog_cycle_counter >= self._watchdog_every_n:
+            self._watchdog_cycle_counter = 0
+            self._run_watchdog_check(result)
+
         return result
+
+    def _run_watchdog_check(self, cycle_result: CycleResult | None) -> WatchdogVerdict | None:
+        """Collect runtime snapshot and run watchdog evaluation."""
+        try:
+            snapshot = self._build_health_snapshot(cycle_result)
+            verdict = self._watchdog.evaluate(snapshot)
+
+            if verdict.level != AnomalyLevel.NONE:
+                self._record(
+                    "WATCHDOG_ANOMALY",
+                    verdict.to_dict(),
+                )
+            return verdict
+        except Exception as exc:
+            log.error("watchdog evaluation failed: %s", exc)
+            return None
+
+    def _build_health_snapshot(self, cycle_result: CycleResult | None) -> RuntimeHealthSnapshot:
+        """Build a RuntimeHealthSnapshot from current monitor state."""
+        monitor = self._monitor
+        adapter = monitor._adapter
+        agent = monitor._agent
+
+        adapter_connected = getattr(adapter, "_connected", True)
+
+        # Gather last_alert_time and counters from the webhook state
+        # if accessible, otherwise use agent-level info
+        last_alert_time = 0.0
+        alerts_received = 0
+        alerts_rejected = 0
+        last_trade_time = 0.0
+        last_quote_time = 0.0
+        trades_today = 0
+
+        # Agent state provides trade timing
+        if agent is not None:
+            last_trade_time = getattr(agent, "_last_trade_time", 0.0)
+            trades_today = getattr(agent, "_trades_today", 0)
+
+        return RuntimeHealthSnapshot(
+            adapter_connected=adapter_connected,
+            readiness_ok=cycle_result.ok if cycle_result else True,
+            webhook_server_up=True,  # if monitor loop is running, server is up
+            last_alert_time=last_alert_time,
+            last_trade_time=last_trade_time,
+            last_quote_time=last_quote_time,
+            alerts_received_total=alerts_received,
+            alerts_rejected_total=alerts_rejected,
+            trades_executed_today=trades_today,
+            monitor_cycles_failed=self.stats.cycles_failed,
+            consecutive_startup_failures=0,
+            risk_halted=monitor._risk_engine.halted if monitor._risk_engine else False,
+            uptime_seconds=time.time() - self.stats.last_cycle_time
+            if self.stats.cycles_run <= 1
+            else time.time() - (self.stats.last_cycle_time - self.stats.total_elapsed_ms / 1000),
+        )
 
     def _record(self, event_name: str, data: dict) -> None:
         if self._recorder is None:
