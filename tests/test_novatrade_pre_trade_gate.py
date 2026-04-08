@@ -171,14 +171,16 @@ class TestAccountMode:
         failed = {c.name for c in decision.failed_checks}
         assert "account_mode" in failed
 
-    def test_funded_denied_in_mvp(self):
+    def test_funded_allowed_in_mvp(self):
         gate = PreTradeGate(_cfg())
         decision = gate.evaluate(
             _order(),
             _account(mode=AccountMode.FUNDED_PRESERVATION),
             [],
         )
-        assert decision.denied
+        assert not decision.denied
+        passed = {c.name for c in decision.passed_checks}
+        assert "account_mode" in passed
 
 
 # ---------------------------------------------------------------------------
@@ -793,3 +795,132 @@ class TestSLDistance:
         sl = next(c for c in decision.checks if c.name == "sl_distance")
         assert sl.passed
         assert "skipped" in sl.detail
+
+
+# ---------------------------------------------------------------------------
+# Dynamic spread vs. session average filter
+# ---------------------------------------------------------------------------
+
+
+class TestSpreadVsAvg:
+    """Tests for the _check_spread_vs_avg dynamic filter."""
+
+    def _make_supervisor(self, spreads_pips: list[float]):
+        """Build a FeedHealthSupervisor with pre-loaded spread history."""
+        import calendar
+        import datetime
+
+        from novatrade.data.tick import Tick
+        from novatrade.monitor.feed_health import FeedHealthConfig, FeedHealthSupervisor
+
+        wed = datetime.datetime(2026, 3, 25, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        fake_now = calendar.timegm(wed.timetuple())
+
+        def clock() -> float:
+            return fake_now
+
+        # Low max_spread_pips so feed stays HEALTHY despite the test spreads
+        supervisor = FeedHealthSupervisor(
+            FeedHealthConfig(max_spread_pips=50.0), clock=clock
+        )
+        for sp in spreads_pips:
+            supervisor.on_tick(
+                Tick(symbol="EURUSD", bid=1.10000, ask=1.10000 + sp * 0.0001, timestamp=fake_now)
+            )
+        return supervisor
+
+    def test_no_price_skips(self):
+        """No price data → check passes (graceful skip)."""
+        gate = PreTradeGate(_cfg())
+        decision = gate.evaluate(_order(), _account(), [], price=None)
+        c = next(c for c in decision.checks if c.name == "spread_vs_avg")
+        assert c.passed
+        assert "skipped" in c.detail
+
+    def test_no_feed_health_skips(self):
+        """No feed health supervisor → check passes (graceful skip)."""
+        gate = PreTradeGate(_cfg())
+        price = SymbolPrice(symbol="EURUSD", bid=1.10000, ask=1.10020)
+        decision = gate.evaluate(_order(), _account(), [], price=price)
+        c = next(c for c in decision.checks if c.name == "spread_vs_avg")
+        assert c.passed
+        assert "skipped" in c.detail
+
+    def test_disabled_when_multiplier_zero(self):
+        """Setting multiplier to 0 disables the filter."""
+        sup = self._make_supervisor([1.0, 1.0, 1.0, 5.0])
+        gate = PreTradeGate(
+            _cfg(risk={"spread_vs_avg_multiplier": 0.0}),
+            feed_health=sup,
+        )
+        price = SymbolPrice(symbol="EURUSD", bid=1.10000, ask=1.10050)
+        decision = gate.evaluate(_order(), _account(), [], price=price)
+        c = next(c for c in decision.checks if c.name == "spread_vs_avg")
+        assert c.passed
+        assert "disabled" in c.detail
+
+    def test_normal_spread_passes(self):
+        """Current spread ≈ avg → passes.
+
+        Snapshot's current_spread_pips = last tick = 1.0, avg = 1.0.
+        Threshold = 1.0 * 2.0 = 2.0.  1.0 < 2.0 → pass.
+        """
+        sup = self._make_supervisor([1.0] * 10)
+        gate = PreTradeGate(
+            _cfg(risk={"spread_vs_avg_multiplier": 2.0}),
+            feed_health=sup,
+        )
+        # price is non-None so the check isn't skipped
+        price = SymbolPrice(symbol="EURUSD", bid=1.10000, ask=1.10010)
+        decision = gate.evaluate(_order(), _account(), [], price=price)
+        c = next(c for c in decision.checks if c.name == "spread_vs_avg")
+        assert c.passed
+
+    def test_spike_denies(self):
+        """Spread spike to 3.0 pips when avg ≈ 1.2 → denied at 2x multiplier.
+
+        History: 9 × 1.0 + 1 × 3.0 → avg = 1.2, current = 3.0.
+        Threshold = 1.2 * 2.0 = 2.4.  3.0 > 2.4 → deny.
+        """
+        sup = self._make_supervisor([1.0] * 9 + [3.0])
+        gate = PreTradeGate(
+            _cfg(risk={"spread_vs_avg_multiplier": 2.0}),
+            feed_health=sup,
+        )
+        price = SymbolPrice(symbol="EURUSD", bid=1.10000, ask=1.10030)
+        decision = gate.evaluate(_order(), _account(), [], price=price)
+        c = next(c for c in decision.checks if c.name == "spread_vs_avg")
+        assert not c.passed
+        assert "2.0x avg" in c.detail
+
+    def test_moderate_widening_passes(self):
+        """Spread widens but stays within 2x of avg → passes.
+
+        History: 9 × 1.0 + 1 × 1.5 → avg = 1.05, current = 1.5.
+        Threshold = 1.05 * 2.0 = 2.1.  1.5 < 2.1 → pass.
+        """
+        sup = self._make_supervisor([1.0] * 9 + [1.5])
+        gate = PreTradeGate(
+            _cfg(risk={"spread_vs_avg_multiplier": 2.0}),
+            feed_health=sup,
+        )
+        price = SymbolPrice(symbol="EURUSD", bid=1.10000, ask=1.10015)
+        decision = gate.evaluate(_order(), _account(), [], price=price)
+        c = next(c for c in decision.checks if c.name == "spread_vs_avg")
+        assert c.passed
+
+    def test_tight_multiplier_catches_smaller_spike(self):
+        """Multiplier 1.5 catches a smaller spread spike.
+
+        History: 9 × 1.0 + 1 × 1.8 → avg = 1.08, current = 1.8.
+        Threshold = 1.08 * 1.5 = 1.62.  1.8 > 1.62 → deny.
+        """
+        sup = self._make_supervisor([1.0] * 9 + [1.8])
+        gate = PreTradeGate(
+            _cfg(risk={"spread_vs_avg_multiplier": 1.5}),
+            feed_health=sup,
+        )
+        price = SymbolPrice(symbol="EURUSD", bid=1.10000, ask=1.10018)
+        decision = gate.evaluate(_order(), _account(), [], price=price)
+        c = next(c for c in decision.checks if c.name == "spread_vs_avg")
+        assert not c.passed
