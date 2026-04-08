@@ -55,26 +55,12 @@ from novatrade.risk.ftmo_compliance import (  # noqa: E402
 )
 from novatrade.risk.position_sizer import DrawdownProportionalRisk, DrawdownScaler, PositionSizer  # noqa: E402
 from novatrade.risk.profit_cushion_protocol import ProfitCushionProtocol  # noqa: E402
+from novatrade.risk.symbol_helpers import pip_value as _pip_value_for_symbol  # noqa: E402
 
 log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
 # Modes that the MVP is allowed to trade in.
 _MVP_ALLOWED_MODES = frozenset({AccountMode.DEMO, AccountMode.FUNDED_PRESERVATION})
-
-
-def _pip_value_for_symbol(symbol: str) -> float:
-    """Return pip value for a symbol (matches hard_risk_supervisor._pip_value).
-
-    Standard forex: 0.0001 (4th decimal).
-    JPY pairs: 0.01 (2nd decimal).
-    Gold/XAU: 0.1 (1st decimal).
-    """
-    s = symbol.upper().replace(".", "")
-    if "JPY" in s:
-        return 0.01
-    if "XAU" in s or "GOLD" in s:
-        return 0.1
-    return 0.0001
 
 
 class PreTradeGate:

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_10_novatrade_impl_1775619873",
+  "workflow_id": "shift_20260407_10_novatrade_impl",
+  "task_summary": "Fixed FTMO tracker initialization and identified DrawdownScaler volume reduction as root cause of 100% trade rejection rate, service restart required to complete fix",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed FTMO tracker initialization and identified DrawdownScaler volume reduction as root cause of 100% trade rejection rate, service restart required to complete fix"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_10_novatrade_impl"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed FTMO tracker initialization and identified DrawdownScaler volume reduction as root cause of 100% trade rejection rate, service restart required to complete fix",
+  "created_at": "2026-04-08T03:44:33Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_10_novatrade_impl_1775628211"
+}

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_15_free_will_pm_1775622013",
+  "workflow_id": "shift_20260407_15_free_will_pm",
+  "task_summary": "Fixed FTMO scaling notification spam \u2014 persistent state file, notification rate-limiting, equity change threshold",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed FTMO scaling notification spam \u2014 persistent state file, notification rate-limiting, equity change threshold"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed FTMO scaling notification spam \u2014 persistent state file, notification rate-limiting, equity change threshold",
+  "created_at": "2026-04-08T04:20:13Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_15_free_will_pm_1775625777"
+}

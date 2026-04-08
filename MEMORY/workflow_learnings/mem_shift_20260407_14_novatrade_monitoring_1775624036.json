@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_14_novatrade_monitoring_1775624036",
+  "workflow_id": "shift_20260407_14_novatrade_monitoring",
+  "task_summary": "NovaTrade main service healthy but shadow validation offline 24+ hours, preventing signal match rate calculation required for cutover",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "NovaTrade main service healthy but shadow validation offline 24+ hours, preventing signal match rate calculation required for cutover"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_14_novatrade_monitoring"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "NovaTrade main service healthy but shadow validation offline 24+ hours, preventing signal match rate calculation required for cutover",
+  "created_at": "2026-04-08T04:53:56Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_14_novatrade_monitoring_1775630050"
+}

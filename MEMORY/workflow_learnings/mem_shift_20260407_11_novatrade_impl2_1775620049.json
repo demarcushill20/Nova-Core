@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_11_novatrade_impl2_1775620049",
+  "workflow_id": "shift_20260407_11_novatrade_impl2",
+  "task_summary": "Fixed MVP account mode restriction blocking FUNDED_PRESERVATION accounts, updated tests, 867/868 tests now pass",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed MVP account mode restriction blocking FUNDED_PRESERVATION accounts, updated tests, 867/868 tests now pass"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_11_novatrade_impl2"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed MVP account mode restriction blocking FUNDED_PRESERVATION accounts, updated tests, 867/868 tests now pass",
+  "created_at": "2026-04-08T03:47:29Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_11_novatrade_impl2_1775629086"
+}

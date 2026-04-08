@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_shift_20260407_14_novatrade_monitoring_1775630050",
+  "workflow_id": "shift_20260407_14_novatrade_monitoring",
+  "task_summary": "Day 1+ shadow validation active with 95% system health, 4 external TV dependencies blocking S8 cutover",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Day 1+ shadow validation active with 95% system health, 4 external TV dependencies blocking S8 cutover"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_14_novatrade_monitoring"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Day 1+ shadow validation active with 95% system health, 4 external TV dependencies blocking S8 cutover",
+  "created_at": "2026-04-08T06:34:10Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260407_14_novatrade_monitoring_1775609796"
+}

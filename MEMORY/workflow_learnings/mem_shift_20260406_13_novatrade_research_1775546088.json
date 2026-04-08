@@ -17,5 +17,7 @@
   "reusable_guidance": "Deep research on Risk of Ruin mathematics, Kelly Criterion adaptation, optimal position sizing, consecutive loss survival, and Monte Carlo insights for FTMO-funded automated trading \u2014 with actionable NovaTrade configuration recommendations",
   "created_at": "2026-04-07T07:14:48Z",
   "confidence": "high",
-  "supersedes": "mem_shift_20260406_13_novatrade_research_1775542392"
+  "supersedes": "mem_shift_20260406_13_novatrade_research_1775542392",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_13_novatrade_research_1775520882"
 }

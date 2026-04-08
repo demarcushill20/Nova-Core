@@ -28,6 +28,24 @@ import heartbeat  # noqa: E402
 class TestActiveHoursGating(unittest.TestCase):
     """LLM heartbeat should only run during active hours."""
 
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        # Save original module state to guarantee restoration even on test failure
+        self._orig_state = {
+            "TASKS_DIR": heartbeat.TASKS_DIR,
+            "OUTPUT_DIR": heartbeat.OUTPUT_DIR,
+            "STATE_DIR": heartbeat.STATE_DIR,
+            "LOGS_DIR": heartbeat.LOGS_DIR,
+            "HEARTBEAT_AGENT_LOG": heartbeat.HEARTBEAT_AGENT_LOG,
+        }
+
+    def tearDown(self):
+        for attr, val in self._orig_state.items():
+            setattr(heartbeat, attr, val)
+        import shutil
+
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
     @patch("heartbeat.subprocess.run")
     @patch("heartbeat.CHECKLIST_FILE", Path("/tmp/nonexistent_checklist.md"))
     def test_skips_outside_active_hours(self, mock_run):
@@ -45,10 +63,9 @@ class TestActiveHoursGating(unittest.TestCase):
     @patch("heartbeat.subprocess.run")
     def test_runs_during_active_hours(self, mock_run):
         """Agent should attempt to run during active hours."""
-        tmpdir = tempfile.mkdtemp()
-        checklist = Path(tmpdir) / "checklist.md"
+        checklist = Path(self._tmpdir) / "checklist.md"
         checklist.write_text("# Test Checklist\n- Check stuff")
-        state_dir = Path(tmpdir) / "STATE"
+        state_dir = Path(self._tmpdir) / "STATE"
         state_dir.mkdir(parents=True, exist_ok=True)
         mock_run.return_value = MagicMock(stdout="HEARTBEAT_OK", returncode=0)
 
@@ -56,7 +73,7 @@ class TestActiveHoursGating(unittest.TestCase):
             patch("heartbeat.CHECKLIST_FILE", checklist),
             patch("heartbeat.ACTIVE_HOURS_START", 0),
             patch("heartbeat.ACTIVE_HOURS_END", 24),
-            patch("heartbeat.HEARTBEAT_AGENT_LOG", Path(tmpdir) / "agent.log"),
+            patch("heartbeat.HEARTBEAT_AGENT_LOG", Path(self._tmpdir) / "agent.log"),
             patch("heartbeat.STATE_DIR", state_dir),
             patch("heartbeat.HEARTBEAT_AGENT_COOLDOWN_FILE", state_dir / "last_heartbeat_agent.json"),
             patch("heartbeat._rules_engine", None),  # bypass rules engine → exercise LLM path
@@ -64,17 +81,13 @@ class TestActiveHoursGating(unittest.TestCase):
             heartbeat._run_heartbeat_agent([])
 
         mock_run.assert_called_once()
-        import shutil
-
-        shutil.rmtree(tmpdir, ignore_errors=True)
 
     @patch("heartbeat.subprocess.run")
     def test_skips_during_cooldown(self, mock_run):
         """Agent should skip if it ran recently (within cooldown period)."""
-        tmpdir = tempfile.mkdtemp()
-        checklist = Path(tmpdir) / "checklist.md"
+        checklist = Path(self._tmpdir) / "checklist.md"
         checklist.write_text("# Test Checklist\n- Check stuff")
-        state_dir = Path(tmpdir) / "STATE"
+        state_dir = Path(self._tmpdir) / "STATE"
         state_dir.mkdir(parents=True, exist_ok=True)
 
         # Write a recent cooldown timestamp (just now)
@@ -97,9 +110,6 @@ class TestActiveHoursGating(unittest.TestCase):
             heartbeat._run_heartbeat_agent([])
 
         mock_run.assert_not_called()
-        import shutil
-
-        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 class TestChecklistRequirement(unittest.TestCase):

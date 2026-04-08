@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_15_free_will_pm_1775611022",
+  "workflow_id": "shift_20260407_15_free_will_pm",
+  "task_summary": "Fixed test regression (heartbeat timeout), added watcher active-task guard to prevent auto-deploy mid-task restarts, archived 4 stale task files",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed test regression (heartbeat timeout), added watcher active-task guard to prevent auto-deploy mid-task restarts, archived 4 stale task files"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed test regression (heartbeat timeout), added watcher active-task guard to prevent auto-deploy mid-task restarts, archived 4 stale task files",
+  "created_at": "2026-04-08T01:17:02Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_15_free_will_pm_1775625777"
+}

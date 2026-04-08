@@ -779,38 +779,8 @@ class HardRiskSupervisor:
 
 
 # ---------------------------------------------------------------------------
-# Pip value helpers (provider-neutral)
+# Pip value helpers — delegated to shared module
 # ---------------------------------------------------------------------------
 
-
-def _pip_value(symbol: str) -> float:
-    """Return pip value for a symbol.
-
-    Standard forex: 0.0001 (4-digit).
-    JPY pairs: 0.01 (2-digit).
-    """
-    symbol_upper = symbol.upper().replace(".", "")
-    if "JPY" in symbol_upper:
-        return 0.01
-    if "XAU" in symbol_upper or "GOLD" in symbol_upper:
-        return 0.1
-    return 0.0001
-
-
-def _pip_usd_value(symbol: str) -> float:
-    """Approximate USD value per pip for 1 standard lot.
-
-    This is a simplified approximation.  For exact values, the adapter
-    should provide symbol specs.  These defaults are conservative and
-    err on the side of OVER-estimating risk (which is safer).
-
-    Standard forex (USD quote): $10/pip/lot
-    JPY pairs: ~$7/pip/lot (approximation)
-    Gold: ~$10/pip/lot
-    """
-    symbol_upper = symbol.upper().replace(".", "")
-    if "JPY" in symbol_upper:
-        return 7.0  # Conservative approximation
-    if "XAU" in symbol_upper or "GOLD" in symbol_upper:
-        return 10.0
-    return 10.0  # Standard forex with USD quote
+from novatrade.risk.symbol_helpers import pip_usd_value as _pip_usd_value  # noqa: E402
+from novatrade.risk.symbol_helpers import pip_value as _pip_value  # noqa: E402

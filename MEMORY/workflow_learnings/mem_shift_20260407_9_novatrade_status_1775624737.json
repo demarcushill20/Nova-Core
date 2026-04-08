@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_9_novatrade_status_1775624737",
+  "workflow_id": "shift_20260407_9_novatrade_status",
+  "task_summary": "Shadow validation service restored after 28-hour outage, main NovaTrade healthy, signal match rate pending new activity",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Shadow validation service restored after 28-hour outage, main NovaTrade healthy, signal match rate pending new activity"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_9_novatrade_status"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Shadow validation service restored after 28-hour outage, main NovaTrade healthy, signal match rate pending new activity",
+  "created_at": "2026-04-08T05:05:37Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_9_novatrade_status_1775630390"
+}

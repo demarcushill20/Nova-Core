@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_10_novatrade_impl_1775622691",
+  "workflow_id": "shift_20260407_10_novatrade_impl",
+  "task_summary": "Restored critical shadow validation service offline 24+ hours - implemented shadow service manager, fixed launch mode selection, verified IRB champion strategy parameters, all tests passing",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Restored critical shadow validation service offline 24+ hours - implemented shadow service manager, fixed launch mode selection, verified IRB champion strategy parameters, all tests passing"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_10_novatrade_impl"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Restored critical shadow validation service offline 24+ hours - implemented shadow service manager, fixed launch mode selection, verified IRB champion strategy parameters, all tests passing",
+  "created_at": "2026-04-08T04:31:31Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_10_novatrade_impl_1775628211"
+}

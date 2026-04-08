@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_10_novatrade_impl_1775607900",
+  "workflow_id": "shift_20260407_10_novatrade_impl",
+  "task_summary": "Enhanced FTMO scaling notifications, improved submission process, and fixed IRB champion strategy parameter loading from YAML configs",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Enhanced FTMO scaling notifications, improved submission process, and fixed IRB champion strategy parameter loading from YAML configs"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_10_novatrade_impl"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Enhanced FTMO scaling notifications, improved submission process, and fixed IRB champion strategy parameter loading from YAML configs",
+  "created_at": "2026-04-08T00:25:00Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_10_novatrade_impl_1775628211"
+}

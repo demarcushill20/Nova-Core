@@ -491,8 +491,17 @@ class TestScalingPlanCalendar:
         # Clear rate limiter state
         _notification_rate_limiter.clear()
 
+        # Must return falsy for PYTEST_CURRENT_TEST/NOVATRADE_TESTING (to avoid
+        # early-return guard) but truthy for TELEGRAM_BOT_TOKEN/ALLOWED_CHAT_ID.
+        def _env_side_effect(key, default=""):
+            if key in ("PYTEST_CURRENT_TEST", "NOVATRADE_TESTING"):
+                return None
+            if key in ("TELEGRAM_BOT_TOKEN", "ALLOWED_CHAT_ID"):
+                return "test"
+            return default
+
         with (
-            patch("novatrade.risk.scaling_plan_calendar.os.environ.get", return_value="test"),
+            patch("novatrade.risk.scaling_plan_calendar.os.environ.get", side_effect=_env_side_effect),
             patch("novatrade.risk.scaling_plan_calendar.urllib.request.urlopen") as mock_urlopen,
         ):
             # First call should go through

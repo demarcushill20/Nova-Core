@@ -313,14 +313,12 @@ class DailyRiskBudgetTracker:
             detail=f"risk allocated: ${actual_risk:.0f}, {reasoning}",
         )
 
-    def _get_pip_value(self, symbol: str) -> float:
-        """Get pip value for symbol (matches pre_trade_gate logic)."""
-        s = symbol.upper().replace(".", "")
-        if "JPY" in s:
-            return 0.01
-        if "XAU" in s or "GOLD" in s:
-            return 0.1
-        return 0.0001
+    @staticmethod
+    def _get_pip_value(symbol: str) -> float:
+        """Get pip value for symbol — delegates to shared helper."""
+        from novatrade.risk.symbol_helpers import pip_value
+
+        return pip_value(symbol)
 
     # -- Budget checking for pre-trade gate ----------------------------------
 

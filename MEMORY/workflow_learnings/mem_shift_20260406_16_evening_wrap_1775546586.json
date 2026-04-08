@@ -17,5 +17,7 @@
   "reusable_guidance": "Comprehensive evening wrap summarizing 16 shift blocks, 23 commits, 7 research reports, and full day's work with open threads and prioritized next actions",
   "created_at": "2026-04-07T07:23:06Z",
   "confidence": "high",
-  "supersedes": "mem_shift_20260406_16_evening_wrap_1775542735"
+  "supersedes": "mem_shift_20260406_16_evening_wrap_1775542735",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_16_evening_wrap_1775525747"
 }

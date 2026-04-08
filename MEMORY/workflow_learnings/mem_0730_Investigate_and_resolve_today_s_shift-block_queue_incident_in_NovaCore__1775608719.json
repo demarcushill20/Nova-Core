@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0730_Investigate_and_resolve_today_s_shift-block_queue_incident_in_NovaCore__1775608719",
+  "workflow_id": "0730_Investigate_and_resolve_today_s_shift-block_queue_incident_in_NovaCore_",
+  "task_summary": "Read-only diagnostic of shift-block queue incident \u2014 traced 16 blocks, identified dual root cause (4h watcher SIGTERM gap + daily session cap exhaustion), confirmed 1/16 blocks completed",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Read-only diagnostic of shift-block queue incident \u2014 traced 16 blocks, identified dual root cause (4h watcher SIGTERM gap + daily session cap exhaustion), confirmed 1/16 blocks completed"
+  ],
+  "successful_patterns": [
+    "task_completed: 0730_Investigate_and_resolve_today_s_shift-block_queue_incident_in_NovaCore_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Read-only diagnostic of shift-block queue incident \u2014 traced 16 blocks, identified dual root cause (4h watcher SIGTERM gap + daily session cap exhaustion), confirmed 1/16 blocks completed",
+  "created_at": "2026-04-08T00:38:39Z",
+  "confidence": "high"
+}

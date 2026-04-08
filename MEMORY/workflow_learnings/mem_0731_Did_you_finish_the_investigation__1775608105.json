@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0731_Did_you_finish_the_investigation__1775608105",
+  "workflow_id": "0731_Did_you_finish_the_investigation_",
+  "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0731_Did_you_finish_the_investigation__1775607900 (done)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-04-08T00:28:25Z",
+  "confidence": "high"
+}

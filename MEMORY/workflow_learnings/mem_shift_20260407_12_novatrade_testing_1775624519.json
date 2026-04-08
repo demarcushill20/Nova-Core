@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_12_novatrade_testing_1775624519",
+  "workflow_id": "shift_20260407_12_novatrade_testing",
+  "task_summary": "NovaTrade testing completed - full test suite passed (42% coverage), all FTMO compliance checks verified, shadow service restored, pipeline test fixed",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "NovaTrade testing completed - full test suite passed (42% coverage), all FTMO compliance checks verified, shadow service restored, pipeline test fixed"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_12_novatrade_testing"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "NovaTrade testing completed - full test suite passed (42% coverage), all FTMO compliance checks verified, shadow service restored, pipeline test fixed",
+  "created_at": "2026-04-08T05:01:59Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_12_novatrade_testing_1775627410"
+}

@@ -17,5 +17,7 @@
   "reusable_guidance": "Fixed test_healthy_run timeout by adding _heartbeat_shutdown_requested guard to skill evolution block in heartbeat.py",
   "created_at": "2026-04-07T08:05:30Z",
   "confidence": "high",
-  "supersedes": "mem_shift_20260406_15_free_will_pm_1775540721"
+  "supersedes": "mem_shift_20260406_15_free_will_pm_1775540721",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260406_15_free_will_pm_1775525210"
 }

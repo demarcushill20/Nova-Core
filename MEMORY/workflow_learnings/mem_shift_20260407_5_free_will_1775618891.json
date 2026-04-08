@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_shift_20260407_5_free_will_1775618891",
+  "workflow_id": "shift_20260407_5_free_will",
+  "task_summary": "Implemented P0 dynamic spread filter \u2014 denies trades when spread exceeds configurable multiplier of session rolling average",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented P0 dynamic spread filter \u2014 denies trades when spread exceeds configurable multiplier of session rolling average"
+  ],
+  "successful_patterns": [
+    "task_failed: shift_20260407_5_free_will"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented P0 dynamic spread filter \u2014 denies trades when spread exceeds configurable multiplier of session rolling average",
+  "created_at": "2026-04-08T03:28:11Z",
+  "confidence": "high"
+}

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_14_novatrade_monitoring_1775621178",
+  "workflow_id": "shift_20260407_14_novatrade_monitoring",
+  "task_summary": "NovaTrade monitoring completed \u2014 main service healthy but shadow validation offline since April 6th, strategy health degraded (69/100), zero FTMO risk exposure",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "NovaTrade monitoring completed \u2014 main service healthy but shadow validation offline since April 6th, strategy health degraded (69/100), zero FTMO risk exposure"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_14_novatrade_monitoring"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "NovaTrade monitoring completed \u2014 main service healthy but shadow validation offline since April 6th, strategy health degraded (69/100), zero FTMO risk exposure",
+  "created_at": "2026-04-08T04:06:18Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_14_novatrade_monitoring_1775630050"
+}

@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_shift_20260407_13_novatrade_research_1775623559",
+  "workflow_id": "shift_20260407_13_novatrade_research",
+  "task_summary": "Market microstructure research for EURUSD prop firm trading \u2014 session liquidity, spreads, rollover, London Fix, DST, news events; 5 actionable improvements identified",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Market microstructure research for EURUSD prop firm trading \u2014 session liquidity, spreads, rollover, London Fix, DST, news events; 5 actionable improvements identified"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_13_novatrade_research"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Market microstructure research for EURUSD prop firm trading \u2014 session liquidity, spreads, rollover, London Fix, DST, news events; 5 actionable improvements identified",
+  "created_at": "2026-04-08T04:45:59Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_13_novatrade_research_1775629706"
+}
