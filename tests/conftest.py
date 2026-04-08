@@ -97,5 +97,11 @@ def _freeze_gate_time():
     time-sensitive windows.  Tests that explicitly mock time.time (e.g.
     test_novatrade_anti_ea_detection.py) override this fixture naturally.
     """
-    with patch("novatrade.risk.pre_trade_gate._now", return_value=_SAFE_TIMESTAMP):
+    try:
+        # Eagerly import the module so the patch target resolves
+        import novatrade.risk.pre_trade_gate  # noqa: F401
+
+        with patch("novatrade.risk.pre_trade_gate._now", return_value=_SAFE_TIMESTAMP):
+            yield
+    except (ImportError, AttributeError):
         yield

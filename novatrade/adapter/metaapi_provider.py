@@ -133,11 +133,17 @@ class MetaApiAdapter(MT5Adapter):
     # --- lifecycle -----------------------------------------------------------
 
     async def connect(self) -> HealthStatus:
-        """Initialize MetaApi SDK, deploy account, open RPC connection."""
+        """Initialize MetaApi SDK, deploy account, open RPC connection.
+
+        Each phase is wrapped individually so the failure reason is explicit
+        and actionable rather than a generic "connection failed".
+        """
         t0 = time.monotonic()
+        phase = "init"
         try:
+            # Phase 1: SDK initialization
+            phase = "sdk_init"
             log.info("metaapi connect: initializing SDK (account_id=%s)", self._config.account_id)
-            # Use singleton MetaApi SDK to prevent per-cycle re-instantiation
             self._api = get_metaapi_sdk(
                 token=self._config.token,
                 domain=self._config.domain,
@@ -145,26 +151,52 @@ class MetaApiAdapter(MT5Adapter):
                 application=self._config.application,
             )
 
-            self._account = await self._api.metatrader_account_api.get_account(
-                self._config.account_id,
-            )
+            # Phase 2: Account lookup (validates token + account_id)
+            phase = "account_lookup"
+            try:
+                self._account = await self._api.metatrader_account_api.get_account(
+                    self._config.account_id,
+                )
+            except Exception as exc:
+                return self._connect_failure(t0, phase, exc,
+                    hint="Check METAAPI_TOKEN and METAAPI_ACCOUNT_ID. "
+                         "Token may be expired or account ID invalid.")
 
-            # Deploy if not already deployed.
+            # Phase 3: Deploy if not already deployed
+            phase = "deploy"
             if self._account.state != "DEPLOYED":
                 log.info("metaapi connect: deploying account (state=%s)", self._account.state)
-                await self._account.deploy()
-                await self._account.wait_deployed()
+                try:
+                    await self._account.deploy()
+                    await self._account.wait_deployed()
+                except Exception as exc:
+                    return self._connect_failure(t0, phase, exc,
+                        hint="Account failed to deploy. Check MetaAPI dashboard "
+                             "for account status and region availability.")
 
-            # Wait for terminal + broker connection.
+            # Phase 4: Wait for terminal + broker connection
+            phase = "broker_connect"
             log.info("metaapi connect: waiting for broker connection")
-            await self._account.wait_connected()
+            try:
+                await self._account.wait_connected()
+            except Exception as exc:
+                return self._connect_failure(t0, phase, exc,
+                    hint="Broker/terminal connection timed out. The MT5 terminal "
+                         "may be offline or the broker server unreachable.")
 
-            # Open RPC connection.
-            self._connection = self._account.get_rpc_connection()
-            await self._connection.connect()
-            await self._connection.wait_synchronized()
+            # Phase 5: Open RPC connection and synchronize
+            phase = "rpc_sync"
+            try:
+                self._connection = self._account.get_rpc_connection()
+                await self._connection.connect()
+                await self._connection.wait_synchronized()
+            except Exception as exc:
+                return self._connect_failure(t0, phase, exc,
+                    hint="RPC connection or synchronization failed. MetaAPI "
+                         "infrastructure may be degraded or region mismatch.")
 
-            # Query account info to check tradeAllowed status early
+            # Phase 6 (non-fatal): Query account info for early diagnostics
+            phase = "account_info"
             try:
                 acct_info = await self._connection.get_account_information()
                 self._cached_equity = acct_info.get("equity")
@@ -196,16 +228,29 @@ class MetaApiAdapter(MT5Adapter):
                 message="connected and synchronized",
             )
         except Exception as exc:
-            latency = (time.monotonic() - t0) * 1000
-            self._connected = False
-            msg = f"connection failed: {_safe_error(exc)}"
-            log.error("metaapi connect: %s", msg)
-            return HealthStatus(
-                state=HealthState.DOWN,
-                connected=False,
-                latency_ms=latency,
-                message=msg,
-            )
+            return self._connect_failure(t0, phase, exc)
+
+    def _connect_failure(
+        self,
+        t0: float,
+        phase: str,
+        exc: Exception,
+        hint: str = "",
+    ) -> HealthStatus:
+        """Build a structured connection failure status with phase and hint."""
+        latency = (time.monotonic() - t0) * 1000
+        self._connected = False
+        error_text = _safe_error(exc)
+        msg = f"connection failed at phase '{phase}': {error_text}"
+        if hint:
+            msg += f" | hint: {hint}"
+        log.error("metaapi connect: %s", msg)
+        return HealthStatus(
+            state=HealthState.DOWN,
+            connected=False,
+            latency_ms=latency,
+            message=msg,
+        )
 
     async def disconnect(self) -> None:
         """Close connection and SDK resources."""
