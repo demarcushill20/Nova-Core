@@ -18,11 +18,24 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import random
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import ClassVar
 
 log = logging.getLogger("novatrade.risk.position_sizer")
+
+
+def _is_test_environment() -> bool:
+    """Check if we're running in a test environment."""
+    return (
+        "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ or any("test" in arg.lower() for arg in sys.argv)
+    )
+
 
 # ---------------------------------------------------------------------------
 # Drawdown-proportional risk tiers (Zeno's Paradox approach)
@@ -249,6 +262,8 @@ class DrawdownScaler:
         hysteresis: bool = True,
         total_dd_enabled: bool = False,
         loss_recovery_mode: str = "instant",
+        state_file: str | None = None,
+        enable_persistence: bool | None = None,
     ) -> None:
         self._consecutive_losses: int = 0
         self._hysteresis = hysteresis
@@ -258,6 +273,15 @@ class DrawdownScaler:
         self._current_dd_scale: float = 1.0
         # Track current loss-streak scale for gradual recovery
         self._current_loss_scale: float = 1.0
+        # State persistence with 24-hour TTL (auto-disabled for testing)
+        if enable_persistence is None:
+            enable_persistence = not _is_test_environment()
+        self._enable_persistence = enable_persistence
+        self._state_file = (
+            Path(state_file) if state_file else Path("/home/nova/nova-core/STATE/novatrade/drawdown_scaler.json")
+        )
+        if self._enable_persistence:
+            self._load_state()
 
     @property
     def consecutive_losses(self) -> int:
@@ -273,6 +297,7 @@ class DrawdownScaler:
         self._consecutive_losses += 1
         # Update loss scale immediately on loss
         self._current_loss_scale = self._compute_loss_scale()
+        self._save_state()
 
     def record_win(self) -> None:
         """Record a winning trade."""
@@ -291,12 +316,71 @@ class DrawdownScaler:
             # Instant reset
             self._consecutive_losses = 0
             self._current_loss_scale = 1.0
+        self._save_state()
+
+    def _load_state(self) -> None:
+        """Load state from persistent storage with 24-hour TTL."""
+        try:
+            if not self._state_file.exists():
+                return
+
+            with open(self._state_file) as f:
+                data = json.load(f)
+
+            # Check if state is stale (older than 24 hours)
+            saved_at = datetime.fromisoformat(data.get("saved_at", "1970-01-01T00:00:00+00:00"))
+            now = datetime.now(timezone.utc)
+            age_hours = (now - saved_at).total_seconds() / 3600
+
+            if age_hours > 24:
+                log.info("DrawdownScaler state file aged %s hours, resetting to defaults", age_hours)
+                return
+
+            # Restore state
+            self._consecutive_losses = data.get("consecutive_losses", 0)
+            self._current_dd_scale = data.get("current_dd_scale", 1.0)
+            self._current_loss_scale = data.get("current_loss_scale", 1.0)
+
+            log.info(
+                "DrawdownScaler state restored: consecutive_losses=%d, dd_scale=%.2f, loss_scale=%.2f (age=%.1fh)",
+                self._consecutive_losses,
+                self._current_dd_scale,
+                self._current_loss_scale,
+                age_hours,
+            )
+
+        except Exception as e:
+            log.warning("Failed to load DrawdownScaler state: %s", e)
+
+    def _save_state(self) -> None:
+        """Save current state to persistent storage."""
+        if not self._enable_persistence:
+            return
+
+        try:
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+
+            data = {
+                "consecutive_losses": self._consecutive_losses,
+                "current_dd_scale": self._current_dd_scale,
+                "current_loss_scale": self._current_loss_scale,
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+                "recovery_mode": self._loss_recovery_mode,
+                "hysteresis": self._hysteresis,
+            }
+
+            with open(self._state_file, "w") as f:
+                json.dump(data, f, indent=2)
+
+        except Exception as e:
+            log.warning("Failed to save DrawdownScaler state: %s", e)
 
     def reset(self) -> None:
         """Reset state (e.g., for a new trading day)."""
         self._consecutive_losses = 0
         self._current_dd_scale = 1.0
         self._current_loss_scale = 1.0
+        self._save_state()
 
     def drawdown_scale(self, dd_used_pct: float) -> float:
         """Return the scale factor based on how much of the daily DD limit is used.

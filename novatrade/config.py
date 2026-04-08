@@ -78,6 +78,10 @@ class RiskConfig:
     max_volume_per_trade: float = _DEFAULT_MAX_VOLUME_PER_TRADE
     min_volume_per_trade: float = 0.01
     spread_ceiling_points: float = _DEFAULT_SPREAD_CEILING_POINTS
+    # Dynamic spread filter: deny if current spread > multiplier × rolling avg.
+    # Catches liquidity dips where spread is technically below the ceiling but
+    # abnormally wide relative to recent session conditions.  Set 0.0 to disable.
+    spread_vs_avg_multiplier: float = 2.0
     cooldown_seconds: int = 60
     max_trades_per_day: int = 10  # FTMO-safe: quality over quantity
     # Extended from 15 for Apr 6-11: PCE/CPI high-vol releases
@@ -97,8 +101,8 @@ class RiskConfig:
     max_slippage_pips: float = 3.0  # max acceptable slippage in pips (0 = disabled)
     # Anti-EA-detection: rollover dead zone (spreads widen, fills degrade)
     rollover_dead_zone_enabled: bool = True
-    rollover_start_hour_utc: int = 22  # 22:00 UTC = daily FX rollover start (optimized from 21:00)
-    rollover_end_hour_utc: int = 23  # 23:00 UTC = rollover window end
+    rollover_start_hour_utc: int = 21  # 21:00 UTC = daily FX rollover start (widened per microstructure research)
+    rollover_end_hour_utc: int = 0  # 00:00 UTC = rollover window end (midnight next day, covers full volatility window)
     # Anti-EA-detection: entry timing jitter (randomizes order timing)
     entry_jitter_min_seconds: float = 1.0
     entry_jitter_max_seconds: float = 5.0
