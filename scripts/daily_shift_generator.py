@@ -1131,6 +1131,11 @@ def build_telegram_summary(
 
 def send_telegram(text: str) -> None:
     """Send a message via Telegram using the same env vars as telegram_notifier.py."""
+    # PAUSED: shift notifications silenced to save tokens (2026-04-08)
+    # Remove this early return to re-enable.
+    log("Telegram notification suppressed (paused)")
+    return
+
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("ALLOWED_CHAT_ID", "").strip()
 

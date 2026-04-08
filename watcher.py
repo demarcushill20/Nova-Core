@@ -521,6 +521,49 @@ def _task_stem(task_name: str) -> str:
     return stem
 
 
+def _budget_category(fm: dict, routing: dict | None = None, stem: str = "") -> str:
+    """Map task metadata to session-budget category.
+
+    Categories: production, research, test, adhoc, carryover.
+    Used by the session counter to enforce reserved-pool budgets.
+    """
+    # Shift blocks are always production
+    if fm.get("type") == "shift_block":
+        return "production"
+
+    # Carryover: task scheduled on a prior UTC day
+    sched = fm.get("scheduled_at")
+    if sched:
+        try:
+            if isinstance(sched, str):
+                sched_dt = datetime.fromisoformat(sched)
+            elif isinstance(sched, datetime):
+                sched_dt = sched
+            else:
+                sched_dt = None
+            if sched_dt is not None:
+                today = datetime.now(timezone.utc).date()
+                sched_date = sched_dt.date()
+                if sched_date < today:
+                    return "carryover"
+        except (ValueError, TypeError):
+            pass
+
+    # Use task_class from routing if available
+    task_class = (routing or {}).get("task_class", "")
+    if task_class == "research":
+        return "research"
+    if task_class == "code_review":
+        return "test"
+
+    # Heuristic from stem
+    stem_lower = stem.lower()
+    if "test" in stem_lower or "pytest" in stem_lower or "validation" in stem_lower:
+        return "test"
+
+    return "adhoc"
+
+
 def _output_matches_stem(filename: str, stem: str) -> bool:
     """Check if an OUTPUT filename matches a task stem with proper boundary.
 
@@ -735,12 +778,31 @@ def reap_stale_tasks(*, force: bool = False) -> list[str]:
                     if hours_past >= STALE_SHIFT_BLOCK_HOURS:
                         done_path = p.with_name(f"{p.stem}.md.done")
                         p.rename(done_path)
+                        _stem = _task_stem(p.name)
                         logger.info(
                             "STALE REAPER (shift-block): %s → %s (%.1fh past scheduled_at)",
                             p.name,
                             done_path.name,
                             hours_past,
                         )
+                        # Phase 7B: Write explicit expiration evidence to OUTPUT/
+                        try:
+                            _exp_stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                            _exp_report = (
+                                f"# Expired: {_stem}\n\n"
+                                f"**Reason:** Shift block expired — {hours_past:.1f}h past scheduled_at "
+                                f"(threshold: {STALE_SHIFT_BLOCK_HOURS}h)\n"
+                                f"**Scheduled:** {sched_at}\n"
+                                f"**Expired:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n"
+                                f"This shift block was not dispatched in time and was automatically expired "
+                                f"by the stale-block reaper.\n"
+                            )
+                            _exp_path = OUTPUT_DIR / f"{_stem}__{_exp_stamp}.expired.md"
+                            _exp_path.write_text(_exp_report, encoding="utf-8")
+                        except OSError as _exp_exc:
+                            logger.warning(
+                                "STALE REAPER: failed to write expiration report for %s: %s", _stem, _exp_exc
+                            )
                         reaped.append(p.name)
                         continue
             except (ValueError, TypeError, OSError) as exc:
@@ -856,24 +918,42 @@ def recover_orphaned_tasks(*, force: bool = False) -> list[str]:
             can_retry = True  # Err on side of retrying
 
         if can_retry:
-            # For proactive tasks, apply adaptive retry context before re-dispatch
-            if is_proactive:
+            # Before resetting to .md for retry, check if OUTPUT already exists.
+            # If the worker completed but the lifecycle rename failed (LIFECYCLE RACE),
+            # mark .done instead of re-dispatching — prevents re-execution loops.
+            output_before_retry = _find_any_output(stem)
+            if output_before_retry:
                 try:
-                    _append_retry_context_watcher(ip)
-                except Exception:
-                    pass  # best-effort — don't block recovery
-            try:
-                ip.rename(task_file)
-                logger.info(
-                    "ORPHAN RECOVERY: %s → %s (stuck %.1f min, reset for retry%s)",
-                    ip.name,
-                    task_file.name,
-                    age_s / 60,
-                    ", adaptive" if is_proactive else "",
-                )
-                recovered.append(ip.name)
-            except (OSError, FileNotFoundError) as exc:
-                logger.warning("ORPHAN RECOVERY: failed to reset %s: %s", ip.name, exc)
+                    ip.rename(done_file)
+                    clear_checkpoint(stem)
+                    logger.info(
+                        "ORPHAN RECOVERY (output-guard): %s → %s (OUTPUT exists at %s — skipping retry)",
+                        ip.name,
+                        done_file.name,
+                        output_before_retry.name,
+                    )
+                    recovered.append(ip.name)
+                except (OSError, FileNotFoundError) as exc:
+                    logger.warning("ORPHAN RECOVERY (output-guard): failed to mark %s as done: %s", ip.name, exc)
+            else:
+                # For proactive tasks, apply adaptive retry context before re-dispatch
+                if is_proactive:
+                    try:
+                        _append_retry_context_watcher(ip)
+                    except Exception:
+                        pass  # best-effort — don't block recovery
+                try:
+                    ip.rename(task_file)
+                    logger.info(
+                        "ORPHAN RECOVERY: %s → %s (stuck %.1f min, reset for retry%s)",
+                        ip.name,
+                        task_file.name,
+                        age_s / 60,
+                        ", adaptive" if is_proactive else "",
+                    )
+                    recovered.append(ip.name)
+                except (OSError, FileNotFoundError) as exc:
+                    logger.warning("ORPHAN RECOVERY: failed to reset %s: %s", ip.name, exc)
         else:
             # Record circuit breaker failure for research injection tasks
             if is_research:
@@ -998,6 +1078,10 @@ async def _maybe_run_jit_shift_generation() -> None:
     lead-time filtering and duplicate prevention, so this is safe to call
     frequently.
     """
+    # PAUSED: JIT shift generation disabled to save tokens (2026-04-08)
+    # Remove this early return to re-enable.
+    return
+
     global _last_jit_time
     now = time.time()
     if (now - _last_jit_time) < JIT_SHIFT_INTERVAL:
@@ -1339,6 +1423,7 @@ async def _execute_worker(
     attempt: int,
     max_attempts: int,
     child_env: dict[str, str] | None = None,
+    budget_category: str = "adhoc",
 ) -> int:
     """Execute a Claude worker subprocess (async).
 
@@ -1389,10 +1474,15 @@ async def _execute_worker(
         await asyncio.to_thread(pid_file.write_text, str(proc.pid), "utf-8")
         logger.info("Worker PID %d written to %s", proc.pid, pid_file)
 
-        # Daily session counter — track actual Claude subprocess spawns
+        # Daily session counter — track actual Claude subprocess spawns (Phase 7B: category-aware)
         if _HAS_SESSION_COUNTER:
-            _sc_count = _session_counter_increment()
-            logger.info("SESSION COUNTER: %d/%d for today", _sc_count, _session_counter_max)
+            _sc_count = _session_counter_increment(budget_category)
+            logger.info(
+                "SESSION COUNTER: %d/%d for today (category=%s)",
+                _sc_count,
+                _session_counter_max,
+                budget_category,
+            )
 
         # Start watchdog keepalive pings during long-running subprocess
         keepalive_task = asyncio.create_task(_watchdog_keepalive())
@@ -1724,6 +1814,34 @@ async def _dispatch_inner(task_path: Path):
         routing.get("fallback_reason", "routed_to_orchestrator"),
     )
 
+    # --- Phase 7B: Category-aware session budget check ---
+    _fm_for_budget = parse_frontmatter(inprogress_path)
+    _budget_cat = _budget_category(_fm_for_budget, routing, stem)
+    if _HAS_SESSION_COUNTER:
+        _cat_ok, _cat_reason = _session_can_dispatch(_budget_cat)
+        if not _cat_ok:
+            logger.warning(
+                "SESSION BUDGET (%s): %s — deferring task %s for %ds",
+                _budget_cat,
+                _cat_reason,
+                stem,
+                int(_DEFER_COOLDOWN_S),
+            )
+            slog.event(
+                "session_budget.deferred",
+                stem=stem,
+                category=_budget_cat,
+                reason=_cat_reason,
+            )
+            # Restore to .md so it can be retried when budget frees up
+            try:
+                inprogress_path.rename(task_path)
+            except FileNotFoundError:
+                pass
+            _deferred[task_name] = time.monotonic()
+            clear_checkpoint(stem)
+            return
+
     # --- Phase 4.4: Cost-aware model routing ---
     task_priority = parse_task_priority(task_text)
     cost_decision = cost_route_task(
@@ -1993,6 +2111,7 @@ async def _dispatch_inner(task_path: Path):
         attempt=1,
         max_attempts=MAX_SUPERVISOR_ATTEMPTS,
         child_env=child_env,
+        budget_category=_budget_cat,
     )
 
     stdout_for_trace = ""
@@ -2074,6 +2193,7 @@ async def _dispatch_inner(task_path: Path):
                 skill_flag_note=skill_flag_note,
                 attempt=2,
                 max_attempts=MAX_SUPERVISOR_ATTEMPTS,
+                budget_category=_budget_cat,
             )
 
             # Re-verify after reflexion retry — skip metrics to avoid
@@ -2148,7 +2268,25 @@ async def _dispatch_inner(task_path: Path):
                 duration_ms=trace_ctx.elapsed_ms(),
             )
     except FileNotFoundError:
-        logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
+        # LIFECYCLE RACE: .inprogress was already moved (e.g. by orphan recovery).
+        # If the task passed but neither .done nor .failed exists, create .done
+        # as a tombstone to prevent orphan recovery from re-dispatching.
+        if passed:
+            done_path = inprogress_path.with_name(f"{stem}.md.done")
+            if not done_path.exists():
+                try:
+                    done_path.touch()
+                    logger.warning(
+                        "LIFECYCLE RACE RECOVERY: %s — created %s tombstone to prevent re-dispatch",
+                        stem,
+                        done_path.name,
+                    )
+                except OSError as exc:
+                    logger.error("LIFECYCLE RACE RECOVERY: failed to create %s: %s", done_path.name, exc)
+            else:
+                logger.warning("LIFECYCLE RACE: %s .inprogress already moved, .done exists — OK", stem)
+        else:
+            logger.warning("LIFECYCLE RACE: %s .inprogress file already moved — skipping rename", stem)
     finally:
         # Phase 6B.14: Always manage checkpoint — even if rename threw FileNotFoundError.
         # Previously, clear_checkpoint was inside the try block and skipped on race conditions,
@@ -2698,11 +2836,13 @@ async def scan_and_enqueue(pool: AsyncWorkerPool) -> None:
         logger.info("Scan complete — no new tasks.")
         return
 
-    # Daily session circuit breaker — halt dispatch if daily cap reached
+    # Daily session circuit breaker — hard-cap safety net (Phase 7B: per-task category
+    # checks happen in _dispatch_inner; this halts the entire scan cycle only if the
+    # absolute hard cap is reached and even production cannot proceed).
     if _HAS_SESSION_COUNTER:
-        _sc_ok, _sc_reason = _session_can_dispatch()
+        _sc_ok, _sc_reason = _session_can_dispatch("production")
         if not _sc_ok:
-            logger.warning("DAILY SESSION CAP: %s — halting dispatch for today", _sc_reason)
+            logger.warning("DAILY SESSION HARD CAP: %s — halting all dispatch", _sc_reason)
             return
 
     # Quota-aware filtering — defers non-critical tasks under pressure

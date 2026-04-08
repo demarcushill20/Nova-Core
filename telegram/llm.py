@@ -31,6 +31,10 @@ CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
 CONVERSATION_TIMEOUT = 14400  # seconds (4 hours) — long-running research/planning needs extended window
 MODEL = "claude-opus-4-6"
 
+# Telegram-specific MCP config: only servers the bot needs
+# (nova-memory, nova-vault, brave-search, tavily, fetch)
+_TELEGRAM_MCP_CONFIG = str(Path(__file__).resolve().parent / ".mcp.json")
+
 # Load MCP API keys from .mcp.env (gitignored) into process environment
 _MCP_ENV_FILE = Path(__file__).resolve().parent.parent / ".mcp.env"
 if _MCP_ENV_FILE.is_file():
@@ -76,7 +80,16 @@ async def generate_response(
     parts.append(f"USER MESSAGE:\n{wrapped_prompt}")
     full_prompt = "\n\n".join(parts)
 
-    cmd = [CLAUDE_BIN, "-p", "--model", MODEL, "--dangerously-skip-permissions"]
+    cmd = [
+        CLAUDE_BIN,
+        "-p",
+        "--model",
+        MODEL,
+        "--dangerously-skip-permissions",
+        "--mcp-config",
+        _TELEGRAM_MCP_CONFIG,
+        "--strict-mcp-config",
+    ]
     # Append system prompt via flag if available
     if system_prompt:
         cmd += ["--append-system-prompt", system_prompt]
