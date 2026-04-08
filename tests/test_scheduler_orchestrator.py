@@ -27,7 +27,6 @@ from utils.scheduler.orchestrator import (
     SchedulerConfig,
     SchedulerResult,
     build_block_plan,
-    build_shadow_comparison,
     load_scheduler_config,
 )
 from utils.scheduler.packer import PackerConfig
@@ -353,10 +352,9 @@ class TestConfigLoading:
         """Feature flags JSON can enable the scheduler."""
         state_dir = tmp_path / "STATE" / "config"
         state_dir.mkdir(parents=True)
-        (state_dir / "feature_flags.json").write_text(json.dumps({"scheduler": {"enabled": True, "shadow_mode": True}}))
+        (state_dir / "feature_flags.json").write_text(json.dumps({"scheduler": {"enabled": True}}))
         cfg = load_scheduler_config(config_dir=tmp_path)
         assert cfg.enabled is True
-        assert cfg.shadow_mode is True
 
     def test_load_with_interrupt_policy_yaml(self, tmp_path):
         """Interrupt policy YAML loads into config."""
@@ -401,70 +399,12 @@ class TestConfigLoading:
             "  use_uncertainty: false\n"
             "  uncertainty_simulations: 50\n"
             "  variant_selection: conservative\n"
-            "  shadow_mode: true\n"
         )
         cfg = load_scheduler_config(config_dir=tmp_path)
         assert cfg.use_calibration is False
         assert cfg.use_uncertainty is False
         assert cfg.uncertainty_simulations == 50
         assert cfg.variant_selection == "conservative"
-        assert cfg.shadow_mode is True
-
-
-# ===================================================================
-# Shadow mode
-# ===================================================================
-
-
-class TestShadowMode:
-    """Tests for shadow comparison functionality."""
-
-    def test_shadow_comparison_returns_valid_dict(self):
-        tasks = [
-            _make_task("t1", priority="high", expected_min=30),
-            _make_task("t2", priority="medium", expected_min=45),
-        ]
-        result = build_shadow_comparison(tasks)
-        assert isinstance(result, dict)
-        assert "old_tasks_count" in result
-        assert "new_tasks_count" in result
-        assert "old_utilization" in result
-        assert "new_utilization" in result
-        assert "improvement_pct" in result
-        assert "new_confidence" in result
-        assert "new_deferred_count" in result
-
-    def test_shadow_comparison_with_disabled_config(self):
-        """Shadow comparison forces enabled=True even if config says False."""
-        tasks = [_make_task("t1")]
-        cfg = SchedulerConfig(enabled=False)
-        result = build_shadow_comparison(tasks, config=cfg)
-        assert result["new_tasks_count"] >= 1
-
-    def test_shadow_mode_doesnt_affect_actual_scheduling(self):
-        """Shadow mode flag should not break normal pipeline."""
-        tasks = [_make_task("t1"), _make_task("t2")]
-        cfg = _enabled_config(shadow_mode=True)
-        result = build_block_plan(tasks, config=cfg)
-        # Pipeline runs normally even in shadow mode
-        assert result.total_tasks_scored == 2
-
-    def test_shadow_comparison_shows_improvement_metrics(self):
-        """Comparison should include meaningful numbers."""
-        tasks = [
-            _make_task("t1", expected_min=30),
-            _make_task("t2", expected_min=45),
-            _make_task("t3", expected_min=20),
-        ]
-        result = build_shadow_comparison(tasks, block_duration_min=480.0)
-        assert isinstance(result["improvement_pct"], float)
-        assert isinstance(result["new_confidence"], float)
-
-    def test_shadow_comparison_empty_tasks(self):
-        """Empty tasks should return zeros."""
-        result = build_shadow_comparison([])
-        assert result["old_tasks_count"] == 0
-        assert result["new_tasks_count"] == 0
 
 
 # ===================================================================
@@ -737,7 +677,6 @@ class TestSchedulerConfigModel:
         assert cfg.use_uncertainty is True
         assert cfg.uncertainty_simulations == 200
         assert cfg.variant_selection == "balanced"
-        assert cfg.shadow_mode is False
 
     def test_enabled_override(self):
         cfg = SchedulerConfig(enabled=True)

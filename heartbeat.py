@@ -2497,7 +2497,7 @@ def check_scheduler() -> dict:
         config = _load_sched_config()
         status_parts = []
         status_parts.append(f"enabled={config.enabled}")
-        status_parts.append(f"shadow={config.shadow_mode}")
+        # shadow_mode removed — replaced by post-trade verification system
         status_parts.append(f"variant={config.variant_selection}")
 
         # Check if execution log exists and has records

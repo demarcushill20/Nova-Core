@@ -17,7 +17,6 @@ The orchestrator exposes:
   - SchedulerConfig: master config aggregating all sub-configs
   - SchedulerResult: full pipeline output with diagnostics
   - build_block_plan(): THE main function — runs the full pipeline
-  - build_shadow_comparison(): shadow mode comparison (new vs old)
   - load_scheduler_config(): loads config from files with defaults
 """
 
@@ -95,10 +94,6 @@ class SchedulerConfig(BaseModel):
         default="balanced",
         description="aggressive / balanced / conservative / auto",
     )
-    shadow_mode: bool = Field(
-        default=False,
-        description="Run but don't execute - log comparison only",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +103,7 @@ class SchedulerConfig(BaseModel):
 _BASE_DIR = Path(__file__).resolve().parents[2]
 
 
-def load_scheduler_config(config_dir: Path | None = None) -> SchedulerConfig:  # noqa: C901
+def load_scheduler_config(config_dir: Path | None = None) -> SchedulerConfig:
     """Load scheduler config from files, merging into SchedulerConfig.
 
     Sources:
@@ -139,8 +134,6 @@ def load_scheduler_config(config_dir: Path | None = None) -> SchedulerConfig:  #
                     kwargs["uncertainty_simulations"] = int(orch["uncertainty_simulations"])
                 if "variant_selection" in orch:
                     kwargs["variant_selection"] = str(orch["variant_selection"])
-                if "shadow_mode" in orch:
-                    kwargs["shadow_mode"] = bool(orch["shadow_mode"])
         except (yaml.YAMLError, OSError) as exc:
             log.warning("Failed to parse %s: %s", weights_path, exc)
 
@@ -161,11 +154,8 @@ def load_scheduler_config(config_dir: Path | None = None) -> SchedulerConfig:  #
         try:
             flags = json.loads(flags_path.read_text())
             sched_flags = flags.get("scheduler", {})
-            if isinstance(sched_flags, dict):
-                if "enabled" in sched_flags:
-                    kwargs["enabled"] = bool(sched_flags["enabled"])
-                if "shadow_mode" in sched_flags:
-                    kwargs["shadow_mode"] = bool(sched_flags["shadow_mode"])
+            if isinstance(sched_flags, dict) and "enabled" in sched_flags:
+                kwargs["enabled"] = bool(sched_flags["enabled"])
         except (json.JSONDecodeError, OSError) as exc:
             log.warning("Failed to parse %s: %s", flags_path, exc)
 
@@ -416,55 +406,3 @@ def build_block_plan(  # noqa: C901
         confidence_summary=confidence_summary,
         validation_warnings=validation_warnings,
     )
-
-
-# ---------------------------------------------------------------------------
-# Shadow comparison
-# ---------------------------------------------------------------------------
-
-
-def build_shadow_comparison(
-    tasks: list[WorkUnit],
-    block_duration_min: float = 480.0,
-    config: SchedulerConfig | None = None,
-) -> dict:
-    """Run both old-style and new-style scheduling for comparison.
-
-    Old-style: simple priority sort, direct pack with default config.
-    New-style: full pipeline via build_block_plan().
-
-    Returns a comparison dict with utilization and improvement metrics.
-    """
-    cfg = config or SchedulerConfig(enabled=True)
-    # Force enabled for shadow comparison
-    if not cfg.enabled:
-        cfg = cfg.model_copy(update={"enabled": True})
-
-    # --- Old-style: simple priority sort + direct pack ---
-    priority_order = {"high": 0, "medium": 1, "low": 2}
-    old_sorted = sorted(tasks, key=lambda wu: priority_order.get(wu.priority, 1))
-    old_scored = rank_tasks(old_sorted)
-    old_plan = pack_block(old_scored, block_duration_min=block_duration_min)
-    old_utilization = old_plan.utilization_pct
-
-    # --- New-style: full pipeline ---
-    new_result = build_block_plan(tasks, block_duration_min=block_duration_min, config=cfg)
-    new_plan = new_result.block_plan
-    new_utilization = new_plan.utilization_pct
-
-    # --- Comparison ---
-    improvement_pct = new_utilization - old_utilization
-
-    return {
-        "old_tasks_count": len(old_plan.scheduled_slots),
-        "new_tasks_count": len(new_plan.scheduled_slots),
-        "old_utilization": round(old_utilization, 2),
-        "new_utilization": round(new_utilization, 2),
-        "new_confidence": round(new_result.simulation.confidence_score, 4) if new_result.simulation else 0.0,
-        "new_deferred_count": new_result.total_tasks_deferred,
-        "improvement_pct": round(improvement_pct, 2),
-        "new_variant": new_result.variant_used,
-        "new_calibration_applied": new_result.calibration_applied,
-        "new_starvation_alerts": len(new_result.starvation_alerts),
-        "new_epic_warnings": len(new_result.epic_warnings),
-    }

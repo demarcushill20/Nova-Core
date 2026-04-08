@@ -90,7 +90,6 @@ from utils.scheduler.orchestrator import (
     SchedulerConfig,
     SchedulerResult,
     build_block_plan,
-    build_shadow_comparison,
     load_scheduler_config,
 )
 from utils.scheduler.packer import (
@@ -185,7 +184,6 @@ __all__ = [
     "WorkUnit",
     "build_block_plan",
     "build_graph",
-    "build_shadow_comparison",
     "can_resume_paused",
     "check_replan_triggers",
     "check_starvation",

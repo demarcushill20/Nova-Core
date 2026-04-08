@@ -48,7 +48,6 @@ try:
     from utils.scheduler.orchestrator import (
         SchedulerResult,
         build_block_plan,
-        build_shadow_comparison,
         load_scheduler_config,
     )
     from utils.scheduler.replanner import BlockState, save_block_state
@@ -281,19 +280,17 @@ AFTERNOON_SHIFT_BLOCKS: list[dict] = [
         "title": "NovaTrade Status Check",
         "focus": "NovaTrade",
         "instructions": """\
-1. Shadow mode health check:
-   - Check if novacore-shadow.service is running: `systemctl status novacore-shadow`
-   - Review shadow mode logs for errors or warnings
+1. NovaTrade live pipeline health:
+   - Verify novacore-novatrade.service is running
    - Check MetaApi connection status and feed health
+   - Review live loop logs for errors or warnings
 
-2. Signal match rate:
-   - Compare Python pipeline signals vs TV webhook signals from last period
-   - Calculate match rate (target: 95%+)
-   - Log any divergences with timestamps and details
+2. Risk and compliance:
+   - Check FTMO daily loss tracker state
+   - Review drawdown governance status
+   - Verify hard risk supervisor is operational
 
 3. Service and system health:
-   - Verify novacore-novatrade.service is running
-   - Check FTMO daily loss tracker state
    - Review morning shift NovaTrade outputs for continuity
    - Quick check on all NovaCore services (watcher, telegram)""",
         "output_suffix": "novatrade_status",
@@ -654,16 +651,6 @@ def _optimize_blocks_with_scheduler(
         if not blocks:
             return blocks, False
         block_duration = len(blocks) * 45.0  # ~45 min per block
-
-        if config.shadow_mode:
-            # Shadow mode: log comparison but don't change order
-            comparison = build_shadow_comparison(
-                work_units,
-                block_duration_min=block_duration,
-                config=config,
-            )
-            log(f"[scheduler-shadow] {_json.dumps(comparison, indent=2)}")
-            return blocks, False
 
         # Run full pipeline
         result: SchedulerResult = build_block_plan(

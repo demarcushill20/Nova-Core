@@ -57,47 +57,6 @@ class TestTimingFixtures:
         assert result == "success"
         assert mock_sleep.call_count == 2  # Called twice before success
 
-    @pytest.mark.asyncio
-    async def test_shadow_mode_async_pattern_fixed(self, mock_async_sleep):
-        """Example fix for shadow mode async timing.
-
-        Original issue: tests/test_novatrade_shadow_mode.py:543 uses await asyncio.sleep(0.25)
-        which can cause race conditions.
-        """
-        # Use events instead of sleep for synchronization
-        run_called = asyncio.Event()
-        stop_called = asyncio.Event()
-
-        class MockRunner:
-            def __init__(self):
-                self.running = False
-
-            async def run(self):
-                self.running = True
-                run_called.set()
-                await stop_called.wait()  # Wait for stop signal
-
-            def stop(self):
-                self.running = False
-                stop_called.set()
-
-        runner = MockRunner()
-
-        # Start runner
-        run_task = asyncio.create_task(runner.run())
-
-        # Wait for runner to start (no sleep needed)
-        await run_called.wait()
-        assert runner.running
-
-        # Stop runner (no sleep needed)
-        runner.stop()
-        await run_task
-        assert not runner.running
-
-        # Verify sleep was never called
-        mock_async_sleep.assert_not_called()
-
     def test_budget_watchdog_deterministic(self, mock_sleep):
         """Example fix for budget watchdog timing.
 
@@ -303,29 +262,3 @@ class TestFlakeRepairs:
 
         assert result is True
         assert attempt_count == 2
-
-    @pytest.mark.asyncio
-    async def test_replace_shadow_mode_sleep(self):
-        """Replace the sleep pattern from test_novatrade_shadow_mode.py:543."""
-        # Original used fixed sleep which was flaky
-        # New pattern: use events for proper synchronization
-
-        run_started = asyncio.Event()
-        should_stop = asyncio.Event()
-
-        async def mock_shadow_runner():
-            run_started.set()
-            await should_stop.wait()
-            return "stopped"
-
-        # Start the runner
-        runner_task = asyncio.create_task(mock_shadow_runner())
-
-        # Wait for it to start (no fixed delay)
-        await run_started.wait()
-
-        # Signal stop
-        should_stop.set()
-        result = await runner_task
-
-        assert result == "stopped"
