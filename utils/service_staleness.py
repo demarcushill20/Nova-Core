@@ -19,11 +19,12 @@ BASE = Path(__file__).resolve().parent.parent  # ~/nova-core
 # Map service names to the code paths they run.
 # If ANY file under these paths was committed after the service started,
 # the service is stale.
+#
+# NOTE: novacore-novatrade is intentionally excluded. It is a stateful live
+# trading process — restarting it mid-position, mid-pending-order, or
+# mid-execution can drop broker callbacks. Restart it manually after pushing
+# code; the /ship workflow already handles this.
 SERVICE_CODE_PATHS: dict[str, list[str]] = {
-    "novacore-novatrade": [
-        "novatrade/",
-        "configs/strategies/",
-    ],
     "novacore-watcher": [
         "watcher.py",
     ],

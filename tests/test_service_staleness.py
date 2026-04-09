@@ -48,7 +48,7 @@ class TestGetServiceStartTime:
     @patch("utils.service_staleness.subprocess.run")
     def test_parses_systemd_timestamp(self, mock_run):
         mock_run.return_value = _mock_run("ActiveEnterTimestamp=Thu 2026-03-27 18:10:51 UTC")
-        result = _get_service_start_time("novacore-novatrade")
+        result = _get_service_start_time("novacore-telegram")
         assert result is not None
         assert result.year == 2026
         assert result.month == 3
@@ -57,19 +57,19 @@ class TestGetServiceStartTime:
     @patch("utils.service_staleness.subprocess.run")
     def test_returns_none_on_empty(self, mock_run):
         mock_run.return_value = _mock_run("ActiveEnterTimestamp=")
-        result = _get_service_start_time("novacore-novatrade")
+        result = _get_service_start_time("novacore-telegram")
         assert result is None
 
     @patch("utils.service_staleness.subprocess.run")
     def test_returns_none_on_failure(self, mock_run):
         mock_run.return_value = _mock_run("", returncode=1)
-        result = _get_service_start_time("novacore-novatrade")
+        result = _get_service_start_time("novacore-telegram")
         assert result is None
 
     @patch("utils.service_staleness.subprocess.run")
     def test_handles_exception(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired("cmd", 10)
-        result = _get_service_start_time("novacore-novatrade")
+        result = _get_service_start_time("novacore-telegram")
         assert result is None
 
 
@@ -151,7 +151,7 @@ class TestCheckStaleness:
     @patch("utils.service_staleness._get_service_start_time", return_value=TWO_DAYS_AGO)
     @patch("utils.service_staleness._is_service_active", return_value=True)
     def test_detects_stale_service(self, mock_active, mock_start, mock_commit, mock_count):
-        report = check_staleness("novacore-novatrade")
+        report = check_staleness("novacore-telegram")
         assert report.is_stale is True
         assert report.commits_since_start == 5
         assert "STALE" in report.detail
@@ -162,13 +162,13 @@ class TestCheckStaleness:
     @patch("utils.service_staleness._get_service_start_time", return_value=TWO_DAYS_AGO)
     @patch("utils.service_staleness._is_service_active", return_value=True)
     def test_fresh_service(self, mock_active, mock_start, mock_commit, mock_count):
-        report = check_staleness("novacore-novatrade")
+        report = check_staleness("novacore-telegram")
         assert report.is_stale is False
         assert "up to date" in report.detail
 
     @patch("utils.service_staleness._is_service_active", return_value=False)
     def test_inactive_service(self, mock_active):
-        report = check_staleness("novacore-novatrade")
+        report = check_staleness("novacore-telegram")
         assert report.is_stale is False
         assert "not active" in report.detail
 
@@ -177,18 +177,24 @@ class TestCheckStaleness:
         assert report.is_stale is False
         assert "no code paths configured" in report.detail
 
+    def test_novatrade_excluded_from_auto_deploy(self):
+        """novatrade is intentionally excluded — restarts must be manual."""
+        report = check_staleness("novacore-novatrade")
+        assert report.is_stale is False
+        assert "no code paths configured" in report.detail
+
     @patch("utils.service_staleness._get_latest_commit_time", return_value=(None, 0))
     @patch("utils.service_staleness._get_service_start_time", return_value=TWO_DAYS_AGO)
     @patch("utils.service_staleness._is_service_active", return_value=True)
     def test_no_commits_found(self, mock_active, mock_start, mock_commit):
-        report = check_staleness("novacore-novatrade")
+        report = check_staleness("novacore-telegram")
         assert report.is_stale is False
         assert "no git commits" in report.detail
 
     @patch("utils.service_staleness._get_service_start_time", return_value=None)
     @patch("utils.service_staleness._is_service_active", return_value=True)
     def test_no_start_time(self, mock_active, mock_start):
-        report = check_staleness("novacore-novatrade")
+        report = check_staleness("novacore-telegram")
         assert report.is_stale is False
         assert "could not determine" in report.detail
 
@@ -243,9 +249,10 @@ class TestStalenessReport:
 
 
 class TestConfiguration:
-    def test_novatrade_paths_configured(self):
-        assert "novacore-novatrade" in SERVICE_CODE_PATHS
-        assert "novatrade/" in SERVICE_CODE_PATHS["novacore-novatrade"]
+    def test_novatrade_excluded(self):
+        """novatrade must NOT be in the auto-deploy list — it is a stateful
+        live trading process and restarts must remain manual."""
+        assert "novacore-novatrade" not in SERVICE_CODE_PATHS
 
     def test_watcher_paths_configured(self):
         assert "novacore-watcher" in SERVICE_CODE_PATHS
@@ -267,25 +274,31 @@ class TestRestartService:
         assert result.success is False
         assert "unknown" in result.detail
 
+    def test_novatrade_unknown_to_auto_deploy(self):
+        """novatrade is excluded from SERVICE_CODE_PATHS, so restart_service refuses it."""
+        result = restart_service("novacore-novatrade")
+        assert result.success is False
+        assert "unknown" in result.detail
+
     @patch("utils.service_staleness._is_service_active", return_value=True)
     @patch("utils.service_staleness.subprocess.run")
     def test_successful_restart(self, mock_run, mock_active):
         mock_run.return_value = _mock_run("")
-        result = restart_service("novacore-novatrade")
+        result = restart_service("novacore-telegram")
         assert result.success is True
         assert "restarted successfully" in result.detail
 
     @patch("utils.service_staleness.subprocess.run")
     def test_restart_failure(self, mock_run):
         mock_run.return_value = _mock_run("access denied", returncode=1)
-        result = restart_service("novacore-novatrade")
+        result = restart_service("novacore-telegram")
         assert result.success is False
         assert "failed" in result.detail
 
     @patch("utils.service_staleness.subprocess.run")
     def test_restart_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired("cmd", 30)
-        result = restart_service("novacore-novatrade")
+        result = restart_service("novacore-telegram")
         assert result.success is False
         assert "timed out" in result.detail
 
@@ -293,7 +306,7 @@ class TestRestartService:
     @patch("utils.service_staleness.subprocess.run")
     def test_restart_issued_but_not_active(self, mock_run, mock_active):
         mock_run.return_value = _mock_run("")
-        result = restart_service("novacore-novatrade")
+        result = restart_service("novacore-telegram")
         assert result.success is False
         assert "not active" in result.detail
 
@@ -308,7 +321,7 @@ class TestRestartStaleServices:
     def test_dry_run_does_not_restart(self, mock_check):
         mock_check.return_value = [
             StalenessReport(
-                service="novacore-novatrade",
+                service="novacore-telegram",
                 is_stale=True,
                 service_started_at=TWO_DAYS_AGO,
                 latest_commit_at=ONE_HOUR_AGO,
@@ -348,7 +361,7 @@ class TestRestartStaleServices:
     def test_stale_services_restarted(self, mock_check, mock_restart):
         mock_check.return_value = [
             StalenessReport(
-                service="novacore-novatrade",
+                service="novacore-telegram",
                 is_stale=True,
                 service_started_at=TWO_DAYS_AGO,
                 latest_commit_at=ONE_HOUR_AGO,
@@ -357,13 +370,13 @@ class TestRestartStaleServices:
                 detail="STALE",
             )
         ]
-        mock_restart.return_value = RestartResult("novacore-novatrade", True, "ok")
+        mock_restart.return_value = RestartResult("novacore-telegram", True, "ok")
         results = restart_stale_services()
         assert len(results) == 1
         _, rr = results[0]
         assert rr is not None
         assert rr.success is True
-        mock_restart.assert_called_once_with("novacore-novatrade")
+        mock_restart.assert_called_once_with("novacore-telegram")
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +442,7 @@ class TestWatcherActiveTaskGuard:
             patch("utils.service_staleness._is_service_active", return_value=True),
         ):
             mock_run.return_value = _mock_run(returncode=0)
-            result = restart_service("novacore-novatrade")
+            result = restart_service("novacore-telegram")
             assert result.success is True
 
 
