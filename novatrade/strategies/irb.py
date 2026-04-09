@@ -53,6 +53,10 @@ class IRBStrategy(BaseStrategy):
             "atr": compute_atr(candles, self.env.atr_period),
             "adx": compute_adx(candles, self.env.adx_period),
         }
+        # v5 simple trend filter needs ema_fast / ema_slow
+        if self.env.use_simple_trend_filter:
+            indicators["ema_fast"] = compute_ema(closes, self.env.ema_fast_period)
+            indicators["ema_slow"] = compute_ema(closes, self.env.ema_slow_period)
         if self.env.use_regime_gate:
             indicators["bbw"] = compute_bbw(closes, self.env.regime_bbw_period)
         return indicators
@@ -114,33 +118,80 @@ class IRBStrategy(BaseStrategy):
             return None
 
         # --- Trend filter ---
-        lookback = min(20, i)
-        if lookback < 1:
-            return None
-        ema_slope = (ema[i] - ema[i - lookback]) / atr[i]
-
-        trend_up = ema_slope >= e.trend_slope_threshold
-        trend_dn = ema_slope <= -e.trend_slope_threshold
-
         side: str | None = None
-        if is_uptrend_irb and trend_up:
-            side = "LONG"
-        elif is_downtrend_irb and trend_dn:
-            side = "SHORT"
+        ema_slope: float = 0.0
+
+        if e.use_simple_trend_filter:
+            # v5 simple trend: ema_fast > ema_slow + ema_fast rising over slope_lookback
+            # Mirrors vault reference (Rob Hoffman IRB v5 - Relaxed Reliable Build, Python).
+            ema_fast = indicators.get("ema_fast", [])
+            ema_slow = indicators.get("ema_slow", [])
+            if i >= len(ema_fast) or i >= len(ema_slow):
+                return None
+            lb = min(e.ema_slope_lookback, i)
+            if lb < 1:
+                return None
+            ef = ema_fast[i]
+            es = ema_slow[i]
+            ef_prev = ema_fast[i - lb]
+            if math.isnan(ef) or math.isnan(es) or math.isnan(ef_prev):
+                return None
+            bull_trend = ef > es and ef > ef_prev
+            bear_trend = ef < es and ef < ef_prev
+            if is_uptrend_irb and bull_trend:
+                side = "LONG"
+            elif is_downtrend_irb and bear_trend:
+                side = "SHORT"
+            else:
+                return None
+
+            # --- v5 HTF EMA slope filter (vault Pine: htfLongOk = htfSlopeUp) ---
+            # Mirrors the vault Python reference's htf_long_ok / htf_short_ok gates.
+            # Uses the higher-timeframe candle buffer (H1 for M5 primary, H4 for
+            # H1 primary) and the configured ema_period as the HTF EMA length.
+            if h4_candles and len(h4_candles) >= 2:
+                htf_lookback = max(1, e.mtf_lookback)
+                if len(h4_candles) > htf_lookback:
+                    htf_closes = [c.close for c in h4_candles]
+                    htf_ema_arr = compute_ema(htf_closes, e.ema_period)
+                    if len(htf_ema_arr) > htf_lookback:
+                        htf_ema_now = htf_ema_arr[-1]
+                        htf_ema_prev = htf_ema_arr[-1 - htf_lookback]
+                        if not math.isnan(htf_ema_now) and not math.isnan(htf_ema_prev):
+                            htf_rising = htf_ema_now > htf_ema_prev
+                            htf_falling = htf_ema_now < htf_ema_prev
+                            if side == "LONG" and not htf_rising:
+                                return None
+                            if side == "SHORT" and not htf_falling:
+                                return None
+            # v5 mode SKIPS ADX threshold and ADX slope filters (vault reference does not check ADX).
         else:
-            return None
+            lookback = min(20, i)
+            if lookback < 1:
+                return None
+            ema_slope = (ema[i] - ema[i - lookback]) / atr[i]
 
-        # --- ADX sideways filter ---
-        if math.isnan(adx[i]) or adx[i] < e.adx_threshold:
-            return None
+            trend_up = ema_slope >= e.trend_slope_threshold
+            trend_dn = ema_slope <= -e.trend_slope_threshold
 
-        # --- ADX slope check: trend must be strengthening ---
-        if (
-            i >= ADX_SLOPE_LOOKBACK
-            and not math.isnan(adx[i - ADX_SLOPE_LOOKBACK])
-            and adx[i] < adx[i - ADX_SLOPE_LOOKBACK]
-        ):
-            return None  # ADX declining → trend weakening, skip
+            if is_uptrend_irb and trend_up:
+                side = "LONG"
+            elif is_downtrend_irb and trend_dn:
+                side = "SHORT"
+            else:
+                return None
+
+            # --- ADX sideways filter (v4 only) ---
+            if math.isnan(adx[i]) or adx[i] < e.adx_threshold:
+                return None
+
+            # --- ADX slope check: trend must be strengthening (v4 only) ---
+            if (
+                i >= ADX_SLOPE_LOOKBACK
+                and not math.isnan(adx[i - ADX_SLOPE_LOOKBACK])
+                and adx[i] < adx[i - ADX_SLOPE_LOOKBACK]
+            ):
+                return None  # ADX declining → trend weakening, skip
 
         # --- Session filter: only trade during London+NY overlap (07-16 UTC) ---
         if e.session_filter == "london" and bar.timestamp > 0:
@@ -148,8 +199,13 @@ class IRBStrategy(BaseStrategy):
             if not (SESSION_START_HOUR_UTC <= bar_hour < SESSION_END_HOUR_UTC):
                 return None
 
-        # --- Overextension filter ---
-        if rng / atr[i] > e.overextension_threshold:
+        # --- Overextension filter (max signal range / ATR) ---
+        overext_ratio = rng / atr[i]
+        if overext_ratio > e.overextension_threshold:
+            return None
+
+        # --- v5 minimum signal size filter (min signal range / ATR) ---
+        if e.min_signal_atr_mult > 0 and overext_ratio < e.min_signal_atr_mult:
             return None
 
         # --- Tier 1 regime gate: skip when BBW indicates ranging/squeeze or extreme volatility ---
@@ -212,7 +268,16 @@ class IRBStrategy(BaseStrategy):
         Args:
             position: Must include keys: side, entry_price, stop_loss,
                       entry_bar, current_stop, best_close.
+
+        Note:
+            In v5 mode (``use_simple_trend_filter=True``) this method returns
+            ``None`` because the live engine handles all exit logic via
+            ``LiveStrategyEngine._check_v5_exit``. Mixing the v4 trailing
+            stop here with the v5 partial/breakeven/runner-trail flow would
+            double-count exits.
         """
+        if self.env.use_simple_trend_filter:
+            return None
         if position is None or bar_index >= len(candles):
             return None
 

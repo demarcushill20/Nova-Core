@@ -96,12 +96,27 @@ class OpenPosition:
     current_stop: float = 0.0
     best_close: float = 0.0
     bars_held: int = 0
+    # v5 trade management state (mirrors vault Python reference)
+    initial_stop: float = 0.0
+    initial_volume: float = 0.0
+    tp_qty_open: float = 0.0
+    runner_qty_open: float = 0.0
+    partial_taken: bool = False
+    breakeven_active: bool = False
+    highest_since_entry: float = 0.0
+    lowest_since_entry: float = 0.0
 
     def __post_init__(self) -> None:
         if self.current_stop == 0.0:
             self.current_stop = self.stop_loss
         if self.best_close == 0.0:
             self.best_close = self.entry_price
+        if self.initial_stop == 0.0:
+            self.initial_stop = self.stop_loss
+        if self.initial_volume == 0.0:
+            self.initial_volume = self.volume
+        # highest/lowest seeded by engine when fill occurs (not here, since we
+        # don't have bar data yet).
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +130,7 @@ class SignalType(Enum):
     MODIFY_SL = "MODIFY_SL"
     CANCEL_PENDING = "CANCEL_PENDING"
     PENDING_FILL = "PENDING_FILL"
+    PARTIAL_EXIT = "PARTIAL_EXIT"  # v5: close a fraction of open volume
 
 
 @dataclass
@@ -217,6 +233,11 @@ class LiveStrategyEngine:
         # Cached indicators (recomputed each H1 bar)
         self._indicators: dict[str, list[float]] = {}
 
+        # v5 frequency controls (mirrors vault Python reference)
+        self._trades_today: int = 0
+        self._current_day_key: Any = None  # date object
+        self._last_flat_bar: int | None = None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -275,6 +296,22 @@ class LiveStrategyEngine:
         self._trim(self._h1_candles)
         self._total_bars += 1
 
+        # v5 day boundary detection — reset trades_today on new UTC day
+        if self._env.use_simple_trend_filter and bar.timestamp > 0:
+            from datetime import datetime as _dt
+            from datetime import timezone as _tz
+
+            day_key = _dt.fromtimestamp(bar.timestamp, tz=_tz.utc).date()
+            if self._current_day_key != day_key:
+                if self._current_day_key is not None:
+                    log.info(
+                        "v5 day boundary: resetting trades_today (was %d) for %s",
+                        self._trades_today,
+                        day_key,
+                    )
+                self._trades_today = 0
+                self._current_day_key = day_key
+
         # Check warmup
         if len(self._h1_candles) < self._env.warmup_bars:
             return []
@@ -287,6 +324,15 @@ class LiveStrategyEngine:
 
         i = len(self._h1_candles) - 1
         signals: list[LiveSignal] = []
+
+        # v5: revalidate pending order against current trend before fill check.
+        # Mirrors the vault Python reference's "still_valid" gate which cancels
+        # the pending if the trend has flipped or the entry context is no longer
+        # valid (cooldown / max_trades / session).
+        if self._env.use_simple_trend_filter and self._env.revalidate_pending and self._pending is not None:
+            cancel_sig = self._revalidate_pending(i, bar)
+            if cancel_sig is not None:
+                signals.append(cancel_sig)
 
         # 1. Check pending order fill
         if self._pending is not None:
@@ -302,14 +348,23 @@ class LiveStrategyEngine:
         ):
             self._position.bars_held += 1
 
-            exit_sig = self._check_exit(i, bar)
-            if exit_sig is not None:
-                signals.append(exit_sig)
-                return signals  # exited — don't evaluate new entry this bar
+            if self._env.use_simple_trend_filter:
+                # v5 path: partial-at-1R, breakeven move, ATR runner trail, time stop
+                v5_signals = self._check_v5_exit(i, bar)
+                signals.extend(v5_signals)
+                # If a final EXIT was emitted, stop further processing this bar
+                if any(s.signal_type == SignalType.EXIT for s in v5_signals):
+                    return signals
+            else:
+                # v4 path: delegate to strategy.check_exit + separate trailing stop
+                exit_sig = self._check_exit(i, bar)
+                if exit_sig is not None:
+                    signals.append(exit_sig)
+                    return signals  # exited — don't evaluate new entry this bar
 
-            sl_sig = self._update_trailing_stop(i, bar)
-            if sl_sig is not None:
-                signals.append(sl_sig)
+                sl_sig = self._update_trailing_stop(i, bar)
+                if sl_sig is not None:
+                    signals.append(sl_sig)
 
         # 3. Check pending order expiry
         if self._pending is not None and self._pending.bars_alive >= self._config.trigger_window_bars:
@@ -326,6 +381,28 @@ class LiveStrategyEngine:
             # Circuit breaker
             if self._env.max_consecutive_losses > 0 and self._consecutive_losses >= self._env.max_consecutive_losses:
                 return signals
+
+            # v5 frequency controls (mirrors vault Python reference entry_context_ok)
+            if self._env.use_simple_trend_filter:
+                if self._env.max_trades_per_day > 0 and self._trades_today >= self._env.max_trades_per_day:
+                    log.debug(
+                        "v5 entry gate: trades_today=%d >= max_trades_per_day=%d — blocked",
+                        self._trades_today,
+                        self._env.max_trades_per_day,
+                    )
+                    return signals
+                if (
+                    self._env.cooldown_bars > 0
+                    and self._last_flat_bar is not None
+                    and (i - self._last_flat_bar) <= self._env.cooldown_bars
+                ):
+                    log.debug(
+                        "v5 entry gate: in cooldown (i=%d, last_flat=%d, cooldown=%d) — blocked",
+                        i,
+                        self._last_flat_bar,
+                        self._env.cooldown_bars,
+                    )
+                    return signals
 
             entry_sig = self._check_entry(i)
             if entry_sig is not None:
@@ -348,15 +425,28 @@ class LiveStrategyEngine:
             return
 
         i = len(self._h1_candles) - 1
+        last_bar = self._h1_candles[i] if i >= 0 else None
+        partial_pct = self._env.partial_exit_pct if self._env.partial_exit_enabled else 0.0
+        tp_qty = round(volume * (partial_pct / 100.0), 2) if partial_pct > 0 else 0.0
+        runner_qty = max(0.0, volume - tp_qty)
         self._position = OpenPosition(
             side=self._pending.side,
             entry_price=fill_price,
             stop_loss=self._pending.stop_loss,
             volume=volume,
             entry_bar=i,
+            initial_stop=self._pending.stop_loss,
+            initial_volume=volume,
+            tp_qty_open=tp_qty,
+            runner_qty_open=runner_qty,
+            highest_since_entry=last_bar.high if last_bar else fill_price,
+            lowest_since_entry=last_bar.low if last_bar else fill_price,
         )
         self._state = LiveState.LONG if self._pending.side == "LONG" else LiveState.SHORT
         self._pending = None
+        # v5: count this fill against today's trade budget
+        if self._env.use_simple_trend_filter:
+            self._trades_today += 1
         log.info("External fill: %s at %.5f vol=%.2f", self._position.side, fill_price, volume)
 
     def notify_close(self, pnl: float) -> None:
@@ -372,6 +462,10 @@ class LiveStrategyEngine:
             self._consecutive_losses += 1
         else:
             self._consecutive_losses = 0
+
+        # v5: track the bar where we went flat for cooldown enforcement
+        if self._env.use_simple_trend_filter:
+            self._last_flat_bar = max(0, len(self._h1_candles) - 1)
 
         log.info("Position closed: pnl=%.2f equity=%.2f", pnl, self._equity)
 
@@ -395,12 +489,22 @@ class LiveStrategyEngine:
         doesn't know about (e.g. after service restart).
         """
         i = len(self._h1_candles) - 1
+        last_bar = self._h1_candles[i] if i >= 0 else None
+        # Conservative recovery: assume partial has not been taken yet so the
+        # full volume is treated as the runner. This is safe because broker
+        # truth (post-trade verifier) reconciles partial state separately.
         self._position = OpenPosition(
             side=side,
             entry_price=entry_price,
             stop_loss=stop_loss,
             volume=volume,
             entry_bar=max(i, 0),
+            initial_stop=stop_loss,
+            initial_volume=volume,
+            tp_qty_open=0.0,
+            runner_qty_open=volume,
+            highest_since_entry=last_bar.high if last_bar else entry_price,
+            lowest_since_entry=last_bar.low if last_bar else entry_price,
         )
         self._state = LiveState.LONG if side == "LONG" else LiveState.SHORT
         self._pending = None
@@ -559,15 +663,27 @@ class LiveStrategyEngine:
             return None
 
         # Open position
+        partial_pct = self._env.partial_exit_pct if self._env.partial_exit_enabled else 0.0
+        tp_qty = round(p.volume * (partial_pct / 100.0), 2) if partial_pct > 0 else 0.0
+        runner_qty = max(0.0, p.volume - tp_qty)
         self._position = OpenPosition(
             side=p.side,
             entry_price=fill_price,
             stop_loss=p.stop_loss,
             volume=p.volume,
             entry_bar=i,
+            initial_stop=p.stop_loss,
+            initial_volume=p.volume,
+            tp_qty_open=tp_qty,
+            runner_qty_open=runner_qty,
+            highest_since_entry=bar.high,
+            lowest_since_entry=bar.low,
         )
         self._state = LiveState.LONG if p.side == "LONG" else LiveState.SHORT
         self._pending = None
+        # v5: count this fill against today's trade budget
+        if self._env.use_simple_trend_filter:
+            self._trades_today += 1
 
         log.info(
             "FILL: %s %s at %.5f (order was %.5f)",
@@ -628,6 +744,205 @@ class LiveStrategyEngine:
             exit_reason=exit_sig.reason,
             metadata=exit_sig.metadata,
         )
+
+    # ------------------------------------------------------------------
+    # Internal: v5 pending order revalidation
+    # ------------------------------------------------------------------
+
+    def _revalidate_pending(self, i: int, bar: Candle) -> LiveSignal | None:
+        """Re-check trend conditions for the pending order each bar.
+
+        Mirrors the vault Python reference's ``still_valid`` gate. If the
+        local EMA20/EMA50 trend has flipped against the pending side, cancel
+        the pending and emit a CANCEL_PENDING signal.
+
+        Cooldown / max_trades / session checks happen at the entry gate
+        (Phase 3 entry block); this method only validates trend invalidation
+        because trend flip is the only condition the vault reference re-checks
+        on each bar.
+        """
+        p = self._pending
+        if p is None:
+            return None
+
+        ema_fast = self._indicators.get("ema_fast", [])
+        ema_slow = self._indicators.get("ema_slow", [])
+        if i >= len(ema_fast) or i >= len(ema_slow):
+            return None
+        ef = ema_fast[i]
+        es = ema_slow[i]
+        if math.isnan(ef) or math.isnan(es):
+            return None
+
+        bull_trend = ef > es
+        bear_trend = ef < es
+
+        still_valid = (p.side == "LONG" and bull_trend) or (p.side == "SHORT" and bear_trend)
+        if still_valid:
+            return None
+
+        log.info(
+            "v5 revalidate_pending: %s pending invalidated by trend flip — cancelling",
+            p.side,
+        )
+        cancelled_side = p.side
+        self._pending = None
+        if self._state in (LiveState.PENDING_LONG, LiveState.PENDING_SHORT):
+            self._state = LiveState.FLAT
+        return LiveSignal(
+            signal_type=SignalType.CANCEL_PENDING,
+            side=cancelled_side,
+            symbol=self._config.symbol,
+            exit_reason="revalidate_failed",
+        )
+
+    # ------------------------------------------------------------------
+    # Internal: v5 exit management (vault Python reference parity)
+    # ------------------------------------------------------------------
+
+    def _check_v5_exit(self, i: int, bar: Candle) -> list[LiveSignal]:
+        """V5 exit lifecycle: partial-at-1R, breakeven move, ATR runner trail, time stop.
+
+        Mirrors the vault Python reference (Rob Hoffman IRB v5 - Relaxed Reliable
+        Build, Python edition). Critical: uses the previous bar's ATR for the
+        runner trail to avoid lookahead bias, exactly like the reference.
+        """
+        pos = self._position
+        if pos is None:
+            return []
+
+        e = self._env
+        atr_arr = self._indicators.get("atr", [])
+        # Vault uses df.iloc[i-1]["runner_atr"] — previous bar's ATR.
+        prev_idx = i - 1
+        if prev_idx < 0 or prev_idx >= len(atr_arr) or math.isnan(atr_arr[prev_idx]):
+            prev_atr = 0.0
+        else:
+            prev_atr = atr_arr[prev_idx]
+
+        signals: list[LiveSignal] = []
+        pip = e.pip_value
+
+        # Update high/low watermarks for the current bar
+        if pos.side == "LONG":
+            pos.highest_since_entry = max(pos.highest_since_entry, bar.high)
+        else:
+            pos.lowest_since_entry = min(pos.lowest_since_entry, bar.low)
+
+        if pos.side == "LONG":
+            risk_unit = max(pos.entry_price - pos.initial_stop, pip)
+            partial_price = pos.entry_price + risk_unit * e.partial_r_target
+            be_trigger = pos.entry_price + risk_unit * e.breakeven_r
+            if not pos.breakeven_active and pos.highest_since_entry >= be_trigger:
+                pos.breakeven_active = True
+            atr_runner_stop = pos.highest_since_entry - e.trail_atr_multiplier * prev_atr
+            runner_stop = max(pos.entry_price, atr_runner_stop) if pos.breakeven_active else pos.initial_stop
+        else:
+            risk_unit = max(pos.initial_stop - pos.entry_price, pip)
+            partial_price = pos.entry_price - risk_unit * e.partial_r_target
+            be_trigger = pos.entry_price - risk_unit * e.breakeven_r
+            if not pos.breakeven_active and pos.lowest_since_entry <= be_trigger:
+                pos.breakeven_active = True
+            atr_runner_stop = pos.lowest_since_entry + e.trail_atr_multiplier * prev_atr
+            runner_stop = min(pos.entry_price, atr_runner_stop) if pos.breakeven_active else pos.initial_stop
+
+        # 1) Partial TP cross
+        if e.partial_exit_enabled and not pos.partial_taken and pos.tp_qty_open > 0:
+            tp_hit = (pos.side == "LONG" and bar.high >= partial_price) or (
+                pos.side == "SHORT" and bar.low <= partial_price
+            )
+            if tp_hit:
+                partial_volume = pos.tp_qty_open
+                signals.append(
+                    LiveSignal(
+                        signal_type=SignalType.PARTIAL_EXIT,
+                        side=pos.side,
+                        symbol=self._config.symbol,
+                        exit_price=partial_price,
+                        volume=partial_volume,
+                        exit_reason="partial_tp",
+                        metadata={
+                            "partial_r_target": e.partial_r_target,
+                            "remaining_volume": pos.runner_qty_open,
+                        },
+                    )
+                )
+                pos.partial_taken = True
+                pos.tp_qty_open = 0.0
+                pos.volume = pos.runner_qty_open
+                log.info(
+                    "v5 PARTIAL_EXIT: %s %.5f vol=%.2f remaining=%.2f",
+                    pos.side,
+                    partial_price,
+                    partial_volume,
+                    pos.runner_qty_open,
+                )
+
+        # 2) Stop / runner-stop cross — emit final EXIT if breached
+        stop_hit = (pos.side == "LONG" and bar.low <= runner_stop) or (pos.side == "SHORT" and bar.high >= runner_stop)
+        if stop_hit:
+            reason = "runner_stop" if pos.breakeven_active else "stop_loss"
+            signals.append(
+                LiveSignal(
+                    signal_type=SignalType.EXIT,
+                    side=pos.side,
+                    symbol=self._config.symbol,
+                    exit_price=runner_stop,
+                    exit_reason=reason,
+                    metadata={
+                        "breakeven_active": pos.breakeven_active,
+                        "atr_at_exit": prev_atr,
+                    },
+                )
+            )
+            log.info(
+                "v5 EXIT: %s %s at %.5f (be_active=%s)",
+                pos.side,
+                reason,
+                runner_stop,
+                pos.breakeven_active,
+            )
+            return signals
+
+        # 3) Time stop
+        if e.time_stop_bars > 0 and pos.bars_held >= e.time_stop_bars:
+            signals.append(
+                LiveSignal(
+                    signal_type=SignalType.EXIT,
+                    side=pos.side,
+                    symbol=self._config.symbol,
+                    exit_price=bar.close,
+                    exit_reason="time_stop",
+                    metadata={"bars_held": pos.bars_held},
+                )
+            )
+            log.info("v5 EXIT: %s time_stop at bar %d (held=%d)", pos.side, i, pos.bars_held)
+            return signals
+
+        # 4) Runner-stop tightening — emit MODIFY_SL when breakeven becomes active
+        # or the ATR trail has ratcheted higher.
+        if runner_stop != pos.current_stop and (
+            (pos.side == "LONG" and runner_stop > pos.current_stop)
+            or (pos.side == "SHORT" and runner_stop < pos.current_stop)
+        ):
+            old_stop = pos.current_stop
+            pos.current_stop = runner_stop
+            self._last_sl_modification_bar = i
+            signals.append(
+                LiveSignal(
+                    signal_type=SignalType.MODIFY_SL,
+                    side=pos.side,
+                    symbol=self._config.symbol,
+                    new_stop=runner_stop,
+                    metadata={
+                        "old_stop": old_stop,
+                        "atr": prev_atr,
+                        "breakeven_active": pos.breakeven_active,
+                    },
+                )
+            )
+
+        return signals
 
     # ------------------------------------------------------------------
     # Internal: trailing stop management

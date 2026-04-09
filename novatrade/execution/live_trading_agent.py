@@ -434,7 +434,29 @@ class LiveTradingAgent:
             return self._build_modify_sl_payload(signal)
         if signal.signal_type == SignalType.CANCEL_PENDING:
             return self._build_cancel_payload(signal)
+        if signal.signal_type == SignalType.PARTIAL_EXIT:
+            return self._build_partial_exit_payload(signal)
         return None
+
+    def _build_partial_exit_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
+        """Build PARTIAL_CLOSE payload for v5 partial profit at 1R."""
+        side_mapped = _SIDE_MAP.get(signal.side)
+        if side_mapped is None:
+            log.error("Unknown signal side %r — cannot build partial-exit payload", signal.side)
+            return None
+        if signal.volume <= 0:
+            log.error("PARTIAL_EXIT signal has volume <= 0 — skipping")
+            return None
+        return {
+            "strategy_name": _STRATEGY_NAME,
+            "strategy_version": _STRATEGY_VERSION,
+            "action": "PARTIAL_CLOSE",
+            "symbol": signal.symbol,
+            "side": side_mapped,
+            "volume": signal.volume,
+            "close_reason": signal.exit_reason or "partial_tp",
+            "campaign": self._campaign,
+        }
 
     def _build_entry_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
         """Build PLACE_STOP_ORDER or REPLACE_STOP_ORDER payload.

@@ -10,19 +10,31 @@ import logging
 
 from novatrade.adapter.base import MT5Adapter
 from novatrade.models import (
+    AccountState,
     HealthSnapshot,
     HealthState,
     HealthStatus,
+    Position,
 )
 
 log = logging.getLogger("novatrade.monitor.health")
 
 
-async def take_health_snapshot(adapter: MT5Adapter) -> HealthSnapshot:
+async def take_health_snapshot(
+    adapter: MT5Adapter,
+    *,
+    account: AccountState | None = None,
+    positions: list[Position] | None = None,
+) -> HealthSnapshot:
     """Capture a point-in-time health snapshot from the adapter.
 
     Safe to call at any time.  Never raises — returns a snapshot with
     error details on failure.
+
+    To avoid burning MetaAPI rate-limit credits, callers may pre-fetch
+    ``account`` and ``positions`` once per monitor cycle and pass them in.
+    When provided, those values are used as-is and no broker API call is
+    made for them.
     """
     # -- 1. Adapter health ---------------------------------------------------
     try:
@@ -41,26 +53,28 @@ async def take_health_snapshot(adapter: MT5Adapter) -> HealthSnapshot:
         log.warning("health snapshot: adapter DOWN — %s", health.message)
         return HealthSnapshot(adapter_health=health, error=health.message)
 
-    # -- 2. Account state ----------------------------------------------------
-    try:
-        account = await adapter.get_account()
-    except Exception as exc:
-        log.error("health snapshot: get_account failed: %s", exc)
-        return HealthSnapshot(
-            adapter_health=health,
-            error=f"get_account failed: {exc}",
-        )
+    # -- 2. Account state (use pre-fetched value if available) ---------------
+    if account is None:
+        try:
+            account = await adapter.get_account()
+        except Exception as exc:
+            log.error("health snapshot: get_account failed: %s", exc)
+            return HealthSnapshot(
+                adapter_health=health,
+                error=f"get_account failed: {exc}",
+            )
 
-    # -- 3. Positions summary ------------------------------------------------
-    try:
-        positions = await adapter.get_positions()
-    except Exception as exc:
-        log.error("health snapshot: get_positions failed: %s", exc)
-        return HealthSnapshot(
-            adapter_health=health,
-            account=account,
-            error=f"get_positions failed: {exc}",
-        )
+    # -- 3. Positions summary (use pre-fetched value if available) -----------
+    if positions is None:
+        try:
+            positions = await adapter.get_positions()
+        except Exception as exc:
+            log.error("health snapshot: get_positions failed: %s", exc)
+            return HealthSnapshot(
+                adapter_health=health,
+                account=account,
+                error=f"get_positions failed: {exc}",
+            )
 
     total_pnl = sum(p.unrealized_pnl for p in positions)
 

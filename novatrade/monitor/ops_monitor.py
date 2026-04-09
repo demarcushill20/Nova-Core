@@ -305,9 +305,26 @@ class OpsMonitor:
         self._cycle_count += 1
         self._daily_summary.cycles_run += 1
 
+        # 0. Single broker fetch per cycle.  Health, supervisor, and
+        # reconciliation all share these snapshots to avoid burning MetaAPI
+        # rate-limit credits with duplicate requests (was the cause of the
+        # 3,500+ TooManyRequestsError events seen on 2026-04-09).
+        cycle_account = None
+        cycle_positions: list = []
+        if hasattr(self._adapter, "get_account"):
+            try:
+                cycle_account = await self._adapter.get_account()
+            except Exception as exc:
+                log.warning("ops_monitor: cycle get_account failed: %s", exc)
+        if hasattr(self._adapter, "get_positions"):
+            try:
+                cycle_positions = await self._adapter.get_positions()
+            except Exception as exc:
+                log.warning("ops_monitor: cycle get_positions failed: %s", exc)
+
         # 1. Health check
         try:
-            await self._check_health(result)
+            await self._check_health(result, account=cycle_account, positions=cycle_positions)
         except Exception as exc:
             result.health_ok = False
             result.health_error = str(exc)
@@ -320,7 +337,7 @@ class OpsMonitor:
 
         # 2. Hard Risk Supervisor continuous check
         try:
-            await self._check_supervisor(result)
+            await self._check_supervisor(result, account=cycle_account, positions=cycle_positions)
         except Exception as exc:
             self._emit_alert(
                 AlertSeverity.WARNING,
@@ -343,7 +360,7 @@ class OpsMonitor:
         # 4. Reconciliation (only if health is OK)
         if result.health_ok:
             try:
-                await self._reconcile(result)
+                await self._reconcile(result, positions=cycle_positions)
             except Exception as exc:
                 self._emit_alert(
                     AlertSeverity.WARNING,
@@ -410,9 +427,19 @@ class OpsMonitor:
     # Health check
     # ------------------------------------------------------------------
 
-    async def _check_health(self, result: CycleResult) -> None:
-        """Run health snapshot and evaluate status."""
-        snapshot = await take_health_snapshot(self._adapter)
+    async def _check_health(
+        self,
+        result: CycleResult,
+        *,
+        account=None,
+        positions=None,
+    ) -> None:
+        """Run health snapshot and evaluate status.
+
+        Accepts pre-fetched account/positions to avoid duplicate broker
+        calls within a single monitor cycle.
+        """
+        snapshot = await take_health_snapshot(self._adapter, account=account, positions=positions)
 
         if snapshot.ok:
             result.health_ok = True
@@ -443,34 +470,43 @@ class OpsMonitor:
     # Hard Risk Supervisor continuous monitoring
     # ------------------------------------------------------------------
 
-    async def _check_supervisor(self, result: CycleResult) -> None:
+    async def _check_supervisor(
+        self,
+        result: CycleResult,
+        *,
+        account=None,
+        positions=None,
+    ) -> None:
         """Run HardRiskSupervisor continuous account check.
 
         This is the critical safety net for the webhook pipeline — between
         TradingView alerts, the supervisor monitors equity, daily loss,
         and position limits.  If any hard limit is breached, the supervisor
         orders emergency actions (CLOSE_ALL, HALT).
+
+        Accepts pre-fetched account/positions to avoid duplicate broker
+        calls within a single monitor cycle.
         """
         if self._supervisor is None:
             return
 
-        # Get current account state
-        account = None
-        positions: list = []
-
-        if hasattr(self._adapter, "get_account"):
+        # Use pre-fetched values when available; fall back to fresh fetches
+        # only if the caller did not provide them.
+        if account is None and hasattr(self._adapter, "get_account"):
             try:
                 account = await self._adapter.get_account()
             except Exception:
                 log.warning("supervisor: failed to get account", exc_info=True)
                 return
 
-        if hasattr(self._adapter, "get_positions"):
-            try:
-                positions = await self._adapter.get_positions()
-            except Exception:
-                log.warning("supervisor: failed to get positions", exc_info=True)
-                return
+        if positions is None:
+            positions = []
+            if hasattr(self._adapter, "get_positions"):
+                try:
+                    positions = await self._adapter.get_positions()
+                except Exception:
+                    log.warning("supervisor: failed to get positions", exc_info=True)
+                    return
 
         if account is None:
             log.debug("supervisor: no account data for continuous check")
@@ -532,29 +568,41 @@ class OpsMonitor:
     # Reconciliation + fill/close detection
     # ------------------------------------------------------------------
 
-    async def _reconcile(self, result: CycleResult) -> None:
+    async def _reconcile(
+        self,
+        result: CycleResult,
+        *,
+        positions=None,
+    ) -> None:
         """Compare Trading Agent state vs broker reality.
 
         Detects fills, broker closes, orphan positions/orders, and
         state mismatches.  Takes corrective action where safe.
+
+        Accepts pre-fetched positions to avoid duplicate broker calls
+        within a single monitor cycle.
         """
         agent_state = self._agent.state
         agent_pending = self._agent.pending_order_id
         agent_position = self._agent.position_id
 
-        # Fetch broker state
-        try:
-            broker_positions = await self._adapter.get_positions()
-        except Exception as exc:
-            result.reconciliation_actions.append(
-                ReconciliationAction(
-                    outcome=ReconciliationOutcome.DEGRADED,
-                    detail=f"Cannot fetch positions: {exc}",
-                    success=False,
+        # Use pre-fetched positions when available; fall back to a fresh fetch
+        # only if the caller did not provide them.
+        if positions is not None:
+            broker_positions = positions
+        else:
+            try:
+                broker_positions = await self._adapter.get_positions()
+            except Exception as exc:
+                result.reconciliation_actions.append(
+                    ReconciliationAction(
+                        outcome=ReconciliationOutcome.DEGRADED,
+                        detail=f"Cannot fetch positions: {exc}",
+                        success=False,
+                    )
                 )
-            )
-            self._daily_summary.reconciliation_mismatches += 1
-            return
+                self._daily_summary.reconciliation_mismatches += 1
+                return
 
         try:
             broker_orders = await self._adapter.get_orders()

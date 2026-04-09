@@ -79,6 +79,7 @@ class AlertAction(Enum):
     MODIFY_SL = "MODIFY_SL"
     CANCEL_ORDER = "CANCEL_ORDER"
     CLOSE_POSITION = "CLOSE_POSITION"
+    PARTIAL_CLOSE = "PARTIAL_CLOSE"  # v5: close a fraction of open volume
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +227,19 @@ _CLOSE_REQUIRED = frozenset(
     }
 )
 
+_PARTIAL_CLOSE_REQUIRED = frozenset(
+    {
+        "strategy_name",
+        "strategy_version",
+        "action",
+        "symbol",
+        "side",
+        "volume",
+        "close_reason",
+        "campaign",
+    }
+)
+
 _VALID_ACTIONS = frozenset(
     {
         "PLACE_STOP_ORDER",
@@ -233,6 +247,7 @@ _VALID_ACTIONS = frozenset(
         "MODIFY_SL",
         "CANCEL_ORDER",
         "CLOSE_POSITION",
+        "PARTIAL_CLOSE",
     }
 )
 
@@ -267,6 +282,8 @@ def validate_alert(payload: dict) -> tuple[str | None, str]:
         required = _CANCEL_REQUIRED
     elif action == "CLOSE_POSITION":
         required = _CLOSE_REQUIRED
+    elif action == "PARTIAL_CLOSE":
+        required = _PARTIAL_CLOSE_REQUIRED
     else:
         return f"unhandled action: {action}", ""
 
@@ -294,6 +311,10 @@ def validate_alert(payload: dict) -> tuple[str | None, str]:
     elif action == "MODIFY_SL":
         if not isinstance(payload.get("new_stop"), (int, float)) or payload["new_stop"] <= 0:
             return "new_stop must be a positive number", ""
+    elif action == "PARTIAL_CLOSE":
+        vol = payload.get("volume")
+        if not isinstance(vol, (int, float)) or vol <= 0:
+            return "PARTIAL_CLOSE volume must be a positive number", ""
 
     return None, action
 
@@ -304,6 +325,7 @@ _ACTION_ABBREV = {
     "MODIFY_SL": "MS",
     "CANCEL_ORDER": "CX",
     "CLOSE_POSITION": "CP",
+    "PARTIAL_CLOSE": "PC",
 }
 _SIDE_ABBREV = {"BUY": "B", "SELL": "S"}
 
@@ -541,6 +563,8 @@ class TradingAgent:
             result = await self._handle_cancel(payload, idem_key, t0)
         elif action_enum == AlertAction.CLOSE_POSITION:
             result = await self._handle_close(payload, idem_key, t0)
+        elif action_enum == AlertAction.PARTIAL_CLOSE:
+            result = await self._handle_partial_close(payload, idem_key, t0)
         else:
             elapsed = (time.monotonic() - t0) * 1000
             return AgentResult(
@@ -1135,6 +1159,128 @@ class TradingAgent:
             success=True,
             intent=intent,
             state_after=AgentState.FLAT,
+            order_result=order_result,
+            elapsed_ms=elapsed,
+        )
+
+    # -- Partial close handler (PARTIAL_CLOSE — v5 partial profit) ----------
+
+    async def _handle_partial_close(
+        self,
+        payload: dict,
+        idem_key: str,
+        t0: float,
+    ) -> AgentResult:
+        """Close a fraction of the open position without leaving LONG/SHORT state.
+
+        Used by the v5 lifecycle to take partial profit at 1R. The remainder
+        (the runner) stays open for the breakeven move and ATR trail.
+        """
+        if self._state not in (AgentState.LONG, AgentState.SHORT):
+            elapsed = (time.monotonic() - t0) * 1000
+            return AgentResult(
+                success=False,
+                state_after=self._state,
+                rejected_reason=f"PARTIAL_CLOSE invalid from {self._state.value}",
+                elapsed_ms=elapsed,
+            )
+
+        if not self._position_id:
+            elapsed = (time.monotonic() - t0) * 1000
+            return AgentResult(
+                success=False,
+                state_after=self._state,
+                rejected_reason="PARTIAL_CLOSE but no tracked position_id",
+                elapsed_ms=elapsed,
+            )
+
+        partial_volume = float(payload.get("volume", 0.0))
+        if partial_volume <= 0:
+            elapsed = (time.monotonic() - t0) * 1000
+            return AgentResult(
+                success=False,
+                state_after=self._state,
+                rejected_reason="PARTIAL_CLOSE volume must be > 0",
+                elapsed_ms=elapsed,
+            )
+
+        if partial_volume >= self._position_volume:
+            # Partial >= remaining => fall through to a full close instead.
+            log.info(
+                "PARTIAL_CLOSE volume %.2f >= position volume %.2f — routing to full close",
+                partial_volume,
+                self._position_volume,
+            )
+            return await self._handle_close(payload, idem_key, t0)
+
+        side = OrderSide(payload["side"])
+        broker_symbol = self._resolve_symbol(payload)
+
+        intent = OrderIntent(
+            intent_type=IntentType.CLOSE_POSITION,
+            idempotency_key=idem_key,
+            broker_symbol=broker_symbol,
+            side=side,
+            volume=partial_volume,
+            campaign=payload.get("campaign", ""),
+            close_reason=payload.get("close_reason", "partial_tp"),
+        )
+
+        order_result = await self._adapter.close_position(self._position_id, volume=partial_volume)
+        elapsed = (time.monotonic() - t0) * 1000
+
+        if not order_result.ok:
+            log.warning(
+                "adapter error on partial close %s vol=%.2f: %s",
+                self._position_id,
+                partial_volume,
+                order_result.error,
+            )
+            self._record_event(
+                "PARTIAL_CLOSE_ERROR",
+                {
+                    "intent": intent.to_dict(),
+                    "position_id": self._position_id,
+                    "partial_volume": partial_volume,
+                    "error": order_result.error,
+                },
+            )
+            return AgentResult(
+                success=False,
+                intent=intent,
+                state_after=self._state,
+                order_result=order_result,
+                error=order_result.error,
+                elapsed_ms=elapsed,
+            )
+
+        # Track FTMO server request and update tracked volume.
+        self._risk.record_server_request("partial_close")
+        old_volume = self._position_volume
+        self._position_volume = max(0.0, old_volume - partial_volume)
+        self._persist()
+
+        log.info(
+            "PARTIAL_CLOSE: %s vol %.2f -> remaining %.2f (state stays %s)",
+            self._position_id,
+            partial_volume,
+            self._position_volume,
+            self._state.value,
+        )
+        self._record_event(
+            "PARTIAL_CLOSED",
+            {
+                "intent": intent.to_dict(),
+                "position_id": self._position_id,
+                "partial_volume": partial_volume,
+                "remaining_volume": self._position_volume,
+            },
+        )
+
+        return AgentResult(
+            success=True,
+            intent=intent,
+            state_after=self._state,  # stays LONG or SHORT — runner is still open
             order_result=order_result,
             elapsed_ms=elapsed,
         )

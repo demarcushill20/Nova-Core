@@ -314,7 +314,7 @@ async def build_stack(
     )
 
     # --- Monitor Loop ---
-    interval = float(os.environ.get("NOVATRADE_MONITOR_INTERVAL", "60"))
+    interval = float(os.environ.get("NOVATRADE_MONITOR_INTERVAL", "120"))
     loop = MonitorLoop(
         monitor=monitor,
         interval_seconds=interval,

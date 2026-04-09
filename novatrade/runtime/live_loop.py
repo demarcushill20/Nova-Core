@@ -97,6 +97,7 @@ _SIGNAL_COUNTER: dict[SignalType, str] = {
     SignalType.MODIFY_SL: "signals_modify_sl",
     SignalType.CANCEL_PENDING: "signals_cancel",
     SignalType.PENDING_FILL: "signals_entry",  # fills count as entries
+    SignalType.PARTIAL_EXIT: "signals_exit",  # partials count as exits
 }
 
 
@@ -604,11 +605,23 @@ class LiveLoop:
                     # Persist equity snapshot for performance_stability scoring
                     self._persist_equity_snapshot()
 
-                    # Broker ↔ Agent state reconciliation
-                    await self._reconcile_broker_state()
-
-                    # Hard Risk Supervisor monitoring
-                    await self._check_hard_risk_supervisor()
+                    # Broker ↔ Agent state reconciliation + supervisor check.
+                    # When the agent has no open or pending position, these
+                    # broker polls produce no useful work but still burn
+                    # MetaAPI rate-limit credits. With a 5s health interval
+                    # they were the dominant source of the 3,500+
+                    # TooManyRequestsError events seen on 2026-04-09. Throttle
+                    # them to ~60s when idle and run them every cycle when an
+                    # active position or pending order needs supervision.
+                    try:
+                        agent_state = self._live_agent.trading_agent.state
+                        active_state = agent_state != AgentState.FLAT
+                    except Exception:
+                        active_state = True  # fail-safe: keep polling
+                    poll_idle = self._health_cycle_count % 12 == 0
+                    if active_state or poll_idle:
+                        await self._reconcile_broker_state()
+                        await self._check_hard_risk_supervisor()
 
                     # Enhanced broker diagnostics (every 12 cycles = ~1 minute)
                     self._health_cycle_count += 1
