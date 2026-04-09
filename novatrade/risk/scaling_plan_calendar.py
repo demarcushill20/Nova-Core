@@ -29,25 +29,46 @@ from dateutil.relativedelta import relativedelta
 log = logging.getLogger(__name__)
 
 
-_notification_rate_limiter: dict[str, float] = {}  # message_key -> monotonic timestamp
+_notification_rate_limiter: dict[str, float] = {}  # rate_key -> monotonic timestamp
+_notification_flood_timestamps: list[float] = []  # recent send timestamps for global flood cap
+_NOTIFICATION_FLOOD_MAX = 5  # max notifications per flood window
+_NOTIFICATION_FLOOD_WINDOW = 300  # flood window in seconds (5 minutes)
 
 
-def _send_scaling_notification(text: str, cooldown_seconds: int = 3600) -> None:
+def _send_scaling_notification(text: str, cooldown_seconds: int = 3600, rate_key: str = "") -> None:
     """Send FTMO scaling notification via Telegram using NovaCore infrastructure.
 
-    Rate-limited: identical message keys are suppressed within cooldown_seconds.
+    Rate-limited by stable rate_key (not message content) to prevent spam when
+    profit values fluctuate. Global flood cap prevents more than 5 notifications
+    per 5-minute window regardless of key.
+
+    Args:
+        text: Notification message text.
+        cooldown_seconds: Minimum seconds between notifications with the same rate_key.
+        rate_key: Stable dedup key (e.g. "ftmo_cycle_20260401:scaling_eligible").
+                  Falls back to text[:60] if empty — callers should always provide this.
     """
     # Never send real notifications during test runs
     if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("NOVATRADE_TESTING"):
         log.debug(f"Scaling notification suppressed (test env): {text[:80]}")
         return
 
-    # Rate-limit by first 60 chars of text to deduplicate near-identical messages
-    message_key = text[:60]
+    # Use caller-provided stable key; fall back to text prefix only as last resort
+    dedup_key = rate_key or text[:60]
     now = time.monotonic()
-    last_sent = _notification_rate_limiter.get(message_key, 0.0)
+
+    # Global flood cap: no more than N notifications in any rolling window
+    _notification_flood_timestamps[:] = [
+        ts for ts in _notification_flood_timestamps if now - ts < _NOTIFICATION_FLOOD_WINDOW
+    ]
+    if len(_notification_flood_timestamps) >= _NOTIFICATION_FLOOD_MAX:
+        log.warning(f"Scaling notification suppressed (flood cap): {text[:80]}")
+        return
+
+    # Per-key rate limit
+    last_sent = _notification_rate_limiter.get(dedup_key, 0.0)
     if now - last_sent < cooldown_seconds:
-        log.debug(f"Scaling notification suppressed (rate-limited): {text[:80]}")
+        log.debug(f"Scaling notification suppressed (rate-limited, key={dedup_key}): {text[:80]}")
         return
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -64,8 +85,9 @@ def _send_scaling_notification(text: str, cooldown_seconds: int = 3600) -> None:
     try:
         req = urllib.request.Request(url, data=data, method="POST")  # noqa: S310
         urllib.request.urlopen(req, timeout=15)  # noqa: S310
-        _notification_rate_limiter[message_key] = now
-        log.info(f"Scaling notification sent: {text}")
+        _notification_rate_limiter[dedup_key] = now
+        _notification_flood_timestamps.append(now)
+        log.info(f"Scaling notification sent (key={dedup_key}): {text}")
     except Exception as e:
         log.error(f"Failed to send scaling notification: {e}")
 
@@ -183,6 +205,7 @@ class ScalingPlanCalendar:
         self._state_loaded = False
         self._last_notification_ts: dict[str, float] = {}  # type -> monotonic timestamp
         self._last_processed_equity: float | None = None
+        self._sent_notifications: dict[str, str] = {}  # rate_key -> ISO timestamp (persisted)
         self._load_state()
 
     def initialize_cycle(self, starting_equity: float, cycle_start_date: datetime | None = None) -> ScalingCycle:
@@ -396,39 +419,53 @@ class ScalingPlanCalendar:
             log.warning(f"Scaling already submitted on {self._current_cycle.scaling_submitted_date}")
             return False
 
-        # Send pre-submission notification
-        pre_submit_text = (
-            f"Submitting scaling application for cycle {self._current_cycle.cycle_id} "
-            f"with {self._current_cycle.current_profit_pct:.2f}% profit"
-        )
-        _send_scaling_notification(pre_submit_text)
+        cycle_id = self._current_cycle.cycle_id
+
+        # Update state BEFORE sending notifications — crash-safe ordering
         self._current_cycle.scaling_submitted_date = datetime.now(ZoneInfo(self.config.timezone))
         self._current_cycle.cycle_status = "scaling_submitted"
 
         # Create completion event
         submission_event = ScalingEvent(
-            event_id=f"{self._current_cycle.cycle_id}_scaling_submitted",
+            event_id=f"{cycle_id}_scaling_submitted",
             event_type="scaling_submitted",
             title="FTMO Scaling Application Submitted",
-            description=f"Scaling application submitted for cycle {self._current_cycle.cycle_id}",
+            description=f"Scaling application submitted for cycle {cycle_id}",
             due_date=self._current_cycle.scaling_submitted_date,
             status="completed",
             metadata={"profit_pct": self._current_cycle.current_profit_pct},
         )
         self._current_cycle.events.append(submission_event)
 
+        # Persist state before sending notifications — if we crash after this,
+        # the state correctly reflects submission even if notification fails
         if self.config.auto_save:
             self._save_state()
 
+        # Send pre-submission notification with stable rate_key
+        pre_key = f"{cycle_id}:scaling_submitting"
+        pre_submit_text = (
+            f"Submitting scaling application for cycle {cycle_id} "
+            f"with {self._current_cycle.current_profit_pct:.2f}% profit"
+        )
+        _send_scaling_notification(pre_submit_text, rate_key=pre_key)
+        self._sent_notifications[pre_key] = datetime.now(ZoneInfo("UTC")).isoformat()
+
         # Send successful submission notification
+        success_key = f"{cycle_id}:scaling_submitted"
         success_text = (
-            f"✅ Scaling application SUBMITTED successfully for cycle {self._current_cycle.cycle_id}! "
+            f"✅ Scaling application SUBMITTED successfully for cycle {cycle_id}! "
             f"Final profit: {self._current_cycle.current_profit_pct:.2f}%. "
             f"Awaiting FTMO approval."
         )
-        _send_scaling_notification(success_text)
+        _send_scaling_notification(success_text, rate_key=success_key)
+        self._sent_notifications[success_key] = datetime.now(ZoneInfo("UTC")).isoformat()
 
-        log.info(f"Scaling application submitted for cycle {self._current_cycle.cycle_id}")
+        # Save again to persist sent_notifications
+        if self.config.auto_save:
+            self._save_state()
+
+        log.info(f"Scaling application submitted for cycle {cycle_id}")
         return True
 
     def _generate_cycle_events(self, cycle: ScalingCycle) -> None:
@@ -538,17 +575,29 @@ class ScalingPlanCalendar:
             f"{self._current_cycle.current_profit_pct:.2f}% profit"
         )
 
-        # Send scaling eligibility notification
+        # Send scaling eligibility notification with stable rate_key
+        rate_key = f"{self._current_cycle.cycle_id}:scaling_eligible"
+
+        # Persistent dedup: skip if already sent in a previous process lifetime
+        if rate_key in self._sent_notifications:
+            log.debug(f"Scaling notification already sent (persistent dedup): {rate_key}")
+            return
+
         notification_text = (
             f"Cycle {self._current_cycle.cycle_id} SCALING ELIGIBLE! "
             f"Profit: {self._current_cycle.current_profit_pct:.2f}% "
             f"(Target: 10%). Submit scaling application before cycle end: "
             f"{self._current_cycle.end_date.strftime('%Y-%m-%d %H:%M %Z')}"
         )
-        _send_scaling_notification(notification_text)
+        _send_scaling_notification(notification_text, rate_key=rate_key)
+        self._sent_notifications[rate_key] = datetime.now(ZoneInfo("UTC")).isoformat()
 
     def _update_cycle_status(self) -> None:
-        """Update cycle status based on current conditions."""
+        """Update cycle status based on current conditions.
+
+        Status never regresses: once scaling_eligible_date is set, status stays
+        at "scaling_eligible" or higher even if equity temporarily dips below 10%.
+        """
         if not self._current_cycle:
             return
 
@@ -561,9 +610,13 @@ class ScalingPlanCalendar:
                 cycle.cycle_status = "completed"
             return
 
-        # Update status based on current conditions
+        # Update status based on current conditions — never regress past milestones
         if cycle.scaling_submitted_date:
             cycle.cycle_status = "scaling_submitted"
+        elif cycle.scaling_eligible_date is not None:
+            # Once scaling eligibility was achieved, keep status at scaling_eligible
+            # even if equity temporarily dips below 10%
+            cycle.cycle_status = "scaling_eligible"
         elif cycle.is_scaling_eligible:
             cycle.cycle_status = "scaling_eligible"
         else:
@@ -611,6 +664,7 @@ class ScalingPlanCalendar:
                     "target_profit_pct": self.config.target_profit_pct,
                     "timezone": self.config.timezone,
                 },
+                "sent_notifications": self._sent_notifications,
                 "saved_at": datetime.now(ZoneInfo("UTC")).isoformat(),
             }
 
@@ -678,6 +732,9 @@ class ScalingPlanCalendar:
                 cycle_status=cycle_data["cycle_status"],
                 events=events,
             )
+
+            # Restore persistent notification dedup set
+            self._sent_notifications = state_data.get("sent_notifications", {})
 
             log.info(f"Loaded scaling plan state: cycle {self._current_cycle.cycle_id}")
 

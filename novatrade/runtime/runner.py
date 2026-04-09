@@ -243,11 +243,19 @@ async def build_stack(
     is_dry_run = isinstance(adapter, DryRunAdapter)
 
     # Connect non-dry-run adapters (e.g. MetaApiAdapter)
+    adapter_connected = is_dry_run  # DryRunAdapter is always "connected"
     if not is_dry_run:
         status = await adapter.connect()
+        adapter_connected = status.connected
         if not status.connected:
-            raise RuntimeError(f"Adapter connection failed: {status.message}")
-        log.info("build_stack: adapter connected")
+            log.error(
+                "build_stack: adapter connection failed: %s (state=%s, latency=%.0fms)",
+                status.message,
+                status.state.value if status.state else "unknown",
+                status.latency_ms or 0,
+            )
+        else:
+            log.info("build_stack: adapter connected (%.0fms)", status.latency_ms or 0)
 
     # For active adapter modes, cfg.dry_run must be False to allow orders
     # through the pre-trade gate. For dry-run, the DryRunAdapter is the
@@ -321,7 +329,7 @@ async def build_stack(
         risk_engine_halted=risk_engine.halted,
         agent_initialized=True,
         monitor_initialized=True,
-        adapter_connected=getattr(adapter, "_connected", is_dry_run),
+        adapter_connected=adapter_connected,
         adapter_type=_adapter_type_name(adapter),
     )
 

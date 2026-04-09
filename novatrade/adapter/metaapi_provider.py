@@ -137,13 +137,16 @@ class MetaApiAdapter(MT5Adapter):
 
         Each phase is wrapped individually so the failure reason is explicit
         and actionable rather than a generic "connection failed".
+
+        Phase labels: SDK_INIT, GET_ACCOUNT, DEPLOY, WAIT_CONNECTED,
+        RPC_CONNECT, RPC_SYNC, ACCOUNT_INFO.
         """
         t0 = time.monotonic()
-        phase = "init"
+        phase = "SDK_INIT"
         try:
             # Phase 1: SDK initialization
-            phase = "sdk_init"
-            log.info("metaapi connect: initializing SDK (account_id=%s)", self._config.account_id)
+            log.info("metaapi connect: [%s] initializing SDK (account_id=%s)", phase, self._config.account_id)
+            # Use singleton MetaApi SDK to prevent per-cycle re-instantiation
             self._api = get_metaapi_sdk(
                 token=self._config.token,
                 domain=self._config.domain,
@@ -152,7 +155,8 @@ class MetaApiAdapter(MT5Adapter):
             )
 
             # Phase 2: Account lookup (validates token + account_id)
-            phase = "account_lookup"
+            phase = "GET_ACCOUNT"
+            log.info("metaapi connect: [%s] fetching account", phase)
             try:
                 self._account = await self._api.metatrader_account_api.get_account(
                     self._config.account_id,
@@ -163,9 +167,9 @@ class MetaApiAdapter(MT5Adapter):
                          "Token may be expired or account ID invalid.")
 
             # Phase 3: Deploy if not already deployed
-            phase = "deploy"
             if self._account.state != "DEPLOYED":
-                log.info("metaapi connect: deploying account (state=%s)", self._account.state)
+                phase = "DEPLOY"
+                log.info("metaapi connect: [%s] deploying account (state=%s)", phase, self._account.state)
                 try:
                     await self._account.deploy()
                     await self._account.wait_deployed()
@@ -175,8 +179,8 @@ class MetaApiAdapter(MT5Adapter):
                              "for account status and region availability.")
 
             # Phase 4: Wait for terminal + broker connection
-            phase = "broker_connect"
-            log.info("metaapi connect: waiting for broker connection")
+            phase = "WAIT_CONNECTED"
+            log.info("metaapi connect: [%s] waiting for broker connection", phase)
             try:
                 await self._account.wait_connected()
             except Exception as exc:
@@ -185,18 +189,25 @@ class MetaApiAdapter(MT5Adapter):
                          "may be offline or the broker server unreachable.")
 
             # Phase 5: Open RPC connection and synchronize
-            phase = "rpc_sync"
+            phase = "RPC_CONNECT"
             try:
                 self._connection = self._account.get_rpc_connection()
                 await self._connection.connect()
+            except Exception as exc:
+                return self._connect_failure(t0, phase, exc,
+                    hint="RPC connection failed. MetaAPI "
+                         "infrastructure may be degraded or region mismatch.")
+
+            phase = "RPC_SYNC"
+            try:
                 await self._connection.wait_synchronized()
             except Exception as exc:
                 return self._connect_failure(t0, phase, exc,
-                    hint="RPC connection or synchronization failed. MetaAPI "
+                    hint="RPC synchronization failed. MetaAPI "
                          "infrastructure may be degraded or region mismatch.")
 
             # Phase 6 (non-fatal): Query account info for early diagnostics
-            phase = "account_info"
+            phase = "ACCOUNT_INFO"
             try:
                 acct_info = await self._connection.get_account_information()
                 self._cached_equity = acct_info.get("equity")

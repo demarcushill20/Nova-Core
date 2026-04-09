@@ -1542,7 +1542,7 @@ def _acquire_lock() -> bool:
 def main() -> None:
     if not _acquire_lock():
         print("telegram_bot: another instance is already running — exiting.", flush=True)
-        raise SystemExit(0)
+        raise SystemExit(2)
     print(f"telegram_bot: lock acquired (pid={os.getpid()})", flush=True)
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()

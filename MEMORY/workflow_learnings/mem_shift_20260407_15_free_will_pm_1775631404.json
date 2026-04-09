@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_shift_20260407_15_free_will_pm_1775631404",
+  "workflow_id": "shift_20260407_15_free_will_pm",
+  "task_summary": "Fixed test regression, hardened flaky test isolation, and extracted duplicated pip value helpers to shared module",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed test regression, hardened flaky test isolation, and extracted duplicated pip value helpers to shared module"
+  ],
+  "successful_patterns": [
+    "task_completed: shift_20260407_15_free_will_pm"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed test regression, hardened flaky test isolation, and extracted duplicated pip value helpers to shared module",
+  "created_at": "2026-04-08T06:56:44Z",
+  "confidence": "high",
+  "supersedes": "mem_shift_20260407_15_free_will_pm_1775625777"
+}

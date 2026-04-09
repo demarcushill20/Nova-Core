@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0746_restart_this_Claude_Code_session_entirely_1775693061",
+  "workflow_id": "0746_restart_this_Claude_Code_session_entirely",
+  "task_summary": "Full session restart briefing \u2014 gathered system state, 6 pending tasks, identified volume_sizing rejection as NovaTrade trade blocker",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Full session restart briefing \u2014 gathered system state, 6 pending tasks, identified volume_sizing rejection as NovaTrade trade blocker"
+  ],
+  "successful_patterns": [
+    "task_completed: 0746_restart_this_Claude_Code_session_entirely"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Full session restart briefing \u2014 gathered system state, 6 pending tasks, identified volume_sizing rejection as NovaTrade trade blocker",
+  "created_at": "2026-04-09T00:04:21Z",
+  "confidence": "low"
+}

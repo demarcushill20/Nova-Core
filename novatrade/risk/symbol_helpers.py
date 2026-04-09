@@ -3,7 +3,9 @@
 Provides pip value (price increment per pip) and pip USD value
 (dollar value per pip per standard lot) for supported FX symbols.
 
-These are static lookups. For exotic or dynamically-priced instruments,
+Static lookup tables are used for known symbols.  Unknown symbols
+fall back to pattern-matching heuristics (JPY → 0.01, XAU → 0.1,
+else → 0.0001).  For exotic or dynamically-priced instruments,
 extend the maps or replace with a broker-side query.
 """
 
@@ -34,12 +36,13 @@ _PIP_VALUES: dict[str, float] = {
     "GBPCHF": 0.0001,
     "AUDNZD": 0.0001,
     "AUDCAD": 0.0001,
-    "XAUUSD": 0.01,  # Gold: 1 pip = $0.01
+    "XAUUSD": 0.1,  # Gold: 1 pip = $0.10
 }
 
 # USD value per pip per standard lot (100,000 units of base currency).
 # For USD-denominated pairs (EURUSD, GBPUSD, etc.) this is ~$10.
-# For JPY crosses the pip is 0.01, so per-lot value differs.
+# JPY crosses use a conservative ~$7 estimate to err on the side of
+# OVER-estimating risk (which is safer for position sizing).
 _PIP_USD_VALUES: dict[str, float] = {
     "EURUSD": 10.0,
     "GBPUSD": 10.0,
@@ -48,13 +51,13 @@ _PIP_USD_VALUES: dict[str, float] = {
     "USDCHF": 10.0,  # approximate (varies with USDCHF rate)
     "USDCAD": 10.0,  # approximate
     "EURGBP": 10.0,  # approximate
-    "EURJPY": 10.0,  # approximate (varies with USDJPY rate)
-    "GBPJPY": 10.0,
-    "USDJPY": 10.0,  # approximate
-    "AUDJPY": 10.0,
-    "CADJPY": 10.0,
-    "NZDJPY": 10.0,
-    "CHFJPY": 10.0,
+    "EURJPY": 7.0,   # conservative approximation (varies with USDJPY rate)
+    "GBPJPY": 7.0,
+    "USDJPY": 7.0,   # conservative approximation
+    "AUDJPY": 7.0,
+    "CADJPY": 7.0,
+    "NZDJPY": 7.0,
+    "CHFJPY": 7.0,
     "EURAUD": 10.0,
     "EURNZD": 10.0,
     "EURCHF": 10.0,
@@ -66,28 +69,50 @@ _PIP_USD_VALUES: dict[str, float] = {
     "XAUUSD": 10.0,  # Gold: ~$10/pip for 1 standard lot (100 oz)
 }
 
-_DEFAULT_PIP_VALUE = 0.0001
-_DEFAULT_PIP_USD_VALUE = 10.0
+
+def _clean_symbol(symbol: str) -> str:
+    """Strip broker suffixes (.ftmo, .sim, etc.) and normalise."""
+    return symbol.split(".")[0].upper()
 
 
 def pip_value(symbol: str) -> float:
     """Return the pip increment for *symbol*.
+
+    Uses the static lookup table first, then falls back to heuristics:
+    JPY pairs → 0.01, XAU/Gold → 0.1, else → 0.0001.
 
     >>> pip_value("EURUSD")
     0.0001
     >>> pip_value("USDJPY")
     0.01
     """
-    # Strip common broker suffixes (.ftmo, .sim, etc.)
-    clean = symbol.split(".")[0].upper()
-    return _PIP_VALUES.get(clean, _DEFAULT_PIP_VALUE)
+    clean = _clean_symbol(symbol)
+    if clean in _PIP_VALUES:
+        return _PIP_VALUES[clean]
+    # Heuristic fallback for unknown symbols
+    if "JPY" in clean:
+        return 0.01
+    if "XAU" in clean or "GOLD" in clean:
+        return 0.1
+    return 0.0001
 
 
 def pip_usd_value(symbol: str) -> float:
     """Return the approximate USD value per pip per standard lot for *symbol*.
 
+    Uses the static lookup table first, then falls back to heuristics.
+    Defaults are conservative and err on the side of OVER-estimating risk
+    (which is safer for position sizing).
+
     >>> pip_usd_value("EURUSD")
     10.0
     """
-    clean = symbol.split(".")[0].upper()
-    return _PIP_USD_VALUES.get(clean, _DEFAULT_PIP_USD_VALUE)
+    clean = _clean_symbol(symbol)
+    if clean in _PIP_USD_VALUES:
+        return _PIP_USD_VALUES[clean]
+    # Heuristic fallback for unknown symbols
+    if "JPY" in clean:
+        return 7.0  # Conservative approximation
+    if "XAU" in clean or "GOLD" in clean:
+        return 10.0
+    return 10.0  # Standard forex with USD quote

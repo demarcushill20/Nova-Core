@@ -514,3 +514,87 @@ class TestScalingPlanCalendar:
 
         # Clean up
         _notification_rate_limiter.clear()
+
+    def test_notification_rate_limiting_with_stable_rate_key(self):
+        """Test that stable rate_key deduplicates even when message text varies."""
+        from unittest.mock import patch
+
+        from novatrade.risk.scaling_plan_calendar import (
+            _notification_flood_timestamps,
+            _notification_rate_limiter,
+            _send_scaling_notification,
+        )
+
+        _notification_rate_limiter.clear()
+        _notification_flood_timestamps.clear()
+
+        def _env_side_effect(key, default=""):
+            if key in ("PYTEST_CURRENT_TEST", "NOVATRADE_TESTING"):
+                return None
+            if key in ("TELEGRAM_BOT_TOKEN", "ALLOWED_CHAT_ID"):
+                return "test"
+            return default
+
+        with (
+            patch("novatrade.risk.scaling_plan_calendar.os.environ.get", side_effect=_env_side_effect),
+            patch("novatrade.risk.scaling_plan_calendar.urllib.request.urlopen") as mock_urlopen,
+        ):
+            # First call with rate_key should go through
+            _send_scaling_notification(
+                "Profit: 10.50% eligible!",
+                rate_key="ftmo_cycle_20260401:scaling_eligible",
+            )
+            assert mock_urlopen.call_count == 1
+
+            # Different text but SAME rate_key should be suppressed
+            _send_scaling_notification(
+                "Profit: 11.00% eligible!",
+                rate_key="ftmo_cycle_20260401:scaling_eligible",
+            )
+            assert mock_urlopen.call_count == 1  # Still 1 — deduplicated by rate_key
+
+            # Different rate_key should go through
+            _send_scaling_notification(
+                "Profit: 10.00% eligible!",
+                rate_key="ftmo_cycle_20260408:scaling_eligible",
+            )
+            assert mock_urlopen.call_count == 2
+
+        _notification_rate_limiter.clear()
+        _notification_flood_timestamps.clear()
+
+    def test_notification_flood_cap(self):
+        """Test that global flood cap prevents more than 5 notifications in 5 minutes."""
+        from unittest.mock import patch
+
+        from novatrade.risk.scaling_plan_calendar import (
+            _notification_flood_timestamps,
+            _notification_rate_limiter,
+            _send_scaling_notification,
+        )
+
+        _notification_rate_limiter.clear()
+        _notification_flood_timestamps.clear()
+
+        def _env_side_effect(key, default=""):
+            if key in ("PYTEST_CURRENT_TEST", "NOVATRADE_TESTING"):
+                return None
+            if key in ("TELEGRAM_BOT_TOKEN", "ALLOWED_CHAT_ID"):
+                return "test"
+            return default
+
+        with (
+            patch("novatrade.risk.scaling_plan_calendar.os.environ.get", side_effect=_env_side_effect),
+            patch("novatrade.risk.scaling_plan_calendar.urllib.request.urlopen") as mock_urlopen,
+        ):
+            # Send 5 notifications with unique keys (all should succeed)
+            for i in range(5):
+                _send_scaling_notification(f"Message {i}", rate_key=f"key_{i}")
+            assert mock_urlopen.call_count == 5
+
+            # 6th notification should be blocked by flood cap
+            _send_scaling_notification("Message 5", rate_key="key_5")
+            assert mock_urlopen.call_count == 5  # Still 5 — flood cap hit
+
+        _notification_rate_limiter.clear()
+        _notification_flood_timestamps.clear()

@@ -17,5 +17,7 @@
   "reusable_guidance": "Fixed London Fix DST docstrings and implemented 5-zone ATR percentile system (compression/low_vol/normal/elevated/extreme) with risk scaling factors and 36 new tests",
   "created_at": "2026-04-08T05:22:57Z",
   "confidence": "low",
-  "supersedes": "mem_shift_20260407_15_free_will_pm_1775611022"
+  "supersedes": "mem_shift_20260407_15_free_will_pm_1775622013",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_15_free_will_pm_1775631404"
 }
