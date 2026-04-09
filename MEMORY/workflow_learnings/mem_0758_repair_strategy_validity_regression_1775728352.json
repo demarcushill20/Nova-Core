@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0758_repair_strategy_validity_regression_1775728352",
+  "workflow_id": "0758_repair_strategy_validity_regression",
+  "task_summary": "Diagnosed NovaTrade strategy_validity regression \u2014 confirmed MetaApi cloud outage (503), restarted service, sent Telegram alert. Service will auto-recover when upstream returns.",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed NovaTrade strategy_validity regression \u2014 confirmed MetaApi cloud outage (503), restarted service, sent Telegram alert. Service will auto-recover when upstream returns."
+  ],
+  "successful_patterns": [
+    "task_completed: 0758_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed NovaTrade strategy_validity regression \u2014 confirmed MetaApi cloud outage (503), restarted service, sent Telegram alert. Service will auto-recover when upstream returns.",
+  "created_at": "2026-04-09T09:52:32Z",
+  "confidence": "high"
+}

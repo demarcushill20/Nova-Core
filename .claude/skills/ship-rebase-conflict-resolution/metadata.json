@@ -1,0 +1,17 @@
+{
+  "name": "ship-rebase-conflict-resolution",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "The execution successfully resolved 3 merge conflicts during rebase against a remote commit introduced by a merged PR (#2). This rebase-with-conflict-resolution pattern during /ship should be documented as an expected path \u2014 the ship skill handled it gracefully in 25 turns, but there is no explicit guidance in the skill for conflict resolution strategy (manual vs. ours/theirs heuristics). Capturing this pattern would reduce future turn count.",
+    "task_examples": [
+      "0757_Ok_lets__ship_first",
+      "0757_Ok_lets__ship_first"
+    ],
+    "task_id": "0757_Ok_lets__ship_first"
+  },
+  "created_at": "2026-04-09T11:16:49.971816+00:00"
+}

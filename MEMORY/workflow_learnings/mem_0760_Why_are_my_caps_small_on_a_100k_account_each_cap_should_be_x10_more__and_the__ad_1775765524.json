@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0760_Why_are_my_caps_small_on_a_100k_account_each_cap_should_be_x10_more__and_the__ad_1775765524",
+  "workflow_id": "0760_Why_are_my_caps_small_on_a_100k_account_each_cap_should_be_x10_more__and_the__ad",
+  "task_summary": "Analyzed position sizing caps and risk limits for 100k account - identified caps too small (5-10 lots vs wanted 50-100 lots) and missing volume adjustment mechanism",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Analyzed position sizing caps and risk limits for 100k account - identified caps too small (5-10 lots vs wanted 50-100 lots) and missing volume adjustment mechanism"
+  ],
+  "successful_patterns": [
+    "task_completed: 0760_Why_are_my_caps_small_on_a_100k_account_each_cap_should_be_x10_more__and_the__a"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Analyzed position sizing caps and risk limits for 100k account - identified caps too small (5-10 lots vs wanted 50-100 lots) and missing volume adjustment mechanism",
+  "created_at": "2026-04-09T20:12:04Z",
+  "confidence": "high"
+}
