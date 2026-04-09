@@ -84,6 +84,10 @@ class StrategyConfig(BaseModel):
     # --- Enhanced filter parameters (v4) --------------------------------
     use_volatility_filter: bool = Field(default=False)
     volatility_atr_ma_period: int = Field(default=50, ge=20, le=100)
+    # Tier 1 regime gate (BBW filter). Default mirrors BacktestEnvironment.
+    # V5 strategies that don't want BBW filtering must set this to False
+    # in their YAML, otherwise the gate silently rejects most signals.
+    use_regime_gate: bool = Field(default=True)
 
     # --- Risk management (v4) -------------------------------------------
     max_consecutive_losses: int = Field(default=0, ge=0, le=20)
@@ -261,6 +265,7 @@ class StrategyConfig(BaseModel):
             "trail_delay_bars": self.trail_delay_bars,
             "use_volatility_filter": self.use_volatility_filter,
             "volatility_atr_ma_period": self.volatility_atr_ma_period,
+            "use_regime_gate": self.use_regime_gate,
             "max_consecutive_losses": self.max_consecutive_losses,
             # v5 params
             "use_simple_trend_filter": self.use_simple_trend_filter,
