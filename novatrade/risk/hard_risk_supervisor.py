@@ -58,12 +58,12 @@ class HardLimits:
 
     # --- Equity protection ---
     equity_floor_usd: float = 8_500.0  # Below this: close all + halt
-    max_daily_loss_usd: float = 450.0  # Absolute daily loss cap ($)
-    max_total_loss_usd: float = 900.0  # Absolute total loss cap ($)
-    max_loss_per_trade_usd: float = 150.0  # Max risk on a single trade ($)
+    max_daily_loss_usd: float = 4_500.0  # Absolute daily loss cap ($)
+    max_total_loss_usd: float = 9_000.0  # Absolute total loss cap ($)
+    max_loss_per_trade_usd: float = 1_500.0  # Max risk on a single trade ($)
 
     # --- Position limits ---
-    max_lot_size: float = 10.0  # Max lots per order (absolute, supports $100K FTMO)
+    max_lot_size: float = 50.0  # Max lots per order (absolute, supports $100K account)
     max_concurrent_positions: int = 1  # FTMO-safe: single position for IRB
     max_trades_per_day: int = 10  # FTMO-safe: aligned with RiskConfig
 
@@ -96,6 +96,7 @@ class SupervisorDecision:
     verdict: SupervisorVerdict
     rule: str = ""  # Which rule triggered the veto
     detail: str = ""  # Human-readable explanation
+    adjusted_volume: float | None = None  # If set, caller must use this volume instead
     timestamp: float = field(default_factory=time.time)
 
     @property
@@ -413,18 +414,34 @@ class HardRiskSupervisor:
                     ),
                 )
 
-        # Rule 11: Per-trade risk (SL-based)
+        # Rule 11: Per-trade risk (SL-based) — scale down to fit, don't veto
+        adjusted_volume: float | None = None
         if stop_loss is not None and entry_price > 0:
             sl_distance = abs(entry_price - stop_loss)
             pip_val = _pip_value(symbol)
+            pip_usd = _pip_usd_value(symbol)
             # Approximate risk: volume × (sl_distance / pip_value) × $10/pip for standard lot
-            risk_usd = volume * (sl_distance / pip_val) * _pip_usd_value(symbol)
+            risk_usd = volume * (sl_distance / pip_val) * pip_usd
             if risk_usd > self._limits.max_loss_per_trade_usd:
-                return SupervisorDecision(
-                    verdict=SupervisorVerdict.VETO,
-                    rule="max_loss_per_trade",
-                    detail=(f"Estimated risk ${risk_usd:.2f} > max ${self._limits.max_loss_per_trade_usd:.2f}/trade"),
-                )
+                # Scale lot size down to fit the per-trade risk cap
+                risk_per_lot = (sl_distance / pip_val) * pip_usd
+                if risk_per_lot > 0:
+                    safe_volume = round(self._limits.max_loss_per_trade_usd / risk_per_lot, 2)
+                    safe_volume = max(0.01, safe_volume)  # minimum lot
+                    adjusted_volume = safe_volume
+                    log.info(
+                        "Risk gate scaled volume %.2f → %.2f to fit $%.0f/trade cap (risk was $%.2f)",
+                        volume,
+                        safe_volume,
+                        self._limits.max_loss_per_trade_usd,
+                        risk_usd,
+                    )
+                else:
+                    return SupervisorDecision(
+                        verdict=SupervisorVerdict.VETO,
+                        rule="max_loss_per_trade",
+                        detail="Cannot compute safe volume — zero risk-per-lot",
+                    )
 
         # Rule 12: Fat finger volume check (vs median of recent trades)
         if self._recent_volumes and len(self._recent_volumes) >= 3:
@@ -438,7 +455,7 @@ class HardRiskSupervisor:
                 )
 
         # All rules passed
-        return SupervisorDecision(verdict=SupervisorVerdict.ALLOW)
+        return SupervisorDecision(verdict=SupervisorVerdict.ALLOW, adjusted_volume=adjusted_volume)
 
     # ------------------------------------------------------------------
     # Post-trade tracking

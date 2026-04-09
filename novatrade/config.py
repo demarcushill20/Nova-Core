@@ -22,7 +22,7 @@ _OVERRIDE_ENV_FILE = Path("configs/novatrade.override.env")
 _DEFAULT_MAX_DAILY_DRAWDOWN_PCT = 5.0  # typical prop-firm limit
 _DEFAULT_MAX_TOTAL_DRAWDOWN_PCT = 10.0
 _DEFAULT_MAX_POSITIONS = 1  # FTMO-safe: single position for IRB strategy
-_DEFAULT_MAX_VOLUME_PER_TRADE = 5.0  # lots — sized for $100K FTMO account
+_DEFAULT_MAX_VOLUME_PER_TRADE = 50.0  # lots — sized for $100K account (1.5% risk cap)
 _DEFAULT_SPREAD_CEILING_POINTS = 30.0
 
 

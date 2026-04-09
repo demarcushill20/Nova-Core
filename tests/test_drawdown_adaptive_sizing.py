@@ -84,20 +84,30 @@ class TestDrawdownAdaptiveIntegration:
 
     def test_stressed_account_reduced_size(self, gate, base_request, stressed_account):
         """Accounts with significant drawdown should use reduced position sizes."""
-        result = gate._check_volume_sizing(base_request, stressed_account)
+        from novatrade.models import OrderRequest, OrderSide, OrderType
 
-        # Should fail validation because base_request (1.0) exceeds scaled calculated volume
+        # With 1.5% base risk, stressed account calculates ~1.01 lots.
+        # Use a larger request (2.0 lots) to exceed the calculated volume.
+        oversized_request = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=2.0,
+            price=1.10000,
+            stop_loss=1.09500,
+        )
+        result = gate._check_volume_sizing(oversized_request, stressed_account)
+
+        # Should fail validation because 2.0 lots exceeds scaled calculated volume (~1.01)
         assert not result.passed
         assert "over-sized" in result.detail
 
         # Test with a more conservative request that should pass
-        from novatrade.models import OrderRequest, OrderSide, OrderType
-
         conservative_request = OrderRequest(
             symbol="EURUSD",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            volume=0.50,  # Within expected scaled range (~0.51 after proportional risk + DD scaler)
+            volume=0.50,  # Within expected scaled range
             price=1.10000,
             stop_loss=1.09500,
         )

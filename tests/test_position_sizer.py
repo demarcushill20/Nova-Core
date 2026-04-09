@@ -251,94 +251,94 @@ class TestFTMO100KSizing:
     With max_lot=10.0, the sizer should no longer under-risk by 5×.
     """
 
-    def test_100k_15pip_stop_returns_5_lots(self):
-        """$100K, 0.75% risk, 15-pip stop → 5.00 lots (was capped at 1.00)."""
-        sizer = PositionSizer()  # defaults: max_lot=10.0, risk_pct=0.0075
-        # risk_dollars = 100000 * 0.0075 = 750
+    def test_100k_15pip_stop_returns_10_lots(self):
+        """$100K, 1.5% risk, 15-pip stop → 10.00 lots."""
+        sizer = PositionSizer()  # defaults: max_lot=50.0, risk_pct=0.015
+        # risk_dollars = 100000 * 0.015 = 1500
         # stop_distance_pips = 15
-        # volume = 750 / (15 * 10) = 5.00
+        # volume = 1500 / (15 * 10) = 10.00
         lot = sizer.calculate(
             equity=100_000,
             entry=1.10150,
             stop=1.10000,
         )
-        assert lot == 5.00
+        assert lot == 10.00
 
-    def test_100k_20pip_stop_returns_3_75_lots(self):
-        """$100K, 0.75% risk, 20-pip stop → 3.75 lots."""
+    def test_100k_20pip_stop_returns_7_50_lots(self):
+        """$100K, 1.5% risk, 20-pip stop → 7.50 lots."""
         sizer = PositionSizer()
-        # risk_dollars = 750, volume = 750 / (20 * 10) = 3.75
+        # risk_dollars = 1500, volume = 1500 / (20 * 10) = 7.50
         lot = sizer.calculate(
             equity=100_000,
             entry=1.10200,
             stop=1.10000,
         )
-        assert lot == 3.75
+        assert lot == 7.50
 
-    def test_100k_10pip_stop_returns_7_50_lots(self):
-        """$100K, 0.75% risk, 10-pip stop → 7.50 lots."""
+    def test_100k_10pip_stop_returns_15_lots(self):
+        """$100K, 1.5% risk, 10-pip stop → 15.00 lots."""
         sizer = PositionSizer()
-        # risk_dollars = 750, volume = 750 / (10 * 10) = 7.50
+        # risk_dollars = 1500, volume = 1500 / (10 * 10) = 15.00
         lot = sizer.calculate(
             equity=100_000,
             entry=1.10100,
             stop=1.10000,
         )
-        assert lot == 7.50
+        assert lot == 15.00
 
-    def test_100k_50pip_stop_returns_1_50_lots(self):
-        """$100K, 0.75% risk, 50-pip stop → 1.50 lots."""
+    def test_100k_50pip_stop_returns_3_lots(self):
+        """$100K, 1.5% risk, 50-pip stop → 3.00 lots."""
         sizer = PositionSizer()
-        # risk_dollars = 750, volume = 750 / (50 * 10) = 1.50
+        # risk_dollars = 1500, volume = 1500 / (50 * 10) = 3.00
         lot = sizer.calculate(
             equity=100_000,
             entry=1.10500,
             stop=1.10000,
         )
-        assert lot == 1.50
+        assert lot == 3.00
 
-    def test_default_risk_pct_is_075(self):
-        """Default risk_pct should be 0.75% (Kelly-optimal)."""
+    def test_default_risk_pct_is_1_5(self):
+        """Default risk_pct should be 1.5%."""
         sizer = PositionSizer()
-        # With 0.75% risk (default), $10K, 50-pip stop:
-        # risk_dollars = 10000 * 0.0075 = 75
-        # volume = 75 / (50 * 10) = 0.15
+        # With 1.5% risk (default), $10K, 50-pip stop:
+        # risk_dollars = 10000 * 0.015 = 150
+        # volume = 150 / (50 * 10) = 0.30
         lot = sizer.calculate(
             equity=10_000,
             entry=1.10500,
             stop=1.10000,
         )
-        assert lot == 0.15
+        assert lot == 0.30
 
-    def test_default_max_lot_is_10(self):
-        """Default max_lot should be 10.0 (supports $100K FTMO)."""
+    def test_default_max_lot_is_50(self):
+        """Default max_lot should be 50.0."""
         sizer = PositionSizer()
-        assert sizer.max_lot == 10.0
+        assert sizer.max_lot == 50.0
 
-    def test_clamp_at_10_lots(self):
-        """Verify clamping at 10.0 lots for very tight stops."""
+    def test_clamp_at_50_lots(self):
+        """Verify clamping at 50.0 lots for very tight stops."""
         sizer = PositionSizer()
-        # $100K, 0.75% risk, 5-pip stop → 750 / 50 = 15.0 → clamped to 10.0
+        # $500K, 1.5% risk, 5-pip stop → 7500 / 50 = 150.0 → clamped to 50.0
         lot = sizer.calculate(
-            equity=100_000,
+            equity=500_000,
             entry=1.10050,
             stop=1.10000,
         )
-        assert lot == 10.0
+        assert lot == 50.0
 
-    def test_over_10_logs_warning(self, caplog):
-        """Calculated volume > 10.0 should log a warning."""
+    def test_over_50_logs_warning(self, caplog):
+        """Calculated volume > 50.0 should log a warning."""
         import logging
 
         sizer = PositionSizer()
         with caplog.at_level(logging.WARNING, logger="novatrade.risk.position_sizer"):
             lot = sizer.calculate(
-                equity=100_000,
+                equity=500_000,
                 entry=1.10050,
                 stop=1.10000,
             )
-        assert lot == 10.0
-        assert "exceeds 10.0 lots" in caplog.text
+        assert lot == 50.0
+        assert "exceeds 50.0 lots" in caplog.text
 
     def test_backward_compat_explicit_1_lot_max(self):
         """Callers can still explicitly set max_lot=1.0 for demo accounts."""
@@ -351,15 +351,15 @@ class TestFTMO100KSizing:
         assert lot == 1.00  # clamped to explicit max
 
     def test_10k_demo_with_defaults(self):
-        """$10K demo with default 0.75% risk still works correctly."""
+        """$10K demo with default 1.5% risk still works correctly."""
         sizer = PositionSizer()
-        # risk=75, stop=30 pips → 75/300 = 0.25
+        # risk=150, stop=30 pips → 150/300 = 0.50
         lot = sizer.calculate(
             equity=10_000,
             entry=1.10300,
             stop=1.10000,
         )
-        assert lot == 0.25
+        assert lot == 0.50
 
 
 # ---------------------------------------------------------------------------
@@ -544,13 +544,13 @@ class TestScaleVolume:
         sizer = PositionSizer()
         scaler = DrawdownScaler()
 
-        # $100K, 0.75% risk, 15-pip stop → 5.00 lots base
+        # $100K, 1.5% risk, 15-pip stop → 10.00 lots base
         base_lot = sizer.calculate(equity=100_000, entry=1.10150, stop=1.10000)
-        assert base_lot == 5.00
+        assert base_lot == 10.00
 
-        # After 60% DD used → 75% scale → 3.75 lots
+        # After 60% DD used → 75% scale → 7.50 lots
         scaled = scaler.scale_volume(base_lot, dd_used_pct=0.60)
-        assert scaled == 3.75
+        assert scaled == 7.50
 
     def test_end_to_end_survival_mode(self):
         """Worst case: high DD + loss streak → 25% of base volume."""
@@ -560,11 +560,11 @@ class TestScaleVolume:
             scaler.record_loss()
 
         base_lot = sizer.calculate(equity=100_000, entry=1.10150, stop=1.10000)
-        assert base_lot == 5.00
+        assert base_lot == 10.00
 
-        # 90% DD + 4 losses → both at 0.25 → 5.00 × 0.25 = 1.25
+        # 90% DD + 4 losses → both at 0.25 → 10.00 × 0.25 = 2.50
         scaled = scaler.scale_volume(base_lot, dd_used_pct=0.90)
-        assert scaled == 1.25
+        assert scaled == 2.50
 
 
 # ---------------------------------------------------------------------------

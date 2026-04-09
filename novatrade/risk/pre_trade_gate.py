@@ -128,7 +128,7 @@ class PreTradeGate:
         # Reduces base risk_pct as total drawdown deepens, creating exponential
         # safety margin. Compounds with DrawdownScaler's volume multipliers.
         self._proportional_risk = DrawdownProportionalRisk(
-            base_risk_pct=0.0075,
+            base_risk_pct=0.015,
             enabled=True,
         )
         # Daily risk budget tracker (P1 priority from funded account survival research)

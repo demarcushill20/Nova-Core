@@ -1,16 +1,16 @@
 """FTMO-compliant position sizer for NovaTrade live trading.
 
-Mirrors the Pine f_qty() model: 0.75% equity risk per trade, clamped to
-FTMO-safe lot-size bounds (max 10.00 lots for $100K accounts).  Provides both calculation and cross-check
+Mirrors the Pine f_qty() model: 1.5% equity risk per trade, clamped to
+lot-size bounds (max 50.00 lots for $100K accounts).  Provides both calculation and cross-check
 validation for TradingView alert volumes.
 
 Usage::
 
     sizer = PositionSizer()
     lot = sizer.calculate(equity=100000, entry=1.10150, stop=1.10000,
-                          risk_pct=0.0075, pip_value=0.0001,
+                          risk_pct=0.015, pip_value=0.0001,
                           pip_value_per_lot=10.0)
-    # lot = 5.00
+    # lot = 10.00
 
     ok, reason = sizer.validate(requested=0.22, calculated=0.20, tolerance=0.10)
     # ok = True (within 10% tolerance)
@@ -73,7 +73,7 @@ class PositionSizer:
     def __init__(
         self,
         min_lot: float = 0.01,
-        max_lot: float = 10.00,
+        max_lot: float = 50.00,
         *,
         micro_variation_enabled: bool = False,
         micro_variation_step: float = 0.01,
@@ -88,7 +88,7 @@ class PositionSizer:
         equity: float,
         entry: float,
         stop: float,
-        risk_pct: float = 0.0075,
+        risk_pct: float = 0.015,
         pip_value: float = 0.0001,
         pip_value_per_lot: float = 10.0,
     ) -> float:
@@ -126,9 +126,9 @@ class PositionSizer:
         volume = risk_dollars / (stop_distance_pips * pip_value_per_lot)
 
         # Guard: warn if calculated volume exceeds safety ceiling
-        if volume > 10.0:
+        if volume > 50.0:
             log.warning(
-                "Calculated volume %.2f exceeds 10.0 lots — capping. equity=%.0f risk_pct=%.4f stop_pips=%.1f",
+                "Calculated volume %.2f exceeds 50.0 lots — capping. equity=%.0f risk_pct=%.4f stop_pips=%.1f",
                 volume,
                 equity,
                 risk_pct,
@@ -506,13 +506,13 @@ class DrawdownProportionalRisk:
     Tiers (total drawdown from initial balance, as % of base risk):
 
         ======== ============ ========================================
-        Drawdown Multiplier   Effect (with 0.75% base)
+        Drawdown Multiplier   Effect (with 1.5% base)
         ======== ============ ========================================
-        0–2%     100%         0.75% → need 13+ losers for 10% breach
-        2–4%      70%         0.525% → need 19+ losers
-        4–6%      50%         0.375% → need 27+ losers
-        6–8%      30%         0.225% → need 44+ losers
-        8–10%     20%         0.15% → need 67+ losers
+        0–2%     100%         1.50% → full risk
+        2–4%      70%         1.05% → cautious
+        4–6%      50%         0.75% → defensive
+        6–8%      30%         0.45% → survival
+        8–10%     20%         0.30% → emergency
         >10%       0%         HALT — account breached
         ======== ============ ========================================
 
@@ -524,12 +524,12 @@ class DrawdownProportionalRisk:
     def __init__(
         self,
         *,
-        base_risk_pct: float = 0.0075,
+        base_risk_pct: float = 0.015,
         enabled: bool = True,
     ) -> None:
         """
         Args:
-            base_risk_pct: The baseline risk percentage (0.0075 = 0.75%).
+            base_risk_pct: The baseline risk percentage (0.015 = 1.5%).
             enabled: When False, always returns base_risk_pct unchanged.
         """
         if base_risk_pct < 0:

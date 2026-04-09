@@ -212,15 +212,24 @@ class TestRule1EquityFloor:
 
 
 class TestRule2DailyLossCap:
-    def test_daily_loss_exceeds_cap(self, supervisor: HardRiskSupervisor) -> None:
-        # Daily loss = 10000 - 9500 = $500 >= cap $450
-        d = supervisor.veto("EURUSD", "BUY", 0.1, 1.1000, 1.0950, 9_500.0)
+    def test_daily_loss_exceeds_cap(self, tmp_state: tuple[Path, Path]) -> None:
+        state_dir, kill_dir = tmp_state
+        # Use higher initial equity so daily loss can exceed $4500 without
+        # hitting the equity floor ($8500 default).
+        s = HardRiskSupervisor(
+            limits=HardLimits(equity_floor_usd=4_000.0),
+            state_dir=state_dir,
+            kill_switch_dir=kill_dir,
+        )
+        s.initialize(initial_equity=10_000.0)
+        # Daily loss = 10000 - 5000 = $5000 >= cap $4500
+        d = s.veto("EURUSD", "BUY", 0.1, 1.1000, 1.0950, 5_000.0)
         assert d.verdict == SupervisorVerdict.EMERGENCY_HALT
         assert d.rule == "daily_loss_cap"
-        assert supervisor.halted
+        assert s.halted
 
     def test_daily_loss_within_cap(self, supervisor: HardRiskSupervisor) -> None:
-        # Daily loss = 10000 - 9600 = $400 < cap $450
+        # Daily loss = 10000 - 9600 = $400 < cap $4500
         d = supervisor.veto("EURUSD", "BUY", 0.1, 1.1000, 1.0950, 9_600.0)
         assert d.verdict == SupervisorVerdict.ALLOW
 
@@ -257,14 +266,15 @@ class TestRule3TotalLossCap:
 
 class TestRule4MaxLotSize:
     def test_volume_exceeds_max(self, supervisor: HardRiskSupervisor) -> None:
-        d = supervisor.veto("EURUSD", "BUY", 10.5, 1.1000, 1.0999, 100_000.0)
+        # 50.5 lots exceeds the 50.0 max lot hard limit
+        d = supervisor.veto("EURUSD", "BUY", 50.5, 1.10000, 1.09900, 100_000.0)
         assert d.verdict == SupervisorVerdict.VETO
         assert d.rule == "max_lot_size"
 
     def test_volume_at_max(self, supervisor: HardRiskSupervisor) -> None:
-        # 10.0 lots at max — with loss safely under per-trade cap
-        # 10.0 lot × 1.4 pip SL × $10/pip = $140 < $150 limit
-        d = supervisor.veto("EURUSD", "BUY", 10.0, 1.10000, 1.09986, 100_000.0)
+        # 50.0 lots at max — with SL tight enough to stay under $1500 per-trade cap
+        # 50.0 lot × 3 pip SL × $10/pip = $1500 = limit (adjusted_volume may be set)
+        d = supervisor.veto("EURUSD", "BUY", 50.0, 1.10000, 1.09970, 100_000.0)
         assert d.verdict == SupervisorVerdict.ALLOW
 
     def test_volume_below_max(self, supervisor: HardRiskSupervisor) -> None:
@@ -522,8 +532,9 @@ class TestRule10MinStopDistance:
 
 
 class TestRule11PerTradeRisk:
-    def test_risk_exceeds_limit(self, tight_supervisor: HardRiskSupervisor) -> None:
+    def test_risk_exceeds_limit_scales_down(self, tight_supervisor: HardRiskSupervisor) -> None:
         # 0.5 lot × 100 pip SL × $10/pip = $500 > $50 limit
+        # Should ALLOW but scale volume down to fit: $50 / (100 * $10) = 0.05 lots
         d = tight_supervisor.veto(
             "EURUSD",
             "BUY",
@@ -532,8 +543,9 @@ class TestRule11PerTradeRisk:
             1.09000,
             10_000.0,
         )
-        assert d.verdict == SupervisorVerdict.VETO
-        assert d.rule == "max_loss_per_trade"
+        assert d.verdict == SupervisorVerdict.ALLOW
+        assert d.adjusted_volume is not None
+        assert d.adjusted_volume == 0.05
 
     def test_risk_within_limit(self, tight_supervisor: HardRiskSupervisor) -> None:
         # 0.01 lot × 20 pip SL × $10/pip = $2 < $50 limit
@@ -545,7 +557,7 @@ class TestRule11PerTradeRisk:
             1.09800,
             10_000.0,
         )
-        assert d.rule != "max_loss_per_trade"
+        assert d.adjusted_volume is None  # No adjustment needed
 
 
 # ---------------------------------------------------------------------------
@@ -658,8 +670,16 @@ class TestCheckAccount:
         assert actions[0].position_ids == ["p1"]
         assert actions[1].action == "HALT"
 
-    def test_daily_loss_triggers_halt(self, supervisor: HardRiskSupervisor) -> None:
-        actions = supervisor.check_account(9_500.0, [])
+    def test_daily_loss_triggers_halt(self, tmp_state: tuple[Path, Path]) -> None:
+        state_dir, kill_dir = tmp_state
+        s = HardRiskSupervisor(
+            limits=HardLimits(equity_floor_usd=1_000.0),
+            state_dir=state_dir,
+            kill_switch_dir=kill_dir,
+        )
+        s.initialize(initial_equity=10_000.0)
+        # Daily loss = 10000 - 5000 = $5000 >= cap $4500
+        actions = s.check_account(5_000.0, [])
         assert any(a.action == "HALT" for a in actions)
 
     def test_healthy_account_no_actions(self, supervisor: HardRiskSupervisor) -> None:

@@ -416,7 +416,7 @@ class TestConstants:
         assert _DEFAULT_MAX_DAILY_DRAWDOWN_PCT == 5.0
         assert _DEFAULT_MAX_TOTAL_DRAWDOWN_PCT == 10.0
         assert _DEFAULT_MAX_POSITIONS == 1
-        assert _DEFAULT_MAX_VOLUME_PER_TRADE == 5.0
+        assert _DEFAULT_MAX_VOLUME_PER_TRADE == 50.0
         assert _DEFAULT_SPREAD_CEILING_POINTS == 30.0
 
     def test_constants_types(self):

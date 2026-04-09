@@ -21,7 +21,7 @@ from novatrade.risk.position_sizer import DrawdownProportionalRisk, PositionSize
 # Constants for test clarity
 # ---------------------------------------------------------------------------
 INITIAL = 100_000.0  # $100K FTMO account
-BASE_RISK = 0.0075  # 0.75% default
+BASE_RISK = 0.015  # 1.5% default
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ class TestRiskPercentage:
     """Verify risk_pct returned at each tier."""
 
     def test_normal_tier_full_risk(self):
-        """0% drawdown → 100% of base = 0.0075."""
+        """0% drawdown → 100% of base = 0.015."""
         dpr = DrawdownProportionalRisk()
         assert dpr.get_risk_pct(INITIAL, INITIAL) == BASE_RISK
 
@@ -109,22 +109,22 @@ class TestRiskPercentage:
         assert dpr.get_risk_pct(99_000, INITIAL) == BASE_RISK * 1.00
 
     def test_cautious_tier_70pct_risk(self):
-        """3% drawdown → 70% of base = 0.00525."""
+        """3% drawdown → 70% of base = 0.0105."""
         dpr = DrawdownProportionalRisk()
         assert dpr.get_risk_pct(97_000, INITIAL) == BASE_RISK * 0.70
 
     def test_defensive_tier_50pct_risk(self):
-        """5% drawdown → 50% of base = 0.00375."""
+        """5% drawdown → 50% of base = 0.0075."""
         dpr = DrawdownProportionalRisk()
         assert dpr.get_risk_pct(95_000, INITIAL) == BASE_RISK * 0.50
 
     def test_survival_tier_30pct_risk(self):
-        """7% drawdown → 30% of base = 0.00225."""
+        """7% drawdown → 30% of base = 0.0045."""
         dpr = DrawdownProportionalRisk()
         assert dpr.get_risk_pct(93_000, INITIAL) == BASE_RISK * 0.30
 
     def test_emergency_tier_20pct_risk(self):
-        """9% drawdown → 20% of base = 0.0015."""
+        """9% drawdown → 20% of base = 0.003."""
         dpr = DrawdownProportionalRisk()
         assert dpr.get_risk_pct(91_000, INITIAL) == BASE_RISK * 0.20
 
@@ -321,8 +321,8 @@ class TestConsecutiveLossesToBreach:
         """At 8% drawdown (emergency tier), need many more losses to breach."""
         dpr = DrawdownProportionalRisk()
         count = dpr.get_consecutive_losses_to_breach(92_000, INITIAL)
-        # At emergency tier (0.15% risk), need $2K more loss → lots of trades
-        assert count >= 10
+        # At emergency tier (0.3% risk with 1.5% base), need $2K more loss
+        assert count >= 5
 
     def test_more_losses_needed_as_dd_deepens(self):
         """Zeno's paradox: deeper drawdown → more losses needed per % of remaining."""
@@ -352,8 +352,8 @@ class TestPositionSizerIntegration:
         assert risk == BASE_RISK
 
         lot = sizer.calculate(equity=INITIAL, entry=1.10150, stop=1.10000, risk_pct=risk)
-        # Same as default: 750 / (15 * 10) = 5.00
-        assert lot == 5.00
+        # 1500 / (15 * 10) = 10.00
+        assert lot == 10.00
 
     def test_cautious_tier_reduces_volume(self):
         """3% drawdown → 70% risk → smaller position."""
@@ -365,9 +365,9 @@ class TestPositionSizerIntegration:
         assert risk == BASE_RISK * 0.70
 
         lot = sizer.calculate(equity=equity, entry=1.10150, stop=1.10000, risk_pct=risk)
-        # risk_dollars = 97000 * 0.00525 = 509.25
-        # volume = 509.25 / (15 * 10) = 3.395 → 3.40
-        assert lot == 3.40
+        # risk_dollars = 97000 * 0.0105 = 1018.50
+        # volume = 1018.50 / (15 * 10) = 6.79
+        assert lot == 6.79
 
     def test_defensive_tier_further_reduces(self):
         """5% drawdown → 50% risk."""
@@ -379,9 +379,9 @@ class TestPositionSizerIntegration:
         assert risk == BASE_RISK * 0.50
 
         lot = sizer.calculate(equity=equity, entry=1.10150, stop=1.10000, risk_pct=risk)
-        # risk_dollars = 95000 * 0.00375 = 356.25
-        # volume = 356.25 / (15 * 10) = 2.375 → 2.38
-        assert lot == 2.38
+        # risk_dollars = 95000 * 0.0075 = 712.50
+        # volume = 712.50 / (15 * 10) = 4.75
+        assert lot == 4.75
 
     def test_survival_tier_significant_reduction(self):
         """7% drawdown → 30% risk."""
@@ -393,9 +393,9 @@ class TestPositionSizerIntegration:
         assert risk == BASE_RISK * 0.30
 
         lot = sizer.calculate(equity=equity, entry=1.10150, stop=1.10000, risk_pct=risk)
-        # risk_dollars = 93000 * 0.00225 = 209.25
-        # volume = 209.25 / 150 = 1.395 → 1.40
-        assert lot == 1.40
+        # risk_dollars = 93000 * 0.0045 = 418.50
+        # volume = 418.50 / 150 = 2.79
+        assert lot == 2.79
 
     def test_emergency_tier_minimal_risk(self):
         """9% drawdown → 20% risk."""
@@ -407,9 +407,9 @@ class TestPositionSizerIntegration:
         assert risk == BASE_RISK * 0.20
 
         lot = sizer.calculate(equity=equity, entry=1.10150, stop=1.10000, risk_pct=risk)
-        # risk_dollars = 91000 * 0.0015 = 136.50
-        # volume = 136.50 / 150 = 0.91
-        assert lot == 0.91
+        # risk_dollars = 91000 * 0.003 = 273.00
+        # volume = 273.00 / 150 = 1.82
+        assert lot == 1.82
 
     def test_halt_tier_returns_zero_risk(self):
         """10% drawdown → 0% risk → cannot calculate (ValueError from sizer)."""
@@ -463,6 +463,5 @@ class TestPositionSizerIntegration:
 
         # Compounding: proportional risk already reduced base, scaler reduces further
         assert final_vol < base_vol
-        # Original unscaled volume at 0.75% would be 4.70 lots
-        # After proportional risk (0.30×) + scaler (0.75×): much smaller
-        assert final_vol < 2.0
+        # After proportional risk (0.30×) + scaler (0.75×): significantly smaller
+        assert final_vol < 3.0

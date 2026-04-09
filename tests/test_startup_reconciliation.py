@@ -593,19 +593,19 @@ class TestPipelineCollectorUptimeGuard:
 class TestConfigMaxVolumePerTrade:
     """Test that max_volume_per_trade defaults to 5.0 and is overridable."""
 
-    def test_default_is_5_0(self):
-        """RiskConfig default max_volume_per_trade is 5.0 (not 1.0)."""
+    def test_default_is_50_0(self):
+        """RiskConfig default max_volume_per_trade is 50.0."""
         cfg = RiskConfig()
-        assert cfg.max_volume_per_trade == 5.0
+        assert cfg.max_volume_per_trade == 50.0
 
-    def test_default_constant_is_5_0(self):
-        """Module-level constant _DEFAULT_MAX_VOLUME_PER_TRADE is 5.0."""
-        assert _DEFAULT_MAX_VOLUME_PER_TRADE == 5.0
+    def test_default_constant_is_50_0(self):
+        """Module-level constant _DEFAULT_MAX_VOLUME_PER_TRADE is 50.0."""
+        assert _DEFAULT_MAX_VOLUME_PER_TRADE == 50.0
 
-    def test_novatrade_cfg_default_is_5_0(self):
-        """NovaTradeCfg default risk.max_volume_per_trade is 5.0."""
+    def test_novatrade_cfg_default_is_50_0(self):
+        """NovaTradeCfg default risk.max_volume_per_trade is 50.0."""
         cfg = NovaTradeCfg()
-        assert cfg.risk.max_volume_per_trade == 5.0
+        assert cfg.risk.max_volume_per_trade == 50.0
 
     def test_overridable_via_env_var(self, monkeypatch):
         """max_volume_per_trade can be overridden via NOVATRADE_MAX_VOLUME_PER_TRADE."""
@@ -627,7 +627,7 @@ class TestConfigMaxVolumePerTrade:
         assert cfg.risk.max_volume_per_trade == 2.5
 
     def test_env_var_not_set_uses_default(self, monkeypatch):
-        """When NOVATRADE_MAX_VOLUME_PER_TRADE is not set, default 5.0 is used."""
+        """When NOVATRADE_MAX_VOLUME_PER_TRADE is not set, default 50.0 is used."""
         monkeypatch.delenv("NOVATRADE_MAX_VOLUME_PER_TRADE", raising=False)
         for key in (
             "NOVATRADE_MODE",
@@ -642,7 +642,7 @@ class TestConfigMaxVolumePerTrade:
             monkeypatch.delenv(key, raising=False)
 
         cfg = NovaTradeCfg.load(env_file=Path("/nonexistent"))
-        assert cfg.risk.max_volume_per_trade == 5.0
+        assert cfg.risk.max_volume_per_trade == 50.0
 
     def test_env_override_large_value(self, monkeypatch):
         """Large volume override via env var works correctly."""

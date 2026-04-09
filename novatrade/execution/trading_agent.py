@@ -719,6 +719,28 @@ class TradingAgent:
                     elapsed_ms=elapsed,
                 )
 
+            # Apply supervisor-adjusted volume (risk gate scaled down to fit cap)
+            if sv.adjusted_volume is not None and sv.adjusted_volume != order_req.volume:
+                log.info(
+                    "Supervisor adjusted volume %.2f → %.2f",
+                    order_req.volume,
+                    sv.adjusted_volume,
+                )
+                order_req = OrderRequest(
+                    symbol=order_req.symbol,
+                    side=order_req.side,
+                    order_type=order_req.order_type,
+                    volume=sv.adjusted_volume,
+                    price=order_req.price,
+                    stop_loss=order_req.stop_loss,
+                    take_profit=order_req.take_profit,
+                    comment=order_req.comment,
+                    idempotency_key=order_req.idempotency_key,
+                    strategy_id=order_req.strategy_id,
+                    strategy_version=order_req.strategy_version,
+                    max_slippage_pips=order_req.max_slippage_pips,
+                )
+
         # Risk check
         decision = self._risk.pre_trade_check(order_req, account, positions)
 
