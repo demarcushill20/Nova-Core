@@ -17,5 +17,7 @@
   "reusable_guidance": "NovaTrade core services healthy with 95% system status, shadow validation active, 4 external TV dependencies blocking production cutover",
   "created_at": "2026-04-08T06:39:50Z",
   "confidence": "high",
-  "supersedes": "mem_shift_20260407_9_novatrade_status_1775619252"
+  "supersedes": "mem_shift_20260407_9_novatrade_status_1775619252",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_9_novatrade_status_1775624737"
 }

@@ -2910,6 +2910,9 @@ async def _async_wait_for_wake(timeout: float) -> None:
         _wake_event.clear()
 
 
+_LOCK_FILE = Path("/tmp/novacore-watcher.lock")  # noqa: S108
+
+
 async def run() -> None:
     """Main async loop: poll TASKS/ every POLL_INTERVAL seconds.
 
@@ -2917,6 +2920,16 @@ async def run() -> None:
     Phase 4.3: Async worker pool with bounded concurrency and priority queue.
     """
     global _running
+
+    # Singleton lock — prevent duplicate watcher instances
+    lock_fp = open(_LOCK_FILE, "w")  # noqa: ASYNC230, SIM115 — must hold fd open for flock
+    try:
+        fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.error("Another watcher instance is already running. Exiting.")
+        sys.exit(1)
+    lock_fp.write(str(os.getpid()))
+    lock_fp.flush()
 
     logger.info("Dispatcher started. Monitoring %s every %ds.", TASKS_DIR, POLL_INTERVAL)
     logger.info(

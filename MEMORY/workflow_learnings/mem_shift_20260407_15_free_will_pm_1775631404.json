@@ -17,5 +17,7 @@
   "reusable_guidance": "Fixed test regression, hardened flaky test isolation, and extracted duplicated pip value helpers to shared module",
   "created_at": "2026-04-08T06:56:44Z",
   "confidence": "high",
-  "supersedes": "mem_shift_20260407_15_free_will_pm_1775625777"
+  "supersedes": "mem_shift_20260407_15_free_will_pm_1775625777",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_shift_20260407_15_free_will_pm_1775622013"
 }
