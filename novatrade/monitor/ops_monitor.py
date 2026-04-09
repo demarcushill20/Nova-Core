@@ -390,6 +390,18 @@ class OpsMonitor:
         except Exception as exc:
             log.debug("Strategy config refresh failed: %s", exc)
 
+        # 11. Trade gap monitoring — detect prolonged no-trade periods
+        try:
+            self._check_trade_gap(result)
+        except Exception as exc:
+            log.debug("Trade gap check failed: %s", exc)
+
+        # 12. Session watchdog — tiered anomaly detection for active sessions
+        try:
+            self._check_session_watchdog(result)
+        except Exception as exc:
+            log.debug("Session watchdog check failed: %s", exc)
+
         result.elapsed_ms = (time.monotonic() - t0) * 1000
         self._record_cycle(result)
         return result
@@ -1152,6 +1164,95 @@ class OpsMonitor:
         config_data["started_at"] = time.time()
         state_dir.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(config_data, indent=2))
+
+    # ------------------------------------------------------------------
+    # Trade gap monitoring
+    # ------------------------------------------------------------------
+
+    def _check_trade_gap(self, result: CycleResult) -> None:
+        """Check for prolonged periods without trade execution.
+
+        Integrates with the trade_gap_monitor module to detect when the
+        system is running but not executing trades for extended periods.
+        Generates alerts through the standard OpsMonitor alert pipeline.
+        """
+        from novatrade.monitor.trade_gap_monitor import check_trade_gap
+
+        status = check_trade_gap()
+
+        if status.suppressed or status.alert_level == "GREEN":
+            return
+
+        severity = AlertSeverity.CRITICAL if status.alert_level == "RED" else AlertSeverity.WARNING
+        self._emit_alert(
+            severity,
+            AlertCategory.OPERATIONAL,
+            f"Trade gap: {status.alert_reason}",
+            result,
+            detail={
+                "gap_hours": round(status.gap_seconds / 3600, 1),
+                "threshold_hours": round(status.effective_threshold_s / 3600, 1),
+                "session": status.session,
+                "regime": status.regime,
+                "recent_rejections": status.recent_rejections,
+                "last_rejection_reason": status.last_rejection_reason,
+            },
+        )
+
+    def _check_session_watchdog(self, result: CycleResult) -> None:
+        """Run session watchdog evaluation and feed health state into it.
+
+        Integrates the tiered anomaly detection (Level 1/2/3) with the
+        OpsMonitor alert pipeline. Also feeds health check results back
+        into the watchdog for continuous tracking.
+        """
+        from novatrade.monitor.session_watchdog import (
+            AnomalyLevel,
+            get_watchdog,
+        )
+
+        watchdog = get_watchdog()
+
+        # Feed health state into watchdog
+        if result.health_ok:
+            watchdog.record_health_ok()
+        else:
+            watchdog.record_health_failure()
+
+        # Gather evidence and evaluate
+        evidence = watchdog.gather_evidence()
+        assessment = watchdog.evaluate(evidence)
+
+        if assessment.suppressed or assessment.level == AnomalyLevel.NONE:
+            return
+
+        # Map anomaly level to alert severity
+        if assessment.level == AnomalyLevel.LEVEL_3:
+            severity = AlertSeverity.CRITICAL
+        elif assessment.level == AnomalyLevel.LEVEL_2:
+            severity = AlertSeverity.WARNING
+        else:
+            severity = AlertSeverity.INFO
+
+        # Only emit alert if cooldown allows
+        if not watchdog.should_alert(assessment.level):
+            return
+
+        self._emit_alert(
+            severity,
+            AlertCategory.HEALTH,
+            f"Session watchdog [{assessment.level.value}]: {assessment.diagnosis}",
+            result,
+            detail={
+                "level": assessment.level.value,
+                "symptoms": assessment.symptoms,
+                "session": evidence.session,
+                "regime": evidence.regime,
+                "adapter_state": evidence.adapter_state,
+                "adapter_connected": evidence.adapter_connected,
+            },
+        )
+        watchdog.mark_alerted(assessment.level)
 
     # ------------------------------------------------------------------
     # Helpers

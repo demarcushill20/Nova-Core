@@ -27,6 +27,7 @@ from typing import Any, ClassVar
 from novatrade.config import NovaTradeCfg
 from novatrade.execution.trading_agent import AgentResult, AgentState, TradingAgent
 from novatrade.monitor.post_trade_verifier import PostTradeVerifier, _VerificationContext
+from novatrade.monitor.regime_detector import load_regime_safe
 from novatrade.strategy.live_engine import LiveSignal, LiveStrategyEngine, SignalType
 
 log = logging.getLogger("novatrade.execution.live_trading_agent")
@@ -450,6 +451,9 @@ class LiveTradingAgent:
             return None
         action = self._resolve_entry_action(signal.side)
 
+        # --- ATR regime-based position sizing adjustment ---
+        volume = self._apply_atr_regime_sizing(signal.volume, signal.symbol)
+
         payload = {
             "strategy_name": _STRATEGY_NAME,
             "strategy_version": _STRATEGY_VERSION,
@@ -461,13 +465,78 @@ class LiveTradingAgent:
             "order_type": order_type,
             "entry_price": signal.entry_price,
             "stop_loss": signal.stop_loss,
-            "volume": signal.volume,
+            "volume": volume,
             "bar_close_time": int(signal.timestamp),
             "campaign": self._campaign,
         }
 
         # Apply price normalization to fix MetaAPI precision issues
         return PriceNormalizer.normalize_payload_prices(payload)
+
+    def _apply_atr_regime_sizing(self, base_volume: float, symbol: str) -> float:
+        """Apply ATR regime risk factor to position volume.
+
+        When NOVATRADE_ATR_REGIME_SIZING_ENABLED=true, reads the current
+        regime from STATE/novatrade/regime.json and scales the base volume
+        by the zone's risk factor (0.0–1.0).
+
+        When the flag is off or the regime file is unavailable/stale/malformed,
+        the base volume is returned unchanged.
+
+        Returns:
+            Adjusted volume (>= min_volume_per_trade), rounded to 2 decimals.
+        """
+        risk_cfg = self._cfg.risk
+        enabled = risk_cfg.atr_regime_sizing_enabled
+
+        if not enabled:
+            log.debug(
+                "ATR regime sizing DISABLED — using base volume %.2f for %s",
+                base_volume,
+                symbol,
+            )
+            return base_volume
+
+        # Load regime with safety guards
+        risk_factor, atr_zone, fallback_reason = load_regime_safe(
+            staleness_seconds=risk_cfg.atr_regime_staleness_seconds,
+        )
+
+        if fallback_reason:
+            log.warning(
+                "ATR regime sizing FALLBACK for %s: %s — using base volume %.2f (factor=1.0)",
+                symbol,
+                fallback_reason,
+                base_volume,
+            )
+            return base_volume
+
+        # Apply risk factor
+        adjusted_volume = round(base_volume * risk_factor, 2)
+        adjusted_volume = max(risk_cfg.min_volume_per_trade, adjusted_volume)
+
+        log.info(
+            "ATR regime sizing APPLIED for %s: atr_zone=%s risk_factor=%.2f base_volume=%.2f adjusted_volume=%.2f",
+            symbol,
+            atr_zone,
+            risk_factor,
+            base_volume,
+            adjusted_volume,
+        )
+
+        # If risk_factor is 0.0 (compression/extreme zones), volume floors
+        # at min_volume_per_trade.  The ATR zone-based trade BLOCKING is a
+        # separate feature (not yet enabled) — this only scales volume.
+        if risk_factor == 0.0:
+            log.warning(
+                "ATR regime sizing: zone=%s has risk_factor=0.0 — "
+                "volume floored to min %.2f.  Consider enabling ATR-based "
+                "trade blocking as a separate feature for full protection.",
+                atr_zone,
+                adjusted_volume,
+            )
+
+        return adjusted_volume
 
     def _build_exit_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
         """Build CLOSE_POSITION payload."""

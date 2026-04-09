@@ -146,6 +146,17 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
         result = await ws.agent.process_alert(payload)
         ws.last_alert_time = time.time()
 
+        # Feed event into session watchdog for anomaly tracking
+        try:
+            from novatrade.monitor.session_watchdog import get_watchdog as _get_wd
+
+            _wd = _get_wd()
+            _wd.record_alert_received()
+            if result.success:
+                _wd.record_trade_executed()
+        except Exception as exc:
+            log.debug("Session watchdog update failed: %s", exc)
+
         if result.success:
             ws.alerts_processed += 1
         else:

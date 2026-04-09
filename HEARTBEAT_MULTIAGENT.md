@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-04-09T00:13:54Z
+Generated: 2026-04-09T00:58:33Z
 
 ## Overall: HEALTHY
 
@@ -8,7 +8,7 @@ Generated: 2026-04-09T00:13:54Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 5 |
+| Completed workflows | 3 |
 | Failed workflows | 1 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
@@ -21,7 +21,7 @@ Generated: 2026-04-09T00:13:54Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 1200 |
+| Contract successes | 1211 |
 | Contract failures | 53 |
 | Contract failure rate | 4.2% |
 | Budget exhaustions | 0 |
@@ -37,12 +37,10 @@ Generated: 2026-04-09T00:13:54Z
 
 | ID | Task | Status | Halt Reason |
 |----|------|--------|-------------|
-| 0728_Can_you_investigate_this____AUTONOMY_ESCALATE__strategy_validity | ? | completed | - |
-| 0729_Can_you_investigate_this__18_tasks_pending__30min___queue_may_need_attention | ? | completed | - |
-| 0731_Did_you_finish_the_investigation_ | ? | completed | - |
+| 0748_NovaTrade_have_not_made_any_trades__Can_you_investigate_and_diagnose_the_issue | ? | completed | - |
+| 0753_From_Nova__I_think_that_explanation_is_credible_and_technically_coherent__but_I_ | ? | completed | - |
 | shift_20260407_6_testing_quality | ? | failed | verifier_rejected |
 | shift_20260407_7_memory_hygiene | ? | completed | - |
-| shift_gen_pm_20260407 | ? | completed | - |
 
 ## Health Findings
 

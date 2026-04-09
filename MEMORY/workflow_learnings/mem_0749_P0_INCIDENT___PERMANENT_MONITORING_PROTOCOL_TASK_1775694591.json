@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0749_P0_INCIDENT___PERMANENT_MONITORING_PROTOCOL_TASK_1775694591",
+  "workflow_id": "0749_P0_INCIDENT___PERMANENT_MONITORING_PROTOCOL_TASK",
+  "task_summary": "Fixed runner.py adapter_connected regression, added MetaAPI connect diagnostics, implemented 3-hour no-trade monitoring protocol with session/regime-aware false-trigger protection",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed runner.py adapter_connected regression, added MetaAPI connect diagnostics, implemented 3-hour no-trade monitoring protocol with session/regime-aware false-trigger protection"
+  ],
+  "successful_patterns": [
+    "task_completed: 0749_P0_INCIDENT___PERMANENT_MONITORING_PROTOCOL_TASK"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed runner.py adapter_connected regression, added MetaAPI connect diagnostics, implemented 3-hour no-trade monitoring protocol with session/regime-aware false-trigger protection",
+  "created_at": "2026-04-09T00:29:51Z",
+  "confidence": "high"
+}

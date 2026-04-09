@@ -127,6 +127,13 @@ class RiskConfig:
     # Max extra SL widening from live spread adjustment (pips). Caps the
     # dynamic spread adjustment to prevent runaway widening during spikes.
     sl_spread_max_extra_pips: float = 3.0
+    # ATR regime-based position sizing: scale risk by ATR zone risk factor
+    # from STATE/novatrade/regime.json.  Off by default — enable for live
+    # trials behind explicit operator decision.
+    atr_regime_sizing_enabled: bool = False
+    # Staleness threshold for regime.json (seconds). If the file is older
+    # than this, fall back to risk_factor=1.0 (no adjustment).
+    atr_regime_staleness_seconds: int = 900  # 15 minutes
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -248,6 +255,10 @@ class NovaTradeCfg:
                 max_volume_per_trade=float(
                     os.environ.get("NOVATRADE_MAX_VOLUME_PER_TRADE", str(_DEFAULT_MAX_VOLUME_PER_TRADE))
                 ),
+                atr_regime_sizing_enabled=(
+                    os.environ.get("NOVATRADE_ATR_REGIME_SIZING_ENABLED", "false").lower() in ("true", "1", "yes")
+                ),
+                atr_regime_staleness_seconds=int(os.environ.get("NOVATRADE_ATR_REGIME_STALENESS_SECONDS", "900")),
             ),
             ftmo=FtmoProfile.from_env(),
             dry_run=dry_run_raw.lower() in ("true", "1", "yes"),

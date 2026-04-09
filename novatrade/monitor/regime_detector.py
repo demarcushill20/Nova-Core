@@ -184,6 +184,77 @@ def load_regime() -> RegimeSnapshot | None:
     return None
 
 
+def load_regime_safe(
+    staleness_seconds: int = 900,
+) -> tuple[float, str, str]:
+    """Load regime risk factor with staleness, missing-file, and malformed-data safeguards.
+
+    Returns:
+        (risk_factor, atr_zone, fallback_reason)
+        - risk_factor: 0.0–1.0 from regime, or 1.0 on fallback
+        - atr_zone: zone label, or "unknown" on fallback
+        - fallback_reason: empty string if regime loaded OK, else explanation
+    """
+    _DEFAULT_FACTOR = 1.0
+    _DEFAULT_ZONE = "unknown"
+
+    # --- File existence ---
+    if not REGIME_FILE.exists():
+        reason = f"regime file missing: {REGIME_FILE}"
+        log.warning("ATR regime fallback: %s", reason)
+        return _DEFAULT_FACTOR, _DEFAULT_ZONE, reason
+
+    # --- Parse ---
+    try:
+        raw = REGIME_FILE.read_text()
+        data = json.loads(raw)
+    except (json.JSONDecodeError, OSError) as exc:
+        reason = f"regime file unreadable/malformed: {exc}"
+        log.warning("ATR regime fallback: %s", reason)
+        return _DEFAULT_FACTOR, _DEFAULT_ZONE, reason
+
+    # --- Required fields ---
+    zone = data.get("atr_zone")
+    factor = data.get("atr_zone_risk_factor")
+    classified_at = data.get("classified_at", "")
+
+    if zone is None or factor is None:
+        reason = f"regime file missing required fields (atr_zone={zone}, atr_zone_risk_factor={factor})"
+        log.warning("ATR regime fallback: %s", reason)
+        return _DEFAULT_FACTOR, _DEFAULT_ZONE, reason
+
+    # --- Staleness check ---
+    if classified_at:
+        try:
+            ts = datetime.fromisoformat(classified_at)
+            age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age_seconds > staleness_seconds:
+                reason = (
+                    f"regime stale: classified_at={classified_at}, "
+                    f"age={age_seconds:.0f}s > threshold={staleness_seconds}s"
+                )
+                log.warning("ATR regime fallback: %s", reason)
+                return _DEFAULT_FACTOR, _DEFAULT_ZONE, reason
+        except (ValueError, TypeError) as exc:
+            reason = f"regime classified_at unparseable: {classified_at} ({exc})"
+            log.warning("ATR regime fallback: %s", reason)
+            return _DEFAULT_FACTOR, _DEFAULT_ZONE, reason
+    else:
+        reason = "regime file has no classified_at timestamp"
+        log.warning("ATR regime fallback: %s", reason)
+        return _DEFAULT_FACTOR, _DEFAULT_ZONE, reason
+
+    # --- Valid regime ---
+    try:
+        factor = float(factor)
+    except (ValueError, TypeError):
+        reason = f"regime risk_factor not numeric: {factor}"
+        log.warning("ATR regime fallback: %s", reason)
+        return _DEFAULT_FACTOR, _DEFAULT_ZONE, reason
+
+    return factor, str(zone), ""
+
+
 def _persist_regime(snap: RegimeSnapshot) -> None:
     """Atomically write regime snapshot to disk."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)

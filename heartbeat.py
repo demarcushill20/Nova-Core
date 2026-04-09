@@ -896,6 +896,50 @@ def check_novatrade_signals() -> dict:
         return {"name": "novatrade_signals", "ok": True, "detail": f"check failed: {e}"}
 
 
+def check_novatrade_watchdog() -> dict:
+    """Run session watchdog evaluation for heartbeat integration.
+
+    Calls the session watchdog's gather_evidence → evaluate cycle using
+    persisted STATE files and returns a health check result compatible
+    with the heartbeat checks list.
+    """
+    try:
+        from novatrade.monitor.session_watchdog import (
+            AnomalyLevel,
+            run_watchdog_check,
+        )
+
+        assessment = run_watchdog_check()
+
+        if assessment.suppressed:
+            return {
+                "name": "novatrade_watchdog",
+                "ok": True,
+                "detail": f"suppressed: {assessment.suppression_reason}",
+            }
+
+        if assessment.level == AnomalyLevel.NONE:
+            return {
+                "name": "novatrade_watchdog",
+                "ok": True,
+                "detail": "all clear — no anomalies detected",
+            }
+
+        # Level 1+ detected
+        ok = assessment.level == AnomalyLevel.LEVEL_1  # L1 is warning, not failure
+        symptom_summary = "; ".join(assessment.symptoms[:3])
+        detail = (
+            f"{assessment.level.value}: {symptom_summary} | "
+            f"session={assessment.evidence.session} "
+            f"regime={assessment.evidence.regime}"
+        )
+
+        return {"name": "novatrade_watchdog", "ok": ok, "detail": detail}
+
+    except Exception as e:
+        return {"name": "novatrade_watchdog", "ok": True, "detail": f"check failed: {e}"}
+
+
 # --- Output ------------------------------------------------------------------
 
 
@@ -1281,6 +1325,18 @@ def send_telegram_heartbeat(checks: list) -> None:
             lines.append(f"- {c['name']}: {c['detail']}")
         text = "\n".join(lines)
 
+    _send_telegram(text)
+
+
+def send_watchdog_alert(assessment_detail: str, level: str) -> None:
+    """Send a dedicated Telegram alert for session watchdog anomalies.
+
+    Called for Level 1+ anomalies even when the overall heartbeat is healthy,
+    providing early warning before the situation escalates.
+    """
+    emoji = {"LEVEL_1": "Warning", "LEVEL_2": "MAJOR", "LEVEL_3": "CRITICAL"}
+    tag = emoji.get(level, level)
+    text = f"[{tag}] NovaTrade Session Watchdog\n\n{assessment_detail}"
     _send_telegram(text)
 
 
@@ -2798,6 +2854,28 @@ def main() -> int:
         checks.append(signal_check)
     except Exception as e:
         checks.append({"name": "novatrade_signals", "ok": True, "detail": f"check skipped: {e}"})
+
+    # --- NovaTrade session watchdog (tiered anomaly detection) ---
+    try:
+        watchdog_check = check_novatrade_watchdog()
+        checks.append(watchdog_check)
+        # Send Telegram alert for any detected anomaly (Level 1+)
+        if "LEVEL_" in watchdog_check.get("detail", ""):
+            detail = watchdog_check["detail"]
+            level = detail.split(":")[0] if ":" in detail else "LEVEL_1"
+            try:
+                from novatrade.monitor.session_watchdog import AnomalyLevel
+                from novatrade.monitor.session_watchdog import get_watchdog as _get_wd_hb
+
+                _wd_hb = _get_wd_hb()
+                _level_enum = AnomalyLevel(level)
+                if _wd_hb.should_alert(_level_enum):
+                    send_watchdog_alert(detail, level)
+                    _wd_hb.mark_alerted(_level_enum)
+            except Exception:
+                pass  # Non-critical — don't fail heartbeat
+    except Exception as e:
+        checks.append({"name": "novatrade_watchdog", "ok": True, "detail": f"check skipped: {e}"})
 
     # --- Autonomy cycle (Phase 2.4 + 3.4): score → decide → decompose → tasks ---
     # Gated on degradation tier: skip at MINIMAL+ (tier >= 2), matching planning cycle policy
