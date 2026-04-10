@@ -19,7 +19,6 @@ from novatrade.models import (
     OrderRequest,
     OrderSide,
     OrderType,
-    Position,
     RiskAction,
     RiskVerdict,
 )
@@ -93,20 +92,6 @@ def _order(
         volume=volume,
         price=price,
         stop_loss=stop_loss,
-    )
-
-
-def _position(
-    position_id: str = "pos1",
-    symbol: str = "EURUSD",
-    side: OrderSide = OrderSide.BUY,
-) -> Position:
-    return Position(
-        position_id=position_id,
-        symbol=symbol,
-        side=side,
-        volume=0.10,
-        open_price=1.1000,
     )
 
 

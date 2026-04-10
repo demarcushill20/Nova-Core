@@ -657,8 +657,7 @@ class TradingAgent:
         # Build OrderRequest — auto-size if volume is missing or zero
         from novatrade.models import VOLUME_AUTO_SIZE
 
-        raw_volume = payload.get("volume", 0)
-        order_volume = VOLUME_AUTO_SIZE if (not raw_volume or raw_volume <= 0) else raw_volume
+        order_volume = VOLUME_AUTO_SIZE
 
         order_req = OrderRequest(
             symbol=broker_symbol,

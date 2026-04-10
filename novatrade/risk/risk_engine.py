@@ -87,11 +87,10 @@ class DrawdownState:
     def update(self, equity: float) -> None:
         """Update drawdown state with new equity reading.
 
-        M8 fix: drawdown is calculated from *reference_equity* (start-of-day
-        or initial balance), matching FTMO's definition and consistent with
-        ``_check_drawdown_governance()``.  Peak equity is still tracked for
-        informational purposes (high-water mark), but drawdown metrics use
-        reference as both numerator base and denominator.
+        Drawdown is calculated from *reference_equity* (start-of-day or
+        initial balance), matching FTMO's definition.  Peak equity is still
+        tracked for informational purposes (high-water mark), but drawdown
+        metrics use reference as both numerator base and denominator.
         """
         self.current_equity = equity
         if equity > self.peak_equity:

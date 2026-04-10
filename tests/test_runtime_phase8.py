@@ -40,7 +40,6 @@ def _cfg(**overrides) -> NovaTradeCfg:
         max_volume_per_trade=1.0,
         min_volume_per_trade=0.01,
         check_forex_session=False,
-        irb_max_open_positions=1,
     )
     defaults = dict(
         mode=AccountMode.DEMO,
