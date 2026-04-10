@@ -112,6 +112,15 @@ class LotSizeConsistencyChecker:
 
     def check(self, proposed_volume: float) -> RiskCheckResult:
         """Check if proposed volume is consistent with recent history."""
+        from novatrade.models import VOLUME_AUTO_SIZE
+
+        if proposed_volume == VOLUME_AUTO_SIZE:
+            return RiskCheckResult(
+                name="lot_consistency",
+                passed=True,
+                detail="volume auto-size sentinel — consistency deferred to volume_sizing",
+            )
+
         if len(self._history) < self.min_trades_for_enforcement:
             return RiskCheckResult(
                 name="lot_consistency",

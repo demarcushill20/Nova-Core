@@ -527,7 +527,23 @@ class PreTradeGate:
         )
 
     def _check_volume(self, request: OrderRequest) -> RiskCheckResult:
-        """Check volume is within configured bounds."""
+        """Check volume is within configured bounds.
+
+        Skips bounds enforcement when ``request.volume`` is the
+        ``VOLUME_AUTO_SIZE`` sentinel — the gate's ``_check_volume_sizing``
+        step (run later in the same evaluation) will substitute a calculated
+        volume in place of the sentinel, after which subsequent checks see a
+        valid lot size.
+        """
+        from novatrade.models import VOLUME_AUTO_SIZE
+
+        if request.volume == VOLUME_AUTO_SIZE:
+            return RiskCheckResult(
+                name="volume_bounds",
+                passed=True,
+                detail="volume auto-size sentinel — bounds deferred to volume_sizing",
+            )
+
         min_vol = self._risk.min_volume_per_trade
         max_vol = self._risk.max_volume_per_trade
         if request.volume < min_vol:
