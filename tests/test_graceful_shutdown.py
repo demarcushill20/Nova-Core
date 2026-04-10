@@ -353,14 +353,6 @@ class TestHeartbeatShutdownFlag:
             p_tc.start()
             p_slog.start()
 
-            # Mock skill evolution processor (calls LLM subprocess)
-            p_evo = mock.patch(
-                "skills.evolution_processor.EvolutionProcessor",
-                side_effect=ImportError("mocked"),
-            )
-            patchers.append(p_evo)
-            p_evo.start()
-
             # Mock the expensive operations we want to verify are NOT called
             mock_agent = mock.patch.object(heartbeat, "_run_heartbeat_agent")
             mock_maint = mock.patch.object(heartbeat, "_run_memory_maintenance")

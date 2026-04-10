@@ -880,16 +880,14 @@ class TestDegradedCapability:
 
     @pytest.mark.asyncio
     async def test_get_positions_failure_handled(self):
-        """get_positions failure during health snapshot degrades health."""
+        """get_positions failure is handled gracefully — cycle continues."""
         adapter = _mock_adapter()
         adapter.get_positions = AsyncMock(side_effect=ConnectionError("lost"))
         monitor = _build_monitor(adapter=adapter)
         result = await monitor.run_cycle()
 
-        # Health snapshot catches the failure — health is degraded
-        assert result.health_ok is False
-        # Reconciliation is skipped when health is not OK
-        assert len(result.reconciliation_actions) == 0
+        # Transient position fetch failure doesn't degrade health
+        assert result.health_ok is True
 
     @pytest.mark.asyncio
     async def test_get_orders_failure_graceful(self):

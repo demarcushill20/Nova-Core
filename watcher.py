@@ -112,24 +112,6 @@ try:
 except ImportError:
     _HAS_SCHEDULER = False
 
-# --- Skill evolution: register existing skills in version store (idempotent) ---
-_skill_version_store = None
-_skill_evolution_queue = None
-try:
-    from skills.evolution_queue import EvolutionQueue as _EvolutionQueue
-    from skills.version_store import SkillVersionStore, register_existing_skills
-
-    _skill_version_store = SkillVersionStore()
-    _skill_evolution_queue = _EvolutionQueue()
-    _all_skills = load_skills()
-    _registered = register_existing_skills(_skill_version_store, _all_skills)
-    if _registered:
-        logging.getLogger(__name__).info("SKILL EVOLUTION: registered %d new skills in version store", _registered)
-except Exception as _sve_exc:
-    logging.getLogger(__name__).warning("Skill version store init failed (non-fatal): %s", _sve_exc)
-    _skill_version_store = None
-    _skill_evolution_queue = None
-
 # --- Audit logger for watcher lifecycle events ---
 _audit = get_audit_logger("watcher")
 
@@ -2225,25 +2207,6 @@ async def _dispatch_inner(task_path: Path):
             # (confidence already downgraded to 'low' by _apply_test_gate_result)
             logger.warning("TEST GATE: %s — tests failed, delivering with low confidence", stem)
 
-    # --- Skill execution analysis (non-fatal, offloaded to thread) ---
-    _analysis_log_text = ""
-    try:
-        _analysis_log_text = worker_log.read_text(encoding="utf-8")[-8000:]
-    except Exception:
-        pass
-    try:
-        await asyncio.to_thread(
-            _run_skill_analysis,
-            stem=stem,
-            task_text=task_text,
-            selected_names=selected_names,
-            log_text=_analysis_log_text,
-            passed=passed,
-            exit_code=exit_code,
-        )
-    except Exception:
-        logger.warning("Skill analysis thread failed for %s (non-fatal)", stem, exc_info=True)
-
     # --- Finalize task lifecycle ---
     try:
         if passed:
@@ -2467,86 +2430,6 @@ async def _dispatch_inner(task_path: Path):
                     logger.info("LOOP RESOLVED: %s (task %s completed)", loop.loop_id, stem)
         except Exception as exc:
             logger.warning("Open-loop resolution failed (non-fatal): %s", exc)
-
-
-def _run_skill_analysis(
-    stem: str,
-    task_text: str,
-    selected_names: list[str],
-    log_text: str,
-    passed: bool,
-    exit_code: int,
-):
-    """Post-task skill execution analysis (non-fatal).
-
-    Analyzes how skills performed during task execution and feeds results
-    back into the skill evolution system.  Updates version-store stats and
-    enqueues evolution suggestions if any are produced.
-
-    Uses module-level ``_skill_version_store`` and ``_skill_evolution_queue``
-    singletons to avoid per-call SQLite/JSON initialization overhead.
-
-    This is a synchronous function — called from async via ``asyncio.to_thread``.
-    """
-    try:
-        if not selected_names:
-            return None
-
-        store = _skill_version_store
-        if store is None:
-            return None
-
-        from skills.evolution_queue import EvolutionRequest
-        from skills.execution_analyzer import ExecutionAnalyzer
-
-        analyzer = ExecutionAnalyzer(version_store=store)
-
-        outcome = {"success": passed, "exit_code": exit_code}
-        analysis = analyzer.analyze(
-            task_id=stem,
-            task_description=task_text[:2000],
-            selected_skills=selected_names,
-            execution_trace=log_text,
-            outcome=outcome,
-        )
-
-        # Update skill stat counters (selections, executions, completions, etc.)
-        analyzer.update_stats(analysis)
-
-        # Persist the analysis for health tracking (includes pattern_hash for dedup)
-        analyzer.store_analysis(analysis)
-
-        # Enqueue evolution suggestions if any
-        queue = _skill_evolution_queue
-        if analysis.evolution_suggestions and queue is not None:
-            for suggestion in analysis.evolution_suggestions:
-                req = EvolutionRequest(
-                    skill_id=suggestion.target_skill_id,
-                    skill_name=suggestion.target_skill_name,
-                    evolution_type=suggestion.type,
-                    direction=suggestion.direction,
-                    priority=suggestion.priority,
-                    task_id=stem,
-                )
-                queue.enqueue(req)
-            logger.info(
-                "SKILL EVOLUTION: %d suggestions enqueued for %s",
-                len(analysis.evolution_suggestions),
-                stem,
-            )
-
-        logger.info(
-            "SKILL ANALYSIS: %s — quality=%.2f skills=%d suggestions=%d",
-            stem,
-            analysis.overall_quality,
-            len(analysis.skill_judgments),
-            len(analysis.evolution_suggestions),
-        )
-        return analysis
-
-    except Exception:
-        logger.warning("Skill analysis failed for %s (non-fatal)", stem, exc_info=True)
-        return None
 
 
 PYTEST_TIMEOUT = 120  # seconds — hard timeout for the test gate

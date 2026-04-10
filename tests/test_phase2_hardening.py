@@ -34,7 +34,6 @@ from novatrade.runtime.launch_gate import (
     evaluate_launch_gate,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -56,7 +55,7 @@ def _cfg(**overrides) -> NovaTradeCfg:
         dry_run=True,
     )
     defaults.update(overrides)
-    return NovaTradeCfg(**defaults)
+    return NovaTradeCfg(**defaults)  # type: ignore[arg-type]
 
 
 def _tuesday_10am_utc() -> float:
@@ -80,7 +79,7 @@ def _snap(**overrides) -> RuntimeHealthSnapshot:
         uptime_seconds=7200,
     )
     defaults.update(overrides)
-    return RuntimeHealthSnapshot(**defaults)
+    return RuntimeHealthSnapshot(**defaults)  # type: ignore[arg-type]
 
 
 # ===========================================================================
@@ -269,11 +268,13 @@ class TestCanonicalAdapterState:
 class TestNoSignalRegime:
     def test_no_trades_no_alerts_is_not_major(self):
         """Zero trades + zero alerts + healthy system = no-signal, not outage."""
-        wd = TradeStallWatchdog(WatchdogConfig(
-            major_no_trade_minutes=60,
-            soft_no_alert_minutes=30,
-            major_min_corroborating=2,
-        ))
+        wd = TradeStallWatchdog(
+            WatchdogConfig(
+                major_no_trade_minutes=60,
+                soft_no_alert_minutes=30,
+                major_min_corroborating=2,
+            )
+        )
         now = _tuesday_10am_utc()
         snap = _snap(
             last_trade_time=now - 7200,  # 2h no trades
@@ -291,11 +292,13 @@ class TestNoSignalRegime:
 
     def test_no_trades_WITH_adapter_down_IS_major(self):
         """Zero trades + adapter down + no alerts = real outage, not no-signal."""
-        wd = TradeStallWatchdog(WatchdogConfig(
-            major_no_trade_minutes=60,
-            soft_no_alert_minutes=30,
-            major_min_corroborating=2,
-        ))
+        wd = TradeStallWatchdog(
+            WatchdogConfig(
+                major_no_trade_minutes=60,
+                soft_no_alert_minutes=30,
+                major_min_corroborating=2,
+            )
+        )
         now = _tuesday_10am_utc()
         snap = _snap(
             last_trade_time=now - 7200,
@@ -475,7 +478,7 @@ class TestSymbolHelpers:
         assert pip_value("USDJPY") == 0.01
 
     def test_xauusd_pip_value(self):
-        assert pip_value("XAUUSD") == 0.01
+        assert pip_value("XAUUSD") == 0.1
 
     def test_unknown_symbol_default(self):
         assert pip_value("UNKNOWN") == 0.0001

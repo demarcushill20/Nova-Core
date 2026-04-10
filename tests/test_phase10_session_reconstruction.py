@@ -306,7 +306,7 @@ class TestCapabilityContract(unittest.TestCase):
 
     def test_playwright_available(self):
         """Subprocess has playwright MCP — persona should reference browser."""
-        self.assertIn("playwright", persona.SYSTEM_PROMPT)
+        self.assertIn("Browser Automation", persona.SYSTEM_PROMPT)
 
     def test_delegation_list_scoped(self):
         """Only heavy-work items are in the delegation list."""

@@ -185,8 +185,12 @@ class TestSignalRateMonitor:
         assert stats.status == "OK"
         assert stats.concern_level == "GREEN"
 
-    def test_signal_rate_low_yellow(self):
-        """Test low signal rate - yellow warning during London."""
+    def test_signal_rate_low_yellow(self, monkeypatch):
+        """Test low signal rate - yellow warning during London (ranging regime)."""
+        from novatrade.monitor import signal_monitor
+
+        monkeypatch.setattr(signal_monitor, "_load_regime", lambda: "ranging")
+
         monitor = SignalRateMonitor()
 
         # 1 signal 2 hours ago (in 4h window but not 1h)

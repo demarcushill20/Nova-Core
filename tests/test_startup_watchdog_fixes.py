@@ -14,9 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from novatrade.config import MetaApiConfig, NovaTradeCfg, RiskConfig
-from novatrade.models import AccountMode, HealthState, HealthStatus
+from novatrade.models import AccountMode, HealthState
 from novatrade.runtime.launch_gate import LaunchMode, ReadinessVerdict, evaluate_launch_gate
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,7 +38,7 @@ def _cfg(**overrides) -> NovaTradeCfg:
         dry_run=True,
     )
     defaults.update(overrides)
-    return NovaTradeCfg(**defaults)
+    return NovaTradeCfg(**defaults)  # type: ignore[arg-type]
 
 
 # ===========================================================================
@@ -99,9 +98,7 @@ class TestAdapterConnectedFromRealState:
                 adapter_connected=False,
                 adapter_type="MetaApiAdapter",
             )
-            adapter_check = next(
-                (c for c in readiness.checks if c.name == "adapter_connected"), None
-            )
+            adapter_check = next((c for c in readiness.checks if c.name == "adapter_connected"), None)
             assert adapter_check is not None
             assert adapter_check.passed is False
             assert readiness.verdict == ReadinessVerdict.NOT_READY
@@ -123,9 +120,7 @@ class TestAdapterConnectedFromRealState:
                 adapter_connected=True,
                 adapter_type="MetaApiAdapter",
             )
-            adapter_check = next(
-                (c for c in readiness.checks if c.name == "adapter_connected"), None
-            )
+            adapter_check = next((c for c in readiness.checks if c.name == "adapter_connected"), None)
             assert adapter_check is not None
             assert adapter_check.passed is True
 
@@ -162,16 +157,14 @@ class TestMetaApiConnectDiagnostics:
         adapter = self._make_adapter()
 
         mock_api = MagicMock()
-        mock_api.metatrader_account_api.get_account = AsyncMock(
-            side_effect=Exception("Not found or unauthorized")
-        )
+        mock_api.metatrader_account_api.get_account = AsyncMock(side_effect=Exception("Not found or unauthorized"))
 
         with patch("novatrade.adapter.metaapi_provider.get_metaapi_sdk", return_value=mock_api):
             status = await adapter.connect()
 
         assert status.connected is False
         assert status.state == HealthState.DOWN
-        assert "account_lookup" in status.message
+        assert "GET_ACCOUNT" in status.message
         assert "METAAPI_TOKEN" in status.message
 
     @pytest.mark.asyncio
@@ -205,7 +198,7 @@ class TestMetaApiConnectDiagnostics:
             status = await adapter.connect()
 
         assert status.connected is False
-        assert "broker_connect" in status.message
+        assert "WAIT_CONNECTED" in status.message
         assert "terminal" in status.message.lower()
 
     @pytest.mark.asyncio
@@ -214,9 +207,7 @@ class TestMetaApiConnectDiagnostics:
 
         mock_connection = AsyncMock()
         mock_connection.connect = AsyncMock(return_value=None)
-        mock_connection.wait_synchronized = AsyncMock(
-            side_effect=Exception("Sync timeout")
-        )
+        mock_connection.wait_synchronized = AsyncMock(side_effect=Exception("Sync timeout"))
         mock_account = AsyncMock()
         mock_account.state = "DEPLOYED"
         mock_account.wait_connected = AsyncMock(return_value=None)
@@ -228,7 +219,7 @@ class TestMetaApiConnectDiagnostics:
             status = await adapter.connect()
 
         assert status.connected is False
-        assert "rpc_sync" in status.message
+        assert "RPC_SYNC" in status.message
         assert "RPC" in status.message
 
     @pytest.mark.asyncio
@@ -238,12 +229,14 @@ class TestMetaApiConnectDiagnostics:
         mock_connection = AsyncMock()
         mock_connection.connect = AsyncMock(return_value=None)
         mock_connection.wait_synchronized = AsyncMock(return_value=None)
-        mock_connection.get_account_information = AsyncMock(return_value={
-            "equity": 100000.0,
-            "broker": "TestBroker",
-            "currency": "USD",
-            "tradeAllowed": True,
-        })
+        mock_connection.get_account_information = AsyncMock(
+            return_value={
+                "equity": 100000.0,
+                "broker": "TestBroker",
+                "currency": "USD",
+                "tradeAllowed": True,
+            }
+        )
         mock_account = AsyncMock()
         mock_account.state = "DEPLOYED"
         mock_account.wait_connected = AsyncMock(return_value=None)
@@ -262,8 +255,7 @@ class TestMetaApiConnectDiagnostics:
     async def test_connect_failure_sets_connected_false(self):
         adapter = self._make_adapter()
 
-        with patch("novatrade.adapter.metaapi_provider.get_metaapi_sdk",
-                    side_effect=RuntimeError("SDK init failed")):
+        with patch("novatrade.adapter.metaapi_provider.get_metaapi_sdk", side_effect=RuntimeError("SDK init failed")):
             status = await adapter.connect()
 
         assert status.connected is False
@@ -278,9 +270,7 @@ class TestMetaApiConnectDiagnostics:
         import time
 
         t0 = time.monotonic()
-        status = adapter._connect_failure(
-            t0, "test_phase", ValueError("something broke"), hint="check your config"
-        )
+        status = adapter._connect_failure(t0, "test_phase", ValueError("something broke"), hint="check your config")
         assert status.connected is False
         assert status.state == HealthState.DOWN
         assert "test_phase" in status.message

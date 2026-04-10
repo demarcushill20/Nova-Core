@@ -98,7 +98,7 @@ class TestCostRoutedModelIntegration:
         captured_cmds = []
 
         async def fake_execute_worker(
-            stem, cmd, worker_log, selected_names, skill_flag_note, attempt, max_attempts, child_env=None
+            stem, cmd, worker_log, selected_names, skill_flag_note, attempt, max_attempts, child_env=None, **kwargs
         ):
             captured_cmds.append(list(cmd))
             worker_log.write_text("fake output", encoding="utf-8")
@@ -176,7 +176,7 @@ class TestCostRoutedModelIntegration:
         captured_cmds = []
 
         async def fake_execute_worker(
-            stem, cmd, worker_log, selected_names, skill_flag_note, attempt, max_attempts, child_env=None
+            stem, cmd, worker_log, selected_names, skill_flag_note, attempt, max_attempts, child_env=None, **kwargs
         ):
             captured_cmds.append(list(cmd))
             worker_log.write_text("fake output", encoding="utf-8")

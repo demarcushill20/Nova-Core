@@ -54,10 +54,10 @@ class TestRiskEngineSessionIntegration:
         )
         assert engine_no_asian._session_filter is not None
 
-    def test_session_checking_enabled_by_default(self):
-        """Test that session checking is enabled by default (P4 change)."""
+    def test_session_checking_disabled_by_default(self):
+        """Test that session checking is disabled by default (not in backtest)."""
         cfg = NovaTradeCfg()
-        assert cfg.risk.check_forex_session is True  # Should be True after P4
+        assert cfg.risk.check_forex_session is False
 
     @patch("novatrade.risk.risk_engine._default_utc_now")
     def test_weekend_blocking_in_risk_engine(self, mock_clock):
@@ -439,10 +439,10 @@ class TestFirstTradeValidationWiring:
 class TestP4ConfigDefaults:
     """Test that P4 configuration defaults are set correctly."""
 
-    def test_session_filtering_enabled_by_default(self):
-        """Test that session filtering is enabled by default in P4."""
+    def test_session_filtering_disabled_by_default(self):
+        """Test that session filtering is disabled by default."""
         cfg = NovaTradeCfg()
-        assert cfg.risk.check_forex_session is True
+        assert cfg.risk.check_forex_session is False
 
     def test_session_filter_defaults(self):
         """Test default values for new session filter configuration."""

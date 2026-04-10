@@ -3064,55 +3064,6 @@ def main() -> int:
     except Exception as e:
         print(f"[heartbeat] Resource cleanup failed (non-fatal): {e}")
 
-    # --- Skill Evolution: process queue + health scan ---
-    if _heartbeat_shutdown_requested:
-        checks.append({"name": "skill_evolution", "ok": True, "detail": "skipped (shutdown requested)"})
-    else:
-        try:
-            from skills.evolution_audit import EvolutionAudit
-            from skills.evolution_processor import EvolutionProcessor
-            from skills.evolution_queue import EvolutionQueue
-            from skills.skill_cache import SkillCache
-            from skills.skill_dashboard import SkillDashboard
-            from skills.skill_evolver import SkillEvolver
-            from skills.version_store import SkillVersionStore
-
-            _evo_store = SkillVersionStore()
-            _evo_queue = EvolutionQueue()
-            _evo_evolver = SkillEvolver(version_store=_evo_store)
-            _evo_dashboard = SkillDashboard(
-                version_store=_evo_store,
-                skill_cache=SkillCache(),
-                evolution_queue=_evo_queue,
-                evolution_audit=EvolutionAudit(),
-            )
-            _evo_processor = EvolutionProcessor(
-                version_store=_evo_store,
-                evolution_queue=_evo_queue,
-                skill_evolver=_evo_evolver,
-                dashboard=_evo_dashboard,
-                telegram_fn=_send_telegram,
-            )
-
-            # Process queued evolutions (up to 3 per heartbeat)
-            _evo_results = _evo_processor.process_batch(max_items=3)
-
-            # Run periodic health scan (detect improvement/capture candidates)
-            _evo_scan = _evo_processor.run_health_scan()
-
-            _evo_stats = _evo_processor.get_stats()
-            _evo_detail = (
-                f"processed={len(_evo_results)} "
-                f"candidates={_evo_scan.get('candidates_found', 0)} "
-                f"patterns={_evo_scan.get('patterns_found', 0)} "
-                f"queue={_evo_stats.get('queue_size', 0)}"
-            )
-            checks.append({"name": "skill_evolution", "ok": True, "detail": _evo_detail})
-            print(f"[skill-evolution] {_evo_detail}")
-        except Exception as e:
-            print(f"[skill-evolution] Failed (non-fatal): {e}")
-            checks.append({"name": "skill_evolution", "ok": True, "detail": f"check skipped: {e}"})
-
     # Always send heartbeat pulse to Telegram
     send_telegram_heartbeat(checks)
 

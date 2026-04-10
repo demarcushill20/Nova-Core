@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0771_Ok_now_let_s_remove_the_skills_you_think_we_don_t_need_1775801461",
+  "workflow_id": "0771_Ok_now_let_s_remove_the_skills_you_think_we_don_t_need",
+  "task_summary": "Archived 15 unnecessary skills (auto-evolved, redundant, or disconnected MCP), reducing active count from 50 to 35",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Archived 15 unnecessary skills (auto-evolved, redundant, or disconnected MCP), reducing active count from 50 to 35"
+  ],
+  "successful_patterns": [
+    "task_completed: 0771_Ok_now_let_s_remove_the_skills_you_think_we_don_t_need"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Archived 15 unnecessary skills (auto-evolved, redundant, or disconnected MCP), reducing active count from 50 to 35",
+  "created_at": "2026-04-10T06:11:01Z",
+  "confidence": "high"
+}

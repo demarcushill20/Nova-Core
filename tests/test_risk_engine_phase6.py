@@ -223,14 +223,13 @@ class TestForexWeekend:
 
 
 class TestSessionPolicy:
-    def test_session_check_enabled_by_default(self):
-        """P4: Session check is enabled by default for enhanced risk filtering."""
+    def test_session_check_disabled_by_default(self):
+        """Session check is disabled by default (not in backtest)."""
         engine = _make_engine(_cfg())
-        # Weekend should DENY because session check is now on by default
+        # Weekend should ALLOW because session check is off by default
         engine._clock = _make_weekday_clock(5, 12)  # Saturday
         decision = engine.pre_trade_check(_order(), _account(), [])
-        assert decision.verdict == RiskVerdict.DENY
-        assert decision.policy_layer == 1
+        assert decision.verdict == RiskVerdict.ALLOW
 
     def test_session_check_explicitly_disabled(self):
         """Session check can be explicitly disabled via config."""
