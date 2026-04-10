@@ -131,8 +131,8 @@ def build_readiness_package(
                     category="all_denied",
                     description=(f"All {report.denied_count} execution(s) denied by risk gate"),
                     action=(
-                        "Verify this is expected behavior (e.g. dry_run mode). "
-                        "If testing live execution, check: dry_run config, "
+                        "Verify this is expected behavior (e.g. demo mode). "
+                        "If testing live execution, check: "
                         "kill switch state, symbol allowlist, volume bounds, "
                         "stop-loss requirement."
                     ),
@@ -168,7 +168,7 @@ def build_readiness_package(
     if report.execution_count > 0 and report.filled_count == 0:
         evidence_gaps.append(
             "No filled executions — the adapter → fill path is untested. "
-            "Consider a live demo execution with dry_run=false on a demo account."
+            "Consider a live demo execution on a demo account."
         )
 
     # -- Determine next step -----------------------------------------------

@@ -16,7 +16,6 @@ def _make_cfg() -> NovaTradeCfg:
     cfg = NovaTradeCfg()
     cfg.symbols = ["EURUSD"]
     cfg.timeframes = ["H1"]
-    cfg.dry_run = True
     return cfg
 
 
@@ -50,12 +49,12 @@ def _make_candles(n: int = 10) -> list[Candle]:
 
 
 @pytest.mark.asyncio
-async def test_build_live_stack_dry_run():
+async def test_build_live_stack_active_demo():
     """Builds successfully with DryRunAdapter and returns a LiveLoop."""
     from novatrade.runtime.runner import build_live_stack
 
     cfg = _make_cfg()
-    loop = await build_live_stack(cfg=cfg, dry_run=True)
+    loop = await build_live_stack(cfg=cfg, shadow=True)
     assert isinstance(loop, LiveLoop)
 
 
@@ -69,7 +68,7 @@ async def test_build_live_stack_fetches_account_balance():
 
     with patch("novatrade.runtime.dry_run.DryRunAdapter.get_account", new_callable=AsyncMock) as mock_account:
         mock_account.return_value = account
-        loop = await build_live_stack(cfg=cfg, dry_run=True)
+        loop = await build_live_stack(cfg=cfg, shadow=True)
 
     mock_account.assert_awaited_once()
     assert isinstance(loop, LiveLoop)
@@ -85,7 +84,7 @@ async def test_build_live_stack_seeds_history():
 
     with patch("novatrade.runtime.dry_run.DryRunAdapter.get_candles", new_callable=AsyncMock) as mock_candles:
         mock_candles.return_value = candles
-        loop = await build_live_stack(cfg=cfg, dry_run=True)
+        loop = await build_live_stack(cfg=cfg, shadow=True)
 
     # get_candles called for H1 and H4
     assert mock_candles.await_count == 2
@@ -107,7 +106,7 @@ async def test_build_live_stack_fails_on_account_error():
         ),
         pytest.raises(RuntimeError, match="Failed to fetch account state"),
     ):
-        await build_live_stack(cfg=cfg, dry_run=True)
+        await build_live_stack(cfg=cfg, shadow=True)
 
 
 @pytest.mark.asyncio
@@ -118,7 +117,7 @@ async def test_build_live_stack_h4_auto_added():
     cfg = _make_cfg()
     cfg.timeframes = ["H1"]  # no H4
 
-    loop = await build_live_stack(cfg=cfg, dry_run=True)
+    loop = await build_live_stack(cfg=cfg, shadow=True)
     assert isinstance(loop, LiveLoop)
     # The aggregator should have H4 in its timeframes
     assert "H4" in loop._aggregator.timeframes
@@ -132,7 +131,7 @@ async def test_build_live_stack_h4_not_duplicated():
     cfg = _make_cfg()
     cfg.timeframes = ["H1", "H4"]
 
-    loop = await build_live_stack(cfg=cfg, dry_run=True)
+    loop = await build_live_stack(cfg=cfg, shadow=True)
     assert loop._aggregator.timeframes.count("H4") == 1
 
 
@@ -148,7 +147,7 @@ async def test_build_live_stack_warmup_failure_continues():
         new_callable=AsyncMock,
         side_effect=ConnectionError("candle fetch failed"),
     ):
-        loop = await build_live_stack(cfg=cfg, dry_run=True)
+        loop = await build_live_stack(cfg=cfg, shadow=True)
 
     # Should still return a LiveLoop despite warmup failure
     assert isinstance(loop, LiveLoop)

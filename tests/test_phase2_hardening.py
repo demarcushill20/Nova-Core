@@ -52,7 +52,6 @@ def _cfg(**overrides) -> NovaTradeCfg:
         mode=AccountMode.DEMO,
         symbols=["EURUSD"],
         risk=risk,
-        dry_run=True,
     )
     defaults.update(overrides)
     return NovaTradeCfg(**defaults)  # type: ignore[arg-type]
@@ -131,12 +130,12 @@ class TestLaunchGateAdapterDisconnected:
             )
         assert readiness.verdict == ReadinessVerdict.NOT_READY
 
-    def test_dry_run_ignores_adapter_state(self):
-        """Dry-run mode should pass even with adapter_connected=False."""
+    def test_active_demo_requires_credentials(self):
+        """ACTIVE_DEMO without credentials should fail."""
         cfg = _cfg()
         readiness = evaluate_launch_gate(
             cfg,
-            LaunchMode.DRY_RUN,
+            LaunchMode.ACTIVE_DEMO,
             risk_engine_initialized=True,
             risk_engine_halted=False,
             agent_initialized=True,
@@ -144,7 +143,7 @@ class TestLaunchGateAdapterDisconnected:
             adapter_connected=False,
             adapter_type="DryRunAdapter",
         )
-        assert readiness.verdict == ReadinessVerdict.READY_FOR_ACTIVE_DEMO
+        assert readiness.verdict == ReadinessVerdict.NOT_READY
 
 
 # ===========================================================================
@@ -160,20 +159,17 @@ class TestCanonicalAdapterState:
 
         mock_agent = MagicMock()
         mock_agent._adapter = MagicMock(_connected=True)
-        ws = WebhookState(agent=mock_agent, dry_run=False)
+        ws = WebhookState(agent=mock_agent)
         assert ws.adapter_connected is True
 
         mock_agent._adapter._connected = False
         assert ws.adapter_connected is False
 
-    def test_webhook_state_adapter_connected_fallback_dry_run(self):
+    def test_webhook_state_adapter_connected_fallback(self):
         from novatrade.runtime.webhook_server import WebhookState
 
-        ws = WebhookState(agent=None, dry_run=True)
-        assert ws.adapter_connected is True
-
-        ws2 = WebhookState(agent=None, dry_run=False)
-        assert ws2.adapter_connected is False
+        ws = WebhookState(agent=None)
+        assert ws.adapter_connected is False
 
     def test_health_endpoint_includes_adapter_connected(self):
         """GET /health must include adapter_connected field."""
@@ -189,7 +185,6 @@ class TestCanonicalAdapterState:
         mock_agent.state = MagicMock(value="FLAT")
         ws = WebhookState(
             agent=mock_agent,
-            dry_run=False,
             started_at=time.time(),
         )
         app = create_app(ws)
@@ -214,7 +209,6 @@ class TestCanonicalAdapterState:
         mock_agent._cfg = _cfg()
         ws = WebhookState(
             agent=mock_agent,
-            dry_run=False,
             launch_mode=LaunchMode.ACTIVE_READY,
             adapter_type="MetaApiAdapter",
             started_at=time.time(),
@@ -242,7 +236,6 @@ class TestCanonicalAdapterState:
         mock_agent._adapter = MagicMock(_connected=False)
         ws = WebhookState(
             agent=mock_agent,
-            dry_run=False,
             started_at=time.time() - 3600,
             alerts_received=5,
             alerts_rejected=2,
@@ -362,7 +355,6 @@ class TestWebhookPipelineFailure:
             alerts_rejected=3,
             last_alert_time=time.time() - 60,
             started_at=time.time() - 3600,
-            dry_run=True,
         )
         # These are the values the MonitorLoop would read
         assert ws.alerts_received == 15
@@ -438,7 +430,7 @@ class TestBoundedRemediation:
         assert loop._remediation_attempted is False  # not consumed
 
     @pytest.mark.asyncio
-    async def test_remediation_falls_through_to_rollback(self):
+    async def test_remediation_falls_through_to_critical(self):
         from novatrade.monitor.watchdog import WatchdogEvidence, WatchdogVerdict
         from novatrade.runtime.monitor_loop import MonitorLoop
         from novatrade.runtime.webhook_server import WebhookState
@@ -449,7 +441,7 @@ class TestBoundedRemediation:
         monitor._risk_engine = MagicMock(halted=False)
 
         mock_agent = MagicMock()
-        ws = WebhookState(agent=mock_agent, dry_run=False, started_at=time.time())
+        ws = WebhookState(agent=mock_agent, started_at=time.time())
 
         loop = MonitorLoop(monitor, interval_seconds=60, webhook_state=ws)
         ev = WatchdogEvidence()
@@ -459,10 +451,8 @@ class TestBoundedRemediation:
             evidence=ev,
         )
 
-        with patch("novatrade.runtime.runner.rollback_to_dry_run") as mock_rollback:
-            ok = await loop.attempt_remediation(verdict)
-            assert ok is True
-            mock_rollback.assert_called_once()
+        ok = await loop.attempt_remediation(verdict)
+        assert ok is False  # reconnect failed, remediation exhausted
 
 
 # ===========================================================================

@@ -35,7 +35,6 @@ def _cfg(**overrides) -> NovaTradeCfg:
         mode=AccountMode.DEMO,
         symbols=["EURUSD"],
         risk=risk,
-        dry_run=False,
     )
     defaults.update(overrides)
     return NovaTradeCfg(**defaults)  # type: ignore[arg-type]
@@ -126,7 +125,6 @@ class TestPreTradeCheck:
             [],
         )
         check_names = [c.name for c in decision.checks]
-        assert "dry_run" in check_names
         assert "volume_bounds" in check_names
 
 

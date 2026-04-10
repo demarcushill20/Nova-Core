@@ -21,7 +21,6 @@ def validate_environment_loading() -> dict[str, Any]:
     """Validate environment variable loading and parsing."""
     env_vars = {}
     config_keys = [
-        "NOVATRADE_DRY_RUN",
         "NOVATRADE_LAUNCH_MODE",
         "METAAPI_TOKEN",
         "METAAPI_ACCOUNT_ID",
@@ -61,7 +60,6 @@ def validate_config_loading() -> dict[str, Any]:
 
         # Focus on critical settings
         critical_settings = {
-            "dry_run": config.dry_run,
             "provider": config.provider,
             "symbols": config.symbols,
             "metaapi_token_set": bool(config.metaapi.token),
@@ -120,23 +118,6 @@ def generate_configuration_report() -> dict[str, Any]:
         "runtime_propagation_validation": validate_runtime_propagation(),
     }
 
-    # Add analysis section
-    env_dry_run = os.getenv("NOVATRADE_DRY_RUN", "true").lower()
-    config_result = report["config_loading_validation"]
-
-    if config_result["loading_success"]:
-        config_dry_run = config_result["config_instance"]["dry_run"]
-
-        report["discrepancy_analysis"] = {
-            "env_dry_run_setting": env_dry_run,
-            "config_dry_run_loaded": config_dry_run,
-            "values_match": (env_dry_run == "false") == (not config_dry_run),
-            "propagation_expected": env_dry_run == "false" and not config_dry_run,
-            "issue_identified": (env_dry_run == "false") and config_dry_run,
-        }
-    else:
-        report["discrepancy_analysis"] = {"config_loading_failed": True, "cannot_analyze": True}
-
     return report
 
 
@@ -150,15 +131,11 @@ def main():
     # Summary analysis
     print("\n=== SUMMARY ===")
 
-    report["environment_validation"]
     config_check = report["config_loading_validation"]
     runtime_check = report["runtime_propagation_validation"]
-    analysis = report.get("discrepancy_analysis", {})
 
     if config_check["loading_success"]:
         print("✅ Config Loading: SUCCESS")
-        dry_run_status = config_check["config_instance"]["dry_run"]
-        print(f"   - dry_run setting: {dry_run_status}")
     else:
         print(f"❌ Config Loading: FAILED - {config_check.get('error', 'Unknown')}")
 
@@ -166,13 +143,6 @@ def main():
         print("✅ Runtime Service: RESPONSIVE")
     else:
         print("❌ Runtime Service: NOT RESPONSIVE")
-
-    if analysis.get("issue_identified"):
-        print("⚠️  ISSUE: Environment sets dry_run=false but config loads dry_run=true")
-        print("   - This explains the execution discrepancy in trade journal")
-        print("   - Recommendation: Verify environment file loading in NovaTradeCfg.load()")
-    elif analysis.get("values_match"):
-        print("✅ Configuration Propagation: VALUES MATCH")
 
     return report
 

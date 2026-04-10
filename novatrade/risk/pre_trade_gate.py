@@ -178,7 +178,6 @@ class PreTradeGate:
         now = _now()
 
         checks.append(self._check_kill_switch())
-        checks.append(self._check_dry_run())
         checks.append(self._check_account_mode(account))
         checks.append(self._check_trade_allowed(account))
         checks.append(self._check_health(health))
@@ -345,16 +344,6 @@ class PreTradeGate:
             passed=False,
             detail=f"NovaCore kill switch active: mode={mode}",
         )
-
-    def _check_dry_run(self) -> RiskCheckResult:
-        """Deny real execution when dry_run is enabled."""
-        if self._cfg.dry_run:
-            return RiskCheckResult(
-                name="dry_run",
-                passed=False,
-                detail="dry_run is enabled — no real orders allowed",
-            )
-        return RiskCheckResult(name="dry_run", passed=True, detail="dry_run=False")
 
     def _check_account_mode(self, account: AccountState) -> RiskCheckResult:
         """Only allow trading in MVP-permitted account modes."""

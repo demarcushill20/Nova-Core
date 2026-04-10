@@ -32,7 +32,6 @@ class TestEnums:
 
     def test_launch_mode_enum(self):
         """Test LaunchMode enum values."""
-        assert LaunchMode.DRY_RUN.value == "dry_run"
         assert LaunchMode.ACTIVE_READY.value == "active_ready"
         assert LaunchMode.ACTIVE_DEMO.value == "active_demo"
 
@@ -115,11 +114,11 @@ class TestDataClasses:
     def test_startup_validation_creation(self):
         """Test StartupValidation can be created and serialized."""
         validation = StartupValidation(
-            ok=False, mode=LaunchMode.DRY_RUN, errors=["error1", "error2"], warnings=["warning1"]
+            ok=False, mode=LaunchMode.ACTIVE_DEMO, errors=["error1", "error2"], warnings=["warning1"]
         )
 
         assert validation.ok is False
-        assert validation.mode == LaunchMode.DRY_RUN
+        assert validation.mode == LaunchMode.ACTIVE_DEMO
         assert validation.errors == ["error1", "error2"]
         assert validation.warnings == ["warning1"]
 
@@ -127,7 +126,7 @@ class TestDataClasses:
         data = validation.to_dict()
         assert isinstance(data, dict)
         assert data["ok"] is False
-        assert data["mode"] == "dry_run"
+        assert data["mode"] == "active_demo"
         assert data["errors"] == ["error1", "error2"]
 
 
@@ -136,9 +135,6 @@ class TestLaunchModeResolution:
 
     def test_resolve_launch_mode_explicit(self):
         """Test explicit launch mode settings."""
-        with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "dry_run"}):
-            assert resolve_launch_mode() == LaunchMode.DRY_RUN
-
         with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "active_ready"}):
             assert resolve_launch_mode() == LaunchMode.ACTIVE_READY
 
@@ -147,25 +143,11 @@ class TestLaunchModeResolution:
 
     def test_resolve_launch_mode_variants(self):
         """Test different format variants."""
-        with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "dry-run"}):
-            assert resolve_launch_mode() == LaunchMode.DRY_RUN
-
         with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "active-ready"}):
             assert resolve_launch_mode() == LaunchMode.ACTIVE_READY
 
-    def test_resolve_launch_mode_fallback(self):
-        """Test fallback to NOVATRADE_DRY_RUN."""
-        with patch.dict(os.environ, {"NOVATRADE_DRY_RUN": "true"}, clear=True):
-            assert resolve_launch_mode() == LaunchMode.DRY_RUN
-
-        with patch.dict(os.environ, {"NOVATRADE_DRY_RUN": "false"}, clear=True):
-            assert resolve_launch_mode() == LaunchMode.ACTIVE_READY
-
-    def test_resolve_launch_mode_default(self):
-        """Test default when no env vars set."""
-        with patch.dict(os.environ, {}, clear=True):
-            # Should default to DRY_RUN (NOVATRADE_DRY_RUN defaults to "true")
-            assert resolve_launch_mode() == LaunchMode.DRY_RUN
+        with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "active-demo"}):
+            assert resolve_launch_mode() == LaunchMode.ACTIVE_DEMO
 
 
 class TestStartupValidation:
@@ -183,14 +165,13 @@ class TestStartupValidation:
                 ftmo=FtmoProfile(enabled=False),
             )
 
-    def test_validate_startup_dry_run(self):
-        """Test startup validation for dry run mode."""
+    def test_validate_startup_active_demo(self):
+        """Test startup validation for active demo mode."""
         cfg = self.create_minimal_config()
-        result = validate_startup(cfg, LaunchMode.DRY_RUN)
+        result = validate_startup(cfg, LaunchMode.ACTIVE_DEMO)
 
         assert isinstance(result, StartupValidation)
-        assert result.mode == LaunchMode.DRY_RUN
-        # Should have minimal errors for dry run
+        assert result.mode == LaunchMode.ACTIVE_DEMO
         assert isinstance(result.errors, list)
         assert isinstance(result.warnings, list)
 
@@ -210,10 +191,10 @@ class TestStartupValidation:
     def test_validate_startup_empty_config(self):
         """Test validation with minimal/invalid config."""
         cfg = NovaTradeCfg()  # Empty config
-        result = validate_startup(cfg, LaunchMode.DRY_RUN)
+        result = validate_startup(cfg, LaunchMode.ACTIVE_DEMO)
 
         assert isinstance(result, StartupValidation)
-        # Empty config might pass for dry_run but should have warnings
+        # Empty config might pass for active_demo but should have warnings
         if not result.ok:
             assert len(result.errors) > 0
         else:
@@ -241,11 +222,11 @@ class TestLaunchGateEvaluation:
         cfg = self.create_minimal_config()
 
         result = evaluate_launch_gate(
-            cfg, LaunchMode.DRY_RUN, risk_engine_initialized=True, agent_initialized=True, monitor_initialized=True
+            cfg, LaunchMode.ACTIVE_DEMO, risk_engine_initialized=True, agent_initialized=True, monitor_initialized=True
         )
 
         assert isinstance(result, LaunchReadiness)
-        assert result.launch_mode == LaunchMode.DRY_RUN
+        assert result.launch_mode == LaunchMode.ACTIVE_DEMO
         assert isinstance(result.checks, list)
         assert len(result.checks) > 0
         assert isinstance(result.blockers, list)
@@ -297,7 +278,7 @@ class TestReportGeneration:
         """Test basic report generation."""
         check = GateCheck("test_check", CheckCategory.CODE, True, "Test detail")
         readiness = LaunchReadiness(
-            verdict=ReadinessVerdict.READY_FOR_ACTIVE_DEMO, launch_mode=LaunchMode.DRY_RUN, checks=[check]
+            verdict=ReadinessVerdict.READY_FOR_ACTIVE_DEMO, launch_mode=LaunchMode.ACTIVE_DEMO, checks=[check]
         )
 
         report = generate_readiness_report(readiness)
@@ -306,7 +287,7 @@ class TestReportGeneration:
         assert len(report) > 0
         assert "NOVATRADE LAUNCH READINESS ASSESSMENT" in report
         assert "READY_FOR_ACTIVE_DEMO" in report
-        assert "dry_run" in report
+        assert "active_demo" in report
         assert "test_check" in report
 
     def test_generate_readiness_report_with_blockers(self):
@@ -358,12 +339,12 @@ class TestEvidenceRecording:
 class TestIntegration:
     """Integration smoke tests."""
 
-    def test_full_workflow_dry_run(self):
-        """Test complete workflow for dry run mode."""
+    def test_full_workflow_active_demo(self):
+        """Test complete workflow for active demo mode."""
         # Resolve mode
-        with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "dry_run"}):
+        with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "active_demo"}):
             mode = resolve_launch_mode()
-            assert mode == LaunchMode.DRY_RUN
+            assert mode == LaunchMode.ACTIVE_DEMO
 
         # Create config
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -393,7 +374,7 @@ class TestIntegration:
 
     def test_timestamp_fields(self):
         """Test that timestamp fields are properly set."""
-        readiness = LaunchReadiness(verdict=ReadinessVerdict.READY_FOR_ACTIVE_DEMO, launch_mode=LaunchMode.DRY_RUN)
+        readiness = LaunchReadiness(verdict=ReadinessVerdict.READY_FOR_ACTIVE_DEMO, launch_mode=LaunchMode.ACTIVE_DEMO)
 
         # Timestamp should be close to current time
         now = time.time()

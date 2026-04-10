@@ -245,14 +245,14 @@ class TestGetEquity:
         adapter = StubAdapter()
         assert adapter.get_equity() is None
 
-    def test_dry_run_adapter_returns_default(self):
+    def test_dry_adapter_returns_default(self):
         """DryRunAdapter.get_equity() returns 100k when no inner adapter."""
         from novatrade.runtime.dry_run import DryRunAdapter
 
         adapter = DryRunAdapter(inner=None)
         assert adapter.get_equity() == 100_000.0
 
-    def test_dry_run_adapter_delegates_to_inner(self):
+    def test_dry_adapter_delegates_to_inner(self):
         """DryRunAdapter.get_equity() delegates to inner when present."""
         inner = MagicMock()
         inner.get_equity.return_value = 99800.50

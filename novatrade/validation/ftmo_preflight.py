@@ -78,18 +78,6 @@ def check_config(cfg: NovaTradeCfg) -> list[PreflightCheck]:
     else:
         checks.append(PreflightCheck("mode_demo", CheckStatus.PASS, "DEMO mode"))
 
-    # dry_run is default safe
-    if cfg.dry_run:
-        checks.append(PreflightCheck("dry_run_safe", CheckStatus.PASS, "dry_run=true (safe default)"))
-    else:
-        checks.append(
-            PreflightCheck(
-                "dry_run_safe",
-                CheckStatus.WARN,
-                "dry_run=false — orders will be placed on demo account",
-            )
-        )
-
     # Symbols configured
     if not cfg.symbols:
         checks.append(PreflightCheck("symbols_configured", CheckStatus.FAIL, "no symbols configured"))

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,7 +47,6 @@ def _cfg(**overrides) -> NovaTradeCfg:
         mode=AccountMode.DEMO,
         symbols=["EURUSD"],
         risk=risk,
-        dry_run=True,
     )
     defaults.update(overrides)
     return NovaTradeCfg(**defaults)  # type: ignore[arg-type]
@@ -142,12 +143,9 @@ def _make_trail_alert(side: str = "BUY") -> dict:
 def _build_stack(tmp_path: Path, **cfg_overrides):
     """Build a full test stack with DryRunAdapter.
 
-    Note: cfg.dry_run is set to False so the pre-trade gate allows orders
-    through.  The DryRunAdapter itself provides the safety net — no real
-    broker operations occur.  WebhookState.dry_run remains True as the
-    operator-visible indicator.
+    The DryRunAdapter itself provides the safety net — no real
+    broker operations occur.
     """
-    cfg_overrides.setdefault("dry_run", False)
     cfg = _cfg(**cfg_overrides)
     adapter = DryRunAdapter()
     recorder = EvidenceRecorder(path=tmp_path / "evidence.jsonl")
@@ -166,7 +164,6 @@ def _build_stack(tmp_path: Path, **cfg_overrides):
         risk_engine=risk_engine,
         monitor=monitor,
         recorder=recorder,
-        dry_run=True,
         started_at=time.time(),
     )
     return ws, adapter, agent, risk_engine, monitor, recorder
@@ -315,7 +312,7 @@ class TestDryRunAdapter:
         assert price.bid > 0
 
     @pytest.mark.asyncio
-    async def test_dry_run_property(self):
+    async def test_dry_adapter_property(self):
         adapter = DryRunAdapter()
         assert adapter.dry_run is True
 
@@ -353,7 +350,6 @@ class TestWebhookServer:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["dry_run"] is True
 
     def test_status_endpoint(self, tmp_path):
         ws, *_ = _build_stack(tmp_path)
@@ -362,7 +358,6 @@ class TestWebhookServer:
         resp = client.get("/status")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["runtime_mode"] == "dry_run"
         assert data["trading_agent"]["state"] == "FLAT"
         assert data["risk_engine"]["halted"] is False
 
@@ -375,7 +370,6 @@ class TestWebhookServer:
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
-        assert data["dry_run"] is True
         assert data["state"] == "PENDING_LONG"
 
     def test_empty_body_rejected(self, tmp_path):
@@ -466,7 +460,7 @@ class TestWebhookServer:
         assert "path" in data
 
     def test_no_agent_returns_503(self):
-        ws = WebhookState(dry_run=True)
+        ws = WebhookState()
         app = create_app(ws)
         client = TestClient(app)
         resp = client.post("/webhook/alert", json={"action": "test"})
@@ -599,7 +593,6 @@ class TestEndToEndDryRun:
 
         assert data["ok"] is True
         assert data["state"] == "PENDING_LONG"
-        assert data["dry_run"] is True
         assert agent.state == AgentState.PENDING_LONG
 
         # Evidence trail should have the webhook events
@@ -667,7 +660,7 @@ class TestEndToEndDryRun:
         assert loop.stats.cycles_ok == 1
 
     @pytest.mark.asyncio
-    async def test_fill_detection_via_dry_run(self, tmp_path):
+    async def test_fill_detection_via_dry_adapter(self, tmp_path):
         """Simulate fill at adapter → reconciliation detects it."""
         ws, adapter, agent, risk, monitor, recorder = _build_stack(tmp_path)
         app = create_app(ws)
@@ -690,7 +683,7 @@ class TestEndToEndDryRun:
         assert len(fill_actions) == 1
 
     @pytest.mark.asyncio
-    async def test_broker_close_detection_via_dry_run(self, tmp_path):
+    async def test_broker_close_detection_via_dry_adapter(self, tmp_path):
         """Simulate broker close → reconciliation detects it."""
         ws, adapter, agent, risk, monitor, recorder = _build_stack(tmp_path)
         app = create_app(ws)
@@ -894,10 +887,9 @@ class TestBuildStatus:
         assert "risk_engine" in status
         assert "ops_monitor" in status
         assert "webhook" in status
-        assert status["runtime_mode"] == "dry_run"
 
     def test_status_with_no_components(self):
-        ws = WebhookState(dry_run=True)
+        ws = WebhookState()
         status = build_status(ws)
         assert status["trading_agent"]["state"] == "not_initialized"
 
@@ -905,7 +897,6 @@ class TestBuildStatus:
         from novatrade.runtime.launch_gate import LaunchMode
 
         ws, *_ = _build_stack(tmp_path)
-        ws.dry_run = False
         ws.launch_mode = LaunchMode.ACTIVE_READY
         status = build_status(ws)
         assert status["runtime_mode"] == "active_ready"
@@ -920,13 +911,28 @@ class TestRunnerBuildStack:
     """Tests for the runner.build_stack() factory."""
 
     @pytest.mark.asyncio
-    async def test_build_stack_dry_run(self):
+    async def test_build_stack_active_demo(self):
         from novatrade.runtime.launch_gate import LaunchMode
         from novatrade.runtime.runner import build_stack
 
-        cfg = _cfg(dry_run=True)
-        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
-        assert ws.dry_run is True
+        cfg = _cfg()
+        cfg.metaapi.token = "test-token"
+        cfg.metaapi.account_id = "test-id"
+        confirm_env = {
+            "NOVATRADE_WEBHOOK_SECRET": "secret",
+            "NOVATRADE_CONFIRM_PINE_COMPILED": "true",
+            "NOVATRADE_CONFIRM_TV_BACKTEST": "true",
+            "NOVATRADE_CONFIRM_WEBHOOK_URL": "true",
+            "NOVATRADE_CONFIRM_ACTIVE_DEMO": "true",
+        }
+        with (
+            patch.dict(os.environ, confirm_env, clear=True),
+            patch("novatrade.runtime.runner._create_adapter") as mock_create,
+            patch("novatrade.runtime.runner._adapter_type_name", return_value="MetaApiAdapter"),
+        ):
+            mock_adapter = DryRunAdapter()
+            mock_create.return_value = mock_adapter
+            ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
         assert ws.agent is not None
         assert ws.risk_engine is not None
         assert ws.monitor is not None
@@ -934,12 +940,11 @@ class TestRunnerBuildStack:
         assert loop is not None
 
     @pytest.mark.asyncio
-    async def test_build_stack_forces_dry_run(self):
-        """In dry_run mode, adapter is always DryRunAdapter."""
+    async def test_build_stack_active_demo_fails_without_credentials(self):
+        """ACTIVE_DEMO mode without credentials raises RuntimeError."""
         from novatrade.runtime.launch_gate import LaunchMode
         from novatrade.runtime.runner import build_stack
 
-        cfg = _cfg(dry_run=True)
-        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
-        # The adapter used by the agent should be DryRunAdapter
-        assert isinstance(ws.agent._adapter, DryRunAdapter)
+        cfg = _cfg()
+        with pytest.raises(RuntimeError, match="METAAPI_TOKEN"):
+            await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)

@@ -16,11 +16,10 @@ from novatrade.risk.pre_trade_gate import PreTradeGate
 
 
 def _cfg(**overrides) -> NovaTradeCfg:
-    """Build a test config with dry_run=False so orders can pass by default."""
+    """Build a test config so orders can pass by default."""
     risk_overrides = overrides.pop("risk", {})
     risk = RiskConfig(**{**{"require_stop_loss": True}, **risk_overrides})
     defaults = {
-        "dry_run": False,
         "symbols": ["EURUSD", "GBPUSD"],
         "risk": risk,
     }

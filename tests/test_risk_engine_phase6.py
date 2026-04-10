@@ -44,7 +44,6 @@ def _cfg(**overrides) -> NovaTradeCfg:
         mode=AccountMode.DEMO,
         symbols=["EURUSD"],
         risk=risk,
-        dry_run=False,
     )
     defaults.update(overrides)
     return NovaTradeCfg(**defaults)  # type: ignore[arg-type]
@@ -66,7 +65,6 @@ def _irb_cfg(**risk_overrides) -> NovaTradeCfg:
         mode=AccountMode.DEMO,
         symbols=["EURUSD"],
         risk=risk,
-        dry_run=False,
     )
 
 
@@ -407,7 +405,6 @@ class TestCheckCompleteness:
         engine = _make_engine()
         decision = engine.pre_trade_check(_order(), _account(), [])
         check_names = [c.name for c in decision.checks]
-        assert "dry_run" in check_names
         assert "volume_bounds" in check_names
         assert "stop_loss" in check_names
 

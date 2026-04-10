@@ -187,7 +187,7 @@ class TestWarnings:
         denied_items = [i for i in pkg.items if i.category == "all_denied"]
         assert len(denied_items) == 1
         assert denied_items[0].severity == RemediationSeverity.WARNING
-        assert "dry_run" in denied_items[0].action.lower()
+        assert "demo mode" in denied_items[0].action.lower()
 
     def test_no_fills_no_denials_warning(self):
         pkg = _build(filled_count=0, denied_count=0, execution_count=1)

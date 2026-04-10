@@ -60,7 +60,6 @@ def _make_cfg(**overrides) -> NovaTradeCfg:
         mode=AccountMode.DEMO,
         ftmo=ftmo,
         risk=risk,
-        dry_run=False,
         **overrides,
     )
 

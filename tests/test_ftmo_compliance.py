@@ -442,7 +442,6 @@ class TestPreTradeGateIntegration:
         from novatrade.risk.pre_trade_gate import PreTradeGate
 
         cfg = NovaTradeCfg()
-        cfg.dry_run = False
         return PreTradeGate(cfg)
 
     @pytest.fixture

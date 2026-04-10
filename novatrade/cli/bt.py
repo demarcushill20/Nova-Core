@@ -353,7 +353,6 @@ async def _run_live(
     cfg: NovaTradeCfg,
     poll_interval: float,
     shadow: bool,
-    dry_run: bool,
 ) -> None:
     from novatrade.runtime.runner import build_live_stack
 
@@ -361,7 +360,6 @@ async def _run_live(
         cfg=cfg,
         poll_interval=poll_interval,
         shadow=shadow,
-        dry_run=dry_run,
     )
 
     typer.echo(f"Live loop ready — symbols={cfg.symbols} timeframe={cfg.timeframes[0]} shadow={shadow}")
@@ -379,7 +377,6 @@ def run_live(
     timeframe: str = typer.Option("H1", help="Primary timeframe"),
     poll_interval: float = typer.Option(2.0, help="Tick poll interval in seconds"),
     shadow: bool = typer.Option(False, help="Shadow mode — log signals, no orders"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Use DryRunAdapter"),
 ) -> None:
     """Start the live trading loop (full Python pipeline, no TradingView).
 
@@ -402,7 +399,7 @@ def run_live(
     cfg.timeframes = [timeframe]
 
     try:
-        asyncio.run(_run_live(cfg, poll_interval, shadow, dry_run))
+        asyncio.run(_run_live(cfg, poll_interval, shadow))
     except RuntimeError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc

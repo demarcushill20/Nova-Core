@@ -46,15 +46,14 @@ def _cfg(**overrides) -> NovaTradeCfg:
         mode=AccountMode.DEMO,
         symbols=["EURUSD"],
         risk=risk,
-        dry_run=True,
     )
     defaults.update(overrides)
     return NovaTradeCfg(**defaults)  # type: ignore[arg-type]
 
 
-def _build_stack(tmp_path: Path, *, launch_mode: LaunchMode = LaunchMode.DRY_RUN):
+def _build_stack(tmp_path: Path, *, launch_mode: LaunchMode = LaunchMode.ACTIVE_DEMO):
     """Build a full test stack with specified launch mode."""
-    cfg = _cfg(dry_run=False)  # DryRunAdapter is the safety net
+    cfg = _cfg()
     adapter = DryRunAdapter()
     recorder = EvidenceRecorder(path=tmp_path / "evidence.jsonl")
     risk_engine = RiskEngine(cfg)
@@ -72,7 +71,6 @@ def _build_stack(tmp_path: Path, *, launch_mode: LaunchMode = LaunchMode.DRY_RUN
         risk_engine=risk_engine,
         monitor=monitor,
         recorder=recorder,
-        dry_run=True,
         launch_mode=launch_mode,
         adapter_type="DryRunAdapter",
         started_at=time.time(),
@@ -88,15 +86,6 @@ def _build_stack(tmp_path: Path, *, launch_mode: LaunchMode = LaunchMode.DRY_RUN
 class TestLaunchModeResolution:
     """Tests for resolve_launch_mode()."""
 
-    def test_default_is_dry_run(self):
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.setdefault("NOVATRADE_DRY_RUN", "true")
-            assert resolve_launch_mode() == LaunchMode.DRY_RUN
-
-    def test_explicit_dry_run(self):
-        with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "dry_run"}):
-            assert resolve_launch_mode() == LaunchMode.DRY_RUN
-
     def test_explicit_active_ready(self):
         with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "active_ready"}):
             assert resolve_launch_mode() == LaunchMode.ACTIVE_READY
@@ -105,21 +94,11 @@ class TestLaunchModeResolution:
         with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "active_demo"}):
             assert resolve_launch_mode() == LaunchMode.ACTIVE_DEMO
 
-    def test_fallback_dry_run_true(self):
-        with patch.dict(os.environ, {"NOVATRADE_DRY_RUN": "true"}, clear=True):
-            assert resolve_launch_mode() == LaunchMode.DRY_RUN
-
-    def test_fallback_dry_run_false(self):
-        with patch.dict(os.environ, {"NOVATRADE_DRY_RUN": "false"}, clear=True):
-            assert resolve_launch_mode() == LaunchMode.ACTIVE_READY
-
     def test_hyphen_variants(self):
         with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "active-ready"}):
             assert resolve_launch_mode() == LaunchMode.ACTIVE_READY
         with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "active-demo"}):
             assert resolve_launch_mode() == LaunchMode.ACTIVE_DEMO
-        with patch.dict(os.environ, {"NOVATRADE_LAUNCH_MODE": "dry-run"}):
-            assert resolve_launch_mode() == LaunchMode.DRY_RUN
 
 
 # ===========================================================================
@@ -130,19 +109,22 @@ class TestLaunchModeResolution:
 class TestStartupValidation:
     """Tests for validate_startup()."""
 
-    def test_dry_run_minimal_config(self):
+    def test_active_demo_minimal_config(self):
         cfg = _cfg()
-        result = validate_startup(cfg, LaunchMode.DRY_RUN)
+        cfg.metaapi.token = "test-token"
+        cfg.metaapi.account_id = "test-id"
+        with patch.dict(os.environ, {"NOVATRADE_WEBHOOK_SECRET": "secret"}):
+            result = validate_startup(cfg, LaunchMode.ACTIVE_DEMO)
         assert result.ok is True
-        assert result.mode == LaunchMode.DRY_RUN
+        assert result.mode == LaunchMode.ACTIVE_DEMO
 
-    def test_dry_run_warns_no_token(self):
+    def test_active_demo_fails_without_token(self):
         cfg = _cfg()
         cfg.metaapi.token = ""
         with patch.dict(os.environ, {}, clear=True):
-            result = validate_startup(cfg, LaunchMode.DRY_RUN)
-        assert result.ok is True
-        assert any("METAAPI_TOKEN" in w for w in result.warnings)
+            result = validate_startup(cfg, LaunchMode.ACTIVE_DEMO)
+        assert result.ok is False
+        assert any("METAAPI_TOKEN" in e for e in result.errors)
 
     def test_active_ready_fails_without_credentials(self):
         cfg = _cfg()
@@ -172,7 +154,7 @@ class TestStartupValidation:
 
     def test_no_symbols_fails(self):
         cfg = _cfg(symbols=[])
-        result = validate_startup(cfg, LaunchMode.DRY_RUN)
+        result = validate_startup(cfg, LaunchMode.ACTIVE_DEMO)
         assert result.ok is False
         assert any("symbol" in e for e in result.errors)
 
@@ -192,33 +174,46 @@ class TestStartupValidation:
 class TestLaunchGateEvaluation:
     """Tests for evaluate_launch_gate()."""
 
-    def test_dry_run_ready(self):
+    def test_active_demo_ready(self):
         cfg = _cfg()
-        result = evaluate_launch_gate(
-            cfg,
-            LaunchMode.DRY_RUN,
-            risk_engine_initialized=True,
-            risk_engine_halted=False,
-            agent_initialized=True,
-            monitor_initialized=True,
-            adapter_connected=True,
-            adapter_type="DryRunAdapter",
-        )
+        cfg.metaapi.token = "test-token"
+        cfg.metaapi.account_id = "test-id"
+        confirm_env = {
+            "NOVATRADE_WEBHOOK_SECRET": "secret",
+            "NOVATRADE_CONFIRM_PINE_COMPILED": "true",
+            "NOVATRADE_CONFIRM_TV_BACKTEST": "true",
+            "NOVATRADE_CONFIRM_WEBHOOK_URL": "true",
+            "NOVATRADE_CONFIRM_ACTIVE_DEMO": "true",
+        }
+        with patch.dict(os.environ, confirm_env, clear=True):
+            result = evaluate_launch_gate(
+                cfg,
+                LaunchMode.ACTIVE_DEMO,
+                risk_engine_initialized=True,
+                risk_engine_halted=False,
+                agent_initialized=True,
+                monitor_initialized=True,
+                adapter_connected=True,
+                adapter_type="MetaApiAdapter",
+            )
         assert result.verdict == ReadinessVerdict.READY_FOR_ACTIVE_DEMO
-        assert result.launch_mode == LaunchMode.DRY_RUN
+        assert result.launch_mode == LaunchMode.ACTIVE_DEMO
 
-    def test_dry_run_not_ready_if_agent_missing(self):
+    def test_active_demo_not_ready_if_agent_missing(self):
         cfg = _cfg()
-        result = evaluate_launch_gate(
-            cfg,
-            LaunchMode.DRY_RUN,
-            risk_engine_initialized=True,
-            risk_engine_halted=False,
-            agent_initialized=False,
-            monitor_initialized=True,
-            adapter_connected=True,
-            adapter_type="DryRunAdapter",
-        )
+        cfg.metaapi.token = "test-token"
+        cfg.metaapi.account_id = "test-id"
+        with patch.dict(os.environ, {"NOVATRADE_WEBHOOK_SECRET": "secret"}, clear=True):
+            result = evaluate_launch_gate(
+                cfg,
+                LaunchMode.ACTIVE_DEMO,
+                risk_engine_initialized=True,
+                risk_engine_halted=False,
+                agent_initialized=False,
+                monitor_initialized=True,
+                adapter_connected=True,
+                adapter_type="MetaApiAdapter",
+            )
         assert result.verdict == ReadinessVerdict.NOT_READY
         assert len(result.blockers) > 0
 
@@ -307,7 +302,7 @@ class TestLaunchGateEvaluation:
         assert result.verdict == ReadinessVerdict.NOT_READY
         assert any("halted" in b.lower() for b in result.blockers)
 
-    def test_dry_run_adapter_blocks_active_mode(self):
+    def test_dry_adapter_blocks_active_mode(self):
         cfg = _cfg()
         cfg.metaapi.token = "test-token"
         cfg.metaapi.account_id = "test-id"
@@ -329,7 +324,7 @@ class TestLaunchGateEvaluation:
         cfg = _cfg()
         result = evaluate_launch_gate(
             cfg,
-            LaunchMode.DRY_RUN,
+            LaunchMode.ACTIVE_DEMO,
             risk_engine_initialized=True,
             risk_engine_halted=False,
             agent_initialized=True,
@@ -352,32 +347,45 @@ class TestReadinessReport:
 
     def test_report_contains_verdict(self):
         cfg = _cfg()
-        result = evaluate_launch_gate(
-            cfg,
-            LaunchMode.DRY_RUN,
-            risk_engine_initialized=True,
-            risk_engine_halted=False,
-            agent_initialized=True,
-            monitor_initialized=True,
-            adapter_connected=True,
-            adapter_type="DryRunAdapter",
-        )
+        cfg.metaapi.token = "test-token"
+        cfg.metaapi.account_id = "test-id"
+        confirm_env = {
+            "NOVATRADE_WEBHOOK_SECRET": "secret",
+            "NOVATRADE_CONFIRM_PINE_COMPILED": "true",
+            "NOVATRADE_CONFIRM_TV_BACKTEST": "true",
+            "NOVATRADE_CONFIRM_WEBHOOK_URL": "true",
+            "NOVATRADE_CONFIRM_ACTIVE_DEMO": "true",
+        }
+        with patch.dict(os.environ, confirm_env, clear=True):
+            result = evaluate_launch_gate(
+                cfg,
+                LaunchMode.ACTIVE_DEMO,
+                risk_engine_initialized=True,
+                risk_engine_halted=False,
+                agent_initialized=True,
+                monitor_initialized=True,
+                adapter_connected=True,
+                adapter_type="MetaApiAdapter",
+            )
         report = generate_readiness_report(result)
         assert "READY_FOR_ACTIVE_DEMO" in report
-        assert "dry_run" in report
+        assert "active_demo" in report
 
     def test_report_shows_blockers(self):
         cfg = _cfg()
-        result = evaluate_launch_gate(
-            cfg,
-            LaunchMode.DRY_RUN,
-            risk_engine_initialized=True,
-            risk_engine_halted=False,
-            agent_initialized=False,
-            monitor_initialized=True,
-            adapter_connected=True,
-            adapter_type="DryRunAdapter",
-        )
+        cfg.metaapi.token = "test-token"
+        cfg.metaapi.account_id = "test-id"
+        with patch.dict(os.environ, {"NOVATRADE_WEBHOOK_SECRET": "secret"}, clear=True):
+            result = evaluate_launch_gate(
+                cfg,
+                LaunchMode.ACTIVE_DEMO,
+                risk_engine_initialized=True,
+                risk_engine_halted=False,
+                agent_initialized=False,
+                monitor_initialized=True,
+                adapter_connected=True,
+                adapter_type="MetaApiAdapter",
+            )
         report = generate_readiness_report(result)
         assert "BLOCK" in report
 
@@ -385,7 +393,7 @@ class TestReadinessReport:
         cfg = _cfg()
         result = evaluate_launch_gate(
             cfg,
-            LaunchMode.DRY_RUN,
+            LaunchMode.ACTIVE_DEMO,
             risk_engine_initialized=True,
             risk_engine_halted=False,
             agent_initialized=True,
@@ -411,33 +419,46 @@ class TestRunnerBuildStack:
     """Tests for the updated runner.build_stack()."""
 
     @pytest.mark.asyncio
-    async def test_build_stack_dry_run(self):
+    async def test_build_stack_active_demo(self):
         from novatrade.runtime.runner import build_stack
 
-        cfg = _cfg(dry_run=True)
-        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
-        assert ws.dry_run is True
-        assert ws.launch_mode == LaunchMode.DRY_RUN
-        assert ws.adapter_type == "DryRunAdapter"
+        cfg = _cfg()
+        cfg.metaapi.token = "test-token"
+        cfg.metaapi.account_id = "test-id"
+        confirm_env = {
+            "NOVATRADE_WEBHOOK_SECRET": "secret",
+            "NOVATRADE_CONFIRM_PINE_COMPILED": "true",
+            "NOVATRADE_CONFIRM_TV_BACKTEST": "true",
+            "NOVATRADE_CONFIRM_WEBHOOK_URL": "true",
+            "NOVATRADE_CONFIRM_ACTIVE_DEMO": "true",
+        }
+        with (
+            patch.dict(os.environ, confirm_env, clear=True),
+            patch("novatrade.runtime.runner._create_adapter") as mock_create,
+            patch("novatrade.runtime.runner._adapter_type_name", return_value="MetaApiAdapter"),
+        ):
+            mock_adapter = DryRunAdapter()
+            mock_create.return_value = mock_adapter
+            ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
+        assert ws.launch_mode == LaunchMode.ACTIVE_DEMO
         assert ws.agent is not None
         assert ws.risk_engine is not None
-        assert readiness.verdict == ReadinessVerdict.READY_FOR_ACTIVE_DEMO
 
     @pytest.mark.asyncio
-    async def test_build_stack_forces_dry_run_adapter(self):
-        """In dry_run mode, adapter is always DryRunAdapter."""
+    async def test_build_stack_no_credentials_fails(self):
+        """ACTIVE_DEMO mode without MetaAPI credentials raises RuntimeError."""
         from novatrade.runtime.runner import build_stack
 
-        cfg = _cfg(dry_run=True)
-        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
-        assert isinstance(ws.agent._adapter, DryRunAdapter)
+        cfg = _cfg()
+        with pytest.raises(RuntimeError, match="METAAPI_TOKEN"):
+            await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
 
     @pytest.mark.asyncio
     async def test_build_stack_active_ready_fails_without_credentials(self):
         """active_ready mode fails explicitly without MetaApi credentials."""
         from novatrade.runtime.runner import build_stack
 
-        cfg = _cfg(dry_run=False)
+        cfg = _cfg()
         cfg.metaapi.token = ""
         cfg.metaapi.account_id = ""
         with pytest.raises(RuntimeError, match="METAAPI_TOKEN"):
@@ -448,7 +469,7 @@ class TestRunnerBuildStack:
         """active_demo mode fails without operator confirmations."""
         from novatrade.runtime.runner import build_stack
 
-        cfg = _cfg(dry_run=False)
+        cfg = _cfg()
         cfg.metaapi.token = "test-token"
         cfg.metaapi.account_id = "test-id"
         # Mock the MetaApiAdapter import to avoid real SDK dependency
@@ -465,8 +486,24 @@ class TestRunnerBuildStack:
     async def test_build_stack_records_startup_events(self, tmp_path):
         from novatrade.runtime.runner import build_stack
 
-        cfg = _cfg(dry_run=True, data_dir=tmp_path)
-        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
+        cfg = _cfg(data_dir=tmp_path)
+        cfg.metaapi.token = "test-token"
+        cfg.metaapi.account_id = "test-id"
+        confirm_env = {
+            "NOVATRADE_WEBHOOK_SECRET": "secret",
+            "NOVATRADE_CONFIRM_PINE_COMPILED": "true",
+            "NOVATRADE_CONFIRM_TV_BACKTEST": "true",
+            "NOVATRADE_CONFIRM_WEBHOOK_URL": "true",
+            "NOVATRADE_CONFIRM_ACTIVE_DEMO": "true",
+        }
+        with (
+            patch.dict(os.environ, confirm_env, clear=True),
+            patch("novatrade.runtime.runner._create_adapter") as mock_create,
+            patch("novatrade.runtime.runner._adapter_type_name", return_value="MetaApiAdapter"),
+        ):
+            mock_adapter = DryRunAdapter()
+            mock_create.return_value = mock_adapter
+            ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
         records = ws.recorder.load()
         events = [r.data.get("event") for r in records]
         assert "STARTUP_VALIDATION" in events
@@ -481,12 +518,12 @@ class TestRunnerBuildStack:
 class TestAdapterSelection:
     """Tests for adapter selection logic."""
 
-    def test_dry_run_uses_dry_adapter(self):
+    def test_active_demo_requires_credentials(self):
         from novatrade.runtime.runner import _create_adapter
 
         cfg = _cfg()
-        adapter = _create_adapter(cfg, LaunchMode.DRY_RUN)
-        assert isinstance(adapter, DryRunAdapter)
+        with pytest.raises(RuntimeError, match="missing credentials"):
+            _create_adapter(cfg, LaunchMode.ACTIVE_DEMO)
 
     def test_active_ready_fails_without_token(self):
         from novatrade.runtime.runner import _create_adapter
@@ -506,40 +543,7 @@ class TestAdapterSelection:
 
 
 # ===========================================================================
-# 7. Rollback to dry-run
-# ===========================================================================
-
-
-class TestRollback:
-    """Tests for rollback_to_dry_run()."""
-
-    def test_rollback_switches_adapter(self, tmp_path):
-        from novatrade.runtime.runner import rollback_to_dry_run
-
-        ws, adapter, agent, risk, monitor, recorder = _build_stack(tmp_path, launch_mode=LaunchMode.ACTIVE_READY)
-        ws.dry_run = False
-        ws.launch_mode = LaunchMode.ACTIVE_READY
-        ws.adapter_type = "MetaApiAdapter"
-
-        rollback_to_dry_run(ws, recorder)
-
-        assert ws.dry_run is True
-        assert ws.launch_mode == LaunchMode.DRY_RUN
-        assert ws.adapter_type == "DryRunAdapter"
-        assert isinstance(ws.agent._adapter, DryRunAdapter)
-
-    def test_rollback_records_evidence(self, tmp_path):
-        from novatrade.runtime.runner import rollback_to_dry_run
-
-        ws, adapter, agent, risk, monitor, recorder = _build_stack(tmp_path)
-        rollback_to_dry_run(ws, recorder)
-        records = recorder.load()
-        events = [r.data.get("event") for r in records]
-        assert "ROLLBACK_TO_DRY_RUN" in events
-
-
-# ===========================================================================
-# 8. Webhook server launch-mode endpoints
+# 7. Webhook server launch-mode endpoints
 # ===========================================================================
 
 
@@ -552,7 +556,7 @@ class TestWebhookLaunchMode:
         client = TestClient(app)
         resp = client.get("/health")
         data = resp.json()
-        assert data["launch_mode"] == "dry_run"
+        assert data["launch_mode"] == "active_demo"
         assert data["adapter_type"] == "DryRunAdapter"
 
     def test_status_includes_launch_mode(self, tmp_path):
@@ -561,7 +565,7 @@ class TestWebhookLaunchMode:
         client = TestClient(app)
         resp = client.get("/status")
         data = resp.json()
-        assert data["runtime_mode"] == "dry_run"
+        assert data["runtime_mode"] == "active_demo"
         assert data["adapter_type"] == "DryRunAdapter"
 
     def test_readiness_endpoint(self, tmp_path):
@@ -575,47 +579,14 @@ class TestWebhookLaunchMode:
         assert "checks" in data
         assert "launch_mode" in data
 
-    def test_rollback_endpoint(self, tmp_path):
-        ws, *_ = _build_stack(tmp_path)
-        ws.launch_mode = LaunchMode.ACTIVE_READY
-        ws.dry_run = False
-        ws.adapter_type = "MetaApiAdapter"
-        app = create_app(ws)
-        client = TestClient(app)
-
-        resp = client.post("/control/rollback")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert data["dry_run"] is True
-        assert data["launch_mode"] == "dry_run"
-        assert data["adapter_type"] == "DryRunAdapter"
-
-    def test_status_after_rollback(self, tmp_path):
-        ws, *_ = _build_stack(tmp_path)
-        ws.launch_mode = LaunchMode.ACTIVE_READY
-        ws.dry_run = False
-        app = create_app(ws)
-        client = TestClient(app)
-
-        # Rollback
-        client.post("/control/rollback")
-
-        # Status should reflect dry-run
-        resp = client.get("/status")
-        data = resp.json()
-        assert data["runtime_mode"] == "dry_run"
-        assert data["dry_run"] is True
-
     def test_build_status_launch_mode(self, tmp_path):
         ws, *_ = _build_stack(tmp_path)
         status = build_status(ws)
-        assert status["runtime_mode"] == "dry_run"
+        assert status["runtime_mode"] == "active_demo"
         assert status["adapter_type"] == "DryRunAdapter"
 
     def test_build_status_active_mode(self, tmp_path):
         ws, *_ = _build_stack(tmp_path, launch_mode=LaunchMode.ACTIVE_READY)
-        ws.dry_run = False
         ws.adapter_type = "MetaApiAdapter"
         status = build_status(ws)
         assert status["runtime_mode"] == "active_ready"

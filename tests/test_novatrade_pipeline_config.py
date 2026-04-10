@@ -19,7 +19,6 @@ def _make_cfg() -> NovaTradeCfg:
     cfg = NovaTradeCfg()
     cfg.symbols = ["EURUSD"]
     cfg.timeframes = ["H1"]
-    cfg.dry_run = True
     return cfg
 
 
@@ -67,7 +66,7 @@ async def test_build_live_stack_loads_strategy_config(tmp_path: Path):
     )
 
     cfg = _make_cfg()
-    loop = await build_live_stack(cfg=cfg, dry_run=True, strategy_config_path=str(config_yaml))
+    loop = await build_live_stack(cfg=cfg, shadow=True, strategy_config_path=str(config_yaml))
 
     assert isinstance(loop, LiveLoop)
     # Verify the strategy engine received the config params
@@ -99,7 +98,7 @@ async def test_build_live_stack_loads_config_from_env_var(tmp_path: Path):
 
     cfg = _make_cfg()
     with patch.dict(os.environ, {"NOVATRADE_STRATEGY_CONFIG": str(config_yaml)}):
-        loop = await build_live_stack(cfg=cfg, dry_run=True)
+        loop = await build_live_stack(cfg=cfg, shadow=True)
 
     engine = loop._strategy_engine
     assert engine._env.irb_threshold == pytest.approx(0.50)
@@ -119,7 +118,7 @@ async def test_build_live_stack_explicit_path_overrides_env(tmp_path: Path):
 
     cfg = _make_cfg()
     with patch.dict(os.environ, {"NOVATRADE_STRATEGY_CONFIG": str(env_yaml)}):
-        loop = await build_live_stack(cfg=cfg, dry_run=True, strategy_config_path=str(explicit_yaml))
+        loop = await build_live_stack(cfg=cfg, shadow=True, strategy_config_path=str(explicit_yaml))
 
     assert loop._strategy_engine._env.irb_threshold == pytest.approx(0.55)
 
@@ -133,7 +132,7 @@ async def test_build_live_stack_no_config_uses_defaults():
     # Clear env var if set
     with patch.dict(os.environ, {}, clear=False):
         os.environ.pop("NOVATRADE_STRATEGY_CONFIG", None)
-        loop = await build_live_stack(cfg=cfg, dry_run=True)
+        loop = await build_live_stack(cfg=cfg, shadow=True)
 
     # Default values from BacktestEnvironment
     assert loop._strategy_engine._env.irb_threshold == pytest.approx(0.40)
@@ -154,7 +153,7 @@ async def test_build_live_stack_config_sets_equity_from_account(tmp_path: Path):
 
     with patch("novatrade.runtime.dry_run.DryRunAdapter.get_account", new_callable=AsyncMock) as mock:
         mock.return_value = account
-        loop = await build_live_stack(cfg=cfg, dry_run=True, strategy_config_path=str(config_yaml))
+        loop = await build_live_stack(cfg=cfg, shadow=True, strategy_config_path=str(config_yaml))
 
     assert loop._strategy_engine._env.initial_equity == pytest.approx(75_000.0)
 
@@ -169,7 +168,7 @@ async def test_build_live_stack_bad_config_raises(tmp_path: Path):
 
     cfg = _make_cfg()
     with pytest.raises((ValueError, TypeError)):  # pydantic ValidationError
-        await build_live_stack(cfg=cfg, dry_run=True, strategy_config_path=str(bad_yaml))
+        await build_live_stack(cfg=cfg, shadow=True, strategy_config_path=str(bad_yaml))
 
 
 @pytest.mark.asyncio
@@ -179,7 +178,7 @@ async def test_build_live_stack_missing_config_raises(tmp_path: Path):
 
     cfg = _make_cfg()
     with pytest.raises(FileNotFoundError):
-        await build_live_stack(cfg=cfg, dry_run=True, strategy_config_path=str(tmp_path / "nonexistent.yaml"))
+        await build_live_stack(cfg=cfg, shadow=True, strategy_config_path=str(tmp_path / "nonexistent.yaml"))
 
 
 _SEED9999_EXISTS = os.path.exists("configs/strategies/irb_v2_seed9999.yaml")
@@ -194,7 +193,7 @@ async def test_build_live_stack_loads_seed9999_config():
     cfg = _make_cfg()
     loop = await build_live_stack(
         cfg=cfg,
-        dry_run=True,
+        shadow=True,
         strategy_config_path="configs/strategies/irb_v2_seed9999.yaml",
     )
 
@@ -259,7 +258,7 @@ async def test_run_live_creates_health_endpoint():
     from novatrade.runtime.runner import build_live_stack, run_live
 
     cfg = _make_cfg()
-    loop = await build_live_stack(cfg=cfg, dry_run=True)
+    loop = await build_live_stack(cfg=cfg, shadow=True)
 
     # We can't easily test the full server startup, but we can verify
     # the function exists and accepts the right arguments

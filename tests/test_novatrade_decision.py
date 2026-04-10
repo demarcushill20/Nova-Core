@@ -82,7 +82,7 @@ class TestReady:
         assert "stable" in decision.reasons[-1].lower()
 
     def test_all_denied_still_ready(self):
-        """All denied (e.g. dry_run) is not an error — READY with warnings."""
+        """All denied is not an error — READY with warnings."""
         decision = evaluate_mvp(
             _report(
                 filled_count=0,

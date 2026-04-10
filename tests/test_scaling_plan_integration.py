@@ -24,7 +24,6 @@ def create_test_config(**overrides):
     )
 
     defaults = {
-        "dry_run": False,
         "symbols": ["EURUSD", "GBPUSD"],
         "risk": risk,
     }

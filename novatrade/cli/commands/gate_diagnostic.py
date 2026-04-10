@@ -7,12 +7,22 @@ execution gate status to troubleshoot trade rejection issues.
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Any
 
 from novatrade.adapter.metaapi_provider import MetaApiAdapter
 from novatrade.config import NovaTradeCfg
-from novatrade.models import AccountState, HealthStatus, OrderRequest, OrderSide, OrderType, Position, SymbolPrice
+from novatrade.models import (
+    AccountState,
+    HealthState,
+    HealthStatus,
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    Position,
+    SymbolPrice,
+)
 from novatrade.risk.pre_trade_gate import PreTradeGate
 
 log = logging.getLogger("novatrade.cli.gate_diagnostic")
@@ -46,7 +56,7 @@ class ExecutionGateDiagnostic:
                 self.adapter = MetaApiAdapter(self.config.metaapi)
                 await self.adapter.connect()
 
-            account = await self.adapter.get_account_state()
+            account = await self.adapter.get_account()
             positions = await self.adapter.get_positions()
             health = await self.adapter.health_check()
             price = await self.adapter.get_symbol_price(symbol)
@@ -56,7 +66,7 @@ class ExecutionGateDiagnostic:
             # Use mock data for diagnostic
             account = self._create_mock_account_state()
             positions = []
-            health = HealthStatus(connected=True, message="Mock health for diagnostic", last_tick_age=30.0)
+            health = HealthStatus(state=HealthState.OK, connected=True, message="Mock health for diagnostic")
             price = None
 
         # Run full gate evaluation
@@ -107,13 +117,12 @@ class ExecutionGateDiagnostic:
         account: AccountState,
         positions: list[Position],
         health: HealthStatus,
-        price: SymbolPrice,
+        price: SymbolPrice | None,
     ) -> dict[str, dict[str, Any]]:
         """Build detailed analysis for each gate."""
 
         gate_map = {
             "kill_switch": "Kill Switch Status",
-            "dry_run": "Dry Run Mode",
             "account_mode": "Account Mode Validation",
             "trade_allowed": "Trade Allowed Status",
             "health": "System Health Check",
@@ -143,70 +152,68 @@ class ExecutionGateDiagnostic:
         analysis = {}
 
         for check in decision.checks:
-            gate_name = check.rule.lower().replace(" ", "_").replace("-", "_")
+            gate_name = check.name.lower().replace(" ", "_").replace("-", "_")
 
             # Map specific check names to our gate categories
-            if "kill" in check.rule.lower():
+            if "kill" in check.name.lower():
                 gate_key = "kill_switch"
-            elif "dry" in check.rule.lower() and "run" in check.rule.lower():
-                gate_key = "dry_run"
-            elif "account" in check.rule.lower() and "mode" in check.rule.lower():
+            elif "account" in check.name.lower() and "mode" in check.name.lower():
                 gate_key = "account_mode"
-            elif "trade" in check.rule.lower() and "allowed" in check.rule.lower():
+            elif "trade" in check.name.lower() and "allowed" in check.name.lower():
                 gate_key = "trade_allowed"
-            elif check.rule.lower() == "health":
+            elif check.name.lower() == "health":
                 gate_key = "health"
-            elif "feed" in check.rule.lower():
+            elif "feed" in check.name.lower():
                 gate_key = "feed_health"
-            elif check.rule.lower() == "symbol":
+            elif check.name.lower() == "symbol":
                 gate_key = "symbol"
-            elif check.rule.lower() == "volume" and "sizing" not in check.rule.lower():
+            elif check.name.lower() == "volume" and "sizing" not in check.name.lower():
                 gate_key = "volume"
-            elif "lot" in check.rule.lower():
+            elif "lot" in check.name.lower():
                 gate_key = "lot_size"
-            elif "request" in check.rule.lower():
+            elif "request" in check.name.lower():
                 gate_key = "request_count"
-            elif "stop" in check.rule.lower() and "distance" not in check.rule.lower():
+            elif "stop" in check.name.lower() and "distance" not in check.name.lower():
                 gate_key = "stop_loss"
-            elif "distance" in check.rule.lower():
+            elif "distance" in check.name.lower():
                 gate_key = "sl_distance"
-            elif "sizing" in check.rule.lower():
+            elif "sizing" in check.name.lower():
                 gate_key = "volume_sizing"
-            elif "max" in check.rule.lower() and "position" in check.rule.lower():
+            elif "max" in check.name.lower() and "position" in check.name.lower():
                 gate_key = "max_positions"
-            elif "daily" in check.rule.lower() and "count" in check.rule.lower():
+            elif "daily" in check.name.lower() and "count" in check.name.lower():
                 gate_key = "daily_count"
-            elif "cooldown" in check.rule.lower():
+            elif "cooldown" in check.name.lower():
                 gate_key = "cooldown"
-            elif "duplicate" in check.rule.lower():
+            elif "duplicate" in check.name.lower():
                 gate_key = "duplicate"
-            elif "drawdown" in check.rule.lower():
+            elif "drawdown" in check.name.lower():
                 gate_key = "drawdown"
-            elif "daily" in check.rule.lower() and "loss" in check.rule.lower():
+            elif "daily" in check.name.lower() and "loss" in check.name.lower():
                 gate_key = "daily_loss"
-            elif "spread" in check.rule.lower() and "gap" not in check.rule.lower():
+            elif "spread" in check.name.lower() and "gap" not in check.name.lower():
                 gate_key = "spread"
-            elif "weekend" in check.rule.lower():
+            elif "weekend" in check.name.lower():
                 gate_key = "weekend"
-            elif "news" in check.rule.lower():
+            elif "news" in check.name.lower():
                 gate_key = "news"
-            elif "gap" in check.rule.lower():
+            elif "gap" in check.name.lower():
                 gate_key = "gap_spread"
-            elif "rollover" in check.rule.lower():
+            elif "rollover" in check.name.lower():
                 gate_key = "rollover"
-            elif "london" in check.rule.lower():
+            elif "london" in check.name.lower():
                 gate_key = "london_fix"
-            elif "days" in check.rule.lower():
+            elif "days" in check.name.lower():
                 gate_key = "trading_days"
             else:
                 gate_key = gate_name
 
             analysis[gate_key] = {
-                "name": gate_map.get(gate_key, check.rule),
-                "rule": check.rule,
+                "name": gate_map.get(gate_key, check.name),
+                "rule": check.name,
                 "passed": check.passed,
                 "status": "PASS" if check.passed else "FAIL",
-                "reason": check.reason if hasattr(check, "reason") else None,
+                "reason": check.detail if check.detail else None,
                 "impact": "BLOCKING" if not check.passed else "NONE",
                 "configuration_source": self._get_gate_config_source(gate_key),
                 "current_value": self._get_gate_current_value(gate_key, account, positions, health, price),
@@ -219,27 +226,30 @@ class ExecutionGateDiagnostic:
     def _get_gate_config_source(self, gate_key: str) -> str:
         """Get configuration source for a specific gate."""
         source_map = {
-            "dry_run": f"config.dry_run = {self.config.dry_run}",
             "account_mode": f"config.metaapi.account_mode = {self.config.metaapi.account_id[-4:]}",
             "max_positions": f"config.risk.max_positions = {self.config.risk.max_positions}",
-            "daily_loss": f"config.ftmo.max_daily_loss_pct = {self.config.ftmo.max_daily_loss_pct}%",
-            "volume_sizing": f"config.risk.max_position_size_pct = {self.config.risk.max_position_size_pct}%",
+            "daily_loss": f"config.risk.max_daily_drawdown_pct = {self.config.risk.max_daily_drawdown_pct}%",
+            "volume_sizing": f"config.risk.max_volume_per_trade = {self.config.risk.max_volume_per_trade}",
             "drawdown": f"config.risk.max_daily_drawdown_pct = {self.config.risk.max_daily_drawdown_pct}%",
             "cooldown": f"config.risk.cooldown_seconds = {self.config.risk.cooldown_seconds}s",
-            "daily_count": f"config.risk.max_daily_trades = {self.config.risk.max_daily_trades}",
+            "daily_count": f"config.risk.max_trades_per_day = {self.config.risk.max_trades_per_day}",
         }
         return source_map.get(gate_key, "config.* (check gate source)")
 
     def _get_gate_current_value(
-        self, gate_key: str, account: AccountState, positions: list[Position], health: HealthStatus, price: SymbolPrice
+        self,
+        gate_key: str,
+        account: AccountState,
+        positions: list[Position],
+        health: HealthStatus,
+        price: SymbolPrice | None,
     ) -> Any:
         """Get current value for gate evaluation."""
         value_map = {
-            "dry_run": self.config.dry_run,
             "account_mode": account.mode.value if account else "unknown",
             "max_positions": len(positions),
             "health": health.connected if health else False,
-            "feed_health": f"{health.last_tick_age:.1f}s ago" if health else "unknown",
+            "feed_health": f"{time.time() - health.last_heartbeat:.1f}s ago" if health else "unknown",
             "trade_allowed": account.trade_allowed if account and hasattr(account, "trade_allowed") else "unknown",
             "drawdown": f"{account.equity / account.balance * 100:.1f}%"
             if account and account.balance > 0
@@ -250,16 +260,15 @@ class ExecutionGateDiagnostic:
     def _get_gate_threshold(self, gate_key: str) -> str:
         """Get threshold/limit for gate."""
         threshold_map = {
-            "dry_run": "false (to allow trades)",
             "account_mode": "DEMO (MVP restriction)",
             "max_positions": f"<= {self.config.risk.max_positions}",
             "health": "connected = true",
             "feed_health": "< 300s staleness",
             "trade_allowed": "true",
-            "daily_loss": f"< {self.config.ftmo.max_daily_loss_pct}%",
+            "daily_loss": f"< {self.config.risk.max_daily_drawdown_pct}%",
             "drawdown": f"< {self.config.risk.max_daily_drawdown_pct}%",
             "cooldown": f">= {self.config.risk.cooldown_seconds}s between trades",
-            "daily_count": f"< {self.config.risk.max_daily_trades} per day",
+            "daily_count": f"< {self.config.risk.max_trades_per_day} per day",
         }
         return threshold_map.get(gate_key, "see rule")
 
@@ -269,7 +278,6 @@ class ExecutionGateDiagnostic:
             return "None required"
 
         remediation_map = {
-            "dry_run": "Set NOVATRADE_DRY_RUN=false in environment or config",
             "account_mode": "Switch to DEMO account or remove MVP restriction",
             "max_positions": "Close some positions or increase max_positions limit",
             "health": "Check broker connectivity and system health",
@@ -290,11 +298,6 @@ class ExecutionGateDiagnostic:
                 "override": "configs/novatrade.override.env",
             },
             "key_settings": {
-                "dry_run": {
-                    "value": self.config.dry_run,
-                    "source": "NovaTradeCfg.load()",
-                    "env_var": "NOVATRADE_DRY_RUN",
-                },
                 "launch_mode": {
                     "value": getattr(self.config, "launch_mode", "unknown"),
                     "source": "NovaTradeCfg.load()",
@@ -319,7 +322,7 @@ class ExecutionGateDiagnostic:
         try:
             import requests
 
-            response = requests.get("http://localhost:8877/status", timeout=5)
+            response = await asyncio.to_thread(requests.get, "http://localhost:8877/status", timeout=5)
             if response.status_code == 200:
                 status = response.json()
                 return {
@@ -374,7 +377,6 @@ class ExecutionGateDiagnostic:
                 "service_health": diagnostic["runtime_status"]["service_responsive"],
                 "feed_health": diagnostic["runtime_status"]["feed_health"],
                 "quick_summary": {
-                    "dry_run": diagnostic["gate_analysis"].get("dry_run", {}).get("passed", True),
                     "account_mode": diagnostic["gate_analysis"].get("account_mode", {}).get("passed", True),
                     "health": diagnostic["gate_analysis"].get("health", {}).get("passed", True),
                     "feed_health": diagnostic["gate_analysis"].get("feed_health", {}).get("passed", True),

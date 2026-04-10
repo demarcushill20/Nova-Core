@@ -217,7 +217,6 @@ class TestNovaTradeCfg:
         assert config.provider == "metaapi"
         assert config.symbols == ["EURUSD"]
         assert config.timeframes == ["H1"]
-        assert config.dry_run is False  # default changed to False (live trading)
 
     def test_custom_components(self):
         """Test NovaTradeCfg with custom components."""
@@ -232,7 +231,6 @@ class TestNovaTradeCfg:
             mode=AccountMode.CHALLENGE,
             symbols=["GBPUSD", "USDJPY"],
             timeframes=["M15", "H1"],
-            dry_run=False,
         )
 
         assert config.metaapi.token == "test-token"
@@ -241,7 +239,6 @@ class TestNovaTradeCfg:
         assert config.mode == AccountMode.CHALLENGE
         assert config.symbols == ["GBPUSD", "USDJPY"]
         assert config.timeframes == ["M15", "H1"]
-        assert config.dry_run is False
 
     def test_load_from_env(self):
         """Test NovaTradeCfg.load() with environment variables."""
@@ -250,7 +247,6 @@ class TestNovaTradeCfg:
             "NOVATRADE_PROVIDER": "custom",
             "NOVATRADE_SYMBOLS": "EURUSD,GBPUSD,USDJPY",
             "NOVATRADE_TIMEFRAMES": "M15,H1,H4",
-            "NOVATRADE_DRY_RUN": "false",
             "METAAPI_TOKEN": "env-token",
             "METAAPI_ACCOUNT_ID": "env-account",
             "FTMO_ENABLED": "true",
@@ -266,7 +262,6 @@ class TestNovaTradeCfg:
         assert config.provider == "custom"
         assert config.symbols == ["EURUSD", "GBPUSD", "USDJPY"]
         assert config.timeframes == ["M15", "H1", "H4"]
-        assert config.dry_run is False
         assert config.metaapi.token == "env-token"
         assert config.metaapi.account_id == "env-account"
         assert config.ftmo.enabled is True

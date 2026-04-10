@@ -94,7 +94,7 @@ async def test_warmup_success_first_attempt():
         mock_strategy_engine = MagicMock()
         mock_engine.return_value = mock_strategy_engine
 
-        await build_live_stack(cfg=mock_cfg, dry_run=True)
+        await build_live_stack(cfg=mock_cfg, shadow=True)
 
         # Primary (500) + higher (200) candles fetched on first attempt
         assert mock_adapter.call_count == 2
@@ -134,7 +134,7 @@ async def test_warmup_retry_success_second_attempt():
         mock_strategy_engine = MagicMock()
         mock_engine.return_value = mock_strategy_engine
 
-        await build_live_stack(cfg=mock_cfg, dry_run=True)
+        await build_live_stack(cfg=mock_cfg, shadow=True)
 
         # Attempt 0: primary fails (call 1) → retry
         # Attempt 1: primary succeeds (call 2) + higher succeeds (call 3)
@@ -176,7 +176,7 @@ async def test_warmup_failure_after_max_retries():
         mock_strategy_engine = MagicMock()
         mock_engine.return_value = mock_strategy_engine
 
-        await build_live_stack(cfg=mock_cfg, dry_run=True)
+        await build_live_stack(cfg=mock_cfg, shadow=True)
 
         # 3 attempts, each fails on first get_candles call
         assert mock_adapter.call_count == 3
@@ -244,7 +244,7 @@ async def test_warmup_insufficient_data_validation():
         mock_strategy_engine = MagicMock()
         mock_engine.return_value = mock_strategy_engine
 
-        await build_live_stack(cfg=mock_cfg, dry_run=True)
+        await build_live_stack(cfg=mock_cfg, shadow=True)
 
         # Attempt 0: primary (call 1, insufficient) + higher (call 2, insufficient) → ValueError
         # Attempt 1: primary (call 3, sufficient) + higher (call 4, sufficient) → success

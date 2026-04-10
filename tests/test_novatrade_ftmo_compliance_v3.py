@@ -62,10 +62,9 @@ def best_day():
 
 
 def _make_cfg() -> NovaTradeCfg:
-    """Build a NovaTradeCfg for testing (dry_run=False so pre-trade gate passes)."""
+    """Build a NovaTradeCfg for testing."""
     return NovaTradeCfg(
         mode=AccountMode.DEMO,
-        dry_run=False,
         risk=RiskConfig(
             max_trades_per_day=10,
             max_positions=1,

@@ -55,9 +55,8 @@ class WebhookState:
     monitor: OpsMonitor | None = None
     recorder: EvidenceRecorder | None = None
     supervisor: HardRiskSupervisor | None = None
-    dry_run: bool = True
-    launch_mode: LaunchMode = LaunchMode.DRY_RUN
-    adapter_type: str = "DryRunAdapter"
+    launch_mode: LaunchMode = LaunchMode.ACTIVE_DEMO
+    adapter_type: str = "MetaApiAdapter"
     webhook_secret: str = ""
     started_at: float = 0.0
     alerts_received: int = 0
@@ -74,7 +73,7 @@ class WebhookState:
         (DryRunAdapter is always considered "connected").
         """
         adapter = self.agent._adapter if self.agent else None
-        return getattr(adapter, "_connected", self.dry_run)
+        return getattr(adapter, "_connected", False)
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +138,6 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
             {
                 "action": payload.get("action", "unknown"),
                 "symbol": payload.get("symbol", "unknown"),
-                "dry_run": ws.dry_run,
             },
         )
 
@@ -171,7 +169,6 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
                 "state_after": result.state_after.value,
                 "rejected_reason": result.rejected_reason,
                 "error": result.error,
-                "dry_run": ws.dry_run,
             },
         )
 
@@ -180,7 +177,6 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
             "state": result.state_after,
             "rejected_reason": result.rejected_reason or None,
             "error": result.error or None,
-            "dry_run": ws.dry_run,
         }
 
     # -- Health endpoint -------------------------------------------------------
@@ -193,7 +189,6 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
         sv_halted = ws.supervisor.halted if ws.supervisor else False
         return {
             "status": "ok" if ws.agent else "degraded",
-            "dry_run": ws.dry_run,
             "launch_mode": ws.launch_mode.value,
             "adapter_type": ws.adapter_type,
             "adapter_connected": ws.adapter_connected,
@@ -244,27 +239,6 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
         )
         return r.to_dict()
 
-    # -- Rollback to dry-run ---------------------------------------------------
-
-    @app.post("/control/rollback")
-    async def rollback(request: Request) -> dict:
-        """Emergency rollback to DryRunAdapter."""
-        from novatrade.runtime.runner import rollback_to_dry_run
-
-        ws: WebhookState = request.app.state.ws
-        rollback_to_dry_run(ws)
-        _record_event(
-            ws,
-            "ROLLBACK_TRIGGERED",
-            {"launch_mode": ws.launch_mode.value, "adapter_type": ws.adapter_type},
-        )
-        return {
-            "ok": True,
-            "launch_mode": ws.launch_mode.value,
-            "adapter_type": ws.adapter_type,
-            "dry_run": ws.dry_run,
-        }
-
     return app
 
 
@@ -306,7 +280,6 @@ def build_status(ws: WebhookState) -> dict:
             "alerts_rejected": ws.alerts_rejected,
             "last_alert_time": ws.last_alert_time,
         },
-        "dry_run": ws.dry_run,
     }
 
 

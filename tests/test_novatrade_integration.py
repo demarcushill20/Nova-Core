@@ -58,7 +58,6 @@ def cfg() -> NovaTradeCfg:
         },
     ):
         c = NovaTradeCfg.load()
-        c.dry_run = True
         return c
 
 
@@ -106,8 +105,8 @@ class TestExecutionAutoEvidence:
         recorder: EvidenceRecorder,
         tracker: PositionTracker,
     ):
-        """Dry-run denial should auto-record an EXECUTION evidence entry."""
-        cfg.dry_run = True
+        """Symbol-denied execution should auto-record an EXECUTION evidence entry."""
+        cfg.symbols = ["GBPUSD"]  # EURUSD not allowed -> denied
         adapter = _make_adapter()
         executor = DemoExecutor(cfg, adapter, recorder=recorder, tracker=tracker)
 
@@ -127,7 +126,7 @@ class TestExecutionAutoEvidence:
         tracker: PositionTracker,
     ):
         """Filled execution should auto-record evidence with order details."""
-        cfg.dry_run = False
+
         adapter = _make_adapter(
             order_result=OrderResult(
                 ok=True,
@@ -155,7 +154,7 @@ class TestExecutionAutoEvidence:
         tracker: PositionTracker,
     ):
         """Adapter error should be captured in evidence."""
-        cfg.dry_run = False
+
         adapter = _make_adapter(
             order_result=OrderResult(ok=False, error="broker rejected"),
         )
@@ -192,11 +191,12 @@ class TestExecutionAutoEvidence:
     @pytest.mark.asyncio
     async def test_no_recorder_still_works(self, cfg: NovaTradeCfg):
         """Executor without recorder should work normally (backward compat)."""
+        cfg.symbols = ["GBPUSD"]  # trigger symbol denial
         adapter = _make_adapter()
         executor = DemoExecutor(cfg, adapter)  # no recorder, no tracker
 
         result = await executor.execute(_market_request())
-        assert result.outcome == ExecutionOutcome.DENIED  # dry_run blocks
+        assert result.outcome == ExecutionOutcome.DENIED
 
 
 # ===========================================================================
@@ -213,7 +213,7 @@ class TestExecutionAutoTracking:
         tracker: PositionTracker,
     ):
         """Filled execution should add expected position to tracker."""
-        cfg.dry_run = False
+
         adapter = _make_adapter(
             order_result=OrderResult(
                 ok=True,
@@ -240,7 +240,7 @@ class TestExecutionAutoTracking:
         tracker: PositionTracker,
     ):
         """Denied execution should NOT create expected positions."""
-        cfg.dry_run = True
+        cfg.symbols = ["GBPUSD"]  # EURUSD not allowed -> denied
         adapter = _make_adapter()
         executor = DemoExecutor(cfg, adapter, recorder=recorder, tracker=tracker)
 
@@ -256,7 +256,7 @@ class TestExecutionAutoTracking:
         tracker: PositionTracker,
     ):
         """Adapter error should NOT create expected positions."""
-        cfg.dry_run = False
+
         adapter = _make_adapter(
             order_result=OrderResult(ok=False, error="rejected"),
         )
@@ -274,7 +274,7 @@ class TestExecutionAutoTracking:
         recorder: EvidenceRecorder,
     ):
         """Executor without tracker should work normally."""
-        cfg.dry_run = False
+
         adapter = _make_adapter(
             order_result=OrderResult(
                 ok=True,
@@ -391,10 +391,10 @@ class TestEndToEndWorkflow:
         tracker: PositionTracker,
     ):
         """Full operator workflow: execute (denied) → review → report."""
-        cfg.dry_run = True
+        cfg.symbols = ["GBPUSD"]  # EURUSD not allowed -> denied
         adapter = _make_adapter()
 
-        # Step 1: Execute (will be denied by dry_run)
+        # Step 1: Execute (will be denied by risk gate — symbol not allowed)
         executor = DemoExecutor(cfg, adapter, recorder=recorder, tracker=tracker)
         result = await executor.execute(_market_request())
         assert result.denied
@@ -419,7 +419,7 @@ class TestEndToEndWorkflow:
         tracker: PositionTracker,
     ):
         """Full workflow: execute (filled) → review → report with tracked position."""
-        cfg.dry_run = False
+
         filled_result = OrderResult(
             ok=True,
             order_id="ORD-77",
@@ -462,11 +462,11 @@ class TestEndToEndWorkflow:
         tracker: PositionTracker,
     ):
         """Multiple executions should accumulate evidence correctly."""
-        cfg.dry_run = True
+        cfg.symbols = ["GBPUSD"]  # EURUSD not allowed -> denied
         adapter = _make_adapter()
         executor = DemoExecutor(cfg, adapter, recorder=recorder, tracker=tracker)
 
-        # Execute 3 times (all denied)
+        # Execute 3 times (all denied — symbol not allowed)
         for _ in range(3):
             await executor.execute(_market_request())
 

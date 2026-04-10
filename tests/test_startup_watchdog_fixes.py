@@ -35,7 +35,6 @@ def _cfg(**overrides) -> NovaTradeCfg:
         mode=AccountMode.DEMO,
         symbols=["EURUSD"],
         risk=risk,
-        dry_run=True,
     )
     defaults.update(overrides)
     return NovaTradeCfg(**defaults)  # type: ignore[arg-type]
@@ -49,16 +48,15 @@ def _cfg(**overrides) -> NovaTradeCfg:
 class TestAdapterConnectedFromRealState:
     """Verify that getattr(adapter, '_connected', fallback) logic works correctly."""
 
-    def test_dry_run_adapter_fallback_true(self):
-        """DryRunAdapter has no _connected → getattr falls back to is_dry_run=True."""
+    def test_adapter_fallback_no_connected_attr(self):
+        """Adapter without _connected → getattr falls back to default."""
 
         class FakeAdapter:
             pass
 
         adapter = FakeAdapter()
-        is_dry_run = True
-        # This is the exact logic from runner.py line 324
-        result = getattr(adapter, "_connected", is_dry_run)
+        # When adapter has no _connected attribute, getattr returns the default
+        result = getattr(adapter, "_connected", True)
         assert result is True
 
     def test_metaapi_adapter_connected_true(self):

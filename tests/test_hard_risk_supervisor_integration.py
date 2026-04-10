@@ -28,7 +28,6 @@ def cfg():
         metaapi=MetaApiConfig(),
         risk=RiskConfig(),
         ftmo=FtmoProfile(symbol_map={"EURUSD": "EURUSD"}),
-        dry_run=True,
     )
 
 
@@ -75,9 +74,6 @@ def supervisor():
 @pytest.fixture
 def trading_agent(cfg, mock_adapter, supervisor):
     """Test trading agent with supervisor."""
-    # Match runner.py behavior: set dry_run=False to allow orders through
-    cfg.dry_run = False
-
     risk_engine = RiskEngine(cfg)
     risk_engine.initialize(AccountState(balance=10000.0, equity=10000.0))
 
@@ -300,7 +296,7 @@ class TestHardRiskSupervisorIntegration:
         from novatrade.runtime.runner import build_stack
 
         # This tests that our changes to build_stack work correctly
-        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.DRY_RUN)
+        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
 
         # Verify supervisor is wired
         assert ws.agent._supervisor is not None

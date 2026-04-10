@@ -33,7 +33,6 @@ def _cfg(**overrides) -> NovaTradeCfg:
     risk_kw = overrides.pop("risk", {})
     risk = RiskConfig(**{**{"require_stop_loss": True}, **risk_kw})
     defaults = {
-        "dry_run": False,
         "symbols": ["EURUSD", "GBPUSD"],
         "risk": risk,
     }
@@ -165,20 +164,6 @@ class TestHappyPath:
 
 
 class TestGateDenial:
-    def test_dry_run_denies(self):
-        cfg = _cfg(dry_run=True)
-        adapter = _mock_adapter()
-        executor = DemoExecutor(cfg, adapter)
-
-        result = _run(executor.execute(_order()))
-
-        assert result.denied
-        assert result.outcome == ExecutionOutcome.DENIED
-        assert result.risk_decision is not None
-        assert result.risk_decision.denied
-        assert result.order_result is None
-        adapter.place_order.assert_not_called()
-
     def test_disallowed_symbol_denies(self):
         cfg = _cfg(symbols=["GBPUSD"])
         adapter = _mock_adapter()

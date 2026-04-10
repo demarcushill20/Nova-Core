@@ -7,9 +7,8 @@ Supports two pipeline modes controlled by ``NOVATRADE_PIPELINE``:
     strategy evaluation → signal queue → order execution (no TradingView)
 
 Launch modes (``NOVATRADE_LAUNCH_MODE``):
-  - dry_run:      DryRunAdapter, safe simulated mode (default)
   - active_ready: MetaApiAdapter connected, launch gate pending operator confirmation
-  - active_demo:  Full active FTMO demo routing after gate passes
+  - active_demo:  Full active FTMO demo routing after gate passes (default)
 
 Usage::
 
@@ -102,7 +101,7 @@ def log_crash(
     )
     env_vars: dict[str, str] = {
         "NOVATRADE_PIPELINE": os.environ.get("NOVATRADE_PIPELINE", "webhook"),
-        "NOVATRADE_LAUNCH_MODE": os.environ.get("NOVATRADE_LAUNCH_MODE", "dry_run"),
+        "NOVATRADE_LAUNCH_MODE": os.environ.get("NOVATRADE_LAUNCH_MODE", "active_demo"),
         "NOVATRADE_PORT": os.environ.get("NOVATRADE_PORT", "8877"),
     }
 
@@ -165,21 +164,12 @@ def setup_crash_handler() -> None:
 
 
 def _create_adapter(cfg: NovaTradeCfg, mode: LaunchMode) -> MT5Adapter:
-    """Create the appropriate adapter for the launch mode.
-
-    - dry_run: always DryRunAdapter (safe)
-    - active_ready / active_demo: MetaApiAdapter if credentials present
-    """
-    if mode == LaunchMode.DRY_RUN:
-        log.info("using DryRunAdapter (dry_run mode)")
-        return DryRunAdapter(inner=None)
-
-    # Active modes require MetaApiAdapter
+    """Create the appropriate adapter for the launch mode."""
     meta_errors = cfg.metaapi.validate()
     if meta_errors:
         raise RuntimeError(
             f"Cannot create MetaApiAdapter — missing credentials: {'; '.join(meta_errors)}. "
-            "Set METAAPI_TOKEN and METAAPI_ACCOUNT_ID, or use NOVATRADE_LAUNCH_MODE=dry_run."
+            "Set METAAPI_TOKEN and METAAPI_ACCOUNT_ID."
         )
 
     from novatrade.adapter.metaapi_provider import MetaApiAdapter
@@ -230,41 +220,30 @@ async def build_stack(
     validation = validate_startup(cfg, mode)
     if not validation.ok:
         log.error("startup validation FAILED: %s", validation.errors)
-        if mode != LaunchMode.DRY_RUN:
-            raise RuntimeError(f"Startup validation failed for {mode.value}: {'; '.join(validation.errors)}")
-        # Dry-run can proceed with warnings
-        log.warning("proceeding in dry_run despite validation warnings")
+        raise RuntimeError(f"Startup validation failed for {mode.value}: {'; '.join(validation.errors)}")
 
     for w in validation.warnings:
         log.warning("startup: %s", w)
 
     # --- Adapter ---
     adapter = _create_adapter(cfg, mode)
-    is_dry_run = isinstance(adapter, DryRunAdapter)
 
-    # Connect non-dry-run adapters (e.g. MetaApiAdapter)
-    adapter_connected = is_dry_run  # DryRunAdapter is always "connected"
-    if not is_dry_run:
-        status = await adapter.connect()
-        adapter_connected = status.connected
-        if not status.connected:
-            log.error(
-                "build_stack: adapter connection failed: %s (state=%s, latency=%.0fms)",
-                status.message,
-                status.state.value if status.state else "unknown",
-                status.latency_ms or 0,
-            )
-        else:
-            log.info("build_stack: adapter connected (%.0fms)", status.latency_ms or 0)
-
-    # For active adapter modes, cfg.dry_run must be False to allow orders
-    # through the pre-trade gate. For dry-run, the DryRunAdapter is the
-    # safety net so we also set cfg.dry_run=False.
-    cfg.dry_run = False
+    # Connect adapter
+    adapter_connected = False
+    status = await adapter.connect()
+    adapter_connected = status.connected
+    if not status.connected:
+        log.error(
+            "build_stack: adapter connection failed: %s (state=%s, latency=%.0fms)",
+            status.message,
+            status.state.value if status.state else "unknown",
+            status.latency_ms or 0,
+        )
+    else:
+        log.info("build_stack: adapter connected (%.0fms)", status.latency_ms or 0)
 
     # --- Evidence ---
     campaign = {
-        LaunchMode.DRY_RUN: "irb-dry-run",
         LaunchMode.ACTIVE_READY: "irb-active-ready",
         LaunchMode.ACTIVE_DEMO: "irb-active-demo",
     }[mode]
@@ -343,7 +322,6 @@ async def build_stack(
         risk_engine=risk_engine,
         monitor=monitor,
         recorder=recorder,
-        dry_run=is_dry_run,
         launch_mode=mode,
         adapter_type=_adapter_type_name(adapter),
         webhook_secret=os.environ.get("NOVATRADE_WEBHOOK_SECRET", ""),
@@ -417,7 +395,6 @@ def _validate_live_preflight(
     cfg: NovaTradeCfg,
     *,
     shadow: bool,
-    dry_run: bool,
 ) -> None:
     """Lightweight preflight validation for the live pipeline.
 
@@ -437,7 +414,7 @@ def _validate_live_preflight(
     if not cfg.data_dir:
         errors.append("data_dir is not set")
 
-    if not dry_run and not shadow:
+    if not shadow:
         meta_errors = cfg.metaapi.validate()
         if meta_errors:
             errors.extend(meta_errors)
@@ -464,7 +441,6 @@ async def build_live_stack(
     poll_interval: float = 30.0,
     health_interval: float = 5.0,
     shadow: bool = False,
-    dry_run: bool = False,
     strategy_config_path: str | None = None,
 ) -> LiveLoop:
     """Build the full live trading stack.
@@ -478,7 +454,6 @@ async def build_live_stack(
         poll_interval: Tick polling interval in seconds.
         health_interval: Feed health check interval.
         shadow: If True, use shadow mode (log only, no orders).
-        dry_run: If True, use DryRunAdapter.
         strategy_config_path: Path to strategy YAML config. If None,
             reads from ``NOVATRADE_STRATEGY_CONFIG`` env var. If neither
             is set, uses default BacktestEnvironment parameters.
@@ -486,7 +461,7 @@ async def build_live_stack(
     cfg = cfg or NovaTradeCfg.load()
 
     # --- Preflight validation ---
-    _validate_live_preflight(cfg, shadow=shadow, dry_run=dry_run)
+    _validate_live_preflight(cfg, shadow=shadow)
 
     symbol = cfg.symbols[0]
 
@@ -500,15 +475,15 @@ async def build_live_stack(
         )
 
     # --- Adapter ---
-    if dry_run or shadow:
+    if shadow:
         adapter: MT5Adapter = DryRunAdapter(inner=None)
-        log.info("build_live_stack: using DryRunAdapter (dry_run=%s shadow=%s)", dry_run, shadow)
+        log.info("build_live_stack: using DryRunAdapter (shadow=%s)", shadow)
     else:
         meta_errors = cfg.metaapi.validate()
         if meta_errors:
             raise RuntimeError(
                 f"Cannot create MetaApiAdapter — missing credentials: {'; '.join(meta_errors)}. "
-                "Use --dry-run or --shadow, or set METAAPI_TOKEN and METAAPI_ACCOUNT_ID."
+                "Use --shadow, or set METAAPI_TOKEN and METAAPI_ACCOUNT_ID."
             )
         from novatrade.adapter.metaapi_provider import MetaApiAdapter
 
@@ -518,12 +493,6 @@ async def build_live_stack(
         if not status.connected:
             raise RuntimeError(f"MetaApiAdapter connection failed: {status.message}")
         log.info("build_live_stack: adapter connected")
-
-    # For non-shadow/non-dry-run modes, ensure cfg.dry_run=False so the
-    # pre-trade gate allows real orders through MetaApiAdapter.
-    # Mirrors the same fix in build_stack() (line 255).
-    if not dry_run and not shadow:
-        cfg.dry_run = False
 
     # --- Account balance (CRITICAL: must succeed) ---
     try:
@@ -780,7 +749,7 @@ async def build_live_stack(
 
     # --- Post-Trade Verifier ---
     verifier = None
-    if not shadow and not dry_run:
+    if not shadow:
         from novatrade.monitor.post_trade_verifier import PostTradeVerifier
 
         verifier = PostTradeVerifier(env)
@@ -828,37 +797,6 @@ async def build_live_stack(
 
 
 # ---------------------------------------------------------------------------
-# Rollback to dry-run
-# ---------------------------------------------------------------------------
-
-
-def rollback_to_dry_run(
-    ws: WebhookState,
-    recorder: EvidenceRecorder | None = None,
-) -> None:
-    """Emergency rollback: switch the runtime to dry-run mode.
-
-    This replaces the agent's adapter with DryRunAdapter, marks the
-    webhook state as dry_run, and records the event.
-    """
-    dry_adapter = DryRunAdapter(inner=None)
-
-    if ws.agent is not None:
-        ws.agent._adapter = dry_adapter
-
-    ws.dry_run = True
-    ws.launch_mode = LaunchMode.DRY_RUN
-    ws.adapter_type = "DryRunAdapter"
-
-    log.warning("ROLLBACK: switched to DryRunAdapter (dry_run mode)")
-    record_launch_event(
-        recorder or ws.recorder,
-        "ROLLBACK_TO_DRY_RUN",
-        {"reason": "operator_triggered", "launch_mode": LaunchMode.DRY_RUN.value},
-    )
-
-
-# ---------------------------------------------------------------------------
 # Server runner
 # ---------------------------------------------------------------------------
 
@@ -871,8 +809,8 @@ async def run_server(
     port: int = 8877,
 ) -> None:
     """Run the webhook server and monitor loop concurrently."""
-    # Connect MetaApiAdapter if in active mode
-    if ws.agent and not ws.dry_run:
+    # Connect MetaApiAdapter if not already connected
+    if ws.agent:
         adapter = ws.agent._adapter
         if hasattr(adapter, "connect") and not getattr(adapter, "_connected", True):
             log.info("connecting MetaApiAdapter to broker...")
@@ -881,14 +819,9 @@ async def run_server(
                 if status.connected:
                     log.info("MetaApiAdapter connected successfully")
                 else:
-                    log.error(
-                        "MetaApiAdapter connection failed: %s — rolling back to dry-run",
-                        status.message,
-                    )
-                    rollback_to_dry_run(ws, ws.recorder)
+                    log.error("MetaApiAdapter connection failed: %s", status.message)
             except Exception:
-                log.exception("MetaApiAdapter connection failed — rolling back to dry-run")
-                rollback_to_dry_run(ws, ws.recorder)
+                log.exception("MetaApiAdapter connection failed")
 
     app = create_app(ws)
 

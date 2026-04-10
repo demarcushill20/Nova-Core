@@ -66,10 +66,10 @@ def _denied_execution(ts: float = 1001.0) -> ExecutionResult:
         outcome=ExecutionOutcome.DENIED,
         risk_decision=RiskDecision(
             verdict=RiskVerdict.DENY,
-            rule="dry_run",
-            reason="dry run mode active",
+            rule="kill_switch",
+            reason="kill switch active",
             checks=[
-                RiskCheckResult(name="dry_run", passed=False, detail="dry run active"),
+                RiskCheckResult(name="kill_switch", passed=False, detail="kill switch active"),
             ],
         ),
         elapsed_ms=5.0,
@@ -196,7 +196,7 @@ class TestEvidenceRecorder:
         assert len(records) == 1
         assert records[0].data["outcome"] == "DENIED"
         assert records[0].data["verdict"] == "DENY"
-        assert records[0].data["rule"] == "dry_run"
+        assert records[0].data["rule"] == "kill_switch"
 
     def test_record_execution_error(self, recorder: EvidenceRecorder):
         recorder.record_execution(_error_execution())

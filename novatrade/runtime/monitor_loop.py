@@ -93,9 +93,9 @@ class MonitorLoop:
         self._watchdog_cycle_counter = 0
         self._webhook_state = webhook_state
         # Run watchdog every N monitor cycles (default: every other cycle)
-        self._watchdog_every_n = max(1, int(
-            (watchdog_config or WatchdogConfig()).check_interval_seconds / interval_seconds
-        ))
+        self._watchdog_every_n = max(
+            1, int((watchdog_config or WatchdogConfig()).check_interval_seconds / interval_seconds)
+        )
 
     @property
     def running(self) -> bool:
@@ -257,10 +257,13 @@ class MonitorLoop:
             return False
 
         self._remediation_attempted = True
-        self._record("REMEDIATION_STARTED", {
-            "level": verdict.level.value,
-            "signals": [s.value for s in verdict.evidence.signals],
-        })
+        self._record(
+            "REMEDIATION_STARTED",
+            {
+                "level": verdict.level.value,
+                "signals": [s.value for s in verdict.evidence.signals],
+            },
+        )
 
         # Step 1: Attempt adapter reconnect
         adapter = self._monitor._adapter
@@ -278,30 +281,15 @@ class MonitorLoop:
                 log.error("remediation step 1: reconnect exception: %s", exc)
                 self._record("REMEDIATION_RECONNECT_FAILED", {"error": str(exc)[:300]})
 
-        # Step 2: Attempt rollback to dry-run (service-level recovery)
-        ws = self._webhook_state
-        if ws is not None:
-            log.warning("remediation step 2: rolling back to dry-run adapter")
-            try:
-                from novatrade.runtime.runner import rollback_to_dry_run
-
-                rollback_to_dry_run(ws, self._recorder)
-                log.info("remediation step 2: rollback to dry-run SUCCEEDED")
-                self._record("REMEDIATION_ROLLBACK_OK", {})
-                return True
-            except Exception as exc:
-                log.error("remediation step 2: rollback failed: %s", exc)
-                self._record("REMEDIATION_ROLLBACK_FAILED", {"error": str(exc)[:300]})
-
-        # Step 3: Escalate — nothing more we can safely do
-        log.critical(
-            "remediation EXHAUSTED: adapter reconnect and rollback both failed. "
-            "Manual intervention required."
+        # Step 2: Escalate — nothing more we can safely do
+        log.critical("remediation EXHAUSTED: adapter reconnect failed. Manual intervention required.")
+        self._record(
+            "REMEDIATION_EXHAUSTED",
+            {
+                "level": verdict.level.value,
+                "diagnosis": verdict.diagnosis[:500],
+            },
         )
-        self._record("REMEDIATION_EXHAUSTED", {
-            "level": verdict.level.value,
-            "diagnosis": verdict.diagnosis[:500],
-        })
         return False
 
     def _build_health_snapshot(self, cycle_result: CycleResult | None) -> RuntimeHealthSnapshot:
@@ -320,7 +308,6 @@ class MonitorLoop:
             last_alert_time = ws.last_alert_time
             alerts_received = ws.alerts_received
             alerts_rejected = ws.alerts_rejected
-            alerts_processed = ws.alerts_processed
             started_at = ws.started_at
         else:
             # Fallback: read from monitor internals (pre-Phase-2 path)
@@ -329,7 +316,6 @@ class MonitorLoop:
             last_alert_time = 0.0
             alerts_received = 0
             alerts_rejected = 0
-            alerts_processed = 0
             started_at = 0.0
 
         # Trade timing from agent (if available)
@@ -351,7 +337,7 @@ class MonitorLoop:
             trades_executed_today=trades_today,
             monitor_cycles_failed=self.stats.cycles_failed,
             consecutive_startup_failures=0,
-            risk_halted=monitor._risk_engine.halted if monitor._risk_engine else False,
+            risk_halted=bool(getattr(getattr(monitor, "_risk", None), "halted", False)),
             uptime_seconds=uptime,
         )
 

@@ -204,7 +204,6 @@ class NovaTradeCfg:
     ftmo: FtmoProfile = field(default_factory=FtmoProfile)
     log_dir: Path = Path("LOGS/novatrade")
     data_dir: Path = Path("OUTPUT/novatrade")
-    dry_run: bool = False  # live trading: real orders enabled
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> NovaTradeCfg:
@@ -230,8 +229,6 @@ class NovaTradeCfg:
         symbols_raw = os.environ.get("NOVATRADE_SYMBOLS", "EURUSD")
         timeframes_raw = os.environ.get("NOVATRADE_TIMEFRAMES", "H1")
 
-        dry_run_raw = os.environ.get("NOVATRADE_DRY_RUN", "true")
-
         return cls(
             mode=mode,
             provider=os.environ.get("NOVATRADE_PROVIDER", "metaapi"),
@@ -244,7 +241,6 @@ class NovaTradeCfg:
                 ),
             ),
             ftmo=FtmoProfile.from_env(),
-            dry_run=dry_run_raw.lower() in ("true", "1", "yes"),
         )
 
     def validate(self) -> list[str]:

@@ -131,14 +131,12 @@ class TestPreflightConfigChecks:
             ftmo=FtmoProfile(enabled=True),
             metaapi=MetaApiConfig(token="tok", account_id="acc"),
             symbols=["EURUSD"],
-            dry_run=True,
         )
         checks = check_config(cfg)
         statuses = {c.name: c.status for c in checks}
         assert statuses["config_valid"] == CheckStatus.PASS
         assert statuses["ftmo_enabled"] == CheckStatus.PASS
         assert statuses["mode_demo"] == CheckStatus.PASS
-        assert statuses["dry_run_safe"] == CheckStatus.PASS
         assert statuses["symbols_configured"] == CheckStatus.PASS
         assert statuses["risk_stop_loss"] == CheckStatus.PASS
         assert statuses["risk_drawdown"] == CheckStatus.PASS
@@ -154,12 +152,6 @@ class TestPreflightConfigChecks:
         checks = check_config(cfg)
         mode_check = next(c for c in checks if c.name == "mode_demo")
         assert mode_check.status == CheckStatus.FAIL
-
-    def test_dry_run_false_warns(self):
-        cfg = NovaTradeCfg(dry_run=False)
-        checks = check_config(cfg)
-        dr_check = next(c for c in checks if c.name == "dry_run_safe")
-        assert dr_check.status == CheckStatus.WARN
 
     def test_no_symbols_fails(self):
         cfg = NovaTradeCfg(symbols=[])
@@ -396,7 +388,7 @@ class TestFormatPreflight:
 
         result = PreflightResult(
             checks=[
-                PreflightCheck("dry_run_safe", CheckStatus.WARN, "dry_run=false"),
+                PreflightCheck("mode_check", CheckStatus.WARN, "mode=demo"),
             ],
             elapsed_ms=10.0,
         )

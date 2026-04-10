@@ -25,11 +25,10 @@ from novatrade.risk.pre_trade_gate import PreTradeGate
 
 
 def _cfg(**overrides) -> NovaTradeCfg:
-    """Build a test config with dry_run=False so orders can pass by default."""
+    """Build a test config so orders can pass by default."""
     risk_overrides = overrides.pop("risk", {})
     risk = RiskConfig(**{**{"require_stop_loss": True}, **risk_overrides})
     defaults = {
-        "dry_run": False,
         "symbols": ["EURUSD", "GBPUSD"],
         "risk": risk,
     }
@@ -83,7 +82,6 @@ class TestHappyPath:
         decision = gate.evaluate(_order(), _account(), [])
         check_names = [c.name for c in decision.checks]
         assert "kill_switch" in check_names
-        assert "dry_run" in check_names
         assert "account_mode" in check_names
         assert "feed_health" in check_names
         assert "symbol_allowed" in check_names
@@ -130,26 +128,6 @@ class TestKillSwitch:
         gate = PreTradeGate(_cfg())
         decision = gate.evaluate(_order(), _account(), [])
         assert decision.denied
-
-
-# ---------------------------------------------------------------------------
-# Dry run
-# ---------------------------------------------------------------------------
-
-
-class TestDryRun:
-    def test_dry_run_enabled_denies(self):
-        gate = PreTradeGate(_cfg(dry_run=True))
-        decision = gate.evaluate(_order(), _account(), [])
-        assert decision.denied
-        failed = {c.name for c in decision.failed_checks}
-        assert "dry_run" in failed
-
-    def test_dry_run_disabled_allows(self):
-        gate = PreTradeGate(_cfg(dry_run=False))
-        decision = gate.evaluate(_order(), _account(), [])
-        dr = next(c for c in decision.checks if c.name == "dry_run")
-        assert dr.passed
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +508,6 @@ class TestMultipleFailures:
     def test_multiple_failures_all_reported(self):
         gate = PreTradeGate(
             _cfg(
-                dry_run=True,  # fail
                 symbols=["GBPUSD"],  # EURUSD not allowed — fail
                 risk={"require_stop_loss": True},
             )
@@ -542,7 +519,6 @@ class TestMultipleFailures:
         )
         assert decision.denied
         failed_names = {c.name for c in decision.failed_checks}
-        assert "dry_run" in failed_names
         assert "symbol_allowed" in failed_names
         assert "stop_loss" in failed_names
         # First failure is the reason

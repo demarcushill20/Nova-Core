@@ -39,7 +39,6 @@ log = logging.getLogger("novatrade.runtime.launch_gate")
 class LaunchMode(Enum):
     """Runtime launch mode — explicit, operator-controlled."""
 
-    DRY_RUN = "dry_run"
     ACTIVE_READY = "active_ready"
     ACTIVE_DEMO = "active_demo"
 
@@ -152,28 +151,20 @@ class StartupValidation:
 def resolve_launch_mode() -> LaunchMode:
     """Determine launch mode from environment.
 
-    NOVATRADE_LAUNCH_MODE can be: dry_run, active_ready, active_demo.
-    Falls back to dry_run/active_ready based on NOVATRADE_DRY_RUN.
+    NOVATRADE_LAUNCH_MODE can be: active_ready, active_demo.
+    Defaults to active_demo.
     """
     explicit = os.environ.get("NOVATRADE_LAUNCH_MODE", "").lower().strip()
-    if explicit in ("dry_run", "dry-run", "dryrun"):
-        return LaunchMode.DRY_RUN
     if explicit in ("active_ready", "active-ready", "activeready"):
         return LaunchMode.ACTIVE_READY
     if explicit in ("active_demo", "active-demo", "activedemo"):
         return LaunchMode.ACTIVE_DEMO
-
-    # Fallback: infer from NOVATRADE_DRY_RUN
-    dry_run_raw = os.environ.get("NOVATRADE_DRY_RUN", "true").lower()
-    if dry_run_raw in ("true", "1", "yes"):
-        return LaunchMode.DRY_RUN
-    return LaunchMode.ACTIVE_READY
+    return LaunchMode.ACTIVE_DEMO
 
 
 def validate_startup(cfg: NovaTradeCfg, mode: LaunchMode) -> StartupValidation:
     """Validate configuration for the requested launch mode.
 
-    - dry_run: minimal validation, works without credentials
     - active_ready: full validation, fails on missing credentials
     - active_demo: same as active_ready + operator confirmation required
     """
@@ -208,10 +199,6 @@ def validate_startup(cfg: NovaTradeCfg, mode: LaunchMode) -> StartupValidation:
         # FTMO profile (warning if not enabled)
         if not cfg.ftmo.enabled:
             warnings.append("FTMO profile not enabled — set FTMO_ENABLED=true for FTMO demo")
-
-    # --- Dry-run specific ---
-    if mode == LaunchMode.DRY_RUN and not cfg.metaapi.token:
-        warnings.append("METAAPI_TOKEN not set — DryRunAdapter will be used (expected)")
 
     ok = len(errors) == 0
     return StartupValidation(ok=ok, mode=mode, errors=errors, warnings=warnings)
@@ -300,40 +287,26 @@ def evaluate_launch_gate(
 
     # --- 3. Adapter readiness ---
     is_active_adapter = adapter_type != "DryRunAdapter"
-    if mode in (LaunchMode.ACTIVE_READY, LaunchMode.ACTIVE_DEMO):
-        checks.append(
-            GateCheck(
-                name="active_adapter_selected",
-                category=CheckCategory.ADAPTER,
-                passed=is_active_adapter,
-                detail=f"Adapter: {adapter_type}"
-                if is_active_adapter
-                else "Still using DryRunAdapter — need MetaApiAdapter for active mode",
-            )
+    checks.append(
+        GateCheck(
+            name="active_adapter_selected",
+            category=CheckCategory.ADAPTER,
+            passed=is_active_adapter,
+            detail=f"Adapter: {adapter_type}"
+            if is_active_adapter
+            else "Still using DryRunAdapter — need MetaApiAdapter for active mode",
         )
-        checks.append(
-            GateCheck(
-                name="adapter_connected",
-                category=CheckCategory.ADAPTER,
-                passed=adapter_connected,
-                detail="Adapter connected to broker" if adapter_connected else "Adapter not connected",
-            )
+    )
+    checks.append(
+        GateCheck(
+            name="adapter_connected",
+            category=CheckCategory.ADAPTER,
+            passed=adapter_connected,
+            detail="Adapter connected to broker" if adapter_connected else "Adapter not connected",
         )
-        if not is_active_adapter:
-            operator_tasks.append(
-                "Set NOVATRADE_LAUNCH_MODE=active_ready and ensure MetaApi credentials are configured"
-            )
-    else:
-        # Dry-run: DryRunAdapter is expected
-        checks.append(
-            GateCheck(
-                name="dry_run_adapter",
-                category=CheckCategory.ADAPTER,
-                passed=True,
-                detail=f"DryRunAdapter active (expected for {mode.value})",
-                required_for_active=False,
-            )
-        )
+    )
+    if not is_active_adapter:
+        operator_tasks.append("Set NOVATRADE_LAUNCH_MODE=active_ready and ensure MetaApi credentials are configured")
 
     # --- 4. Risk governance readiness ---
     checks.append(
@@ -385,19 +358,7 @@ def evaluate_launch_gate(
     # --- Compute verdict ---
     required_failed = [c for c in checks if not c.passed and c.required_for_active]
 
-    if mode == LaunchMode.DRY_RUN:
-        # Dry-run only needs code + basic config — warnings are acceptable
-        code_config_failed = [
-            c for c in checks if not c.passed and c.category in (CheckCategory.CODE, CheckCategory.MONITORING)
-        ]
-        if code_config_failed:
-            verdict = ReadinessVerdict.NOT_READY
-            for c in code_config_failed:
-                blockers.append(c.detail)
-        else:
-            verdict = ReadinessVerdict.READY_FOR_ACTIVE_DEMO
-
-    elif mode == LaunchMode.ACTIVE_READY:
+    if mode == LaunchMode.ACTIVE_READY:
         if required_failed:
             # Check if only external confirmations are missing
             non_external_failures = [c for c in required_failed if c.category != CheckCategory.EXTERNAL]

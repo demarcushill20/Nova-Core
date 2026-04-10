@@ -71,7 +71,6 @@ class TestNovaTradeCfg:
     def test_defaults(self):
         cfg = NovaTradeCfg()
         assert cfg.mode == AccountMode.DEMO
-        assert cfg.dry_run is False  # default changed to False (live trading)
         assert "EURUSD" in cfg.symbols
 
     def test_load_defaults(self, monkeypatch):
@@ -81,7 +80,6 @@ class TestNovaTradeCfg:
             "NOVATRADE_SYMBOLS",
             "NOVATRADE_TIMEFRAMES",
             "NOVATRADE_PROVIDER",
-            "NOVATRADE_DRY_RUN",
             "METAAPI_TOKEN",
             "METAAPI_ACCOUNT_ID",
         ):
@@ -90,19 +88,16 @@ class TestNovaTradeCfg:
         cfg = NovaTradeCfg.load(env_file=Path("/nonexistent"))
         assert cfg.mode == AccountMode.DEMO
         assert cfg.symbols == ["EURUSD"]
-        assert cfg.dry_run is True  # load() defaults to dry_run=True as safety net
 
     def test_load_with_env(self, monkeypatch):
         monkeypatch.setenv("NOVATRADE_MODE", "CHALLENGE")
         monkeypatch.setenv("NOVATRADE_SYMBOLS", "EURUSD,GBPUSD,USDJPY")
-        monkeypatch.setenv("NOVATRADE_DRY_RUN", "false")
         monkeypatch.setenv("METAAPI_TOKEN", "tok")
         monkeypatch.setenv("METAAPI_ACCOUNT_ID", "acc")
 
         cfg = NovaTradeCfg.load(env_file=Path("/nonexistent"))
         assert cfg.mode == AccountMode.CHALLENGE
         assert cfg.symbols == ["EURUSD", "GBPUSD", "USDJPY"]
-        assert cfg.dry_run is False
 
     def test_load_invalid_mode_falls_back(self, monkeypatch):
         monkeypatch.setenv("NOVATRADE_MODE", "INVALID_MODE")

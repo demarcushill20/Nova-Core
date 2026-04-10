@@ -32,7 +32,6 @@ def _cfg(**overrides) -> NovaTradeCfg:
     risk_overrides = overrides.pop("risk", {})
     risk = RiskConfig(**{**{"require_stop_loss": True}, **risk_overrides})
     defaults = {
-        "dry_run": False,
         "symbols": ["EURUSD"],
         "risk": risk,
     }
