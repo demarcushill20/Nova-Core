@@ -827,7 +827,7 @@ class TestSpreadVsAvg:
 
     def test_no_price_skips(self):
         """No price data → check passes (graceful skip)."""
-        gate = PreTradeGate(_cfg())
+        gate = PreTradeGate(_cfg(risk={"spread_vs_avg_multiplier": 2.0}))
         decision = gate.evaluate(_order(), _account(), [], price=None)
         c = next(c for c in decision.checks if c.name == "spread_vs_avg")
         assert c.passed
@@ -835,7 +835,7 @@ class TestSpreadVsAvg:
 
     def test_no_feed_health_skips(self):
         """No feed health supervisor → check passes (graceful skip)."""
-        gate = PreTradeGate(_cfg())
+        gate = PreTradeGate(_cfg(risk={"spread_vs_avg_multiplier": 2.0}))
         price = SymbolPrice(symbol="EURUSD", bid=1.10000, ask=1.10020)
         decision = gate.evaluate(_order(), _account(), [], price=price)
         c = next(c for c in decision.checks if c.name == "spread_vs_avg")
