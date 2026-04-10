@@ -95,6 +95,11 @@ class TaskRequest(BaseModel):
     token: str | None = None
 
 
+class CreateThreadRequest(BaseModel):
+    title: str | None = None
+    token: str | None = None
+
+
 class TokenRequest(BaseModel):
     token: str | None = None
 
@@ -793,6 +798,15 @@ async def list_threads(
         "offset": offset,
         "limit": limit,
     }
+
+
+@app.post("/api/threads")
+async def create_thread_endpoint(req: CreateThreadRequest):
+    """Create a new empty conversation thread."""
+    _check_token(req.token)
+    thread = _thread_store.create_thread(title=req.title or "")
+    await _broadcast("thread_created", {"thread_id": thread.id, "title": thread.title})
+    return thread.to_dict()
 
 
 @app.get("/api/threads/default")

@@ -6,38 +6,215 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Nova-Link">
-  <meta name="theme-color" content="#0a0a0f">
+  <meta name="theme-color" content="#0b0b12">
+  <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=8">
   <title>Nova-Link</title>
 </head>
 <body>
 
   <!-- Header -->
   <div class="header">
-    <h1>Nova-Link</h1>
-    <div style="display:flex;align-items:center">
+    <div class="header-brand">
+      <span class="brand-mark"></span>
+      <h1>Nova-Link</h1>
+    </div>
+    <div class="status-pill" id="status-pill">
       <span id="status-dot" class="status-dot unknown"></span>
-      <span id="status-text" style="font-size:13px;font-weight:600">Loading...</span>
+      <span id="status-text">Loading…</span>
     </div>
   </div>
 
   <!-- Navigation -->
   <div class="nav">
-    <button data-page="dashboard" class="active" onclick="switchPage('dashboard')">Dashboard</button>
-    <button data-page="chat" onclick="switchPage('chat')">Chat</button>
+    <button data-page="chat" class="active" onclick="switchPage('chat')">Chat</button>
+    <button data-page="dashboard" onclick="switchPage('dashboard')">Dashboard</button>
     <button data-page="reports" onclick="switchPage('reports')">Reports</button>
     <button data-page="controls" onclick="switchPage('controls')">Controls</button>
   </div>
 
+  <!-- Chat Page -->
+  <div id="page-chat" class="page active">
+    <div class="chat-shell">
+      <!-- Chat header -->
+      <div class="chat-header">
+        <button class="btn-icon" onclick="openSidebar()" aria-label="Conversations">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        <div class="chat-title" id="chat-title">New conversation</div>
+        <button class="btn-icon" onclick="newConversation()" aria-label="New conversation">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Chat body -->
+      <div class="chat-body">
+        <!-- Empty / welcome state -->
+        <div class="chat-empty" id="chat-empty">
+          <div class="empty-glow"></div>
+          <h2 class="empty-title">Hi, I'm Nova</h2>
+          <p class="empty-tagline">Your AI co-pilot for the Nova-Core runtime</p>
+          <div class="empty-prompts" id="empty-prompts">
+            <button class="prompt-card" onclick="sendPrompt('Show me today\u2019s heartbeat status')">
+              <span class="prompt-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                </svg>
+              </span>
+              <span class="prompt-text">Show me today's heartbeat status</span>
+            </button>
+            <button class="prompt-card" onclick="sendPrompt('Summarize my last research cycle')">
+              <span class="prompt-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </span>
+              <span class="prompt-text">Summarize my last research cycle</span>
+            </button>
+            <button class="prompt-card" onclick="sendPrompt('Create a task to ')">
+              <span class="prompt-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 11l3 3L22 4"/>
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                </svg>
+              </span>
+              <span class="prompt-text">Create a task to…</span>
+            </button>
+            <button class="prompt-card" onclick="sendPrompt('What\u2019s new in my Obsidian vault?')">
+              <span class="prompt-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                </svg>
+              </span>
+              <span class="prompt-text">What's new in my Obsidian vault?</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div class="chat-messages" id="chat-messages"></div>
+      </div>
+
+      <!-- Composer -->
+      <div class="chat-composer">
+        <!-- Voice settings sheet (slides up from composer) -->
+        <div id="voice-settings" class="voice-settings" style="display:none">
+          <div class="voice-setting-row">
+            <label>Voice</label>
+            <select id="voice-select" onchange="saveVoiceSetting()"></select>
+          </div>
+          <div class="voice-setting-row">
+            <label>Speed</label>
+            <div class="speed-control">
+              <input type="range" id="voice-speed" min="0.5" max="2" step="0.1" value="1" oninput="updateSpeedLabel(); saveVoiceSetting()">
+              <span id="speed-label">1.0x</span>
+            </div>
+          </div>
+          <div class="voice-setting-row">
+            <label>Pitch</label>
+            <div class="speed-control">
+              <input type="range" id="voice-pitch" min="0.5" max="2" step="0.1" value="1" oninput="updatePitchLabel(); saveVoiceSetting()">
+              <span id="pitch-label">1.0x</span>
+            </div>
+          </div>
+          <button class="control-btn" onclick="testVoice()" style="width:100%;margin-top:8px">Test Voice</button>
+        </div>
+
+        <!-- Voice mode panel (mic + transcript) -->
+        <div id="voice-input-bar" class="voice-input-bar" style="display:none">
+          <div id="voice-status" class="voice-status">Tap to speak</div>
+          <button id="mic-btn" class="mic-btn" onclick="toggleVoice()" aria-label="Microphone">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </button>
+          <div id="voice-transcript" class="voice-transcript"></div>
+          <button class="mode-btn" onclick="setChatMode('text')">Back to text</button>
+        </div>
+
+        <!-- Text composer -->
+        <div class="composer-row" id="composer-row">
+          <textarea
+            id="chat-input"
+            class="composer-input"
+            placeholder="Message Nova…"
+            rows="1"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="true"></textarea>
+          <div class="composer-actions">
+            <button class="btn-icon composer-btn" onclick="setChatMode('voice')" aria-label="Voice mode" title="Voice mode">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            </button>
+            <button id="tts-toggle" class="btn-icon composer-btn" onclick="toggleTTS()" aria-label="Toggle voice responses" title="Toggle spoken replies">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+              </svg>
+            </button>
+            <button id="voice-settings-btn" class="btn-icon composer-btn" onclick="toggleVoiceSettings()" aria-label="Voice settings" title="Voice settings">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </button>
+            <button id="send-btn" class="send-btn" onclick="sendChat()" disabled aria-label="Send">
+              <svg class="send-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+              <svg class="send-spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <circle cx="12" cy="12" r="9" opacity="0.25"/>
+                <path d="M21 12a9 9 0 0 1-9 9"/>
+              </svg>
+              <svg class="send-check" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Dashboard Page -->
-  <div id="page-dashboard" class="page active">
-    <!-- Heartbeat -->
-    <div class="card" onclick="loadHealthChecks()">
-      <div class="card-title">Heartbeat</div>
-      <div class="card-value" id="hb-checks">--/--</div>
-      <div class="card-detail">checks passed &middot; <span id="hb-time">--</span></div>
+  <div id="page-dashboard" class="page">
+    <!-- Heartbeat hero -->
+    <div class="card hero-card" onclick="loadHealthChecks()">
+      <div class="hero-row">
+        <div>
+          <div class="card-title">Heartbeat</div>
+          <div class="hero-value" id="hb-checks">--/--</div>
+          <div class="card-detail">checks passed · <span id="hb-time">--</span></div>
+        </div>
+        <div class="hero-pill" id="hero-pill">
+          <span class="hero-pill-dot"></span>
+          <span id="hero-pill-text">UNKNOWN</span>
+        </div>
+      </div>
     </div>
 
     <!-- Health checks (hidden until tapped) -->
@@ -49,18 +226,35 @@
     <!-- Tasks -->
     <div class="card">
       <div class="card-title">Task Queue</div>
-      <div class="grid-3">
-        <div style="text-align:center">
-          <div class="card-value" id="tasks-pending">-</div>
-          <div class="card-detail">Pending</div>
+      <div class="stat-row">
+        <div class="stat-tile">
+          <div class="stat-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+          <div class="stat-value" id="tasks-pending">-</div>
+          <div class="stat-label">Pending</div>
         </div>
-        <div style="text-align:center">
-          <div class="card-value" style="color:var(--green)" id="tasks-done">-</div>
-          <div class="card-detail">Done</div>
+        <div class="stat-tile stat-tile-green">
+          <div class="stat-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </div>
+          <div class="stat-value" id="tasks-done">-</div>
+          <div class="stat-label">Done</div>
         </div>
-        <div style="text-align:center">
-          <div class="card-value" style="color:var(--red)" id="tasks-failed">-</div>
-          <div class="card-detail">Failed</div>
+        <div class="stat-tile stat-tile-red">
+          <div class="stat-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </div>
+          <div class="stat-value" id="tasks-failed">-</div>
+          <div class="stat-label">Failed</div>
         </div>
       </div>
     </div>
@@ -88,73 +282,6 @@
     </div>
   </div>
 
-  <!-- Chat Page -->
-  <div id="page-chat" class="page">
-    <div class="chat-container">
-      <!-- Voice mode toggle -->
-      <div class="chat-mode-bar">
-        <button id="mode-text" class="mode-btn active" onclick="setChatMode('text')">Text</button>
-        <button id="mode-voice" class="mode-btn" onclick="setChatMode('voice')">Voice</button>
-        <button id="voice-settings-btn" class="tts-btn" onclick="toggleVoiceSettings()" title="Voice settings">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
-        </button>
-        <button id="tts-toggle" class="tts-btn" onclick="toggleTTS()" title="Toggle voice responses">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-            <path id="tts-waves" d="M15.54 8.46a5 5 0 0 1 0 7.07 M19.07 4.93a10 10 0 0 1 0 14.14"/>
-          </svg>
-        </button>
-      </div>
-
-      <!-- Voice settings panel -->
-      <div id="voice-settings" class="voice-settings" style="display:none">
-        <div class="voice-setting-row">
-          <label>Voice</label>
-          <select id="voice-select" onchange="saveVoiceSetting()"></select>
-        </div>
-        <div class="voice-setting-row">
-          <label>Speed</label>
-          <div class="speed-control">
-            <input type="range" id="voice-speed" min="0.5" max="2" step="0.1" value="1" oninput="updateSpeedLabel(); saveVoiceSetting()">
-            <span id="speed-label">1.0x</span>
-          </div>
-        </div>
-        <div class="voice-setting-row">
-          <label>Pitch</label>
-          <div class="speed-control">
-            <input type="range" id="voice-pitch" min="0.5" max="2" step="0.1" value="1" oninput="updatePitchLabel(); saveVoiceSetting()">
-            <span id="pitch-label">1.0x</span>
-          </div>
-        </div>
-        <button class="mode-btn" onclick="testVoice()" style="width:100%;margin-top:8px">Test Voice</button>
-      </div>
-
-      <div class="chat-messages" id="chat-messages"></div>
-
-      <!-- Text input mode -->
-      <div class="chat-input-bar" id="text-input-bar">
-        <input type="text" id="chat-input" placeholder="Message Nova..." autocomplete="off">
-        <button onclick="sendChat()">Send</button>
-      </div>
-
-      <!-- Voice input mode -->
-      <div class="voice-input-bar" id="voice-input-bar" style="display:none">
-        <div id="voice-status" class="voice-status">Tap to speak</div>
-        <button id="mic-btn" class="mic-btn" onclick="toggleVoice()">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-            <line x1="12" y1="19" x2="12" y2="23"/>
-            <line x1="8" y1="23" x2="16" y2="23"/>
-          </svg>
-        </button>
-        <div id="voice-transcript" class="voice-transcript"></div>
-      </div>
-    </div>
-  </div>
-
   <!-- Reports Page -->
   <div id="page-reports" class="page">
     <div id="reports-list"></div>
@@ -171,20 +298,58 @@
     <div class="card">
       <div class="card-title">Actions</div>
       <button class="control-btn primary" onclick="triggerHeartbeat()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="13 2 13 10 21 10"/>
+          <path d="M21 12A9 9 0 1 1 12 3"/>
+        </svg>
         Trigger Heartbeat
       </button>
       <button class="control-btn" onclick="injectTask()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
         Inject Task
       </button>
       <button class="control-btn" onclick="loadDashboard(); switchPage('dashboard'); toast('Refreshed!')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/>
+          <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
+        </svg>
         Refresh Dashboard
       </button>
+    </div>
+  </div>
+
+  <!-- Conversation sidebar (slides in from left) -->
+  <div id="chat-sidebar" class="chat-sidebar">
+    <div class="sidebar-backdrop" onclick="closeSidebar()"></div>
+    <div class="sidebar-panel">
+      <div class="sidebar-header">
+        <span>Conversations</span>
+        <button class="btn-icon" onclick="closeSidebar()" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <button class="sidebar-new-btn" onclick="newConversation(); closeSidebar()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        New conversation
+      </button>
+      <div id="thread-list" class="sidebar-thread-list"></div>
     </div>
   </div>
 
   <!-- Toast -->
   <div id="toast" class="toast"></div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
-// Nova-Link — PWA Dashboard for Nova-Core
+// Nova-Link — Modern AI app frontend
 const API = window.location.origin;
-let currentPage = 'dashboard';
+let currentPage = 'chat';
 let ws = null;
 
 // --- Navigation ---
@@ -11,7 +11,6 @@ function switchPage(page) {
   document.querySelector(`[data-page="${page}"]`).classList.add('active');
   currentPage = page;
 
-  // Load data for the page
   if (page === 'dashboard') loadDashboard();
   else if (page === 'chat') loadChatHistory();
   else if (page === 'reports') loadReports();
@@ -23,7 +22,7 @@ function toast(msg) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2500);
+  setTimeout(() => el.classList.remove('show'), 2400);
 }
 
 // --- API helper ---
@@ -49,12 +48,23 @@ async function loadDashboard() {
 
   const hb = data.heartbeat;
   const isHealthy = hb.status === 'HEALTHY';
+  const isUnhealthy = hb.status && hb.status !== 'HEALTHY' && hb.status !== 'unknown';
 
-  // Status header
+  // Header status pill
+  const pill = document.getElementById('status-pill');
+  pill.className = `status-pill ${isHealthy ? 'healthy' : isUnhealthy ? 'unhealthy' : ''}`;
   document.getElementById('status-dot').className =
-    `status-dot ${isHealthy ? 'healthy' : 'unhealthy'}`;
+    `status-dot ${isHealthy ? 'healthy' : isUnhealthy ? 'unhealthy' : 'unknown'}`;
   document.getElementById('status-text').textContent =
-    isHealthy ? 'HEALTHY' : hb.status;
+    isHealthy ? 'HEALTHY' : (hb.status || 'UNKNOWN');
+
+  // Hero pill on heartbeat card
+  const heroPill = document.getElementById('hero-pill');
+  if (heroPill) {
+    heroPill.className = `hero-pill ${isHealthy ? 'healthy' : isUnhealthy ? 'unhealthy' : ''}`;
+    document.getElementById('hero-pill-text').textContent =
+      isHealthy ? 'HEALTHY' : (hb.status || 'UNKNOWN');
+  }
 
   // Heartbeat card
   document.getElementById('hb-checks').textContent =
@@ -62,7 +72,7 @@ async function loadDashboard() {
   document.getElementById('hb-time').textContent =
     hb.last_check ? timeAgo(hb.last_check) : 'never';
 
-  // Tasks card
+  // Tasks
   const t = data.tasks;
   document.getElementById('tasks-pending').textContent = t.pending;
   document.getElementById('tasks-done').textContent = t.done;
@@ -86,16 +96,15 @@ async function loadDashboard() {
   if (data.goals && data.goals.length > 0) {
     goalsEl.innerHTML = data.goals.map(g =>
       `<div class="check-item">
-        <span class="check-icon">🎯</span>
-        <span class="check-name">${g.text || g.title || 'Goal'}</span>
-        <span class="check-detail">${g.priority || g.status || ''}</span>
+        <span class="check-icon">·</span>
+        <span class="check-name">${escapeHtml(g.text || g.title || 'Goal')}</span>
+        <span class="check-detail">${escapeHtml(g.priority || g.status || '')}</span>
       </div>`
     ).join('');
   } else {
-    goalsEl.innerHTML = '<div class="check-item"><span style="color:var(--text-dim)">No active goals</span></div>';
+    goalsEl.innerHTML = '<div class="check-item"><span style="color:var(--text-faint)">No active goals</span></div>';
   }
 
-  // Research/Planning
   document.getElementById('last-research').textContent =
     data.last_research ? data.last_research.split('] ')[1] || data.last_research : 'No research yet';
   document.getElementById('last-planning').textContent =
@@ -111,48 +120,141 @@ async function loadHealthChecks() {
   if (data.checks && data.checks.length > 0) {
     el.innerHTML = data.checks.map(c =>
       `<div class="check-item">
-        <span class="check-icon">${c.ok ? '✅' : '❌'}</span>
-        <span class="check-name">${c.name}</span>
-        <span class="check-detail">${c.detail}</span>
+        <span class="check-icon">${c.ok ? '✓' : '✕'}</span>
+        <span class="check-name">${escapeHtml(c.name)}</span>
+        <span class="check-detail">${escapeHtml(c.detail)}</span>
       </div>`
     ).join('');
   }
   el.closest('.card').style.display = 'block';
 }
 
-// --- Chat ---
+// --- Chat state ---
 const chatMessages = [];
 let chatHistoryLoaded = false;
 let activeThreadId = null;
-let chatMode = 'text';  // 'text' or 'voice'
+const THREAD_KEY = 'nova-active-thread-id';
+let chatMode = 'text';
 let ttsEnabled = true;
 let isListening = false;
 let recognition = null;
-let selectedVoice = null;
 
+// --- Markdown renderer (small subset, no deps) ---
+function renderMarkdown(src) {
+  if (!src) return '';
+  const codeBlocks = [];
+  const inlineCodes = [];
+
+  // 1. Extract fenced code blocks
+  let s = src.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push({ lang: lang || '', code });
+    return `\u0000CODEBLOCK${idx}\u0000`;
+  });
+
+  // 2. Extract inline code
+  s = s.replace(/`([^`\n]+)`/g, (_, code) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(code);
+    return `\u0000INLINECODE${idx}\u0000`;
+  });
+
+  // 3. HTML-escape everything else
+  s = escapeHtml(s);
+
+  // 4. Inline transforms
+  s = s
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
+    .replace(/(?<![*\w])\*([^*\n]+?)\*(?!\w)/g, '<em>$1</em>')
+    .replace(/(?<![_\w])_([^_\n]+?)_(?!\w)/g, '<em>$1</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  // 5. Block transforms (line-by-line)
+  const lines = s.split('\n');
+  const out = [];
+  let inList = null; // 'ul' | 'ol' | null
+  let para = [];
+
+  const flushPara = () => {
+    if (para.length) {
+      out.push(`<p>${para.join(' ')}</p>`);
+      para = [];
+    }
+  };
+  const closeList = () => {
+    if (inList) { out.push(`</${inList}>`); inList = null; }
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    if (!line.trim()) {
+      flushPara();
+      closeList();
+      continue;
+    }
+    let m;
+    if ((m = line.match(/^(#{1,3})\s+(.*)$/))) {
+      flushPara(); closeList();
+      out.push(`<h${m[1].length}>${m[2]}</h${m[1].length}>`);
+      continue;
+    }
+    if ((m = line.match(/^[-*]\s+(.*)$/))) {
+      flushPara();
+      if (inList !== 'ul') { closeList(); out.push('<ul>'); inList = 'ul'; }
+      out.push(`<li>${m[1]}</li>`);
+      continue;
+    }
+    if ((m = line.match(/^\d+\.\s+(.*)$/))) {
+      flushPara();
+      if (inList !== 'ol') { closeList(); out.push('<ol>'); inList = 'ol'; }
+      out.push(`<li>${m[1]}</li>`);
+      continue;
+    }
+    closeList();
+    para.push(line);
+  }
+  flushPara();
+  closeList();
+
+  let html = out.join('\n');
+
+  // 6. Re-insert inline code (escaped)
+  html = html.replace(/\u0000INLINECODE(\d+)\u0000/g, (_, idx) =>
+    `<code>${escapeHtml(inlineCodes[+idx])}</code>`);
+
+  // 7. Re-insert fenced code blocks (escaped)
+  html = html.replace(/\u0000CODEBLOCK(\d+)\u0000/g, (_, idx) => {
+    const { lang, code } = codeBlocks[+idx];
+    const cls = lang ? ` class="lang-${escapeHtml(lang)}"` : '';
+    return `<pre><code${cls}>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`;
+  });
+
+  return html;
+}
+
+// --- Chat history loading ---
 async function loadChatHistory() {
   if (chatHistoryLoaded) return;
 
-  // Load from thread API (Phase 2+) — falls back to legacy if unavailable
-  const threadData = await api('/api/threads/default');
-  if (threadData && threadData.id) {
-    activeThreadId = threadData.id;
-    const msgData = await api(`/api/threads/${activeThreadId}/messages?limit=100&order=asc`);
-    if (msgData && msgData.messages) {
-      chatMessages.length = 0;
-      for (const m of msgData.messages) {
-        if (m.role === 'user' || m.role === 'assistant') {
-          chatMessages.push({
-            role: m.role,
-            content: m.content,
-            created_at: m.created_at,
-          });
-        }
-      }
-      chatHistoryLoaded = true;
-      renderChat();
-      return;
-    }
+  let thread = null;
+  const saved = localStorage.getItem(THREAD_KEY);
+  if (saved) {
+    thread = await api(`/api/threads/${saved}`);
+    if (!thread || !thread.id) thread = null;
+  }
+  if (!thread) {
+    thread = await api('/api/threads/default');
+  }
+
+  if (thread && thread.id) {
+    activeThreadId = thread.id;
+    localStorage.setItem(THREAD_KEY, thread.id);
+    updateThreadTitle(thread.title);
+    await _loadThreadMessages(thread.id);
+    chatHistoryLoaded = true;
+    return;
   }
 
   // Fallback: legacy chat history endpoint
@@ -161,7 +263,6 @@ async function loadChatHistory() {
   chatMessages.length = 0;
   for (const m of data.messages) {
     if (m.role === 'user' || m.role === 'assistant') {
-      // Filter out injected summary blobs
       if (m.content && m.content.startsWith('[Prior conversation summary:')) continue;
       chatMessages.push({ role: m.role, content: m.content });
     }
@@ -170,47 +271,140 @@ async function loadChatHistory() {
   renderChat();
 }
 
-// --- Async chat job handling (polling + WebSocket) ---
+async function _loadThreadMessages(threadId) {
+  const msgData = await api(`/api/threads/${threadId}/messages?limit=200&order=asc`);
+  chatMessages.length = 0;
+  if (msgData && msgData.messages) {
+    for (const m of msgData.messages) {
+      if (m.role === 'user' || m.role === 'assistant') {
+        chatMessages.push({
+          role: m.role,
+          content: m.content,
+          created_at: m.created_at,
+        });
+      }
+    }
+  }
+  renderChat();
+}
+
+function updateThreadTitle(title) {
+  const el = document.getElementById('chat-title');
+  if (el) el.textContent = title || 'New conversation';
+}
+
+// --- Thread management ---
+async function newConversation() {
+  _stopJobPolling();
+  _typingStartTime = null;
+
+  const thread = await api('/api/threads', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (!thread || !thread.id) {
+    toast('Could not create conversation');
+    return;
+  }
+
+  activeThreadId = thread.id;
+  localStorage.setItem(THREAD_KEY, thread.id);
+  updateThreadTitle(thread.title);
+  chatMessages.length = 0;
+  renderChat();
+  chatHistoryLoaded = true;
+  toast('New conversation started');
+  document.getElementById('chat-input')?.focus();
+}
+
+function openSidebar() {
+  const sb = document.getElementById('chat-sidebar');
+  sb.classList.add('is-open');
+  refreshThreadList();
+}
+
+function closeSidebar() {
+  document.getElementById('chat-sidebar').classList.remove('is-open');
+}
+
+async function refreshThreadList() {
+  const data = await api('/api/threads?status=active&limit=100');
+  const el = document.getElementById('thread-list');
+  if (!data || !data.threads || data.threads.length === 0) {
+    el.innerHTML = '<div class="thread-list-empty">No conversations yet.</div>';
+    return;
+  }
+  el.innerHTML = data.threads.map(t => {
+    const title = escapeHtml(t.title || 'Untitled');
+    const ts = t.updated_at ? formatTimestamp(t.updated_at) : '';
+    const count = t.message_count || 0;
+    const isActive = t.id === activeThreadId;
+    const plural = count === 1 ? '' : 's';
+    return `
+      <div class="thread-item ${isActive ? 'active' : ''}" onclick="selectThread('${t.id}')">
+        <div class="thread-item-title">${title}</div>
+        <div class="thread-item-meta">${count} message${plural} · ${ts}</div>
+      </div>`;
+  }).join('');
+}
+
+async function selectThread(threadId) {
+  if (threadId === activeThreadId) {
+    closeSidebar();
+    return;
+  }
+
+  _stopJobPolling();
+  _typingStartTime = null;
+
+  const thread = await api(`/api/threads/${threadId}`);
+  if (!thread || !thread.id) {
+    toast('Conversation not found');
+    return;
+  }
+
+  activeThreadId = thread.id;
+  localStorage.setItem(THREAD_KEY, thread.id);
+  updateThreadTitle(thread.title);
+  await _loadThreadMessages(thread.id);
+  chatHistoryLoaded = true;
+  closeSidebar();
+}
+
+// --- Async chat job handling ---
 let _pendingJobId = null;
 let _pendingJobTimer = null;
 let _typingStartTime = null;
-let _pollFailures = 0;        // consecutive poll failures
-const _MAX_POLL_FAILURES = 5; // give up after 5 consecutive network errors
-const _MAX_POLL_DURATION_S = 14400; // 4 hours — matches backend CONVERSATION_TIMEOUT
+let _pollFailures = 0;
+const _MAX_POLL_FAILURES = 5;
+const _MAX_POLL_DURATION_S = 14400;
 
 function _updateTypingIndicator() {
   const typingMsg = chatMessages.find(m => m.role === 'typing');
   if (!typingMsg || !_typingStartTime) return;
   const elapsed = Math.floor((Date.now() - _typingStartTime) / 1000);
 
-  // Safety: give up after max poll duration
   if (elapsed > _MAX_POLL_DURATION_S) {
     _deliverChatResponse(null, 'Response timed out — Nova may still be working. Try again in a moment.');
     return;
   }
 
-  if (elapsed < 5) {
-    typingMsg.content = '';
-  } else if (elapsed < 30) {
-    typingMsg.content = `${elapsed}s — still thinking...`;
-  } else if (elapsed < 120) {
-    typingMsg.content = `${elapsed}s — working on a detailed response...`;
-  } else {
+  if (elapsed < 5) typingMsg.content = '';
+  else if (elapsed < 30) typingMsg.content = `${elapsed}s`;
+  else if (elapsed < 120) typingMsg.content = `${elapsed}s · working on a detailed response…`;
+  else {
     const mins = Math.floor(elapsed / 60);
-    typingMsg.content = `${mins}m ${elapsed % 60}s — deep processing, hang tight...`;
+    typingMsg.content = `${mins}m ${elapsed % 60}s · deep processing…`;
   }
   renderChat();
 }
 
 function _deliverChatResponse(response, error, threadId) {
-  // Stop polling and typing updates
   _stopJobPolling();
   _typingStartTime = null;
 
-  // Track thread from response
   if (threadId && !activeThreadId) activeThreadId = threadId;
 
-  // Remove typing indicator
   const idx = chatMessages.findIndex(m => m.role === 'typing');
   if (idx !== -1) chatMessages.splice(idx, 1);
 
@@ -218,10 +412,12 @@ function _deliverChatResponse(response, error, threadId) {
   if (response) {
     chatMessages.push({ role: 'assistant', content: response, created_at: now });
     if (ttsEnabled) speak(response);
+    _flashSendButton('success');
   } else {
     chatMessages.push({ role: 'assistant', content: error || 'No response received.', created_at: now });
   }
   renderChat();
+  updateSendButtonState();
 }
 
 function _stopJobPolling() {
@@ -231,7 +427,6 @@ function _stopJobPolling() {
 }
 
 function _startJobPolling(jobId) {
-  // Clear any existing polling first (prevents timer leaks)
   if (_pendingJobTimer) { clearInterval(_pendingJobTimer); _pendingJobTimer = null; }
   _pendingJobId = jobId;
   _pollFailures = 0;
@@ -245,24 +440,21 @@ async function _pollChatJob(jobId) {
   try {
     const data = await api(`/api/chat/jobs/${jobId}`);
     if (!data || data.job_id !== jobId) {
-      // Network error or stale job — track consecutive failures
       _pollFailures++;
       if (_pollFailures >= _MAX_POLL_FAILURES) {
         _deliverChatResponse(null, 'Lost connection to Nova — please try again.');
       }
       return;
     }
-    if (_pendingJobId !== jobId) return; // superseded
+    if (_pendingJobId !== jobId) return;
 
-    _pollFailures = 0; // reset on successful poll
+    _pollFailures = 0;
 
     if (data.status === 'completed') {
-      // Deliver even if response is empty (edge case: treat as success with fallback)
       _deliverChatResponse(data.response || '(empty response)', null, data.thread_id);
     } else if (data.status === 'failed') {
       _deliverChatResponse(null, data.error || 'Processing failed.', data.thread_id);
     }
-    // status === 'processing' → keep polling
   } catch (e) {
     console.error('Poll error:', e);
     _pollFailures++;
@@ -272,6 +464,7 @@ async function _pollChatJob(jobId) {
   }
 }
 
+// --- Send chat ---
 async function sendChat() {
   const input = document.getElementById('chat-input');
   const msg = input.value.trim();
@@ -279,13 +472,19 @@ async function sendChat() {
 
   unlockTTS();
   input.value = '';
-  chatMessages.push({ role: 'user', content: msg, created_at: Date.now() / 1000 });
-  renderChat();
+  autoResizeTextarea(input);
 
-  // Show typing indicator with elapsed time
+  // Optimistic title for fresh threads (mirrors backend auto-title)
+  const realMsgs = chatMessages.filter(m => m.role !== 'typing');
+  if (realMsgs.length === 0) {
+    updateThreadTitle(msg.split('\n')[0].slice(0, 80));
+  }
+
+  chatMessages.push({ role: 'user', content: msg, created_at: Date.now() / 1000 });
   _typingStartTime = Date.now();
   chatMessages.push({ role: 'typing', content: '' });
   renderChat();
+  updateSendButtonState();
 
   const data = await api('/api/chat', {
     method: 'POST',
@@ -295,32 +494,117 @@ async function sendChat() {
   if (data && data.job_id) {
     _startJobPolling(data.job_id);
   } else {
-    // Submission itself failed (network error, 4xx, etc.)
     _deliverChatResponse(null, 'Failed to send message.');
   }
 }
 
-function renderChat() {
-  const el = document.getElementById('chat-messages');
-  el.innerHTML = chatMessages.map(m => {
-    if (m.role === 'typing') {
-      const detail = m.content ? ` — ${escapeHtml(m.content)}` : '';
-      return `<div class="chat-bubble assistant"><span class="spinner"></span> Thinking${detail}</div>`;
-    }
-    const ts = m.created_at ? formatTimestamp(m.created_at) : '';
-    const timeHtml = ts ? `<span class="msg-time">${ts}</span>` : '';
-    return `<div class="chat-bubble ${m.role}">${escapeHtml(m.content)}${timeHtml}</div>`;
-  }).join('');
-  el.scrollTop = el.scrollHeight;
+function sendPrompt(text) {
+  const input = document.getElementById('chat-input');
+  input.value = text;
+  autoResizeTextarea(input);
+  if (text.trim().endsWith('…')) {
+    input.focus();
+    updateSendButtonState();
+    return;
+  }
+  sendChat();
 }
 
-// --- Voice Mode ---
+// --- Render chat ---
+function renderChat() {
+  const empty = document.getElementById('chat-empty');
+  const list = document.getElementById('chat-messages');
+  const hasMsgs = chatMessages.some(m => m.role !== 'typing');
+  const hasTyping = chatMessages.some(m => m.role === 'typing');
+
+  if (!hasMsgs && !hasTyping) {
+    empty.classList.add('is-visible');
+    list.style.display = 'none';
+    return;
+  }
+
+  empty.classList.remove('is-visible');
+  list.style.display = 'flex';
+
+  list.innerHTML = chatMessages.map((m, i) => {
+    if (m.role === 'typing') {
+      const detail = m.content ? `<span class="typing-text">${escapeHtml(m.content)}</span>` : '';
+      return `<div class="chat-bubble typing"><div class="typing-dots"><span></span><span></span><span></span></div>${detail}</div>`;
+    }
+    if (m.role === 'user') {
+      return `<div class="chat-bubble user">${escapeHtml(m.content)}</div>`;
+    }
+    // assistant
+    const html = renderMarkdown(m.content);
+    return `<div class="chat-bubble assistant">
+      <div class="bubble-md">${html}</div>
+      <button class="copy-btn" data-idx="${i}" onclick="copyMessage(this, ${i})" aria-label="Copy">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+      </button>
+    </div>`;
+  }).join('');
+  list.scrollTop = list.scrollHeight;
+}
+
+// --- Copy message ---
+async function copyMessage(btn, idx) {
+  const msg = chatMessages[idx];
+  if (!msg) return;
+  try {
+    await navigator.clipboard.writeText(msg.content);
+    btn.classList.add('copied');
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    toast('Copied');
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    }, 1500);
+  } catch (e) {
+    toast('Copy failed');
+  }
+}
+
+// --- Auto-resize textarea ---
+function autoResizeTextarea(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
+// --- Send button state machine ---
+function updateSendButtonState() {
+  const btn = document.getElementById('send-btn');
+  const input = document.getElementById('chat-input');
+  if (!btn || !input) return;
+
+  if (_pendingJobId) {
+    btn.dataset.state = 'loading';
+    btn.disabled = true;
+    return;
+  }
+  if (!input.value.trim()) {
+    btn.dataset.state = 'idle';
+    btn.disabled = true;
+    return;
+  }
+  btn.dataset.state = 'idle';
+  btn.disabled = false;
+}
+
+function _flashSendButton(state) {
+  const btn = document.getElementById('send-btn');
+  if (!btn) return;
+  btn.dataset.state = state;
+  setTimeout(() => updateSendButtonState(), 1000);
+}
+
+// --- Voice mode ---
 function setChatMode(mode) {
   unlockTTS();
   chatMode = mode;
-  document.getElementById('mode-text').classList.toggle('active', mode === 'text');
-  document.getElementById('mode-voice').classList.toggle('active', mode === 'voice');
-  document.getElementById('text-input-bar').style.display = mode === 'text' ? 'flex' : 'none';
+  document.getElementById('composer-row').style.display = mode === 'text' ? 'flex' : 'none';
   document.getElementById('voice-input-bar').style.display = mode === 'voice' ? 'flex' : 'none';
 
   if (mode === 'text' && isListening) stopListening();
@@ -329,16 +613,13 @@ function setChatMode(mode) {
 
 function toggleTTS() {
   ttsEnabled = !ttsEnabled;
-  document.getElementById('tts-toggle').classList.toggle('active', ttsEnabled);
+  const btn = document.getElementById('tts-toggle');
+  if (btn) btn.style.color = ttsEnabled ? 'var(--accent)' : 'var(--text-dim)';
   if (!ttsEnabled) window.speechSynthesis.cancel();
   toast(ttsEnabled ? 'Voice responses on' : 'Voice responses off');
 }
 
-// iOS Safari requires speechSynthesis to be triggered from a user gesture.
-// We "unlock" it by speaking an empty utterance on the first tap, then
-// the real speech works from async callbacks afterwards.
 let ttsUnlocked = false;
-
 function unlockTTS() {
   if (ttsUnlocked || !('speechSynthesis' in window)) return;
   const utter = new SpeechSynthesisUtterance('');
@@ -351,7 +632,6 @@ function speak(text) {
   if (!('speechSynthesis' in window) || !ttsEnabled) return;
   window.speechSynthesis.cancel();
 
-  // Clean up text for speech (remove markdown, code blocks, etc.)
   const clean = text
     .replace(/```[\s\S]*?```/g, 'code block omitted')
     .replace(/`([^`]+)`/g, '$1')
@@ -364,7 +644,6 @@ function speak(text) {
 
   if (!clean) return;
 
-  // Split long text into chunks (speechSynthesis has limits ~200 chars)
   const chunks = [];
   const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [clean];
   let current = '';
@@ -378,12 +657,10 @@ function speak(text) {
   }
   if (current.trim()) chunks.push(current.trim());
 
-  // Get voice settings
   const voice = getSelectedVoice();
   const rate = parseFloat(localStorage.getItem('nova-tts-speed') || '1');
   const pitch = parseFloat(localStorage.getItem('nova-tts-pitch') || '1');
 
-  // Queue utterances
   for (const chunk of chunks) {
     const utter = new SpeechSynthesisUtterance(chunk);
     utter.rate = rate;
@@ -392,17 +669,13 @@ function speak(text) {
     window.speechSynthesis.speak(utter);
   }
 
-  // iOS workaround: speechSynthesis can pause in background, keep it alive
   const keepAlive = setInterval(() => {
-    if (!window.speechSynthesis.speaking) {
-      clearInterval(keepAlive);
-    } else {
-      window.speechSynthesis.resume();
-    }
+    if (!window.speechSynthesis.speaking) clearInterval(keepAlive);
+    else window.speechSynthesis.resume();
   }, 5000);
 }
 
-// --- Voice Settings ---
+// --- Voice settings ---
 function getSelectedVoice() {
   const voices = window.speechSynthesis.getVoices();
   const saved = localStorage.getItem('nova-tts-voice');
@@ -410,7 +683,6 @@ function getSelectedVoice() {
     const match = voices.find(v => v.name === saved);
     if (match) return match;
   }
-  // Default: prefer natural English voice
   return voices.find(v =>
     v.name.includes('Samantha') || v.name.includes('Karen') ||
     v.name.includes('Google') || v.name.includes('Natural')
@@ -426,7 +698,6 @@ function populateVoiceSelect() {
   const saved = localStorage.getItem('nova-tts-voice');
   select.innerHTML = '';
 
-  // Group by language
   const groups = {};
   for (const v of voices) {
     const lang = v.lang.split('-')[0].toUpperCase();
@@ -434,7 +705,6 @@ function populateVoiceSelect() {
     groups[lang].push(v);
   }
 
-  // English first, then others
   const sortedLangs = Object.keys(groups).sort((a, b) => {
     if (a === 'EN') return -1;
     if (b === 'EN') return 1;
@@ -454,7 +724,6 @@ function populateVoiceSelect() {
     select.appendChild(optgroup);
   }
 
-  // If nothing was saved, select the default
   if (!saved) {
     const def = getSelectedVoice();
     if (def) select.value = def.name;
@@ -495,12 +764,15 @@ function testVoice() {
 function loadVoiceSettings() {
   const speed = localStorage.getItem('nova-tts-speed') || '1';
   const pitch = localStorage.getItem('nova-tts-pitch') || '1';
-  document.getElementById('voice-speed').value = speed;
-  document.getElementById('voice-pitch').value = pitch;
+  const speedEl = document.getElementById('voice-speed');
+  const pitchEl = document.getElementById('voice-pitch');
+  if (speedEl) speedEl.value = speed;
+  if (pitchEl) pitchEl.value = pitch;
   updateSpeedLabel();
   updatePitchLabel();
 }
 
+// --- Speech recognition ---
 function initSpeechRecognition() {
   if (recognition) return;
 
@@ -517,23 +789,17 @@ function initSpeechRecognition() {
   recognition.lang = 'en-US';
 
   recognition.onresult = (e) => {
-    const transcript = Array.from(e.results)
-      .map(r => r[0].transcript)
-      .join('');
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
     document.getElementById('voice-transcript').textContent = transcript;
-
-    // If final result, send the message
-    if (e.results[e.results.length - 1].isFinal) {
-      if (transcript.trim()) {
-        sendVoiceMessage(transcript.trim());
-      }
+    if (e.results[e.results.length - 1].isFinal && transcript.trim()) {
+      sendVoiceMessage(transcript.trim());
     }
   };
 
   recognition.onstart = () => {
     isListening = true;
     document.getElementById('mic-btn').classList.add('listening');
-    document.getElementById('voice-status').textContent = 'Listening...';
+    document.getElementById('voice-status').textContent = 'Listening…';
     document.getElementById('voice-transcript').textContent = '';
   };
 
@@ -555,18 +821,14 @@ function initSpeechRecognition() {
 }
 
 function toggleVoice() {
-  if (isListening) {
-    stopListening();
-  } else {
-    startListening();
-  }
+  if (isListening) stopListening();
+  else startListening();
 }
 
 function startListening() {
   if (!recognition) initSpeechRecognition();
   if (!recognition) return;
   unlockTTS();
-  // Stop any ongoing TTS so it doesn't interfere
   window.speechSynthesis.cancel();
   try { recognition.start(); } catch { /* already started */ }
 }
@@ -578,24 +840,13 @@ function stopListening() {
 }
 
 async function sendVoiceMessage(text) {
-  // Add to chat and send — uses same async job pattern as sendChat
   chatMessages.push({ role: 'user', content: text, created_at: Date.now() / 1000 });
-  renderChat();
-
   _typingStartTime = Date.now();
   chatMessages.push({ role: 'typing', content: '' });
   renderChat();
 
-  document.getElementById('voice-status').textContent = 'Nova is thinking...';
+  document.getElementById('voice-status').textContent = 'Nova is thinking…';
   document.getElementById('voice-transcript').textContent = '';
-
-  // Override _deliverChatResponse for voice to also update voice status
-  const origDeliver = _deliverChatResponse;
-  _deliverChatResponse = function(response, error, threadId) {
-    origDeliver(response, error, threadId);
-    document.getElementById('voice-status').textContent = 'Tap to speak';
-    _deliverChatResponse = origDeliver; // restore
-  };
 
   const data = await api('/api/chat', {
     method: 'POST',
@@ -616,13 +867,10 @@ async function loadReports() {
 
   const el = document.getElementById('reports-list');
   el.innerHTML = data.outputs.map(o => {
-    const name = o.stem
-      .replace(/__\d{8}-\d{6}$/, '')
-      .replace(/_/g, ' ')
-      .replace(/^\d+\s*/, '');
+    const name = o.stem.replace(/__\d{8}-\d{6}$/, '').replace(/_/g, ' ').replace(/^\d+\s*/, '');
     return `
       <div class="report-item" onclick="loadReport('${o.name}')">
-        <span class="report-name">${name || o.stem}</span>
+        <span class="report-name">${escapeHtml(name || o.stem)}</span>
         <span class="report-meta">${o.age_hours}h<br>${formatBytes(o.size)}</span>
       </div>`;
   }).join('');
@@ -636,8 +884,14 @@ async function loadReport(filename) {
   const detail = document.getElementById('report-detail');
   detail.style.display = 'block';
   detail.innerHTML = `
-    <button class="back-btn" onclick="closeReport()">← Back</button>
-    <div class="report-content">${escapeHtml(data.content)}</div>`;
+    <button class="back-btn" onclick="closeReport()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"/>
+        <polyline points="12 19 5 12 12 5"/>
+      </svg>
+      Back
+    </button>
+    <div class="report-content bubble-md">${renderMarkdown(data.content)}</div>`;
 }
 
 function closeReport() {
@@ -657,10 +911,10 @@ async function loadServices() {
     return `
       <div class="service-item">
         <div>
-          <span class="service-name">${shortName}</span>
-          <div style="font-size:11px;color:var(--text-dim)">${s.since !== '?' ? s.since : ''}</div>
+          <span class="service-name">${escapeHtml(shortName)}</span>
+          <div style="font-size:11px;color:var(--text-faint)">${s.since !== '?' ? escapeHtml(s.since) : ''}</div>
         </div>
-        <span class="service-badge ${isActive ? 'active' : 'inactive'}">${s.active}</span>
+        <span class="service-badge ${isActive ? 'active' : 'inactive'}">${escapeHtml(s.active)}</span>
       </div>`;
   }).join('');
 }
@@ -692,8 +946,6 @@ function connectWS() {
   ws = new WebSocket(`${proto}//${location.host}/ws`);
 
   ws.onopen = () => {
-    console.log('WS connected');
-    // On reconnect, immediately poll for any pending job (catches missed broadcasts)
     if (_pendingJobId) _pollChatJob(_pendingJobId);
   };
   ws.onmessage = (e) => {
@@ -701,14 +953,10 @@ function connectWS() {
       const msg = JSON.parse(e.data);
       if (msg.event === 'task_created') toast(`New task: ${msg.data.title}`);
       if (msg.event === 'chat_response' && msg.data) {
-        // WebSocket push delivery — faster than polling
         const d = msg.data;
         if (_pendingJobId && d.job_id === _pendingJobId) {
-          if (d.response) {
-            _deliverChatResponse(d.response, null, d.thread_id);
-          } else if (d.error) {
-            _deliverChatResponse(null, d.error, d.thread_id);
-          }
+          if (d.response) _deliverChatResponse(d.response, null, d.thread_id);
+          else if (d.error) _deliverChatResponse(null, d.error, d.thread_id);
         }
       }
     } catch {}
@@ -716,7 +964,6 @@ function connectWS() {
   ws.onclose = () => setTimeout(connectWS, 3000);
   ws.onerror = () => ws.close();
 
-  // Ping every 30s
   setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) ws.send('ping');
   }, 30000);
@@ -724,8 +971,9 @@ function connectWS() {
 
 // --- Helpers ---
 function escapeHtml(str) {
+  if (str == null) return '';
   const div = document.createElement('div');
-  div.textContent = str;
+  div.textContent = String(str);
   return div.innerHTML;
 }
 
@@ -758,20 +1006,40 @@ function timeAgo(dateStr) {
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
-  switchPage('dashboard');
+  switchPage('chat');
   connectWS();
 
-  // Auto-refresh dashboard every 60s
+  // Auto-refresh dashboard every 60s when visible
   setInterval(() => {
     if (currentPage === 'dashboard') loadDashboard();
   }, 60000);
 
-  // Chat enter key
-  document.getElementById('chat-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  // Composer wiring
+  const input = document.getElementById('chat-input');
+  if (input) {
+    input.addEventListener('input', () => {
+      autoResizeTextarea(input);
+      updateSendButtonState();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChat();
+      }
+    });
+    autoResizeTextarea(input);
+  }
+  updateSendButtonState();
+
+  // Sidebar dismiss with Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const sb = document.getElementById('chat-sidebar');
+      if (sb && sb.classList.contains('is-open')) closeSidebar();
+    }
   });
 
-  // Init TTS voices (Safari loads them async)
+  // TTS init
   if ('speechSynthesis' in window) {
     window.speechSynthesis.getVoices();
     window.speechSynthesis.onvoiceschanged = () => {
@@ -779,10 +1047,11 @@ document.addEventListener('DOMContentLoaded', () => {
       populateVoiceSelect();
     };
   }
-  document.getElementById('tts-toggle').classList.add('active');
   loadVoiceSettings();
+  const ttsBtn = document.getElementById('tts-toggle');
+  if (ttsBtn) ttsBtn.style.color = ttsEnabled ? 'var(--accent)' : 'var(--text-dim)';
 
-  // Register service worker
+  // Service worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(console.error);
   }

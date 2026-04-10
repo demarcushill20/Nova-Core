@@ -89,6 +89,12 @@ async def generate_response(
         "--mcp-config",
         _TELEGRAM_MCP_CONFIG,
         "--strict-mcp-config",
+        # CEO Nova handles conversation only — execution is delegated to the task queue.
+        # Without this, the LLM will sometimes ignore the persona prompt's "do not use
+        # Bash/Write/Edit" rule and run things like the full pytest suite, blocking the
+        # bot for hours. Enforce it at the CLI layer so the rule is unbypassable.
+        "--disallowed-tools",
+        "Bash,Write,Edit,NotebookEdit",
     ]
     # Append system prompt via flag if available
     if system_prompt:
