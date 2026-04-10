@@ -16,5 +16,6 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Committed and pushed 3 files (heartbeat, test fix, workflow learning) to origin/main as commit 87868e8",
   "created_at": "2026-04-10T05:55:20Z",
-  "confidence": "high"
+  "confidence": "high",
+  "supersedes": "mem_0769_Perfect_lets__ship_1775800270"
 }

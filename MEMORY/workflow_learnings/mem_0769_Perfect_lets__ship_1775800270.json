@@ -16,5 +16,7 @@
   "verification_outcome": "not_verified",
   "reusable_guidance": "Shipped 35-file commit (regime gate/ATR removal, live trading enabled) to origin/main \u2014 commit 2967da4",
   "created_at": "2026-04-10T05:51:10Z",
-  "confidence": "high"
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0769_Perfect_lets__ship_1775800520"
 }
