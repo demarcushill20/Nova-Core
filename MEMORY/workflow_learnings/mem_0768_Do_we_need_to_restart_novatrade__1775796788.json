@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0768_Do_we_need_to_restart_novatrade__1775796788",
+  "workflow_id": "0768_Do_we_need_to_restart_novatrade_",
+  "task_summary": "Restarted novatrade service to pick up regime gate and ATR detector removal; verified healthy startup",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Restarted novatrade service to pick up regime gate and ATR detector removal; verified healthy startup"
+  ],
+  "successful_patterns": [
+    "task_completed: 0768_Do_we_need_to_restart_novatrade_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Restarted novatrade service to pick up regime gate and ATR detector removal; verified healthy startup",
+  "created_at": "2026-04-10T04:53:08Z",
+  "confidence": "high"
+}

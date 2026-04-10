@@ -254,12 +254,10 @@ class TestIRBStrategy:
         candles = _make_trending_candles(100)
         s = IRBStrategy()
         indicators = s.compute_indicators(candles)
-        # BBW is now included when regime_gate is enabled (default True)
-        assert set(indicators.keys()) == {"ema", "atr", "adx", "bbw"}
+        assert set(indicators.keys()) == {"ema", "atr", "adx"}
         assert len(indicators["ema"]) == 100
         assert len(indicators["atr"]) == 100
         assert len(indicators["adx"]) == 100
-        assert len(indicators["bbw"]) == 100
 
     def test_check_entry_warmup_returns_none(self) -> None:
         candles = _make_trending_candles(10)

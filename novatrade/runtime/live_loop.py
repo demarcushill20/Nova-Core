@@ -596,9 +596,6 @@ class LiveLoop:
                     # Persist signal metrics for the autonomy collector
                     self._persist_signal_metrics()
 
-                    # Classify and persist market regime for autonomy collectors
-                    self._persist_regime_classification()
-
                     # Persist signal rate stats for autonomy collectors
                     self._persist_signal_rate_stats()
 
@@ -690,21 +687,6 @@ class LiveLoop:
             metrics_path.write_text(_json.dumps(self._metrics.to_dict(), indent=2))
         except OSError:
             log.debug("Failed to persist signal metrics", exc_info=True)
-
-    def _persist_regime_classification(self) -> None:
-        """Classify current market regime from buffered candles and persist to disk."""
-        try:
-            from novatrade.monitor.regime_detector import classify_live_regime
-
-            candles = self._strategy_engine.h1_candles
-            if len(candles) > 16:  # need at least atr_period + 2
-                classify_live_regime(
-                    candles=candles,
-                    symbol=self._strategy_engine._config.symbol,
-                    timeframe=self._strategy_engine._config.primary_timeframe,
-                )
-        except Exception:
-            log.debug("regime classification failed", exc_info=True)
 
     def _persist_signal_rate_stats(self) -> None:
         """Invoke the global SignalRateMonitor to persist fresh signal_stats.json."""

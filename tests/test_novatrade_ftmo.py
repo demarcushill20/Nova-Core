@@ -131,6 +131,7 @@ class TestPreflightConfigChecks:
             ftmo=FtmoProfile(enabled=True),
             metaapi=MetaApiConfig(token="tok", account_id="acc"),
             symbols=["EURUSD"],
+            dry_run=True,
         )
         checks = check_config(cfg)
         statuses = {c.name: c.status for c in checks}

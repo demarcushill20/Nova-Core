@@ -491,7 +491,7 @@ class TestConfigWiring:
 
     def test_rollover_config_defaults(self):
         cfg = RiskConfig()
-        assert cfg.rollover_dead_zone_enabled is True
+        assert cfg.rollover_dead_zone_enabled is False  # default changed to False
         assert cfg.rollover_start_hour_utc == 21  # Extended per microstructure research from 22 to 21
         assert cfg.rollover_end_hour_utc == 0  # Extended to midnight (00:00) to cover full volatility window
 

@@ -242,24 +242,18 @@ def test_volatility_filter_integration_with_other_filters():
     """Test that volatility filter works alongside other filters."""
     env = BacktestEnvironment(
         use_volatility_filter=True,
-        use_regime_gate=True,  # BBW squeeze gate
         volatility_atr_ma_period=20,
-        regime_bbw_period=20,
-        regime_bbw_threshold=0.003,
         irb_threshold=0.2,
     )
 
-    # Both filters should be enabled
+    # Filter should be enabled
     assert env.use_volatility_filter is True
-    assert env.use_regime_gate is True
 
     # Configuration should be valid
     assert env.volatility_atr_ma_period == 20
-    assert env.regime_bbw_period == 20
 
     strategy = IRBStrategy(env)
     assert strategy.env.use_volatility_filter is True
-    assert strategy.env.use_regime_gate is True
 
 
 def test_volatility_filter_parameter_validation():

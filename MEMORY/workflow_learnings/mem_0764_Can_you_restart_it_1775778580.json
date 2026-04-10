@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0764_Can_you_restart_it_1775778580",
+  "workflow_id": "0764_Can_you_restart_it",
+  "task_summary": "Restarted novacore-novatrade systemd service; verified healthy startup with live config (dry_run=False)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Restarted novacore-novatrade systemd service; verified healthy startup with live config (dry_run=False)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0764_Can_you_restart_it"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Restarted novacore-novatrade systemd service; verified healthy startup with live config (dry_run=False)",
+  "created_at": "2026-04-09T23:49:40Z",
+  "confidence": "high"
+}

@@ -286,11 +286,6 @@ class IRBBacktester:
                 if len(vals) == ma_period:
                     atr_sma[j] = sum(vals) / ma_period
 
-        # Bollinger Band Width for Tier 1 regime gate
-        self._bbw: list[float] = []
-        if self.env.use_regime_gate:
-            self._bbw = compute_bbw(h1_closes, self.env.regime_bbw_period)
-
         # Pre-compute H4 EMA
         h4_closes = [c.close for c in h4_candles]
         ema_h4 = compute_ema(h4_closes, self.env.ema_period) if h4_candles else []
@@ -588,13 +583,6 @@ class IRBBacktester:
         if e.min_signal_atr_mult > 0 and overext_ratio < e.min_signal_atr_mult:
             self._rejections.overextension_filter += 1
             return
-
-        # --- Tier 1 regime gate: skip when BBW indicates ranging/squeeze or extreme volatility ---
-        if e.use_regime_gate and self._bbw and i < len(self._bbw):
-            bbw_val = self._bbw[i]
-            if not math.isnan(bbw_val) and (bbw_val < e.regime_bbw_threshold or bbw_val > e.regime_bbw_ceiling):
-                self._rejections.regime_gate += 1
-                return
 
         # --- All filters passed: record signal ---
         self._signals.append(

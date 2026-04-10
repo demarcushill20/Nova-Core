@@ -123,7 +123,6 @@ class FilterRejection:
     session_filter: int = 0  # v4: rejected by session hours
     volatility_filter: int = 0  # v4: rejected by low-volatility regime
     circuit_breaker: int = 0  # v4: rejected by consecutive-loss breaker
-    regime_gate: int = 0  # Tier 1: rejected by BBW ranging regime gate
 
 
 # ---------------------------------------------------------------------------

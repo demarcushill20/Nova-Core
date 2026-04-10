@@ -71,7 +71,6 @@ def _v5_env(**overrides: Any) -> BacktestEnvironment:
         # MTF
         mtf_lookback=1,
         # Other v4 features off
-        use_regime_gate=False,
         use_volatility_filter=False,
         use_ema_stack_filter=False,
         ema_confirm_bars=0,
@@ -642,7 +641,6 @@ def test_v4_path_unchanged_when_use_simple_trend_filter_off():
         adx_period=14,
         irb_threshold=0.45,
         overextension_threshold=2.5,
-        use_regime_gate=False,
         use_volatility_filter=False,
     )
     strategy = IRBStrategy(env)

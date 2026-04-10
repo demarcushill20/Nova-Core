@@ -11,7 +11,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-from novatrade.backtest.engine import compute_adx, compute_atr, compute_bbw, compute_ema
+from novatrade.backtest.engine import compute_adx, compute_atr, compute_ema
 from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
 from novatrade.monitor.signal_monitor import record_signal
@@ -57,8 +57,6 @@ class IRBStrategy(BaseStrategy):
         if self.env.use_simple_trend_filter:
             indicators["ema_fast"] = compute_ema(closes, self.env.ema_fast_period)
             indicators["ema_slow"] = compute_ema(closes, self.env.ema_slow_period)
-        if self.env.use_regime_gate:
-            indicators["bbw"] = compute_bbw(closes, self.env.regime_bbw_period)
         return indicators
 
     def generate_signals(self, candles: list[Candle], indicators: dict[str, list[float]]) -> list[EntrySignal]:
@@ -207,16 +205,6 @@ class IRBStrategy(BaseStrategy):
         # --- v5 minimum signal size filter (min signal range / ATR) ---
         if e.min_signal_atr_mult > 0 and overext_ratio < e.min_signal_atr_mult:
             return None
-
-        # --- Tier 1 regime gate: skip when BBW indicates ranging/squeeze or extreme volatility ---
-        if e.use_regime_gate:
-            bbw = indicators.get("bbw", [])
-            if (
-                i < len(bbw)
-                and not math.isnan(bbw[i])
-                and (bbw[i] < e.regime_bbw_threshold or bbw[i] > e.regime_bbw_ceiling)
-            ):
-                return None
 
         # --- Compute entry/stop levels ---
         # Spread cushion: widen SL by the configured spread buffer so the

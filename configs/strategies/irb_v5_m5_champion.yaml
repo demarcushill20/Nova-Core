@@ -54,4 +54,3 @@ max_consecutive_losses: 0
 # Disabled filters
 session_filter: null
 use_volatility_filter: false
-use_regime_gate: false

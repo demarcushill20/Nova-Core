@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0766_If_the_atr_regime_detector_isn_t_part_of_the_strategy_we_can_remove_that_too_1775796241",
+  "workflow_id": "0766_If_the_atr_regime_detector_isn_t_part_of_the_strategy_we_can_remove_that_too",
+  "task_summary": "Removed ATR regime detector module, ATR regime-based position sizing, and associated config/tests from NovaTrade",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Removed ATR regime detector module, ATR regime-based position sizing, and associated config/tests from NovaTrade"
+  ],
+  "successful_patterns": [
+    "task_completed: 0766_If_the_atr_regime_detector_isn_t_part_of_the_strategy_we_can_remove_that_too"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Removed ATR regime detector module, ATR regime-based position sizing, and associated config/tests from NovaTrade",
+  "created_at": "2026-04-10T04:44:01Z",
+  "confidence": "high"
+}

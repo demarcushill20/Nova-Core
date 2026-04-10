@@ -1,0 +1,17 @@
+{
+  "name": "config-toggle",
+  "origin": "captured",
+  "optimization_enabled": false,
+  "quarantine": true,
+  "quarantine_successes_required": 5,
+  "quarantine_successes": 0,
+  "captured_from": {
+    "pattern_description": "Capture a lightweight pattern for simple config/flag toggle tasks: read the file, make the one-line edit, read it back to confirm, done. No task lifecycle, no output report, no multi-turn ceremony. Should complete in 3-5 turns max.",
+    "task_examples": [
+      "0763_Can_you_turn_dry_run_to_false",
+      "0763_Can_you_turn_dry_run_to_false"
+    ],
+    "task_id": "0763_Can_you_turn_dry_run_to_false"
+  },
+  "created_at": "2026-04-10T05:23:08.419911+00:00"
+}

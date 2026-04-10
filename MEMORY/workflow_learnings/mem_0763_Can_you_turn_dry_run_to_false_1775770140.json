@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0763_Can_you_turn_dry_run_to_false_1775770140",
+  "workflow_id": "0763_Can_you_turn_dry_run_to_false",
+  "task_summary": "Changed NovaTradeCfg.dry_run default from True to False in config.py",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Changed NovaTradeCfg.dry_run default from True to False in config.py"
+  ],
+  "successful_patterns": [
+    "task_completed: 0763_Can_you_turn_dry_run_to_false"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Changed NovaTradeCfg.dry_run default from True to False in config.py",
+  "created_at": "2026-04-09T21:29:00Z",
+  "confidence": "high"
+}

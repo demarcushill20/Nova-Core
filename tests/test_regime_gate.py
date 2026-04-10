@@ -1,9 +1,7 @@
-"""Tests for Tier 1 regime gate (BBW ranging filter) and Sortino formula fix.
+"""Tests for compute_bbw utility and Sortino formula fix.
 
 Verifies:
   - compute_bbw() produces correct Bollinger Band Width values
-  - Regime gate filters signals during low-BBW (ranging) periods
-  - Regime gate is inactive by default (use_regime_gate=False)
   - Sortino formula uses target=0 (industry standard)
 """
 
@@ -15,10 +13,7 @@ import statistics
 import pytest
 
 from novatrade.backtest.engine import compute_bbw
-from novatrade.backtest.environment import BacktestEnvironment
-from novatrade.backtest.metrics import FilterRejection, _compute_sharpe_sortino
-from novatrade.models import Candle
-from novatrade.strategies.irb import IRBStrategy
+from novatrade.backtest.metrics import _compute_sharpe_sortino
 
 # ---------------------------------------------------------------------------
 # compute_bbw tests
@@ -67,66 +62,6 @@ class TestComputeBBW:
         bbw_flat = compute_bbw(flat, 20)
         bbw_vol = compute_bbw(volatile, 20)
         assert bbw_flat[29] < bbw_vol[29]
-
-
-# ---------------------------------------------------------------------------
-# Regime gate integration tests (IRBStrategy)
-# ---------------------------------------------------------------------------
-
-
-def _make_candles(n: int, base_close: float = 1.10, spread: float = 0.001) -> list[Candle]:
-    """Generate synthetic candles with configurable volatility."""
-    candles = []
-    for i in range(n):
-        close = base_close + (spread if i % 2 else -spread)
-        candles.append(
-            Candle(
-                timestamp=1700000000 + i * 3600,
-                open=base_close,
-                high=close + 0.0005,
-                low=close - 0.0005,
-                close=close,
-                volume=100,
-            )
-        )
-    return candles
-
-
-class TestRegimeGateDefault:
-    """Regime gate default state (enabled since volatility filter activation)."""
-
-    def test_default_on(self):
-        env = BacktestEnvironment()
-        assert env.use_regime_gate is True
-
-    def test_filter_rejection_field_exists(self):
-        fr = FilterRejection()
-        assert fr.regime_gate == 0
-
-    def test_env_fields(self):
-        env = BacktestEnvironment(use_regime_gate=True, regime_bbw_period=25, regime_bbw_threshold=0.003)
-        assert env.use_regime_gate is True
-        assert env.regime_bbw_period == 25
-        assert env.regime_bbw_threshold == 0.003
-
-
-class TestRegimeGateStrategy:
-    """Regime gate in IRBStrategy.compute_indicators()."""
-
-    def test_bbw_not_computed_when_off(self):
-        env = BacktestEnvironment(use_regime_gate=False)
-        strat = IRBStrategy(env)
-        candles = _make_candles(50)
-        indicators = strat.compute_indicators(candles)
-        assert "bbw" not in indicators
-
-    def test_bbw_computed_when_on(self):
-        env = BacktestEnvironment(use_regime_gate=True)
-        strat = IRBStrategy(env)
-        candles = _make_candles(50)
-        indicators = strat.compute_indicators(candles)
-        assert "bbw" in indicators
-        assert len(indicators["bbw"]) == 50
 
 
 # ---------------------------------------------------------------------------

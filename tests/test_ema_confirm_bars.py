@@ -94,7 +94,6 @@ class TestEmaConfirmBarsIntegration:
         env_enabled = BacktestEnvironment(
             ema_confirm_bars=2,
             use_volatility_filter=False,  # Isolate EMA confirm bars filter
-            use_regime_gate=False,  # Isolate EMA confirm bars filter
             irb_threshold=0.1,  # Lower threshold to get potential signals
             time_stop_bars=100,  # Longer time stop
         )
@@ -106,7 +105,6 @@ class TestEmaConfirmBarsIntegration:
         env_disabled = BacktestEnvironment(
             ema_confirm_bars=0,
             use_volatility_filter=False,  # Isolate EMA confirm bars filter
-            use_regime_gate=False,  # Isolate EMA confirm bars filter
             irb_threshold=0.1,
             time_stop_bars=100,
         )
@@ -145,7 +143,6 @@ class TestEmaConfirmBarsIntegration:
         env_1bar = BacktestEnvironment(
             ema_confirm_bars=1,
             use_volatility_filter=False,
-            use_regime_gate=False,
             irb_threshold=0.1,
             time_stop_bars=100,
         )
@@ -154,7 +151,6 @@ class TestEmaConfirmBarsIntegration:
         env_3bar = BacktestEnvironment(
             ema_confirm_bars=3,
             use_volatility_filter=False,
-            use_regime_gate=False,
             irb_threshold=0.1,
             time_stop_bars=100,
         )
@@ -183,7 +179,7 @@ class TestEmaConfirmBarsIntegration:
 
         # Test with all filters enabled
         env_all_filters = BacktestEnvironment(
-            ema_confirm_bars=2, use_volatility_filter=True, use_regime_gate=True, irb_threshold=0.1, time_stop_bars=100
+            ema_confirm_bars=2, use_volatility_filter=True, irb_threshold=0.1, time_stop_bars=100
         )
         bt_all_filters = IRBBacktester(env_all_filters)
         results_all = bt_all_filters.run(test_candles, h4_candles)
@@ -196,7 +192,6 @@ class TestEmaConfirmBarsIntegration:
         env_only_ema = BacktestEnvironment(
             ema_confirm_bars=2,
             use_volatility_filter=False,
-            use_regime_gate=False,
             irb_threshold=0.1,
             time_stop_bars=100,
         )
@@ -231,7 +226,6 @@ class TestEmaConfirmBarsEdgeCases:
         env = BacktestEnvironment(
             ema_confirm_bars=0,  # Explicitly disabled
             use_volatility_filter=False,
-            use_regime_gate=False,
             irb_threshold=0.1,
             time_stop_bars=100,
         )

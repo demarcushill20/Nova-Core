@@ -217,7 +217,7 @@ class TestNovaTradeCfg:
         assert config.provider == "metaapi"
         assert config.symbols == ["EURUSD"]
         assert config.timeframes == ["H1"]
-        assert config.dry_run is True
+        assert config.dry_run is False  # default changed to False (live trading)
 
     def test_custom_components(self):
         """Test NovaTradeCfg with custom components."""
@@ -359,7 +359,7 @@ class TestAntiEADetectionConfig:
         assert config.entry_jitter_enabled is True
         assert config.lot_micro_variation_enabled is True
         assert config.lot_micro_variation_step == 0.01
-        assert config.london_fix_avoidance_enabled is True
+        assert config.london_fix_avoidance_enabled is False
         assert config.london_fix_start_hour_utc == 15
         assert config.london_fix_start_minute_utc == 45
         assert config.london_fix_end_hour_utc == 16
@@ -417,7 +417,7 @@ class TestConstants:
         assert _DEFAULT_MAX_TOTAL_DRAWDOWN_PCT == 10.0
         assert _DEFAULT_MAX_POSITIONS == 1
         assert _DEFAULT_MAX_VOLUME_PER_TRADE == 50.0
-        assert _DEFAULT_SPREAD_CEILING_POINTS == 30.0
+        assert _DEFAULT_SPREAD_CEILING_POINTS == 999.0
 
     def test_constants_types(self):
         """Test that constants have correct types."""

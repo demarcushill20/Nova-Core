@@ -71,7 +71,7 @@ class TestNovaTradeCfg:
     def test_defaults(self):
         cfg = NovaTradeCfg()
         assert cfg.mode == AccountMode.DEMO
-        assert cfg.dry_run is True
+        assert cfg.dry_run is False  # default changed to False (live trading)
         assert "EURUSD" in cfg.symbols
 
     def test_load_defaults(self, monkeypatch):
@@ -90,7 +90,7 @@ class TestNovaTradeCfg:
         cfg = NovaTradeCfg.load(env_file=Path("/nonexistent"))
         assert cfg.mode == AccountMode.DEMO
         assert cfg.symbols == ["EURUSD"]
-        assert cfg.dry_run is True
+        assert cfg.dry_run is True  # load() defaults to dry_run=True as safety net
 
     def test_load_with_env(self, monkeypatch):
         monkeypatch.setenv("NOVATRADE_MODE", "CHALLENGE")

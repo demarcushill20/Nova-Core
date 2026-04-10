@@ -197,12 +197,6 @@ class BacktestEnvironment:
     # --- Enhanced filter parameters (v4) ---
     use_volatility_filter: bool = True  # Only trade when ATR > SMA(ATR, vol_atr_ma_period)
     volatility_atr_ma_period: int = 50  # Period for ATR moving average filter
-    use_regime_gate: bool = True  # Tier 1 regime gate: skip signals when BBW indicates ranging
-    regime_bbw_period: int = 20  # Bollinger Band width lookback period
-    regime_bbw_threshold: float = 0.005  # BBW below this = ranging → skip signal
-    # P1.1: BBW above this = extreme vol → skip (prevents entries during news spikes)
-    regime_bbw_ceiling: float = 0.04
-
     # --- Risk management (v4) ---
     max_consecutive_losses: int = 0  # 0 = disabled; >0 = pause trading after N consecutive losses
 
@@ -477,7 +471,6 @@ class BacktestEnvironment:
             "breakeven_r": "breakeven_r",
             "trail_delay_bars": "trail_delay_bars",
             "use_volatility_filter": "use_volatility_filter",
-            "use_regime_gate": "use_regime_gate",
         }
 
         # Apply mappings from config

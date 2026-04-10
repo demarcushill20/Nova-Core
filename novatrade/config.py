@@ -23,7 +23,7 @@ _DEFAULT_MAX_DAILY_DRAWDOWN_PCT = 5.0  # typical prop-firm limit
 _DEFAULT_MAX_TOTAL_DRAWDOWN_PCT = 10.0
 _DEFAULT_MAX_POSITIONS = 1  # FTMO-safe: single position for IRB strategy
 _DEFAULT_MAX_VOLUME_PER_TRADE = 50.0  # lots — sized for $100K account (1.5% risk cap)
-_DEFAULT_SPREAD_CEILING_POINTS = 30.0
+_DEFAULT_SPREAD_CEILING_POINTS = 999.0  # effectively disabled
 
 
 # ---------------------------------------------------------------------------
@@ -77,19 +77,18 @@ class RiskConfig:
     max_positions: int = _DEFAULT_MAX_POSITIONS
     max_volume_per_trade: float = _DEFAULT_MAX_VOLUME_PER_TRADE
     min_volume_per_trade: float = 0.01
-    spread_ceiling_points: float = _DEFAULT_SPREAD_CEILING_POINTS
-    # Dynamic spread filter: deny if current spread > multiplier × rolling avg.
-    # Catches liquidity dips where spread is technically below the ceiling but
-    # abnormally wide relative to recent session conditions.  Set 0.0 to disable.
-    spread_vs_avg_multiplier: float = 2.0
-    cooldown_seconds: int = 60
+    # Spread filters disabled — not present in backtest pipeline.
+    # Re-enable only after backtesting validates these thresholds.
+    spread_ceiling_points: float = 999.0  # effectively disabled (was 30.0)
+    spread_vs_avg_multiplier: float = 0.0  # disabled (was 2.0)
+    cooldown_seconds: int = 0  # disabled — not in backtest (was 60)
     max_trades_per_day: int = 10  # FTMO-safe: quality over quantity
-    # Extended from 15 for Apr 6-11: PCE/CPI high-vol releases
-    news_blackout_minutes: int = 60
+    # News blackout disabled — not in backtest pipeline. Re-enable after validation.
+    news_blackout_minutes: int = 0  # disabled (was 60)
     require_stop_loss: bool = True
     max_drawdown_equity_pct: float = _DEFAULT_MAX_DAILY_DRAWDOWN_PCT
     # Phase 6: IRB-specific risk hardening
-    check_forex_session: bool = True  # P4: Enable enhanced session-aware filtering
+    check_forex_session: bool = False  # disabled — not in backtest (was True)
     irb_max_open_positions: int = 0  # IRB exposure limit (0 = disabled)
     # P4: Enhanced session filtering options
     session_overlap_only: bool = False  # Restrict to London-NY overlap only
@@ -99,8 +98,8 @@ class RiskConfig:
     daily_reset_tz: str = "Europe/Prague"
     # Slippage control (Phase: Execution Gaps)
     max_slippage_pips: float = 3.0  # max acceptable slippage in pips (0 = disabled)
-    # Anti-EA-detection: rollover dead zone (spreads widen, fills degrade)
-    rollover_dead_zone_enabled: bool = True
+    # Rollover dead zone disabled — not in backtest pipeline. Re-enable after validation.
+    rollover_dead_zone_enabled: bool = False  # disabled (was True)
     rollover_start_hour_utc: int = 21  # 21:00 UTC = daily FX rollover start (widened per microstructure research)
     rollover_end_hour_utc: int = 0  # 00:00 UTC = rollover window end (midnight next day, covers full volatility window)
     # Anti-EA-detection: entry timing jitter (randomizes order timing)
@@ -110,8 +109,8 @@ class RiskConfig:
     # Anti-EA-detection: lot-size micro-variation (prevents exact repetition)
     lot_micro_variation_enabled: bool = True
     lot_micro_variation_step: float = 0.01  # ±0.01 lot random offset
-    # Anti-EA-detection: London Fix avoidance (benchmark FX rate setting)
-    london_fix_avoidance_enabled: bool = True
+    # London Fix avoidance disabled — not in backtest pipeline. Re-enable after validation.
+    london_fix_avoidance_enabled: bool = False  # disabled (was True)
     london_fix_start_hour_utc: int = 15
     london_fix_start_minute_utc: int = 45
     london_fix_end_hour_utc: int = 16
@@ -127,13 +126,6 @@ class RiskConfig:
     # Max extra SL widening from live spread adjustment (pips). Caps the
     # dynamic spread adjustment to prevent runaway widening during spikes.
     sl_spread_max_extra_pips: float = 3.0
-    # ATR regime-based position sizing: scale risk by ATR zone risk factor
-    # from STATE/novatrade/regime.json.  Off by default — enable for live
-    # trials behind explicit operator decision.
-    atr_regime_sizing_enabled: bool = False
-    # Staleness threshold for regime.json (seconds). If the file is older
-    # than this, fall back to risk_factor=1.0 (no adjustment).
-    atr_regime_staleness_seconds: int = 900  # 15 minutes
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -217,7 +209,7 @@ class NovaTradeCfg:
     ftmo: FtmoProfile = field(default_factory=FtmoProfile)
     log_dir: Path = Path("LOGS/novatrade")
     data_dir: Path = Path("OUTPUT/novatrade")
-    dry_run: bool = True  # safety default: no real orders
+    dry_run: bool = False  # live trading: real orders enabled
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> NovaTradeCfg:
@@ -255,10 +247,6 @@ class NovaTradeCfg:
                 max_volume_per_trade=float(
                     os.environ.get("NOVATRADE_MAX_VOLUME_PER_TRADE", str(_DEFAULT_MAX_VOLUME_PER_TRADE))
                 ),
-                atr_regime_sizing_enabled=(
-                    os.environ.get("NOVATRADE_ATR_REGIME_SIZING_ENABLED", "false").lower() in ("true", "1", "yes")
-                ),
-                atr_regime_staleness_seconds=int(os.environ.get("NOVATRADE_ATR_REGIME_STALENESS_SECONDS", "900")),
             ),
             ftmo=FtmoProfile.from_env(),
             dry_run=dry_run_raw.lower() in ("true", "1", "yes"),
