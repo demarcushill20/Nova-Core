@@ -442,13 +442,10 @@ class TestPositionSizerIntegration:
                 f"Volume increased from {volumes[i - 1]} to {volumes[i]} at equity {equities[i]}"
             )
 
-    def test_combined_with_drawdown_scaler(self):
-        """Full pipeline: proportional risk + volume scaler = compounding protection."""
-        from novatrade.risk.position_sizer import DrawdownScaler
-
+    def test_proportional_risk_reduces_volume(self):
+        """Full pipeline: proportional risk reduces position sizes at drawdown."""
         dpr = DrawdownProportionalRisk()
         sizer = PositionSizer()
-        scaler = DrawdownScaler(total_dd_enabled=True)
 
         # At 6% total DD: equity=94K
         equity = 94_000.0
@@ -457,11 +454,9 @@ class TestPositionSizerIntegration:
 
         base_vol = sizer.calculate(equity=equity, entry=1.10150, stop=1.10000, risk_pct=risk)
 
-        # Daily DD usage at 60% → DrawdownScaler applies 0.75 multiplier
-        # Total DD at 60% of 10% limit → additional 0.75 multiplier
-        final_vol = scaler.scale_volume(base_vol, dd_used_pct=0.60, total_dd_used_pct=0.60)
+        # Compare against full risk volume
+        full_vol = sizer.calculate(equity=equity, entry=1.10150, stop=1.10000, risk_pct=BASE_RISK)
 
-        # Compounding: proportional risk already reduced base, scaler reduces further
-        assert final_vol < base_vol
-        # After proportional risk (0.30×) + scaler (0.75×): significantly smaller
-        assert final_vol < 3.0
+        # Proportional risk should significantly reduce the volume
+        assert base_vol < full_vol
+        assert base_vol < 3.0

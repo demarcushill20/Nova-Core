@@ -90,11 +90,13 @@ class TestCheckTradeGap:
         assert status.alert_level == "GREEN"
         assert "weekend" in status.suppression_reason
 
-    def test_low_uptime_suppressed(self):
+    def test_low_uptime_suppressed(self, monkeypatch):
         """Should not alert when uptime is very low."""
+        from novatrade.monitor import trade_gap_monitor
+
+        monkeypatch.setattr(trade_gap_monitor, "_get_uptime", lambda: 0.0)
+
         now = datetime(2026, 4, 9, 9, 0, tzinfo=timezone.utc)
-        # check_trade_gap reads uptime from live_metrics.json
-        # In test environment, uptime will be 0 → suppressed
         status = check_trade_gap(now=now)
         assert status.suppressed is True
         assert "uptime" in status.suppression_reason

@@ -1,14 +1,11 @@
-"""Tests for Phase 6 — Risk Management Hardening.
+"""Tests for Risk Management Hardening.
 
 Covers:
 - Policy layer evaluation order
 - Session policy (forex market hours)
-- Drawdown governance with tiered warnings
-- IRB exposure controls
 - HALT verdict semantics
 - Kill-switch governance
 - RiskAction portfolio actions
-- Drawdown tier classification
 - Forex weekend detection
 - Trading Agent HALT integration
 """
@@ -24,13 +21,10 @@ from novatrade.models import (
     OrderType,
     Position,
     RiskAction,
-    RiskCheckResult,
     RiskVerdict,
 )
 from novatrade.risk.risk_engine import (
-    DrawdownTier,
     RiskEngine,
-    _drawdown_tier,
     _is_forex_weekend,
 )
 
@@ -58,7 +52,7 @@ def _cfg(**overrides) -> NovaTradeCfg:
 
 
 def _irb_cfg(**risk_overrides) -> NovaTradeCfg:
-    """Config with Phase 6 IRB hardening enabled."""
+    """Config with session checking enabled."""
     risk_kw = dict(
         max_daily_drawdown_pct=5.0,
         max_total_drawdown_pct=10.0,
@@ -66,7 +60,6 @@ def _irb_cfg(**risk_overrides) -> NovaTradeCfg:
         max_volume_per_trade=1.0,
         min_volume_per_trade=0.01,
         check_forex_session=True,
-        irb_max_open_positions=1,
     )
     risk_kw.update(risk_overrides)
     risk = RiskConfig(**risk_kw)  # type: ignore[arg-type]
@@ -135,43 +128,6 @@ def _make_weekday_clock(weekday: int, hour: int = 12):
     base_monday = dt.datetime(2026, 3, 16, hour, 0, 0, tzinfo=dt.timezone.utc)
     target = base_monday + dt.timedelta(days=weekday)
     return lambda: target
-
-
-# ---------------------------------------------------------------------------
-# Drawdown tier helper tests
-# ---------------------------------------------------------------------------
-
-
-class TestDrawdownTier:
-    def test_normal(self):
-        assert _drawdown_tier(2.0, 5.0) == DrawdownTier.NORMAL
-
-    def test_elevated_at_60_pct(self):
-        assert _drawdown_tier(3.0, 5.0) == DrawdownTier.ELEVATED
-
-    def test_critical_at_80_pct(self):
-        assert _drawdown_tier(4.0, 5.0) == DrawdownTier.CRITICAL
-
-    def test_breach_at_100_pct(self):
-        assert _drawdown_tier(5.0, 5.0) == DrawdownTier.BREACH
-
-    def test_breach_above_limit(self):
-        assert _drawdown_tier(7.0, 5.0) == DrawdownTier.BREACH
-
-    def test_total_drawdown_tiers(self):
-        assert _drawdown_tier(5.0, 10.0) == DrawdownTier.NORMAL
-        assert _drawdown_tier(6.0, 10.0) == DrawdownTier.ELEVATED
-        assert _drawdown_tier(8.0, 10.0) == DrawdownTier.CRITICAL
-        assert _drawdown_tier(10.0, 10.0) == DrawdownTier.BREACH
-
-    def test_zero_drawdown(self):
-        assert _drawdown_tier(0.0, 5.0) == DrawdownTier.NORMAL
-
-    def test_just_below_elevated(self):
-        assert _drawdown_tier(2.99, 5.0) == DrawdownTier.NORMAL
-
-    def test_just_below_critical(self):
-        assert _drawdown_tier(3.99, 5.0) == DrawdownTier.ELEVATED
 
 
 # ---------------------------------------------------------------------------
@@ -298,137 +254,6 @@ class TestSessionPolicy:
 
 
 # ---------------------------------------------------------------------------
-# Drawdown governance tests (Layer 2)
-# ---------------------------------------------------------------------------
-
-
-class TestDrawdownGovernance:
-    def test_normal_drawdown_allows(self):
-        engine = _make_engine()
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=99_000),  # 1% daily DD
-            [],
-        )
-        assert decision.verdict == RiskVerdict.ALLOW
-        # Check drawdown checks are included
-        dd_names = [c.name for c in decision.checks if "drawdown" in c.name]
-        assert "ftmo_daily_drawdown" in dd_names
-        assert "ftmo_total_drawdown" in dd_names
-
-    def test_daily_drawdown_breach_halts(self):
-        engine = _make_engine()
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=94_000),  # 6% daily DD > 5% limit
-            [],
-        )
-        assert decision.verdict == RiskVerdict.HALT
-        assert decision.policy_layer == 2
-        assert engine.halted
-
-    def test_total_drawdown_breach_halts(self):
-        engine = _make_engine()
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=89_000),  # 11% total DD > 10% limit
-            [],
-        )
-        assert decision.verdict == RiskVerdict.HALT
-        assert engine.halted
-
-    def test_elevated_drawdown_still_allows(self):
-        engine = _make_engine()
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=97_000),  # 3% daily DD (ELEVATED tier)
-            [],
-        )
-        assert decision.verdict == RiskVerdict.ALLOW
-        # Verify the check detail mentions the tier
-        dd_check = next(c for c in decision.checks if c.name == "ftmo_daily_drawdown")
-        assert "ELEVATED" in dd_check.detail
-
-    def test_critical_drawdown_still_allows(self):
-        engine = _make_engine()
-        # Mock the FTMO daily loss buffer so Layer 4 doesn't interfere
-        # with the Layer 2 drawdown governance test.
-        engine._gate._daily_loss_tracker.check = lambda b, e: RiskCheckResult(
-            name="ftmo_daily_loss", passed=True, detail="mocked"
-        )
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=96_000),  # 4% daily DD (CRITICAL tier)
-            [],
-        )
-        assert decision.verdict == RiskVerdict.ALLOW
-        dd_check = next(c for c in decision.checks if c.name == "ftmo_daily_drawdown")
-        assert "CRITICAL" in dd_check.detail
-
-    def test_halt_actions_included_in_decision(self):
-        engine = _make_engine()
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=94_000),  # breach
-            [],
-        )
-        assert RiskAction.HALT_TRADING in decision.actions
-
-
-# ---------------------------------------------------------------------------
-# IRB exposure control tests (Layer 3)
-# ---------------------------------------------------------------------------
-
-
-class TestIRBExposure:
-    def test_exposure_check_disabled_by_default(self):
-        """Default config (irb_max_open_positions=0) skips exposure check."""
-        engine = _make_engine(_cfg())
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(),
-            [_position()],  # 1 open position
-        )
-        # Should not be denied by IRB exposure (only by general max_positions)
-        check_names = [c.name for c in decision.checks]
-        assert "irb_max_positions" not in check_names
-
-    def test_exposure_deny_when_position_open(self):
-        engine = _make_engine(_irb_cfg())
-        engine._clock = _make_weekday_clock(1, 12)  # weekday
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(),
-            [_position()],  # 1 open position
-        )
-        assert decision.verdict == RiskVerdict.DENY
-        assert decision.policy_layer == 3
-        assert decision.rule == "irb_max_positions"
-
-    def test_exposure_allow_no_positions(self):
-        engine = _make_engine(_irb_cfg())
-        engine._clock = _make_weekday_clock(1, 12)  # weekday
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(),
-            [],  # no positions
-        )
-        assert decision.verdict == RiskVerdict.ALLOW
-
-    def test_exposure_deny_multiple_positions(self):
-        engine = _make_engine(_irb_cfg())
-        engine._clock = _make_weekday_clock(1, 12)
-        positions = [_position("p1"), _position("p2")]
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(),
-            positions,
-        )
-        assert decision.verdict == RiskVerdict.DENY
-        assert decision.policy_layer == 3
-
-
-# ---------------------------------------------------------------------------
 # Policy layer order tests
 # ---------------------------------------------------------------------------
 
@@ -443,38 +268,16 @@ class TestPolicyLayerOrder:
         assert decision.policy_layer == 0  # halt, not session
 
     def test_layer1_before_layer2(self):
-        """Session (layer 1) takes priority over drawdown (layer 2)."""
+        """Session (layer 1) takes priority over gate (layer 2)."""
         engine = _make_engine(_irb_cfg())
         engine._clock = _make_weekday_clock(5, 12)  # Saturday
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=94_000),  # would breach drawdown
-            [],
-        )
-        assert decision.policy_layer == 1  # session, not drawdown
-
-    def test_layer2_before_layer3(self):
-        """Drawdown (layer 2) takes priority over exposure (layer 3)."""
-        engine = _make_engine(_irb_cfg())
-        engine._clock = _make_weekday_clock(1, 12)
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=94_000),  # drawdown breach
-            [_position()],  # would fail exposure
-        )
-        assert decision.policy_layer == 2  # drawdown, not exposure
-
-    def test_layer3_before_layer4(self):
-        """Exposure (layer 3) takes priority over pre-trade gate (layer 4)."""
-        engine = _make_engine(_irb_cfg())
-        engine._clock = _make_weekday_clock(1, 12)
         bad_order = _order(volume=999.0)  # would fail volume check in gate
         decision = engine.pre_trade_check(
             bad_order,
             _account(),
-            [_position()],  # fails exposure
+            [],
         )
-        assert decision.policy_layer == 3  # exposure, not gate
+        assert decision.policy_layer == 1  # session, not gate
 
     def test_all_layers_pass(self):
         engine = _make_engine(_irb_cfg())
@@ -615,30 +418,20 @@ class TestRequiredActions:
 
 
 class TestCheckCompleteness:
-    def test_allow_includes_drawdown_checks(self):
-        engine = _make_engine()
-        decision = engine.pre_trade_check(_order(), _account(), [])
-        check_names = [c.name for c in decision.checks]
-        assert "ftmo_daily_drawdown" in check_names
-        assert "ftmo_total_drawdown" in check_names
-
     def test_allow_includes_gate_checks(self):
         engine = _make_engine()
         decision = engine.pre_trade_check(_order(), _account(), [])
         check_names = [c.name for c in decision.checks]
-        # Pre-trade gate checks
         assert "dry_run" in check_names
         assert "volume_bounds" in check_names
         assert "stop_loss" in check_names
 
-    def test_irb_config_includes_all_layer_checks(self):
+    def test_session_config_includes_all_layer_checks(self):
         engine = _make_engine(_irb_cfg())
         engine._clock = _make_weekday_clock(1, 12)
         decision = engine.pre_trade_check(_order(), _account(), [])
         check_names = [c.name for c in decision.checks]
         assert "forex_session" in check_names
-        assert "ftmo_daily_drawdown" in check_names
-        assert "irb_max_positions" in check_names
         assert "volume_bounds" in check_names  # from gate
 
 
@@ -648,16 +441,14 @@ class TestCheckCompleteness:
 
 
 class TestEdgeCases:
-    def test_uninitialized_engine_skips_drawdown(self):
-        """If initialize() was never called, daily_start_equity=0, skip DD check."""
+    def test_uninitialized_engine_allows(self):
+        """If initialize() was never called, pre-trade gate still works."""
         engine = RiskEngine(_cfg())
-        # Don't call initialize
         decision = engine.pre_trade_check(
             _order(),
             _account(),
             [],
         )
-        # Should still work — drawdown checks skipped when reference is 0
         assert decision.verdict == RiskVerdict.ALLOW
 
     def test_zero_equity_account(self):
@@ -667,18 +458,4 @@ class TestEdgeCases:
             _account(equity=0, balance=0),
             [],
         )
-        # Zero equity skips drawdown checks (guard clauses)
-        # May fail on other checks (balance=0 drawdown check in gate)
         assert decision is not None  # doesn't crash
-
-    def test_negative_pnl_drawdown_clamped(self):
-        """If equity exceeds daily start (profit), DD should be 0, not negative."""
-        engine = _make_engine(equity=100_000)
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=105_000),  # profit
-            [],
-        )
-        dd_check = next(c for c in decision.checks if c.name == "ftmo_daily_drawdown")
-        # DD should be 0% (clamped), not -5%
-        assert "0.00%" in dd_check.detail

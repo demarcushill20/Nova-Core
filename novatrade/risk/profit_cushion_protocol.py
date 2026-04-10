@@ -18,7 +18,6 @@ Profit Cushion Tiers:
 Design principles:
 - Track cycle profit from FTMO cycle start date (4-month cycles)
 - Progressive risk reduction as profit targets are approached
-- Integrate with DailyRiskBudgetTracker for compound risk management
 - FTMO timezone-aware cycle boundaries (Europe/Prague)
 - State persistence for crash recovery
 - Configurable profit thresholds and risk multipliers

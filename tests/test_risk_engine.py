@@ -90,12 +90,6 @@ class TestRiskEngineInitialization:
         assert snap.daily_drawdown.reference_equity == 50_000
         assert snap.total_drawdown.reference_equity == 50_000
 
-    def test_initialize_wires_daily_budget(self):
-        engine = RiskEngine(_cfg())
-        engine.initialize(_account(equity=100_000))
-        # Daily budget should be 5% of equity = $5,000
-        assert engine._gate._daily_budget_tracker.daily_budget_usd == 5000.0
-
 
 class TestPreTradeCheck:
     def test_allow_normal_trade(self):
@@ -123,23 +117,7 @@ class TestPreTradeCheck:
         assert decision.policy_layer == 0
         assert "halted" in decision.reason.lower()
 
-    def test_halt_daily_drawdown_breach(self):
-        cfg = _cfg()
-        engine = RiskEngine(cfg)
-        engine.initialize(_account(equity=100_000))
-        # Simulate equity drop below daily drawdown limit (5%)
-        decision = engine.pre_trade_check(
-            _order(),
-            _account(equity=94_000, balance=100_000),
-            [],
-        )
-        # With equity=94000, daily DD = (100000-94000)/100000 = 6% > 5%
-        # Phase 6: drawdown breach returns HALT (not DENY)
-        assert decision.verdict == RiskVerdict.HALT
-        assert decision.denied
-        assert decision.policy_layer == 2
-
-    def test_includes_portfolio_checks(self):
+    def test_includes_gate_checks(self):
         engine = RiskEngine(_cfg())
         engine.initialize(_account())
         decision = engine.pre_trade_check(
@@ -148,8 +126,8 @@ class TestPreTradeCheck:
             [],
         )
         check_names = [c.name for c in decision.checks]
-        assert "ftmo_daily_drawdown" in check_names
-        assert "ftmo_total_drawdown" in check_names
+        assert "dry_run" in check_names
+        assert "volume_bounds" in check_names
 
 
 class TestTradeLifecycle:

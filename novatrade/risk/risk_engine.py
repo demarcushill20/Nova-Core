@@ -2,7 +2,7 @@
 
 Extends the pre-trade gate into a full risk management system that handles:
 
-1. **Pre-trade risk** — 5-layer policy evaluation (Phase 6)
+1. **Pre-trade risk** — 3-layer policy evaluation
 2. **Position-level risk** — trailing stop management, time stop monitoring
 3. **Portfolio-level risk** — drawdown tracking, FTMO compliance, daily P&L
 4. **Session-level risk** — forex market hours, trade logging, risk metrics
@@ -13,9 +13,7 @@ generator, the pre-trade gate, and the execution layer.
 Policy layers (evaluated in order, short-circuit on DENY/HALT):
   Layer 0: System kill switch (halt state)
   Layer 1: Session policy (24/5 forex market hours)
-  Layer 2: Drawdown governance (FTMO daily/total limits with tiered warnings)
-  Layer 3: Exposure control (IRB max 1 position)
-  Layer 4: Pre-trade gate (13 standard checks)
+  Layer 2: Pre-trade gate (13+ standard checks)
 
 Design:
 - Provider-neutral: no MetaApi imports
@@ -71,15 +69,6 @@ class RiskLevel(Enum):
 class DrawdownType(Enum):
     DAILY = "DAILY"
     TOTAL = "TOTAL"
-
-
-class DrawdownTier(Enum):
-    """Drawdown warning tier for tiered escalation."""
-
-    NORMAL = "NORMAL"
-    ELEVATED = "ELEVATED"  # >= 60% of limit
-    CRITICAL = "CRITICAL"  # >= 80% of limit
-    BREACH = "BREACH"  # >= 100% of limit
 
 
 @dataclass
@@ -187,17 +176,6 @@ class RiskSnapshot:
 # ---------------------------------------------------------------------------
 
 
-def _drawdown_tier(pct: float, limit: float) -> DrawdownTier:
-    """Classify drawdown percentage into a warning tier."""
-    if pct >= limit:
-        return DrawdownTier.BREACH
-    if pct >= limit * 0.8:
-        return DrawdownTier.CRITICAL
-    if pct >= limit * 0.6:
-        return DrawdownTier.ELEVATED
-    return DrawdownTier.NORMAL
-
-
 def _is_forex_weekend(now: dt.datetime) -> bool:
     """Check if the given UTC datetime falls in the forex weekend close.
 
@@ -224,9 +202,9 @@ class RiskEngine:
     Coordinates pre-trade checks, position-level risk, portfolio drawdown
     tracking, and FTMO compliance monitoring.
 
-    Phase 6 hardening: pre-trade evaluation is organized into 5 policy layers
-    evaluated in sequence.  A DENY or HALT at any layer short-circuits the
-    remaining layers.
+    Pre-trade evaluation is organized into 3 policy layers evaluated in
+    sequence.  A DENY or HALT at any layer short-circuits the remaining
+    layers.
 
     Usage::
 
@@ -371,7 +349,7 @@ class RiskEngine:
         self._gate.initialize_daily_loss(account.balance, account.equity)
 
     # ------------------------------------------------------------------
-    # Pre-trade evaluation (Phase 6: 5-layer policy model)
+    # Pre-trade evaluation (3-layer policy model)
     # ------------------------------------------------------------------
 
     def pre_trade_check(
@@ -392,9 +370,7 @@ class RiskEngine:
 
         Layer 0: System kill switch (halt state)
         Layer 1: Session policy (24/5 forex market hours)
-        Layer 2: Drawdown governance (FTMO daily/total with tiered warnings)
-        Layer 3: Exposure control (IRB max 1 position)
-        Layer 4: Pre-trade gate (13 standard checks)
+        Layer 2: Pre-trade gate (13+ standard checks)
         """
         all_checks: list[RiskCheckResult] = []
 
@@ -429,38 +405,7 @@ class RiskEngine:
                     request=request,
                 )
 
-        # --- Layer 2: Drawdown governance (FTMO limits + tiered warnings) ---
-        dd_checks, should_halt = self._check_drawdown_governance(account)
-        all_checks.extend(dd_checks)
-        if should_halt:
-            first_fail = next((c for c in dd_checks if not c.passed), dd_checks[0])
-            return RiskDecision(
-                verdict=RiskVerdict.HALT,
-                checks=all_checks,
-                reason=first_fail.detail,
-                rule=first_fail.name,
-                policy_layer=2,
-                actions=[RiskAction.HALT_TRADING],
-                request=request,
-            )
-
-        # --- Layer 3: Exposure control (IRB-specific) ---
-        if self._risk.irb_max_open_positions > 0:
-            exposure_checks = self._check_irb_exposure(positions)
-            all_checks.extend(exposure_checks)
-            failed_exposure = [c for c in exposure_checks if not c.passed]
-            if failed_exposure:
-                first_fail = failed_exposure[0]
-                return RiskDecision(
-                    verdict=RiskVerdict.DENY,
-                    checks=all_checks,
-                    reason=first_fail.detail,
-                    rule=first_fail.name,
-                    policy_layer=3,
-                    request=request,
-                )
-
-        # --- Layer 4: Pre-trade gate (13 standard checks) ---
+        # --- Layer 2: Pre-trade gate (13+ standard checks) ---
         gate_decision = self._gate.evaluate(
             request,
             account,
@@ -476,7 +421,7 @@ class RiskEngine:
                 checks=all_checks,
                 reason=gate_decision.reason,
                 rule=gate_decision.rule,
-                policy_layer=4,
+                policy_layer=2,
                 request=request,
             )
 
@@ -524,142 +469,6 @@ class RiskEngine:
             passed=True,
             detail=f"Session allowed: {session_info.reason}{quality_note}",
         )
-
-    # ------------------------------------------------------------------
-    # Layer 2: Drawdown governance
-    # ------------------------------------------------------------------
-
-    def _check_drawdown_governance(self, account: AccountState) -> tuple[list[RiskCheckResult], bool]:
-        """FTMO drawdown limits with tiered warnings.
-
-        Returns ``(checks, should_halt)``.  Warning-tier transitions are
-        logged but do not deny trades — only BREACH triggers a halt.
-
-        RC2 fix: zero or negative equity is now an immediate emergency halt
-        instead of silently skipping all drawdown checks.
-        """
-        checks: list[RiskCheckResult] = []
-        should_halt = False
-
-        # RC2: Zero or negative equity — emergency halt
-        if account.equity <= 0:
-            checks.append(
-                RiskCheckResult(
-                    name="equity_zero_or_negative",
-                    passed=False,
-                    detail=f"Equity at or below zero (${account.equity:.2f}) — emergency halt",
-                )
-            )
-            self._halt(f"Equity at or below zero: ${account.equity:.2f}")
-            return checks, True
-
-        # Daily drawdown
-        if self._daily_start_equity > 0:
-            daily_dd = max(
-                ((self._daily_start_equity - account.equity) / self._daily_start_equity) * 100,
-                0.0,
-            )
-            limit = self._risk.max_daily_drawdown_pct
-            tier = _drawdown_tier(daily_dd, limit)
-
-            if tier == DrawdownTier.BREACH:
-                checks.append(
-                    RiskCheckResult(
-                        name="ftmo_daily_drawdown",
-                        passed=False,
-                        detail=f"Daily drawdown {daily_dd:.2f}% >= limit {limit:.1f}% [BREACH]",
-                    )
-                )
-                should_halt = True
-                self._halt("FTMO daily drawdown limit reached")
-            else:
-                checks.append(
-                    RiskCheckResult(
-                        name="ftmo_daily_drawdown",
-                        passed=True,
-                        detail=f"Daily drawdown {daily_dd:.2f}%, limit {limit:.1f}% [{tier.value}]",
-                    )
-                )
-
-            if tier in (DrawdownTier.ELEVATED, DrawdownTier.CRITICAL):
-                log.warning(
-                    "Daily drawdown %s: %.2f%% of %.1f%% limit",
-                    tier.value,
-                    daily_dd,
-                    limit,
-                )
-
-        # Total drawdown
-        if self._initial_equity > 0:
-            total_dd = max(
-                ((self._initial_equity - account.equity) / self._initial_equity) * 100,
-                0.0,
-            )
-            limit = self._risk.max_total_drawdown_pct
-            tier = _drawdown_tier(total_dd, limit)
-
-            if tier == DrawdownTier.BREACH:
-                checks.append(
-                    RiskCheckResult(
-                        name="ftmo_total_drawdown",
-                        passed=False,
-                        detail=f"Total drawdown {total_dd:.2f}% >= limit {limit:.1f}% [BREACH]",
-                    )
-                )
-                should_halt = True
-                self._halt("FTMO total drawdown limit reached")
-            else:
-                checks.append(
-                    RiskCheckResult(
-                        name="ftmo_total_drawdown",
-                        passed=True,
-                        detail=f"Total drawdown {total_dd:.2f}%, limit {limit:.1f}% [{tier.value}]",
-                    )
-                )
-
-            if tier in (DrawdownTier.ELEVATED, DrawdownTier.CRITICAL):
-                log.warning(
-                    "Total drawdown %s: %.2f%% of %.1f%% limit",
-                    tier.value,
-                    total_dd,
-                    limit,
-                )
-
-        return checks, should_halt
-
-    # ------------------------------------------------------------------
-    # Layer 3: Exposure control
-    # ------------------------------------------------------------------
-
-    def _check_irb_exposure(self, positions: list[Position]) -> list[RiskCheckResult]:
-        """IRB-specific exposure limits.
-
-        Strategy spec §4.4: only one position at a time. This is stricter than
-        the general risk config ``max_positions`` and provides defense-in-depth
-        alongside the Trading Agent FSM.
-        """
-        checks: list[RiskCheckResult] = []
-        limit = self._risk.irb_max_open_positions
-
-        open_count = len(positions)
-        if open_count >= limit:
-            checks.append(
-                RiskCheckResult(
-                    name="irb_max_positions",
-                    passed=False,
-                    detail=f"IRB: {open_count} open position(s) >= limit {limit}",
-                )
-            )
-        else:
-            checks.append(
-                RiskCheckResult(
-                    name="irb_max_positions",
-                    passed=True,
-                    detail=f"IRB: {open_count} open position(s), limit {limit}",
-                )
-            )
-
-        return checks
 
     # ------------------------------------------------------------------
     # Trade lifecycle

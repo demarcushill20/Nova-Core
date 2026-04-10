@@ -20,7 +20,6 @@ from novatrade.models import (
     OrderSide,
     OrderType,
 )
-from novatrade.risk.position_sizer import PositionSizer
 from novatrade.risk.pre_trade_gate import PreTradeGate
 from novatrade.strategy.live_engine import LiveSignal, SignalType
 
@@ -364,125 +363,7 @@ class TestEntryTimingJitter:
 
 
 # ===========================================================================
-# 3. Lot-Size Micro-Variation
-# ===========================================================================
-
-
-class TestLotMicroVariation:
-    """Tests for the lot-size micro-variation in PositionSizer."""
-
-    def test_micro_variation_changes_output(self):
-        """With micro-variation enabled, repeated calculations should vary."""
-        sizer = PositionSizer(
-            min_lot=0.01,
-            max_lot=1.0,
-            micro_variation_enabled=True,
-            micro_variation_step=0.01,
-        )
-        results = set()
-        for _ in range(50):
-            vol = sizer.calculate(equity=10000, entry=1.1050, stop=1.1000)
-            results.add(vol)
-        # With ±0.01 variation, we should see at least 2 distinct values
-        assert len(results) >= 2, f"expected variation, got single value: {results}"
-
-    def test_micro_variation_respects_bounds(self):
-        """Micro-variation should never produce volumes outside [min_lot, max_lot]."""
-        sizer = PositionSizer(
-            min_lot=0.01,
-            max_lot=0.50,
-            micro_variation_enabled=True,
-            micro_variation_step=0.01,
-        )
-        for _ in range(100):
-            vol = sizer.calculate(equity=10000, entry=1.1050, stop=1.1000)
-            assert 0.01 <= vol <= 0.50, f"volume {vol} out of bounds"
-
-    def test_no_variation_when_disabled(self):
-        """With micro-variation disabled, results should be deterministic."""
-        sizer = PositionSizer(
-            min_lot=0.01,
-            max_lot=1.0,
-            micro_variation_enabled=False,
-        )
-        results = set()
-        for _ in range(20):
-            vol = sizer.calculate(equity=10000, entry=1.1050, stop=1.1000)
-            results.add(vol)
-        assert len(results) == 1, f"expected single value, got {results}"
-
-    def test_variation_at_min_bound(self):
-        """Micro-variation at min_lot should clamp upward, not go below."""
-        sizer = PositionSizer(
-            min_lot=0.01,
-            max_lot=1.0,
-            micro_variation_enabled=True,
-            micro_variation_step=0.01,
-        )
-        # Very small equity → should produce near-minimum lots
-        for _ in range(50):
-            vol = sizer.calculate(equity=100, entry=1.1050, stop=1.1000)
-            assert vol >= 0.01, f"volume {vol} below minimum"
-
-    def test_variation_at_max_bound(self):
-        """Micro-variation at max_lot should clamp downward, not exceed."""
-        sizer = PositionSizer(
-            min_lot=0.01,
-            max_lot=0.20,
-            micro_variation_enabled=True,
-            micro_variation_step=0.01,
-        )
-        # Large equity → should produce near-maximum lots
-        for _ in range(50):
-            vol = sizer.calculate(equity=100000, entry=1.1050, stop=1.1000)
-            assert vol <= 0.20, f"volume {vol} above maximum"
-
-    def test_variation_step_configurable(self):
-        """Custom step size should produce expected variation range."""
-        sizer = PositionSizer(
-            min_lot=0.01,
-            max_lot=5.0,
-            micro_variation_enabled=True,
-            micro_variation_step=0.05,
-        )
-        base = PositionSizer(min_lot=0.01, max_lot=5.0).calculate(equity=10000, entry=1.1050, stop=1.1000)
-        results = set()
-        for _ in range(100):
-            vol = sizer.calculate(equity=10000, entry=1.1050, stop=1.1000)
-            results.add(vol)
-        # Should see base-0.05, base, base+0.05 (three possible values)
-        expected = {round(base - 0.05, 2), base, round(base + 0.05, 2)}
-        assert results.issubset(expected), f"unexpected values: {results - expected}"
-
-    def test_variation_is_rounded_to_2_decimals(self):
-        """All lot sizes should be rounded to 2 decimal places."""
-        sizer = PositionSizer(
-            min_lot=0.01,
-            max_lot=1.0,
-            micro_variation_enabled=True,
-            micro_variation_step=0.01,
-        )
-        for _ in range(50):
-            vol = sizer.calculate(equity=10000, entry=1.1050, stop=1.1000)
-            assert vol == round(vol, 2), f"volume {vol} not rounded to 2 decimals"
-
-    def test_zero_step_disables_variation(self):
-        """A step of 0.0 should produce no variation even when enabled."""
-        sizer = PositionSizer(
-            min_lot=0.01,
-            max_lot=1.0,
-            micro_variation_enabled=True,
-            micro_variation_step=0.0,
-        )
-        results = set()
-        for _ in range(20):
-            vol = sizer.calculate(equity=10000, entry=1.1050, stop=1.1000)
-            results.add(vol)
-        assert len(results) == 1
-
-
-# ===========================================================================
-# 4. Integration: Config wiring
+# 3. Integration: Config wiring
 # ===========================================================================
 
 
@@ -500,24 +381,6 @@ class TestConfigWiring:
         assert cfg.entry_jitter_enabled is True
         assert cfg.entry_jitter_min_seconds == 1.0
         assert cfg.entry_jitter_max_seconds == 5.0
-
-    def test_lot_variation_config_defaults(self):
-        cfg = RiskConfig()
-        assert cfg.lot_micro_variation_enabled is True
-        assert cfg.lot_micro_variation_step == 0.01
-
-    def test_pre_trade_gate_wires_micro_variation(self):
-        """PreTradeGate should pass micro_variation config to PositionSizer."""
-        gate = PreTradeGate(
-            _cfg(
-                risk={
-                    "lot_micro_variation_enabled": True,
-                    "lot_micro_variation_step": 0.02,
-                }
-            )
-        )
-        assert gate._sizer._micro_variation_enabled is True
-        assert gate._sizer._micro_variation_step == 0.02
 
 
 # ===========================================================================

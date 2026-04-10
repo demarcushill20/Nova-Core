@@ -357,8 +357,6 @@ class TestAntiEADetectionConfig:
         """Test anti-EA-detection default values."""
         config = RiskConfig()
         assert config.entry_jitter_enabled is True
-        assert config.lot_micro_variation_enabled is True
-        assert config.lot_micro_variation_step == 0.01
         assert config.london_fix_avoidance_enabled is False
         assert config.london_fix_start_hour_utc == 15
         assert config.london_fix_start_minute_utc == 45
@@ -370,8 +368,6 @@ class TestAntiEADetectionConfig:
         """Test anti-EA-detection with custom values."""
         config = RiskConfig(
             entry_jitter_enabled=False,
-            lot_micro_variation_enabled=False,
-            lot_micro_variation_step=0.02,
             london_fix_avoidance_enabled=False,
             london_fix_start_hour_utc=14,
             london_fix_start_minute_utc=30,
@@ -380,8 +376,6 @@ class TestAntiEADetectionConfig:
             min_sl_distance_pips=5.0,
         )
         assert config.entry_jitter_enabled is False
-        assert config.lot_micro_variation_enabled is False
-        assert config.lot_micro_variation_step == 0.02
         assert config.london_fix_avoidance_enabled is False
         assert config.london_fix_start_hour_utc == 14
         assert config.london_fix_start_minute_utc == 30

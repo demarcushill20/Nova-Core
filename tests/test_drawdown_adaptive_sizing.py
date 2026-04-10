@@ -1,7 +1,8 @@
-"""Tests for drawdown-adaptive position sizing (P0 critical priority).
+"""Tests for drawdown-proportional position sizing in PreTradeGate.
 
-This feature integrates the DrawdownScaler into the PreTradeGate to automatically
-reduce position sizes as drawdown approaches FTMO limits, preventing account blowups.
+Verifies that DrawdownProportionalRisk (Layer 1) correctly integrates with
+PreTradeGate._check_volume_sizing() to adjust position sizes based on total
+account drawdown depth.
 """
 
 import pytest
@@ -21,7 +22,7 @@ def config():
 
 @pytest.fixture
 def gate(config):
-    """Pre-trade gate with drawdown-adaptive scaling enabled."""
+    """Pre-trade gate with drawdown-proportional risk enabled."""
     return PreTradeGate(config)
 
 
@@ -51,9 +52,9 @@ def healthy_account():
 
 @pytest.fixture
 def stressed_account():
-    """Account with significant drawdown (70% of 5% daily limit used)."""
+    """Account with significant drawdown (3.5% total drawdown)."""
     return AccountState(
-        equity=96500.0,  # 3.5% drawdown = 70% of 5% limit
+        equity=96500.0,  # 3.5% drawdown
         balance=96500.0,
         margin=0.0,
         free_margin=96500.0,
@@ -62,17 +63,17 @@ def stressed_account():
 
 @pytest.fixture
 def critical_account():
-    """Account approaching FTMO limits (90% of daily limit used)."""
+    """Account approaching FTMO limits (4.5% total drawdown)."""
     return AccountState(
-        equity=95500.0,  # 4.5% drawdown = 90% of 5% limit
+        equity=95500.0,  # 4.5% drawdown
         balance=95500.0,
         margin=0.0,
         free_margin=95500.0,
     )
 
 
-class TestDrawdownAdaptiveIntegration:
-    """Test integration of DrawdownScaler into PreTradeGate volume sizing."""
+class TestDrawdownProportionalIntegration:
+    """Test integration of DrawdownProportionalRisk into PreTradeGate volume sizing."""
 
     def test_healthy_account_full_size(self, gate, base_request, healthy_account):
         """Healthy accounts should use full position sizes."""
@@ -83,22 +84,24 @@ class TestDrawdownAdaptiveIntegration:
         assert "OK" in result.detail or "conservative" in result.detail
 
     def test_stressed_account_reduced_size(self, gate, base_request, stressed_account):
-        """Accounts with significant drawdown should use reduced position sizes."""
-        from novatrade.models import OrderRequest, OrderSide, OrderType
+        """Accounts with significant drawdown should use reduced position sizes.
 
-        # With 1.5% base risk, stressed account calculates ~1.01 lots.
-        # Use a larger request (2.0 lots) to exceed the calculated volume.
+        At 3.5% DD (cautious tier = 70% risk):
+          risk = 0.015 * 0.70 = 0.0105
+          volume = (96500 * 0.0105) / (50 * 10) = ~2.03 lots
+        A 3.5-lot request should exceed this by enough to fail (>25% tolerance).
+        """
         oversized_request = OrderRequest(
             symbol="EURUSD",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            volume=2.0,
+            volume=3.5,
             price=1.10000,
             stop_loss=1.09500,
         )
         result = gate._check_volume_sizing(oversized_request, stressed_account)
 
-        # Should fail validation because 2.0 lots exceeds scaled calculated volume (~1.01)
+        # Should fail validation because 3.5 lots exceeds calculated volume (~2.03)
         assert not result.passed
         assert "over-sized" in result.detail
 
@@ -107,7 +110,7 @@ class TestDrawdownAdaptiveIntegration:
             symbol="EURUSD",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            volume=0.50,  # Within expected scaled range
+            volume=0.50,  # Well within expected range
             price=1.10000,
             stop_loss=1.09500,
         )
@@ -116,21 +119,33 @@ class TestDrawdownAdaptiveIntegration:
         assert result_conservative.passed
 
     def test_critical_account_survival_mode(self, gate, base_request, critical_account):
-        """Accounts approaching limits should use minimal position sizes."""
-        result = gate._check_volume_sizing(base_request, critical_account)
+        """Accounts approaching limits should use minimal position sizes.
 
-        # Should fail validation due to heavy scaling down
+        At 4.5% DD (defensive tier = 50% risk):
+          risk = 0.015 * 0.50 = 0.0075
+          volume = (95500 * 0.0075) / (50 * 10) = ~1.43 lots
+        A 2.5-lot request should exceed this by enough to fail (>25% tolerance).
+        """
+        oversized_request = OrderRequest(
+            symbol="EURUSD",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            volume=2.5,
+            price=1.10000,
+            stop_loss=1.09500,
+        )
+        result = gate._check_volume_sizing(oversized_request, critical_account)
+
+        # Should fail validation due to proportional risk reduction
         assert not result.passed
         assert "over-sized" in result.detail
 
-        # Test with minimal request that should pass in survival mode
-        from novatrade.models import OrderRequest, OrderSide, OrderType
-
+        # Test with minimal request that should pass
         minimal_request = OrderRequest(
             symbol="EURUSD",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            volume=0.15,  # Very small request for survival mode (~0.18 calculated after proportional risk)
+            volume=0.50,
             price=1.10000,
             stop_loss=1.09500,
         )
@@ -169,131 +184,6 @@ class TestDrawdownAdaptiveIntegration:
         assert "skipped" in result.detail
 
 
-class TestLossStreakScaling:
-    """Test consecutive loss tracking and additional scaling."""
-
-    def test_record_loss_increases_count(self, gate):
-        """Recording losses should increase consecutive loss count."""
-        initial_count = gate.consecutive_losses
-        gate.record_trade_loss()
-        assert gate.consecutive_losses == initial_count + 1
-
-    def test_record_win_resets_count(self, gate):
-        """Recording wins should reset consecutive loss count (instant mode)."""
-        # Accumulate some losses
-        gate.record_trade_loss()
-        gate.record_trade_loss()
-        gate.record_trade_loss()
-        assert gate.consecutive_losses == 3
-
-        # Single win should reset
-        gate.record_trade_win()
-        assert gate.consecutive_losses == 0
-
-    def test_daily_reset_clears_state(self, gate):
-        """Daily reset should clear all scaling state."""
-        # Build up some state
-        gate.record_trade_loss()
-        gate.record_trade_loss()
-
-        # Reset
-        gate.reset_daily_risk_scaling()
-
-        # Should be cleared
-        assert gate.consecutive_losses == 0
-        assert gate.current_drawdown_scale == 1.0
-
-    def test_multiple_losses_compound_scaling(self, gate, base_request, healthy_account):
-        """Multiple consecutive losses should progressively reduce position sizes."""
-        # Record several losses
-        for _ in range(4):
-            gate.record_trade_loss()
-
-        # Should be in survival mode now (4+ losses = 0.25x scale)
-        assert gate.consecutive_losses >= 4
-
-        # The validation should fail because base_request asks for 1.0 lot
-        # but the system calculates much smaller due to loss scaling
-        result = gate._check_volume_sizing(base_request, healthy_account)
-
-        # Should fail due to oversized request (1.0 vs ~0.38 calculated)
-        assert not result.passed
-        assert "over-sized" in result.detail
-
-        # Now test with a smaller request that should pass
-        from novatrade.models import OrderRequest, OrderSide, OrderType
-
-        small_request = OrderRequest(
-            symbol="EURUSD",
-            side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
-            volume=0.25,  # Much smaller request
-            price=1.10000,
-            stop_loss=1.09500,
-        )
-
-        result_small = gate._check_volume_sizing(small_request, healthy_account)
-        # This should pass since we're requesting less than calculated
-        assert result_small.passed
-
-
-class TestDrawdownTierHysteresis:
-    """Test hysteresis behavior in drawdown tier transitions."""
-
-    def test_tier_entry_thresholds(self, gate):
-        """Test tier entry at configured thresholds."""
-        scaler = gate._drawdown_scaler
-
-        # Should start at full scale
-        assert scaler.current_dd_scale == 1.0
-
-        # Cross 50% threshold → should drop to 0.75
-        scale = scaler.drawdown_scale(0.51)
-        assert scale == 0.75
-        assert scaler.current_dd_scale == 0.75
-
-    def test_tier_exit_hysteresis(self, gate):
-        """Test that tier exits use lower thresholds (hysteresis)."""
-        scaler = gate._drawdown_scaler
-
-        # Enter elevated tier (50% → 0.75x)
-        scaler.drawdown_scale(0.51)
-        assert scaler.current_dd_scale == 0.75
-
-        # Partial recovery (to 48%) should not restore full size yet
-        scale = scaler.drawdown_scale(0.48)
-        assert scale == 0.75  # Still in tier
-
-        # Full recovery below exit threshold (45%) should restore
-        scale = scaler.drawdown_scale(0.44)
-        assert scale == 1.0
-
-    def test_total_dd_scaling_independence(self, gate):
-        """Test that total DD scaling works independently."""
-        scaler = gate._drawdown_scaler
-
-        # Test total DD scaling at various levels
-        assert scaler.total_dd_scale(0.40) == 1.0  # <50% = full size
-        assert scaler.total_dd_scale(0.60) == 0.75  # 50-70% = 3/4 size
-        assert scaler.total_dd_scale(0.80) == 0.50  # 70-85% = 1/2 size
-        assert scaler.total_dd_scale(0.90) == 0.10  # 85%+ = survival mode
-
-    def test_combined_scaling_takes_minimum(self, gate):
-        """Test that combined scaling uses the most restrictive factor."""
-        scaler = gate._drawdown_scaler
-
-        # Set up different scaling factors
-        daily_factor = scaler.drawdown_scale(0.60)  # 0.75 (elevated)
-        total_factor = scaler.total_dd_scale(0.80)  # 0.50 (critical)
-
-        # Combined should take the minimum
-        combined = scaler.combined_scale(
-            dd_used_pct=0.60,
-            total_dd_used_pct=0.80,
-        )
-        assert combined == min(daily_factor, total_factor, scaler.loss_streak_scale())
-
-
 class TestEdgeCases:
     """Test edge cases and error conditions."""
 
@@ -329,145 +219,19 @@ class TestEdgeCases:
         assert result.passed
         assert "skipped" in result.detail
 
-    def test_extreme_drawdown_levels(self, gate):
-        """Test scaling behavior at extreme drawdown levels."""
-        scaler = gate._drawdown_scaler
-
-        # Test extreme values
-        assert scaler.drawdown_scale(1.5) == 0.25  # 150% of limit = survival mode
-        assert scaler.drawdown_scale(-0.1) == 1.0  # Negative DD = full size
-
-    def test_concurrent_access_safety(self, gate):
-        """Test that concurrent access to scaler state is handled safely."""
-        # This is a basic test - full thread safety would need more sophisticated testing
-        initial_state = gate.consecutive_losses
-
-        # Multiple operations should maintain consistency
-        gate.record_trade_loss()
-        gate.record_trade_win()
-        gate.record_trade_loss()
-
-        # State should be predictable
-        assert gate.consecutive_losses == initial_state + 1
-
-
-# ---------------------------------------------------------------------------
-# Integration benchmarks
-# ---------------------------------------------------------------------------
-
-
-try:
-    import pytest_benchmark  # noqa: F401
-
-    _HAS_BENCHMARK = True
-except ImportError:
-    _HAS_BENCHMARK = False
-
-
-@pytest.mark.skipif(not _HAS_BENCHMARK, reason="pytest-benchmark not installed")
-class TestPerformanceImpact:
-    """Ensure drawdown-adaptive sizing doesn't significantly impact performance."""
-
-    def test_sizing_calculation_performance(self, gate, base_request, healthy_account, benchmark):
-        """Benchmark the volume sizing calculation performance."""
-
-        def volume_sizing_check():
-            return gate._check_volume_sizing(base_request, healthy_account)
-
-        result = benchmark(volume_sizing_check)
-        assert result.passed
-
-    def test_scaler_performance_under_load(self, gate, benchmark):
-        """Test DrawdownScaler performance with rapid scaling calculations."""
-        scaler = gate._drawdown_scaler
-
-        def rapid_scaling():
-            for pct in [0.3, 0.6, 0.8, 0.4, 0.7]:
-                scaler.drawdown_scale(pct)
-
-        benchmark(rapid_scaling)
-
-
-# ---------------------------------------------------------------------------
-# Property-based testing
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.property
-class TestPropertyBasedScaling:
-    """Property-based tests for drawdown scaling invariants."""
-
-    def test_scaling_never_exceeds_one(self, gate):
-        """Scale factors should never exceed 1.0 (never increase base size)."""
-        scaler = gate._drawdown_scaler
-
-        # Test range of drawdown percentages
-        for pct in [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0, 1.5]:
-            daily_scale = scaler.drawdown_scale(pct)
-            total_scale = scaler.total_dd_scale(pct)
-            combined = scaler.combined_scale(pct, pct)
-
-            assert daily_scale <= 1.0
-            assert total_scale <= 1.0
-            assert combined <= 1.0
-
-    def test_scaling_monotonic_decrease(self, gate):
-        """Higher drawdown percentages should never result in higher scaling."""
-        scaler = gate._drawdown_scaler
-
-        prev_scale = 1.0
-        for pct in [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]:
-            current_scale = scaler.total_dd_scale(pct)  # Use total DD to avoid hysteresis
-            assert current_scale <= prev_scale
-            prev_scale = current_scale
-
-    def test_volume_scaling_preserves_bounds(self, gate, base_request):
-        """Scaled volumes should always respect min/max lot bounds."""
-        scaler = gate._drawdown_scaler
-        base_volume = 5.0
-        min_lot = 0.01
-
-        for dd_pct in [0.0, 0.3, 0.6, 0.9, 1.5]:
-            scaled = scaler.scale_volume(base_volume, dd_pct, min_lot)
-            assert scaled >= min_lot
-            assert scaled <= base_volume  # Never increase
-
-
-# ---------------------------------------------------------------------------
-# Regression tests
-# ---------------------------------------------------------------------------
-
 
 class TestRegression:
     """Regression tests for known issues or edge cases."""
 
-    def test_state_persistence_across_requests(self, gate, base_request, healthy_account):
-        """Ensure DrawdownScaler state persists across multiple requests."""
-        # Record some losses
-        gate.record_trade_loss()
-        gate.record_trade_loss()
-        initial_losses = gate.consecutive_losses
-
-        # Multiple volume sizing calls shouldn't affect loss count
-        gate._check_volume_sizing(base_request, healthy_account)
-        gate._check_volume_sizing(base_request, healthy_account)
-
-        assert gate.consecutive_losses == initial_losses
-
     def test_configuration_independence(self):
-        """Ensure different gate instances have independent scaling state."""
+        """Ensure different gate instances have independent state."""
         config1 = NovaTradeCfg()
         config2 = NovaTradeCfg()
         gate1 = PreTradeGate(config1)
         gate2 = PreTradeGate(config2)
 
-        # Modify state on gate1
-        gate1.record_trade_loss()
-        gate1.record_trade_loss()
-
-        # gate2 should be unaffected
-        assert gate2.consecutive_losses == 0
-        assert gate1.consecutive_losses == 2
+        # Modifying gate1 should not affect gate2
+        assert gate1 is not gate2
 
     def test_backward_compatibility(self, gate, base_request, healthy_account):
         """Ensure existing volume sizing logic still works correctly."""

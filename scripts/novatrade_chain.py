@@ -470,7 +470,6 @@ async def step_risk_status(cfg: NovaTradeCfg) -> StepResult:
             r.details["max_vol_per_trade"] = cfg.risk.max_volume_per_trade
             r.details["anti_ea_rollover"] = cfg.risk.rollover_dead_zone_enabled
             r.details["anti_ea_jitter"] = cfg.risk.entry_jitter_enabled
-            r.details["anti_ea_lot_var"] = cfg.risk.lot_micro_variation_enabled
 
             if supervisor.halted:
                 r.status = "FAIL"

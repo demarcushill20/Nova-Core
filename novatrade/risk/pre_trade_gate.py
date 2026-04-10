@@ -39,7 +39,6 @@ from novatrade.models import (  # noqa: E402
     RiskVerdict,
     SymbolPrice,
 )
-from novatrade.risk.daily_budget_tracker import DailyRiskBudgetTracker  # noqa: E402
 from novatrade.risk.first_trade_validator import FirstTradeValidationResult, FirstTradeValidator  # noqa: E402
 from novatrade.risk.ftmo_compliance import (  # noqa: E402
     BestDayRuleTracker,
@@ -53,7 +52,7 @@ from novatrade.risk.ftmo_compliance import (  # noqa: E402
     WeekendAutoCloser,
     WeeklyLossTracker,
 )
-from novatrade.risk.position_sizer import DrawdownProportionalRisk, DrawdownScaler, PositionSizer  # noqa: E402
+from novatrade.risk.position_sizer import DrawdownProportionalRisk, PositionSizer  # noqa: E402
 from novatrade.risk.profit_cushion_protocol import ProfitCushionProtocol  # noqa: E402
 from novatrade.risk.symbol_helpers import pip_value as _pip_value_for_symbol  # noqa: E402
 
@@ -115,28 +114,13 @@ class PreTradeGate:
         self._sizer = PositionSizer(
             min_lot=self._risk.min_volume_per_trade,
             max_lot=self._risk.max_volume_per_trade,
-            micro_variation_enabled=self._risk.lot_micro_variation_enabled,
-            micro_variation_step=self._risk.lot_micro_variation_step,
-        )
-        # Drawdown-adaptive risk scaling (P0 priority from research)
-        self._drawdown_scaler = DrawdownScaler(
-            hysteresis=True,
-            total_dd_enabled=True,
-            loss_recovery_mode="instant",
         )
         # Drawdown-proportional risk adjustment (Zeno's Paradox — deep research P0)
         # Reduces base risk_pct as total drawdown deepens, creating exponential
-        # safety margin. Compounds with DrawdownScaler's volume multipliers.
+        # safety margin.
         self._proportional_risk = DrawdownProportionalRisk(
             base_risk_pct=0.015,
             enabled=True,
-        )
-        # Daily risk budget tracker (P1 priority from funded account survival research)
-        self._daily_budget_tracker = DailyRiskBudgetTracker(
-            daily_loss_limit_pct=self._risk.max_daily_drawdown_pct,
-            max_risk_per_trade_pct=20.0,  # Max 20% of daily budget per trade
-            min_risk_per_trade_pct=5.0,  # Min 5% of daily budget per trade
-            allocation_strategy="adaptive",
         )
         # Profit cushion protocol (P2 priority from funded account survival research)
         # Auto-loads existing state or requires initialization for new cycles
@@ -170,7 +154,6 @@ class PreTradeGate:
         self._daily_loss_tracker.load_state()
         self._sl_mod_counter.load_state()
         self._weekly_loss_tracker.load_state()
-        self._daily_budget_tracker.load_state()
         # Note: profit cushion state is loaded automatically in __init__
 
     # ------------------------------------------------------------------
@@ -213,7 +196,6 @@ class PreTradeGate:
         checks.append(self._check_duplicate_position(request, positions))
         checks.append(self._check_drawdown(account))
         checks.append(self._daily_loss_tracker.check(account.balance, account.equity))
-        checks.append(self._check_daily_budget(request, account))
         checks.append(self._check_spread(price))
         checks.append(self._check_spread_vs_avg(request.symbol, price))
         checks.append(self._check_weekend(now))
@@ -275,13 +257,12 @@ class PreTradeGate:
         return decision
 
     def initialize_daily_loss(self, balance: float, equity: float) -> None:
-        """Initialize the FTMO daily loss tracker and daily budget tracker with account state.
+        """Initialize the FTMO daily loss tracker with account state.
 
         Call once at session start after fetching account balance from broker.
         """
         self._daily_loss_tracker.initialize(balance, equity)
         self._weekly_loss_tracker.initialize(balance)
-        self._daily_budget_tracker.initialize(equity)
 
     def record_closed_trade_pnl(self, pnl: float, date_str: str | None = None) -> None:
         """Record a closed trade's P&L for weekly loss and best day tracking.
@@ -308,32 +289,6 @@ class PreTradeGate:
         self._request_counter.record("order_open")
         self._days_tracker.record_trade_day()
 
-    def record_trade_with_budget(
-        self,
-        symbol: str,
-        side_value: str,
-        volume: float,
-        entry_price: float,
-        stop_loss: float,
-        trade_id: str = "",
-    ) -> None:
-        """Record a trade with full details for budget tracking.
-
-        This should be called after successful order placement to record
-        the trade against the daily budget allocation.
-        """
-        # Record in standard tracking
-        self.record_trade(symbol, side_value, volume)
-
-        # Record budget allocation
-        self._daily_budget_tracker.allocate_trade_risk(
-            symbol=symbol,
-            entry_price=entry_price,
-            stop_loss=stop_loss,
-            volume=volume,
-            trade_id=trade_id,
-        )
-
     def record_server_request(self, operation: str) -> None:
         """Record a non-trade server request (modify SL/TP, close, etc.)."""
         self._request_counter.record(operation)
@@ -347,14 +302,13 @@ class PreTradeGate:
         return self._sl_mod_counter.check(position_id)
 
     def save_ftmo_state(self) -> None:
-        """Persist FTMO compliance state and daily budget for crash recovery."""
+        """Persist FTMO compliance state for crash recovery."""
         self._lot_checker.save_state()
         self._request_counter.save_state()
         self._days_tracker.save_state()
         self._daily_loss_tracker.save_state()
         self._sl_mod_counter.save_state()
         self._weekly_loss_tracker.save_state()
-        self._daily_budget_tracker.save_state()
 
     def _day_start_prague_tz(self, ts: float) -> float:
         """Return midnight Prague timezone timestamp for the day containing *ts*.
@@ -662,30 +616,6 @@ class PreTradeGate:
                 risk_pct=adaptive_risk,
             )
 
-            # Apply drawdown-adaptive volume scaling (compounds with proportional risk)
-            daily_dd_limit_pct = self._risk.max_daily_drawdown_pct  # e.g., 5.0
-            total_dd_limit_pct = self._risk.max_total_drawdown_pct  # e.g., 10.0
-
-            # Estimate daily start equity
-            estimated_daily_start = estimated_initial_equity
-            if hasattr(account, "daily_start_equity") and account.daily_start_equity > 0:
-                estimated_daily_start = account.daily_start_equity
-
-            # Calculate drawdown usage percentages
-            daily_dd_used = max(0.0, (estimated_daily_start - account.equity) / estimated_daily_start * 100)
-            total_dd_used = max(0.0, (estimated_initial_equity - account.equity) / estimated_initial_equity * 100)
-
-            daily_dd_usage_pct = min(1.0, daily_dd_used / daily_dd_limit_pct) if daily_dd_limit_pct > 0 else 0.0
-            total_dd_usage_pct = min(1.0, total_dd_used / total_dd_limit_pct) if total_dd_limit_pct > 0 else 0.0
-
-            # Apply drawdown scaling to reduce position size as we approach limits
-            drawdown_scaled = self._drawdown_scaler.scale_volume(
-                base_volume=base_calculated,
-                dd_used_pct=daily_dd_usage_pct,
-                total_dd_used_pct=total_dd_usage_pct,
-                min_lot=self._risk.min_volume_per_trade,
-            )
-
             # Initialize profit cushion on first trade if needed
             if self._profit_cushion is None:
                 from datetime import datetime
@@ -709,8 +639,8 @@ class PreTradeGate:
 
                 except Exception as exc:
                     log.warning(f"Failed to initialize profit cushion: {exc}")
-                    # Fallback to no profit cushion scaling
-                    calculated = drawdown_scaled
+                    # Fallback to base calculated volume
+                    calculated = base_calculated
 
             # Prepare first trade validation (R4 priority from funded account survival research)
             # Store expected values to validate against actual execution later
@@ -719,7 +649,7 @@ class PreTradeGate:
                     self._first_trade_validator.prepare_first_trade_checks(
                         entry_price=request.price,
                         sl_price=request.stop_loss,
-                        volume=drawdown_scaled,
+                        volume=base_calculated,
                         typical_spread_pips=1.0,  # EURUSD typical spread
                     )
                     log.info("Prepared first trade validation — this will be validated post-execution")
@@ -737,7 +667,7 @@ class PreTradeGate:
                     profit_tier = self._profit_cushion.get_tier()
 
                     # Apply profit cushion scaling
-                    calculated = max(self._risk.min_volume_per_trade, drawdown_scaled * profit_multiplier)
+                    calculated = max(self._risk.min_volume_per_trade, base_calculated * profit_multiplier)
 
                     # Update scaling calendar with current equity
                     if self._scaling_calendar:
@@ -750,22 +680,19 @@ class PreTradeGate:
                         "Profit cushion scaling: tier=%s, multiplier=%.2fx, pre=%.2f, post=%.2f",
                         profit_tier,
                         profit_multiplier,
-                        drawdown_scaled,
+                        base_calculated,
                         calculated,
                     )
                 except Exception as exc:
-                    log.warning(f"Profit cushion scaling failed: {exc}, using drawdown-only scaling")
-                    calculated = drawdown_scaled
+                    log.warning(f"Profit cushion scaling failed: {exc}, using base calculated")
+                    calculated = base_calculated
             else:
-                calculated = drawdown_scaled
+                calculated = base_calculated
 
             log.debug(
-                "Multi-tier risk scaling: base=%.2f, drawdown=%.2f, final=%.2f, daily_dd=%.1f%%, total_dd=%.1f%%",
+                "Risk scaling: base=%.2f, final=%.2f",
                 base_calculated,
-                drawdown_scaled,
                 calculated,
-                daily_dd_usage_pct * 100,
-                total_dd_usage_pct * 100,
             )
 
         except ValueError as exc:
@@ -904,28 +831,6 @@ class PreTradeGate:
             passed=True,
             detail=f"drawdown={drawdown_pct:.2f}%, limit={limit:.1f}%",
         )
-
-    def _check_daily_budget(self, request: OrderRequest, account: AccountState) -> RiskCheckResult:
-        """Check if sufficient daily risk budget is available for this trade.
-
-        Uses the Daily Risk Budget Tracker (P1 priority from funded account survival research)
-        to ensure proper risk distribution throughout the trading day.
-        """
-        if request.price is None or request.stop_loss is None:
-            return RiskCheckResult(
-                name="daily_budget",
-                passed=True,
-                detail="price or stop_loss not set — budget check skipped",
-            )
-
-        # Calculate required risk for this trade
-        stop_distance = abs(request.price - request.stop_loss)
-        pip_value = _pip_value_for_symbol(request.symbol)
-        stop_pips = stop_distance / pip_value
-        required_risk_usd = request.volume * stop_pips * 10.0  # $10/pip for standard lot
-
-        # Check budget availability
-        return self._daily_budget_tracker.check_budget_availability(required_risk_usd)
 
     def _check_spread(self, price: SymbolPrice | None) -> RiskCheckResult:
         """Deny if current spread exceeds ceiling."""
@@ -1211,24 +1116,6 @@ class PreTradeGate:
     # Drawdown-adaptive risk management (P0 priority)
     # ---------------------------------------------------------------------------
 
-    def record_trade_loss(self) -> None:
-        """Record a losing trade for consecutive loss tracking.
-
-        This updates the internal state of the DrawdownScaler to apply
-        additional position size reduction based on loss streak length.
-        """
-        self._drawdown_scaler.record_loss()
-        log.debug("Recorded trade loss — consecutive losses: %d", self._drawdown_scaler.consecutive_losses)
-
-    def record_trade_win(self) -> None:
-        """Record a winning trade for consecutive loss tracking.
-
-        Resets or reduces the consecutive loss count depending on the
-        configured recovery mode (instant or gradual).
-        """
-        self._drawdown_scaler.record_win()
-        log.debug("Recorded trade win — consecutive losses: %d", self._drawdown_scaler.consecutive_losses)
-
     def validate_first_trade_execution(
         self,
         actual_entry_price: float,
@@ -1265,35 +1152,6 @@ class PreTradeGate:
             execution_time_ms=execution_time_ms,
             current_spread_pips=current_spread_pips,
         )
-
-    def reset_daily_risk_scaling(self) -> None:
-        """Reset drawdown scaling state for a new trading day.
-
-        Should be called at the start of each trading day to reset
-        the daily drawdown tracking and loss streak state.
-        """
-        self._drawdown_scaler.reset()
-        log.info("Reset daily drawdown scaling state")
-
-    @property
-    def consecutive_losses(self) -> int:
-        """Current consecutive loss count for monitoring."""
-        return self._drawdown_scaler.consecutive_losses
-
-    @property
-    def current_drawdown_scale(self) -> float:
-        """Current drawdown scaling factor (1.0 = full size, 0.25 = survival mode)."""
-        return self._drawdown_scaler.current_dd_scale
-
-    @property
-    def daily_budget_status(self) -> dict:
-        """Current daily budget tracker status for monitoring."""
-        return self._daily_budget_tracker.get_status_summary()
-
-    @property
-    def remaining_daily_budget(self) -> float:
-        """Remaining risk budget for today in USD."""
-        return self._daily_budget_tracker.remaining_budget_usd
 
     @property
     def profit_cushion_status(self) -> dict:

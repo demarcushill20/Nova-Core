@@ -87,9 +87,7 @@ class RiskConfig:
     news_blackout_minutes: int = 0  # disabled (was 60)
     require_stop_loss: bool = True
     max_drawdown_equity_pct: float = _DEFAULT_MAX_DAILY_DRAWDOWN_PCT
-    # Phase 6: IRB-specific risk hardening
     check_forex_session: bool = False  # disabled — not in backtest (was True)
-    irb_max_open_positions: int = 0  # IRB exposure limit (0 = disabled)
     # P4: Enhanced session filtering options
     session_overlap_only: bool = False  # Restrict to London-NY overlap only
     session_allow_asian: bool = True  # Allow Asian session trading
@@ -106,9 +104,6 @@ class RiskConfig:
     entry_jitter_min_seconds: float = 1.0
     entry_jitter_max_seconds: float = 5.0
     entry_jitter_enabled: bool = True
-    # Anti-EA-detection: lot-size micro-variation (prevents exact repetition)
-    lot_micro_variation_enabled: bool = True
-    lot_micro_variation_step: float = 0.01  # ±0.01 lot random offset
     # London Fix avoidance disabled — not in backtest pipeline. Re-enable after validation.
     london_fix_avoidance_enabled: bool = False  # disabled (was True)
     london_fix_start_hour_utc: int = 15

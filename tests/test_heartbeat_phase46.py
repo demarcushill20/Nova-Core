@@ -670,14 +670,7 @@ class TestMetricsInMain:
     @mock.patch("heartbeat._send_telegram")
     @mock.patch("heartbeat.send_telegram_heartbeat")
     @mock.patch("heartbeat._append_metrics")
-    @mock.patch("skills.evolution_processor.EvolutionProcessor")
-    def test_main_calls_append_metrics(
-        self, m_evo, m_metrics, m_tg_hb, m_tg, m_hb_agent, m_mem, m_res, m_plan, tmp_path
-    ):
-        m_evo_inst = m_evo.return_value
-        m_evo_inst.process_batch.return_value = []
-        m_evo_inst.run_health_scan.return_value = {}
-        m_evo_inst.get_stats.return_value = {}
+    def test_main_calls_append_metrics(self, m_metrics, m_tg_hb, m_tg, m_hb_agent, m_mem, m_res, m_plan, tmp_path):
         _make_tmp_base(tmp_path)
         check_names = [
             "check_service",
