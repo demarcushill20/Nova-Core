@@ -672,7 +672,11 @@ def render_report_markdown(report: HealthReport) -> str:
         lines.append("No issues detected.")
         lines.append("")
 
-    return "\n".join(lines) + "\n"
+    # Normalize to exactly one trailing newline. Several branches above append
+    # an empty "" as a section separator, which combined with the join below
+    # would produce two trailing newlines. Pre-commit's end-of-file-fixer then
+    # collapses it back to one on every commit — this rstrip avoids that churn.
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def render_report_json(report: HealthReport) -> str:

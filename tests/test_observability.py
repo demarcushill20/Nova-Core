@@ -525,6 +525,34 @@ class TestReportGeneration:
         assert "workflow_stuck" in md
         assert "[X]" in md
 
+    def test_markdown_has_exactly_one_trailing_newline(self, tmp_path):
+        """Regression guard: rendered markdown must end with exactly one newline.
+
+        Previously the renderer returned `"\\n".join(lines) + "\\n"`, which
+        combined with the trailing `""` section-separator entries in `lines`
+        produced two trailing newlines. Pre-commit's end-of-file-fixer then
+        collapsed it back to one on every commit, so HEARTBEAT_MULTIAGENT.md
+        appeared dirty on every heartbeat write. The fix normalizes to exactly
+        one trailing newline at the return site. This test covers both the
+        healthy (no findings) and unhealthy (with findings) code paths.
+        """
+        # Healthy path — hits the "No issues detected." branch
+        healthy_report = generate_health_report(base=tmp_path)
+        healthy_md = render_report_markdown(healthy_report)
+        assert healthy_md.endswith("\n"), "healthy markdown must end with a newline"
+        assert not healthy_md.endswith("\n\n"), "healthy markdown must not end with two or more newlines"
+
+        # Unhealthy path — hits the findings + bottlenecks branches
+        _make_workflow(
+            tmp_path,
+            status="executing",
+            created_at=time.time() - WORKFLOW_EXECUTING_SLA_S - 100,
+        )
+        unhealthy_report = generate_health_report(base=tmp_path)
+        unhealthy_md = render_report_markdown(unhealthy_report)
+        assert unhealthy_md.endswith("\n"), "unhealthy markdown must end with a newline"
+        assert not unhealthy_md.endswith("\n\n"), "unhealthy markdown must not end with two or more newlines"
+
 
 # ---------------------------------------------------------------------------
 # 4. Contract failure rate tracking test
