@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0782_When_you_ship_what_memory_do_you_save_too__1775917840",
+  "workflow_id": "0782_When_you_ship_what_memory_do_you_save_too_",
+  "task_summary": "Documented the four memory systems that can be saved during /ship (Fusion checkpoint, Fusion store, Obsidian learnings, Claude auto-memory)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Documented the four memory systems that can be saved during /ship (Fusion checkpoint, Fusion store, Obsidian learnings, Claude auto-memory)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0782_When_you_ship_what_memory_do_you_save_too_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Documented the four memory systems that can be saved during /ship (Fusion checkpoint, Fusion store, Obsidian learnings, Claude auto-memory)",
+  "created_at": "2026-04-11T14:30:40Z",
+  "confidence": "high"
+}

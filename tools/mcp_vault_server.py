@@ -63,6 +63,7 @@ _VAULT_CONFIG_PATH = VAULT_ROOT / ".nova-vault-config.json"
 VAULT_FOLDERS = frozenset(
     {
         "00-inbox",
+        "05-north-star",
         "10-adrs",
         "20-agent-patterns",
         "30-workflow-learnings",
@@ -93,6 +94,7 @@ _FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 WRITABLE_FOLDERS = frozenset(
     {
         "00-inbox",
+        "05-north-star",
         "20-agent-patterns",
         "30-workflow-learnings",
         "40-research",
