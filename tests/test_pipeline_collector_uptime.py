@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -67,10 +68,16 @@ class TestFeedHealthLiveMetrics:
 
         Before the fix, this combination would skip both branches and
         contribute 0 to feed_health. Now the else-branch fires → 20 pts.
+        Mock market-closed to False so we exercise the else-branch
+        regardless of what day the test runs.
         """
         _write_live_metrics(state_dir, {"ticks": 0, "errors": 0, "uptime_seconds": 0.0})
         collector = _make_collector(tmp_path)
-        score, checks = collector._check_feed_health()
+        with (
+            patch.object(collector, "_is_forex_market_closed", return_value=False),
+            patch.object(collector, "_runtime_reports_market_closed", return_value=False),
+        ):
+            score, checks = collector._check_feed_health()
         assert score == 20.0, "Fresh live_metrics with ticks=0 uptime=0 should still score 20"
         assert checks == 1.0
 
@@ -78,7 +85,11 @@ class TestFeedHealthLiveMetrics:
         """ticks=0 + uptime>0 → 20 pts (service running, no ticks yet)."""
         _write_live_metrics(state_dir, {"ticks": 0, "errors": 0, "uptime_seconds": 60.0})
         collector = _make_collector(tmp_path)
-        score, checks = collector._check_feed_health()
+        with (
+            patch.object(collector, "_is_forex_market_closed", return_value=False),
+            patch.object(collector, "_runtime_reports_market_closed", return_value=False),
+        ):
+            score, checks = collector._check_feed_health()
         assert score == 20.0
         assert checks == 1.0
 

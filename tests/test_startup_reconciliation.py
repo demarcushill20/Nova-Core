@@ -13,7 +13,7 @@ import json
 import os
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -552,7 +552,11 @@ class TestPipelineCollectorUptimeGuard:
         self._write_live_metrics(state_dir, ticks=0, errors=0, uptime_seconds=60.0)
 
         collector = PipelineCollector(base_path=str(tmp_path))
-        score, raw = collector._check_feed_health()
+        with (
+            patch.object(collector, "_is_forex_market_closed", return_value=False),
+            patch.object(collector, "_runtime_reports_market_closed", return_value=False),
+        ):
+            score, raw = collector._check_feed_health()
 
         assert score == 20.0, f"Expected 20.0 but got {score}"
 

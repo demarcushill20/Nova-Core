@@ -1,5 +1,5 @@
 # NovaCore Multi-Agent Heartbeat
-Generated: 2026-04-10T15:19:39Z
+Generated: 2026-04-11T13:56:16Z
 
 ## Overall: HEALTHY
 
@@ -8,7 +8,7 @@ Generated: 2026-04-10T15:19:39Z
 | Metric | Value |
 |--------|-------|
 | Active workflows | 0 |
-| Completed workflows | 2 |
+| Completed workflows | 0 |
 | Failed workflows | 0 |
 | Halted workflows | 0 |
 | Total delegations | 0 |
@@ -21,7 +21,7 @@ Generated: 2026-04-10T15:19:39Z
 | Verifier rejections | 0 |
 | Verifier approvals | 0 |
 | Verifier rejection rate | N/A |
-| Contract successes | 1236 |
+| Contract successes | 1240 |
 | Contract failures | 53 |
 | Contract failure rate | 4.1% |
 | Budget exhaustions | 0 |
@@ -32,13 +32,6 @@ Generated: 2026-04-10T15:19:39Z
 | Most rejected tool | N/A |
 | Most overloaded role | N/A |
 | Max dependency wait | N/As |
-
-## Workflows
-
-| ID | Task | Status | Halt Reason |
-|----|------|--------|-------------|
-| 0759_research_execution_pipeline_gaps | ? | completed | - |
-| 0761_NovaTrade_risk_cap_overhaul___1__Bump_risk-per-trade_from_0_75__to_1_5____1_500_ | ? | completed | - |
 
 ## Health Findings
 

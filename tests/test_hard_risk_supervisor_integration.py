@@ -292,11 +292,22 @@ class TestHardRiskSupervisorIntegration:
     @pytest.mark.asyncio
     async def test_runtime_integration_supervisor_wiring(self, cfg):
         """Test that build_stack properly wires the supervisor."""
-        from novatrade.runtime.launch_gate import LaunchMode
+        from novatrade.runtime.launch_gate import LaunchMode, LaunchReadiness, ReadinessVerdict, StartupValidation
         from novatrade.runtime.runner import build_stack
 
-        # This tests that our changes to build_stack work correctly
-        ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
+        ok_validation = StartupValidation(ok=True, mode=LaunchMode.ACTIVE_DEMO, errors=[], warnings=[])
+        ok_readiness = LaunchReadiness(
+            verdict=ReadinessVerdict.READY_FOR_ACTIVE_DEMO,
+            launch_mode=LaunchMode.ACTIVE_DEMO,
+        )
+        mock_adapter = AsyncMock()
+        mock_adapter.connect.return_value = MagicMock(connected=True, latency_ms=10, state=None, message="ok")
+        with (
+            patch("novatrade.runtime.runner.validate_startup", return_value=ok_validation),
+            patch("novatrade.runtime.runner._create_adapter", return_value=mock_adapter),
+            patch("novatrade.runtime.runner.evaluate_launch_gate", return_value=ok_readiness),
+        ):
+            ws, loop, readiness = await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
 
         # Verify supervisor is wired
         assert ws.agent._supervisor is not None
