@@ -1021,6 +1021,15 @@ def main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
+    # Silence noisy SDK loggers that emit MetaApi auth tokens in URL query
+    # strings at INFO level. The python-socketio / python-engineio clients
+    # used by the MetaApi SDK log full polling URLs (including ?auth-token=...)
+    # on every (re)connect, leaking JWT bearer tokens into journalctl. We
+    # raise their threshold to WARNING so genuine SDK errors are still visible
+    # but routine connection chatter is suppressed.
+    logging.getLogger("engineio.client").setLevel(logging.WARNING)
+    logging.getLogger("socketio.client").setLevel(logging.WARNING)
+
     # Set up crash handler for debugging restart cycles
     setup_crash_handler()
     log.info("NovaTrade runner starting with crash logging enabled")
