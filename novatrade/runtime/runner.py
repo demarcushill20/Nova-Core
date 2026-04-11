@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sys
 import time
 import traceback
@@ -801,6 +802,86 @@ async def build_live_stack(
 # ---------------------------------------------------------------------------
 
 
+_HALT_DETAIL_MAX = 200
+_HALT_DETAIL_QS_RE = re.compile(r"\?\S*")
+_HALT_DETAIL_SECRET_RE = re.compile(r"(?i)(bearer|token|apikey|api[_-]?key|password|secret)[\s:=]+\S+")
+
+
+def _sanitize_halt_detail(msg: str | None) -> str:
+    """Sanitize adapter error text for exposure via halt_reason / /status.
+
+    Redacts URL query strings and common auth artifacts, then truncates.
+    The output lands in RiskEngine.halt_reason, which is returned by /status,
+    so we must not forward arbitrary upstream error text that may contain
+    tokens, account identifiers, or query strings.
+    """
+    if not msg:
+        return "no detail"
+    safe = _HALT_DETAIL_QS_RE.sub("?<redacted>", msg)
+    safe = _HALT_DETAIL_SECRET_RE.sub(r"\1=<redacted>", safe)
+    if len(safe) > _HALT_DETAIL_MAX:
+        safe = safe[: _HALT_DETAIL_MAX - 3] + "..."
+    return safe
+
+
+async def _connect_and_maybe_halt(ws: WebhookState) -> None:
+    """Connect the adapter at startup; halt the risk engine on failure.
+
+    On any failure (status.connected=False or unexpected exception), the
+    risk engine is halted with a stable reason prefix and the function
+    returns normally so the caller can still bind the webhook surface.
+    Every subsequent signal will short-circuit at risk Layer 0 with
+    RiskVerdict.HALT until an operator explicitly calls RiskEngine.resume().
+
+    The halt_reason prefix "adapter_disconnected_at_startup:" is a stable,
+    greppable contract: a future auto-resume path in MonitorLoop may match
+    on it to clear only startup-induced halts after a successful reconnect.
+    """
+    if not ws.agent:
+        return
+    adapter = ws.agent._adapter
+    if not (hasattr(adapter, "connect") and not getattr(adapter, "_connected", True)):
+        return
+
+    log.info("connecting MetaApiAdapter to broker...")
+    halt_detail: str | None = None
+    try:
+        status = await adapter.connect()
+        if status.connected:
+            log.info("MetaApiAdapter connected successfully")
+        else:
+            halt_detail = _sanitize_halt_detail(status.message)
+            log.error(
+                "MetaApiAdapter connection failed at startup: %s",
+                halt_detail,
+            )
+    except Exception as exc:
+        halt_detail = _sanitize_halt_detail(f"unexpected exception: {exc.__class__.__name__}")
+        log.exception("MetaApiAdapter connection raised at startup")
+
+    if halt_detail is None:
+        return
+
+    reason = f"adapter_disconnected_at_startup: {halt_detail}"
+    ws.agent._risk._halt(reason)
+    log.critical(
+        "risk engine halted at startup; /status will report reason=%s",
+        reason,
+    )
+    if ws.recorder is not None:
+        try:
+            ws.recorder.record_error(
+                "startup_adapter_connect_failed",
+                {
+                    "phase": "connect",
+                    "halt_set": True,
+                    "detail": halt_detail,
+                },
+            )
+        except Exception:
+            log.exception("failed to record STARTUP_ADAPTER_CONNECT_FAILED evidence")
+
+
 async def run_server(
     ws: WebhookState,
     loop: MonitorLoop,
@@ -809,19 +890,7 @@ async def run_server(
     port: int = 8877,
 ) -> None:
     """Run the webhook server and monitor loop concurrently."""
-    # Connect MetaApiAdapter if not already connected
-    if ws.agent:
-        adapter = ws.agent._adapter
-        if hasattr(adapter, "connect") and not getattr(adapter, "_connected", True):
-            log.info("connecting MetaApiAdapter to broker...")
-            try:
-                status = await adapter.connect()
-                if status.connected:
-                    log.info("MetaApiAdapter connected successfully")
-                else:
-                    log.error("MetaApiAdapter connection failed: %s", status.message)
-            except Exception:
-                log.exception("MetaApiAdapter connection failed")
+    await _connect_and_maybe_halt(ws)
 
     app = create_app(ws)
 

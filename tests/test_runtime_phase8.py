@@ -948,3 +948,157 @@ class TestRunnerBuildStack:
         cfg = _cfg()
         with pytest.raises(RuntimeError, match="METAAPI_TOKEN"):
             await build_stack(cfg, mode=LaunchMode.ACTIVE_DEMO)
+
+
+# ===========================================================================
+# Startup adapter-failure halt
+# ===========================================================================
+
+
+class _FakeAdapter:
+    """Minimal adapter stub for startup-connect tests.
+
+    Mimics the contract `_connect_and_maybe_halt` reads: a non-True
+    `_connected` flag and a `connect()` coroutine returning HealthStatus.
+    """
+
+    def __init__(self, *, connect_result=None, connect_exc: Exception | None = None):
+        self._connected = False
+        self._connect_result = connect_result
+        self._connect_exc = connect_exc
+
+    async def connect(self):
+        if self._connect_exc is not None:
+            raise self._connect_exc
+        return self._connect_result
+
+
+class TestStartupAdapterFailure:
+    """Verify _connect_and_maybe_halt halts the engine on adapter failure."""
+
+    def _build_ws_with_fake_adapter(self, tmp_path: Path, adapter: _FakeAdapter) -> WebhookState:
+        from novatrade.models import HealthState, HealthStatus  # noqa: F401
+
+        cfg = _cfg()
+        recorder = EvidenceRecorder(path=tmp_path / "evidence.jsonl")
+        risk_engine = RiskEngine(cfg)
+        risk_engine.initialize(AccountState(balance=100_000, equity=100_000, mode=AccountMode.DEMO))
+        agent = TradingAgent(cfg=cfg, adapter=adapter, risk_engine=risk_engine, recorder=recorder)  # type: ignore[arg-type]
+        return WebhookState(
+            agent=agent,
+            risk_engine=risk_engine,
+            recorder=recorder,
+            started_at=time.time(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_connect_returns_not_connected_halts_engine(self, tmp_path: Path):
+        """status.connected=False at startup => risk engine halted with prefix."""
+        from novatrade.models import HealthState, HealthStatus
+        from novatrade.runtime.runner import _connect_and_maybe_halt
+
+        adapter = _FakeAdapter(
+            connect_result=HealthStatus(
+                state=HealthState.DOWN,
+                connected=False,
+                message="broker unreachable: timeout after 30s",
+            )
+        )
+        ws = self._build_ws_with_fake_adapter(tmp_path, adapter)
+
+        await _connect_and_maybe_halt(ws)
+
+        assert ws.agent is not None
+        assert ws.agent._risk.halted is True
+        assert ws.agent._risk.halt_reason.startswith("adapter_disconnected_at_startup:")
+        assert "broker unreachable" in ws.agent._risk.halt_reason
+
+    @pytest.mark.asyncio
+    async def test_connect_raises_halts_engine(self, tmp_path: Path):
+        """connect() raising any exception => risk engine halted with prefix."""
+        from novatrade.runtime.runner import _connect_and_maybe_halt
+
+        adapter = _FakeAdapter(connect_exc=RuntimeError("network down"))
+        ws = self._build_ws_with_fake_adapter(tmp_path, adapter)
+
+        await _connect_and_maybe_halt(ws)
+
+        assert ws.agent is not None
+        assert ws.agent._risk.halted is True
+        assert ws.agent._risk.halt_reason.startswith("adapter_disconnected_at_startup:")
+        assert "unexpected exception" in ws.agent._risk.halt_reason
+        assert "RuntimeError" in ws.agent._risk.halt_reason
+
+    @pytest.mark.asyncio
+    async def test_halt_fast_rejects_subsequent_signal(self, tmp_path: Path):
+        """After startup halt, webhook signals get rejected with risk_halt reason."""
+        from novatrade.models import HealthState, HealthStatus
+        from novatrade.runtime.runner import _connect_and_maybe_halt
+
+        adapter = _FakeAdapter(
+            connect_result=HealthStatus(
+                state=HealthState.DOWN,
+                connected=False,
+                message="broker unreachable",
+            )
+        )
+        ws = self._build_ws_with_fake_adapter(tmp_path, adapter)
+        await _connect_and_maybe_halt(ws)
+
+        # Webhook is still bindable post-halt
+        app = create_app(ws)
+        client = TestClient(app)
+        resp = client.post("/webhook/alert", json=_make_irb_signal())
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert body["rejected_reason"].startswith("risk_halt: adapter_disconnected_at_startup:")
+
+    @pytest.mark.asyncio
+    async def test_successful_connect_does_not_halt(self, tmp_path: Path):
+        """Happy path: connect succeeds, engine remains unhalted."""
+        from novatrade.models import HealthState, HealthStatus
+        from novatrade.runtime.runner import _connect_and_maybe_halt
+
+        adapter = _FakeAdapter(
+            connect_result=HealthStatus(
+                state=HealthState.OK,
+                connected=True,
+                message="connected and synchronized",
+            )
+        )
+        # Manually flip _connected back to False so the connect() branch fires;
+        # the success path should set the flag via the real adapter's connect()
+        # but our fake doesn't, so we just verify no halt is set on success.
+        ws = self._build_ws_with_fake_adapter(tmp_path, adapter)
+
+        await _connect_and_maybe_halt(ws)
+
+        assert ws.agent is not None
+        assert ws.agent._risk.halted is False
+        assert ws.agent._risk.halt_reason == ""
+
+    def test_sanitize_halt_detail_redacts_secrets(self):
+        """Sanitizer redacts query strings and auth artifacts, then truncates."""
+        from novatrade.runtime.runner import _sanitize_halt_detail
+
+        assert _sanitize_halt_detail(None) == "no detail"
+        assert _sanitize_halt_detail("") == "no detail"
+        assert _sanitize_halt_detail("plain message") == "plain message"
+
+        # Query string redaction
+        out = _sanitize_halt_detail("https://broker.example/api?token=abc123&account=42")
+        assert "abc123" not in out
+        assert "<redacted>" in out
+
+        # Bearer token redaction
+        out = _sanitize_halt_detail("auth failed: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9")
+        assert "eyJ" not in out
+        assert "<redacted>" in out
+
+        # Truncation
+        long_msg = "x" * 500
+        out = _sanitize_halt_detail(long_msg)
+        assert len(out) <= 200
+        assert out.endswith("...")
