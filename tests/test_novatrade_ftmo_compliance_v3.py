@@ -285,14 +285,14 @@ class TestFridayForceClose:
     def test_phase_normal_friday_morning(self, closer):
         assert closer.friday_close_phase(self._friday_at(10)) == "normal"
 
-    def test_phase_warning_friday_1945(self, closer):
-        assert closer.friday_close_phase(self._friday_at(19, 45)) == "warning"
+    def test_phase_warning_friday_1930(self, closer):
+        assert closer.friday_close_phase(self._friday_at(19, 30)) == "warning"
 
-    def test_phase_warning_friday_1949(self, closer):
-        assert closer.friday_close_phase(self._friday_at(19, 49)) == "warning"
+    def test_phase_warning_friday_1944(self, closer):
+        assert closer.friday_close_phase(self._friday_at(19, 44)) == "warning"
 
-    def test_phase_partial_friday_1950(self, closer):
-        assert closer.friday_close_phase(self._friday_at(19, 50)) == "partial"
+    def test_phase_partial_friday_1945(self, closer):
+        assert closer.friday_close_phase(self._friday_at(19, 45)) == "partial"
 
     def test_phase_partial_friday_1959(self, closer):
         assert closer.friday_close_phase(self._friday_at(19, 59)) == "partial"

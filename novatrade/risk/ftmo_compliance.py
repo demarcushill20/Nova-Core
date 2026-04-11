@@ -875,19 +875,22 @@ class WeekendAutoCloser:
 
     Markets reopen Sunday at the same NY 5:00 PM local time.
 
-    This class provides a configurable buffer (default 5 min) before close
-    to allow orderly position flattening before the weekend gap.
+    New entries are blocked 3 hours before market close (2 PM ET) and all
+    positions are force-closed 1 hour before market close (4 PM ET).
 
     Usage::
 
         closer = WeekendAutoCloser()
         if closer.should_close_positions(time.time()):
-            # close all open positions
+            # block new entries (2 PM ET on Friday)
+        if closer.should_force_close_all(time.time()):
+            # force-close all positions (4 PM ET on Friday)
         if closer.is_weekend(time.time()):
             # do not open new positions
     """
 
-    CLOSE_BUFFER_MINUTES: int = 5
+    ENTRY_CUTOFF_MINUTES_BEFORE_CLOSE: int = 180  # 3h before close = 2 PM ET
+    FORCE_CLOSE_MINUTES_BEFORE_CLOSE: int = 60  # 1h before close = 4 PM ET
     last_close_attempt_ts: float = field(default=0.0, repr=False)
 
     @staticmethod
@@ -903,10 +906,10 @@ class WeekendAutoCloser:
         return 21 if is_dst else 22
 
     def should_close_positions(self, timestamp: float) -> bool:
-        """Return True if it's Friday and within the close buffer window.
+        """Return True if it's Friday and within the entry-cutoff window.
 
-        The window starts at (market_close - CLOSE_BUFFER_MINUTES) on Friday
-        and extends through the entire weekend.
+        New entries are blocked 3 hours before market close (2 PM ET on
+        Friday) and through the entire weekend.
         """
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         weekday = dt.weekday()
@@ -917,10 +920,10 @@ class WeekendAutoCloser:
         if self.is_weekend(timestamp):
             return True
 
-        # Friday close buffer: close_hour - buffer_minutes through close_hour
+        # Friday entry cutoff: block new entries 3h before close (2 PM ET)
         if weekday == _FRIDAY:
             close_hour = self._market_close_hour_utc(timestamp)
-            close_threshold_minutes = close_hour * 60 - self.CLOSE_BUFFER_MINUTES
+            close_threshold_minutes = close_hour * 60 - self.ENTRY_CUTOFF_MINUTES_BEFORE_CLOSE
             current_minutes = hour * 60 + minute
             if current_minutes >= close_threshold_minutes:
                 return True
@@ -949,9 +952,10 @@ class WeekendAutoCloser:
     def should_force_close_all(self, timestamp: float) -> bool:
         """Return True if all positions must be force-closed for weekend safety.
 
-        The force-close deadline is 20:00 UTC on Friday — 1-2 hours before
-        actual market close.  This gives ample time for orderly closure and
-        avoids the deteriorating liquidity near close.
+        The force-close deadline is 1 hour before market close on Friday
+        (4 PM ET), which is DST-aware:
+        - EDT (Mar-Nov): 20:00 UTC
+        - EST (Nov-Mar): 21:00 UTC
 
         This method is distinct from should_close_positions() which only
         blocks NEW entries.  should_force_close_all() demands the runtime
@@ -960,10 +964,15 @@ class WeekendAutoCloser:
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         weekday = dt.weekday()
         hour = dt.hour
+        minute = dt.minute
 
-        # Force close at 20:00+ UTC on Friday
-        if weekday == _FRIDAY and hour >= 20:
-            return True
+        # Force close 1h before market close on Friday (4 PM ET)
+        if weekday == _FRIDAY:
+            close_hour = self._market_close_hour_utc(timestamp)
+            force_close_minutes = close_hour * 60 - self.FORCE_CLOSE_MINUTES_BEFORE_CLOSE
+            current_minutes = hour * 60 + minute
+            if current_minutes >= force_close_minutes:
+                return True
 
         # Also force close during full weekend (should already be flat)
         if weekday == _SATURDAY:
@@ -978,11 +987,14 @@ class WeekendAutoCloser:
     def friday_close_phase(self, timestamp: float) -> str:
         """Return the current Friday close phase for graduated action.
 
+        All phase boundaries are DST-aware, relative to the force-close time
+        (1 hour before market close = 4 PM ET):
+
         Returns:
             - "normal": No close action needed
-            - "warning": 19:45-19:50 UTC Friday — emit warning
-            - "partial": 19:50-20:00 UTC Friday — close largest positions first
-            - "force": 20:00+ UTC Friday — force-close everything
+            - "warning": 30 min before force close (3:30 PM ET)
+            - "partial": 15 min before force close (3:45 PM ET)
+            - "force": at force close time (4:00 PM ET)
             - "weekend": Saturday/Sunday — should already be flat
         """
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
@@ -995,12 +1007,14 @@ class WeekendAutoCloser:
             return "normal"
 
         minutes = dt.hour * 60 + dt.minute
+        close_hour = self._market_close_hour_utc(timestamp)
+        force_close_minutes = close_hour * 60 - self.FORCE_CLOSE_MINUTES_BEFORE_CLOSE
 
-        if minutes >= 20 * 60:  # 20:00+
+        if minutes >= force_close_minutes:
             return "force"
-        if minutes >= 19 * 60 + 50:  # 19:50-20:00
+        if minutes >= force_close_minutes - 15:
             return "partial"
-        if minutes >= 19 * 60 + 45:  # 19:45-19:50
+        if minutes >= force_close_minutes - 30:
             return "warning"
 
         return "normal"

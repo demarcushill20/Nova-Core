@@ -39,29 +39,29 @@ class TestWeekendAutoCloser:
     """
 
     def test_friday_before_close_window_edt(self):
-        """20:54 UTC on Friday (EDT) — not yet in the 5-min close buffer."""
+        """17:59 UTC on Friday (EDT) — not yet in the 3h entry cutoff (18:00 UTC)."""
         closer = WeekendAutoCloser()
-        # 2026-03-27 is a Friday, EDT → close at 21:00 UTC
-        ts = _ts(2026, 3, 27, 20, 54)
+        # 2026-03-27 is a Friday, EDT → close at 21:00 UTC, cutoff at 18:00 UTC
+        ts = _ts(2026, 3, 27, 17, 59)
         assert closer.should_close_positions(ts) is False
 
     def test_friday_in_close_window_edt(self):
-        """20:55 UTC on Friday (EDT) — in the 5-min close buffer (21:00 - 5 = 20:55)."""
+        """18:00 UTC on Friday (EDT) — in the 3h entry cutoff (21:00 - 180min = 18:00)."""
         closer = WeekendAutoCloser()
-        ts = _ts(2026, 3, 27, 20, 55)
+        ts = _ts(2026, 3, 27, 18, 0)
         assert closer.should_close_positions(ts) is True
 
     def test_friday_before_close_window_est(self):
-        """21:54 UTC on Friday (EST) — not yet in the 5-min close buffer."""
+        """18:59 UTC on Friday (EST) — not yet in the 3h entry cutoff (19:00 UTC)."""
         closer = WeekendAutoCloser()
-        # 2026-01-09 is a Friday, EST → close at 22:00 UTC
-        ts = _ts(2026, 1, 9, 21, 54)
+        # 2026-01-09 is a Friday, EST → close at 22:00 UTC, cutoff at 19:00 UTC
+        ts = _ts(2026, 1, 9, 18, 59)
         assert closer.should_close_positions(ts) is False
 
     def test_friday_in_close_window_est(self):
-        """21:55 UTC on Friday (EST) — in the 5-min close buffer (22:00 - 5 = 21:55)."""
+        """19:00 UTC on Friday (EST) — in the 3h entry cutoff (22:00 - 180min = 19:00)."""
         closer = WeekendAutoCloser()
-        ts = _ts(2026, 1, 9, 21, 55)
+        ts = _ts(2026, 1, 9, 19, 0)
         assert closer.should_close_positions(ts) is True
 
     def test_saturday(self):
