@@ -47,9 +47,13 @@ partial_exit_pct: 50.0
 partial_r_target: 1.0
 
 # Risk controls
-max_trades_per_day: 3
+# Strategy-level caps are DISABLED to match the validated Pine v5 backtest
+# (PF 1.15, 63.6% profitable months over 24yr). The authoritative daily loss
+# stop is the HardRiskSupervisor ($4,500 daily_cap, $9,000 total_cap,
+# $8,500 equity_floor), not strategy-level trade counts.
+max_trades_per_day: 0        # 0 = disabled (was 3 — not in Pine baseline)
 cooldown_bars: 1
-max_consecutive_losses: 0
+max_consecutive_losses: 0    # 0 = disabled (not in Pine baseline)
 
 # Disabled filters
 session_filter: null
