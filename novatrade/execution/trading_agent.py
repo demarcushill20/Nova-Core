@@ -162,6 +162,7 @@ class AgentResult:
     rejected_reason: str = ""
     elapsed_ms: float = 0.0
     timestamp: float = field(default_factory=time.time)
+    pnl_usd: float = 0.0
 
     @property
     def rejected(self) -> bool:
@@ -1182,6 +1183,7 @@ class TradingAgent:
             state_after=AgentState.FLAT,
             order_result=order_result,
             elapsed_ms=elapsed,
+            pnl_usd=pnl_usd,
         )
 
     # -- Partial close handler (PARTIAL_CLOSE — v5 partial profit) ----------

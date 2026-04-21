@@ -186,6 +186,56 @@ class TestExitSignal:
         payload = agent.process_alert.call_args[0][0]
         assert payload["close_reason"] == "STRATEGY_EXIT"
 
+    def test_exit_success_notifies_strategy_engine(self) -> None:
+        """Successful EXIT must call engine.notify_close so the engine clears
+        its internal position state. Without this, the engine keeps firing
+        spurious EXIT signals against a phantom position.
+        """
+        agent = _mock_trading_agent(AgentState.LONG)
+        agent.process_alert = AsyncMock(
+            return_value=AgentResult(success=True, state_after=AgentState.FLAT, pnl_usd=42.5),
+        )
+        engine = _mock_engine()
+        lta = LiveTradingAgent(agent, engine, _cfg())
+
+        asyncio.run(lta.execute(_exit_signal("LONG")))
+
+        engine.notify_close.assert_called_once_with(42.5)
+
+    def test_exit_rejected_does_not_notify_engine(self) -> None:
+        """A rejected EXIT (e.g. CLOSE_POSITION invalid from FLAT) must NOT
+        notify the engine — engine state is already whatever it believes."""
+        agent = _mock_trading_agent(AgentState.FLAT)
+        agent.process_alert = AsyncMock(
+            return_value=AgentResult(
+                success=False,
+                state_after=AgentState.FLAT,
+                rejected_reason="CLOSE_POSITION invalid from FLAT",
+            ),
+        )
+        engine = _mock_engine()
+        lta = LiveTradingAgent(agent, engine, _cfg())
+
+        asyncio.run(lta.execute(_exit_signal("LONG")))
+
+        engine.notify_close.assert_not_called()
+
+    def test_exit_engine_exception_does_not_crash(self) -> None:
+        """If engine.notify_close raises, execute() must not propagate —
+        TradingAgent already committed the close at the broker."""
+        agent = _mock_trading_agent(AgentState.LONG)
+        agent.process_alert = AsyncMock(
+            return_value=AgentResult(success=True, state_after=AgentState.FLAT, pnl_usd=-10.0),
+        )
+        engine = _mock_engine()
+        engine.notify_close = MagicMock(side_effect=RuntimeError("engine boom"))
+        lta = LiveTradingAgent(agent, engine, _cfg())
+
+        result = asyncio.run(lta.execute(_exit_signal("LONG")))
+
+        assert result.success is True
+        engine.notify_close.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # MODIFY_SL signal tests

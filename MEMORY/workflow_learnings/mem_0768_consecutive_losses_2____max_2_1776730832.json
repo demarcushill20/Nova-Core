@@ -1,0 +1,25 @@
+{
+  "artifact_id": "mem_0768_consecutive_losses_2____max_2_1776730832",
+  "workflow_id": "0768_consecutive_losses_2____max_2",
+  "task_summary": "SUPERSEDED 2026-04-21: original diagnosis of stale-config circuit_breaker max=2 was not supported by journal evidence; running process (PID 3596211, booted Apr 17) loaded correct YAML values and has never fired circuit_breaker; no restart performed",
+  "task_class": "misdiagnosis",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Original claim (stale process config, restart needed) rejected after evidence review",
+    "Confirmed NOVATRADE_STRATEGY_CONFIG points to irb_v5_m5_champion.yaml with max_consecutive_losses=0 and max_trades_per_day=3",
+    "Verified runner.py load path has no hidden default layer between YAML and BacktestEnvironment",
+    "journalctl shows zero circuit_breaker, trades_today>=, or consecutive_losses>= events since boot"
+  ],
+  "successful_patterns": [],
+  "failure_patterns": [
+    "Diagnosis asserted without checking journalctl for the actual rejection event",
+    "Likely misread 7:10 PM validate_guards() synthetic cooldown message as a live circuit_breaker firing"
+  ],
+  "verification_outcome": "falsified",
+  "reusable_guidance": "Before recommending a live-service restart for 'stale config', always grep journalctl for the rejection tag the user reported. Live gates log the effective limit values; absence of the log line means the rejection did not occur. Do not rely on Telegram excerpts alone.",
+  "created_at": "2026-04-21T00:20:32Z",
+  "superseded_at": "2026-04-21T13:10:00Z",
+  "confidence": "high"
+}

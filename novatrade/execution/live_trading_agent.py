@@ -222,6 +222,21 @@ class LiveTradingAgent:
                 result.rejected_reason,
             )
 
+        # Strategy-initiated EXIT: propagate the close to the engine so its
+        # internal position state clears. Without this, the engine keeps
+        # generating spurious EXIT signals against a phantom position while
+        # refusing new entries. Broker-originated closes (SL hit, trailing
+        # stop) use on_broker_close() instead.
+        if signal.signal_type == SignalType.EXIT and result.success and result.state_after == AgentState.FLAT:
+            try:
+                self._strategy_engine.notify_close(result.pnl_usd)
+            except Exception:
+                log.exception(
+                    "DESYNC: LiveStrategyEngine.notify_close raised after strategy "
+                    "EXIT — TradingAgent is FLAT but engine may still hold a phantom "
+                    "position. Next restart will re-sync via recover_position_state.",
+                )
+
         return result
 
     # -- Fill / close callbacks --------------------------------------------
