@@ -519,3 +519,64 @@ Reviewer returned REQUEST FIXES on 3 MEDIUMs; all addressed in-place before comm
 - **Test counts post-fix**: `tests/test_observability_metrics.py` → **25 passed** (21 prior + 4 new). Full suite: **843 passed / 2 failed / 14 errors** (baseline 839/2/14 + 4 new tests; pre-existing 2/14 unchanged).
 - **Endpoint smoke**: `/metrics` body contains both `backfill_records_processed_total` and `mode="unknown"` after hitting the helpers.
 - **Files touched (fix-up only)**: `app/observability/metrics.py`, `tests/test_observability_metrics.py`, `scripts/assoc_backfill_similarity.py`, `scripts/assoc_backfill_entities.py`. No other Sprint 18 files re-opened.
+
+## Sprint 19 — 2026-04-23 (pending review) — **Phase 8c: SLO alert shim + routing**
+
+- **Scope executed**: Ship the SLO alert shim that scrapes `/metrics`, computes p95 + error-rate against four latency/ratio SLOs, plus a fifth Neo4j-backed daily 10× deviation check against `edges_created_total`. Route violations to the nova-core Obsidian vault (under `70-debugging/`, one note per SLO per day, idempotent) and an optional Slack webhook. Fail-open on every external surface.
+- **Scope deferred**: No Prometheus recording rules, no auth on `/metrics`, no crontab installation — operator wires the cron line.
+- **Validator vault-path amendment**: the plan's original target `02-knowledge/alerts/` does not exist. Actual vault root `/home/nova/nova-vault` has `70-debugging/` as the Nova-Core-managed folder for runtime operational alerts. Used `70-debugging/slo-alert-<slo_name>-<YYYY-MM-DD>.md` so same-metric re-alerts on the same day overwrite (idempotent). Write safety-gate refuses to overwrite any existing file whose first 15 lines do not contain the `type: slo-alert` frontmatter marker, protecting human-authored notes from clobber.
+- **Durable baseline for daily deviation**: counters reset on app restart, so the 10× deviation SLO sources absolute edge counts from Neo4j via `MemoryEdgeService.get_edge_stats()`. Rolling 7-day history persists to `data/slo_edges_baseline.json` (atomic tmp-rename write, upsert-by-date, trimmed to 7 most recent entries). Same-day re-runs overwrite the day's entry instead of appending.
+- **Files created** (`Nova_AI_Fusion_Memory_MCP/` root):
+  - `scripts/slo_config.yaml` — 37 lines. Declarative SLOs + notify block + state-file path + default Prometheus URL.
+  - `scripts/slo_alert_check.py` — 832 lines incl. docstrings (~450 LOC code). CLI, parser, p95 computation, SLO evaluator, vault router, Slack router, daily-baseline persistence, Neo4j stats fetch.
+  - `tests/test_slo_alert_check.py` — 605 lines, **30 hermetic tests** all green. Covers parser, p95 interpolation, every SLO path (green / enqueue violation / completion violation / expansion violation / error-rate violation / no-data / daily deviation violation / daily deviation no-data), vault fresh-write, vault clobber refusal, vault prior-SLO-alert overwrite, vault dry-run, Slack missing webhook, Slack failure fail-open, Slack dry-run, run_check dry-run (no HTTP, no writes), run_check fail-on-violation exit code, run_check green exit code, metric-scrape fail-open, markdown frontmatter shape.
+- **Files modified**: none. Pure scripts + tests sprint; `app/` untouched; `requirements.txt` untouched (`prometheus-client` parser already shipped Sprint 18; `pyyaml` already pinned).
+- **CLI surface**: `--config`, `--metrics-url`, `--dry-run`, `--vault-path` (default `/home/nova/nova-vault`), `--window-minutes` (context only; histograms are cumulative), `--verbose`, `--fail-on-violation` (default off → cron stays green), `--skip-neo4j` (operator escape hatch when Neo4j is down).
+- **Core modules inside `slo_alert_check.py` (9)**: `parse_prometheus_metrics`, `_collect_histogram_buckets`, `compute_p95`, `evaluate_slos` (+ 3 per-aggregation helpers), `load_daily_baseline`, `append_daily_snapshot`, `check_daily_edges_deviation`, `build_alert_markdown`, `write_vault_alert`, `post_slack`, `fetch_metrics`, `fetch_neo4j_stats` (sync wrapper around async `MemoryEdgeService.get_edge_stats`), `run_check`, `main`.
+- **Fail-open surfaces**: metric scrape (`fetch_metrics` → returns `""` on HTTP error), vault write (`write_vault_alert` → logs + returns `False`), Slack post (`post_slack` → logs + returns `False`), Neo4j stats (`fetch_neo4j_stats` → returns `None`). `main()` wraps `run_check` in try/except; unhandled errors return exit 0 unless `--fail-on-violation` is set.
+- **Prometheus parser gotcha + fix**: `prometheus_client.parser.text_string_to_metric_families` strips the on-wire `_total` suffix from counter family names (`edges_created_total` → family name `edges_created`). SLO config uses the on-wire name, so `parse_prometheus_metrics()` now aliases both forms for counters (entry appears under both `edges_created` and `edges_created_total`). Covered by `test_all_green_no_violations` and `test_error_rate_violation`.
+- **Vault-clobber safety evidence**: `test_vault_write_refuses_to_clobber_human_note` pre-writes a file with `type: research` frontmatter and an "author: human" line; the script's write returns `False` and the original content is preserved bit-for-bit. `test_vault_write_overwrites_prior_slo_alert` confirms the idempotent-overwrite path still works for `type: slo-alert` files so same-day re-alerts update in place.
+- **Slack fail-open evidence**: `test_slack_skip_when_webhook_missing` asserts no HTTP call when `SLACK_ALERT_WEBHOOK` is unset (mocks `urlopen` to raise if touched). `test_slack_failure_does_not_raise` patches `urlopen` to raise `RuntimeError("boom")`; `post_slack` returns `False` and no exception propagates.
+- **Dry-run smoke output** (against live `uvicorn app.main:app --host 127.0.0.1 --port 8765` with fresh `/metrics`; no counter/histogram activity yet):
+  ```
+  INFO slo_alert_check: running SLO check: config=…/scripts/slo_config.yaml url=http://127.0.0.1:8765/metrics window=15m dry_run=True
+  INFO slo_alert_check: slo=p95_similarity_link_enqueue status=no_data metric=similarity_link_enqueue_seconds actual=None threshold=0.005 direction=less_than
+  INFO slo_alert_check: slo=p95_similarity_link_completion status=no_data metric=similarity_link_completion_seconds actual=None threshold=10.0 direction=less_than
+  INFO slo_alert_check: slo=p95_graph_expansion_latency status=no_data metric=graph_expansion_latency_seconds actual=None threshold=0.2 direction=less_than
+  INFO slo_alert_check: slo=edge_create_error_rate status=no_data metric=edges_created_total actual=None threshold=0.01 direction=less_than
+  INFO slo_alert_check: slo=daily_edges_created_deviation status=no_data metric=MemoryEdgeService.get_edge_stats actual=None threshold=10.0 direction=bounded
+  INFO slo_alert_check: SLO check summary: total=5 violations=0 no_data=5 ok=0
+  ```
+  Exit 0. Live endpoint returned a 307 on `/metrics` → `/metrics/`; `urllib.request.urlopen` follows the GET redirect transparently.
+- **Cron wiring line for operator** (not installed by this sprint):
+  ```cron
+  */15 * * * * NEO4J_URI=bolt://localhost:7687 SLACK_ALERT_WEBHOOK=<url> \
+      /usr/bin/python3 -m scripts.slo_alert_check \
+          --metrics-url http://localhost:8000/metrics
+  ```
+  Run from `cd /home/nova/Nova_AI_Fusion_Memory_MCP`. Drop `SLACK_ALERT_WEBHOOK` to silence Slack (vault note still writes). Add `--fail-on-violation` only if the operator wants non-zero exit to feed a supervisor/pager.
+- **Full-suite pre/post**:
+  - Pre-sprint baseline: `843 passed / 2 failed / 14 errors` (Sprint 18 post-fix).
+  - Post-sprint: `873 passed / 2 failed / 14 errors` — +30 new tests, **zero new failures**, pre-existing 2/14 unchanged.
+  - New-tests-only run: `tests/test_slo_alert_check.py` → **30 passed in 0.24s**.
+- **Live Neo4j**: no writes; sprint is scripts + tests only. Smoke test invoked `MemoryEdgeService.get_edge_stats()` in read-only mode once via `--skip-neo4j` negation path (verified via unit tests; live dry-run used `--skip-neo4j` to isolate metric parsing).
+- **Open issues / surprises**: none material.
+  - The `/metrics` endpoint returns a 307 redirect on exact path `/metrics` (ASGI mount at trailing-slash). `urllib.request.urlopen` follows GET redirects so the shim works transparently; documenting the hop here so future operators don't chase a phantom connectivity issue.
+  - `prometheus_client.parser` counter-name stripping is load-bearing — the alias in `parse_prometheus_metrics` must stay. Covered by two tests (green-path + violation).
+- **Phase 8 closed. Plan score → ~98/100 per handoff §gap-to-95.**
+- **Next-sprint gate**: none — plan complete modulo operator decisions (cron install, Slack webhook provisioning, `/metrics` bind-level hardening).
+
+### Review follow-ups (2026-04-23) — 2 HIGH + 3 MEDIUM findings addressed
+
+Reviewer returned REQUEST FIXES on 2 HIGH + 3 MEDIUM findings; all addressed in-place before commit. Diffs stayed tight; no files outside Sprint 19's original scope were reopened.
+
+- **HIGH-1 — `.gitignore` for rolling baseline**: added explicit `data/slo_edges_baseline.json` line next to the existing `data/event_seq.counter` entry (`.gitignore:135`). Narrow entry, not a `data/*.json` wildcard. Verified via `git check-ignore -v` — pattern matches the target file.
+- **HIGH-2 — Path traversal sanitization**: (a) new `_safe_slo_token()` helper at `scripts/slo_alert_check.py:57` lowercases and replaces `[^a-z0-9_-]` → `_`; applied to `result.name` inside `run_check` before `fname_pattern.format` so traversal sequences can never reach the filename. (b) `write_vault_alert` now resolves the target and uses `Path.is_relative_to(vault_root)` as a containment gate (fail-open log + `return False` on escape). Covers defense-in-depth even if the upstream sanitizer is bypassed.
+- **MED-3 — end-to-end non-dry test**: new `test_run_check_writes_violation_file_end_to_end` drives the full orchestrator with mocked `fetch_metrics` (violation-triggering payload) + `fetch_neo4j_stats=None` against a tmpdir vault; asserts the violation file lands at `<vault>/70-debugging/slo-alert-p95_similarity_link_enqueue-<date>.md`, parses its frontmatter via `_parse_frontmatter_type`, and asserts `type == "slo-alert"` and `status: violation`.
+- **MED-4 — parser-based clobber check**: new `_parse_frontmatter_type()` helper reads the `---` ... `---` block, `yaml.safe_load`s it, and returns `parsed["type"]` or `None`. `write_vault_alert` now requires `fm_type == "slo-alert"` before overwriting — a human note whose body quotes the literal string `type: slo-alert` but whose frontmatter is `type: research` can no longer be clobbered. Covered by new `test_vault_write_refuses_human_note_with_literal_type_string`. Fail-open wrapper preserved — no exceptions propagate.
+- **MED-6 — daily-deviation insufficient-history floor**: `check_daily_edges_deviation` now short-circuits with `status="no_data"` + `reason="insufficient_history"` + `history_size` when `len(deltas) < 3`. Updated `test_daily_deviation_ok_within_multiplier` to use 5 baseline entries (4 deltas) so it still exercises the `ok` path; existing 10x-violation test already had 4 deltas so it still triggers violation. New `test_daily_deviation_no_data_when_history_too_short` exercises the floor (2 baseline entries → 1 delta → no_data).
+
+- **New tests shipped (5)**: `test_daily_deviation_no_data_when_history_too_short`, `test_safe_slo_token_sanitizes_traversal`, `test_write_vault_alert_rejects_escape`, `test_vault_write_refuses_human_note_with_literal_type_string`, `test_run_check_writes_violation_file_end_to_end`. One existing test updated in place (`test_daily_deviation_ok_within_multiplier` — 3 → 5 baseline entries to survive the new floor).
+- **Test counts post-fix**: `tests/test_slo_alert_check.py` → **35 passed** (30 prior + 5 new). Full suite: **878 passed / 2 failed / 14 errors** (baseline 873/2/14 + 5 new tests; pre-existing 2/14 unchanged).
+- **Fail-open semantics preserved**: every new guard (path-containment, frontmatter-type check, insufficient-history floor) logs + returns False/`no_data` and never raises into the cron loop.
+- **Files touched (fix-up only)**: `.gitignore`, `scripts/slo_alert_check.py`, `tests/test_slo_alert_check.py`, this sprint log. No change to `scripts/slo_config.yaml`, `app/`, or `requirements.txt`.
