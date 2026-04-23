@@ -398,3 +398,50 @@ Per ADR-0759 and the v2 plan's Step 0.7, each sprint is ≤4 hours with an expli
   - `ASSOC_GRAPH_RECALL_ENABLED=True` (2026-04-16) and `ASSOC_PROVENANCE_WRITE_ENABLED=True` (2026-04-21) are the only non-False defaults in the 8-flag ASSOC_* set. Everything else stays at False pending its own gate.
 - **Phase 5 rollout complete**: write path armed, read path live, MCP tool exposed, observability deferred to Phase 8. Task #5 closed.
 - **Next**: Task #6 — re-score PLAN-0759 completion against the v2 per-phase scorecard.
+
+## Sprint 17 — 2026-04-23 ✓ COMPLETE (pending review) — **Phase 8a: live-test `get_provenance` against real edges**
+
+- **Phase**: Phase 8 (MCP tooling hardening — live-exercise the already-shipped provenance read path)
+- **Workflow**: implementation-team (validate → implement → review → verify). This entry is the Implementer hand-off to the Critical Reviewer.
+- **Scope as executed**: seed 3 provenance edges between 4 pre-existing real nova-core `:base` nodes, live-exercise the `get_provenance` MCP handler against them, add one hermetic mixed-edge-type regression, roll back by `run_id`, verify graph is byte-identical to pre-sprint. FastMCP stdio-transport live-test skipped with documented rationale.
+- **Duration**: ~45 min (within the validator estimate).
+- **Chosen 4 nova-core `:base` nodes** (verified clean of SUPERSEDES/PROMOTED_FROM/COMPACTED_FROM at pick time):
+  - **A** = `005b347afc0f10618dadd5a283f37a58` — "Research: Autonomous Agent Scheduling Patterns (2026-03-11)" (BabyAGI, MCP task tools, adaptive heartbeat).
+  - **B** = `015916fdfc5a8d32b280b96d4a46015e` — "CEO Nova Telegram Implementation Plan" (7-phase plan, dual-layer conversational AI).
+  - **C** = `0161deeeae900bce4cd31d15760f06e1` — "Session checkpoint: session-2026-04-06-5" (watcher unbounded-retry loop fix).
+  - **D** = `0294ca7688ba0396bf0bf3d1b7355683` — "Built evidence.jsonl daily rotation for NovaTrade (2026-03-23)".
+- **Seeded topology** (3 edges, tagged `created_by=sprint-17`, `run_id=wt-phase8-livetest-2026-04-23`, `edge_version=1`):
+  - `A --[SUPERSEDES]--> B` (pure supersession chain; B is a leaf)
+  - `A --[PROMOTED_FROM]--> C` (start of mixed chain)
+  - `C --[COMPACTED_FROM]--> D` (completes mixed chain; D is a leaf)
+- **Files created**:
+  - `Nova_AI_Fusion_Memory_MCP/scripts/seed_phase8_livetest_provenance.py` (~160 LOC) — idempotent CLI seeder. CONSTANTS-level 4 entity_ids. Uses `MemoryEdgeService.create_edge` / `MemoryEdge` dataclass (no raw Cypher). Supports `--dry-run`, `--run-id`, `--uri`, `--database`, `-v`. Prints per-type prov-edge counts before/after.
+  - `Nova_AI_Fusion_Memory_MCP/tests/test_provenance_livetest.py` (~200 LOC) — 2 live tests; module-scoped seed fixture that (a) defensively rolls back any pre-existing edges tagged with the run_id, (b) seeds the 3 edges via the edge service, (c) teardown invokes `scripts.assoc_rollback.assoc_rollback(run_id=..., dry_run=False)` and asserts `report.total >= 3`. Mirrors `test_provenance_api.py` Context stub + skip-on-unreachable pattern.
+- **Files modified**:
+  - `Nova_AI_Fusion_Memory_MCP/tests/test_mcp_association_tools.py:717` — added `test_get_provenance_mixed_edge_types` inside `class TestGetProvenance`. Hermetic (AsyncMock-backed). Asserts the MCP handler preserves `edge_type` verbatim for SUPERSEDES + PROMOTED_FROM + COMPACTED_FROM chain entries. Closes the pure-type-only gap flagged by the Validator.
+- **Dry-run evidence**:
+  ```
+  $ NEO4J_URI=bolt://localhost:7687 python3 -m scripts.seed_phase8_livetest_provenance --dry-run
+  [dry-run] Would create 3 edges tagged run_id=wt-phase8-livetest-2026-04-23:
+    005b347afc0f10618dadd5a283f37a58 -[SUPERSEDES]-> 015916fdfc5a8d32b280b96d4a46015e
+    005b347afc0f10618dadd5a283f37a58 -[PROMOTED_FROM]-> 0161deeeae900bce4cd31d15760f06e1
+    0161deeeae900bce4cd31d15760f06e1 -[COMPACTED_FROM]-> 0294ca7688ba0396bf0bf3d1b7355683
+  ```
+- **Live-test assertions green** (both new tests in `test_provenance_livetest.py`):
+  - (a) `get_provenance(A, max_depth=5)` returns 3-hop chain `{B, C, D}`; per-hop depth and edge_type verified; mixed edge types present.
+  - (b) `original_sources == {B, D}`; `depth == 2`; `depth_limited == False`; `exists == True`; `exists_checked == True`.
+  - (c) `max_depth=1` cuts chain to `{B, C}`, `depth_limited == True`.
+- **FastMCP stdio transport live-test**: SKIPPED. Rationale: exercising the client→stdio→server path would require spawning `python mcp_server.py` as a subprocess, which triggers the full `service_lifespan` (MemoryService init with Pinecone, OpenAI embeddings, sentence-transformers warmup, Neo4j constraint creation). That path also requires `OPENAI_API_KEY` and Pinecone creds at runtime. Coverage cost: >30 min boilerplate + ~30s subprocess warmup per test + potential secret-dependency. Coverage benefit: transport-framing delta only — the handler function is already exercised against a real Neo4j driver in `test_provenance_api.py:436-590` and now in `test_provenance_livetest.py`. Per the sprint spec, documented and skipped. Recommend deferring to a future observability / smoke-test sprint if ever needed.
+- **Live Neo4j counts**:
+  - Before seeding: MENTIONS=9081, CO_OCCURS=4734, SIMILAR_TO=1221, INCLUDES=523, MEMORY_FOLLOWS=182, FOLLOWS=1. SUPERSEDES/PROMOTED_FROM/COMPACTED_FROM=0.
+  - During test run: 1×SUPERSEDES + 1×PROMOTED_FROM + 1×COMPACTED_FROM tagged run_id=wt-phase8-livetest-2026-04-23.
+  - After rollback (`assoc_rollback --run-id wt-phase8-livetest-2026-04-23`): identical to pre-seed. Provenance edge types all back to 0.
+- **Full provenance suite run**: `pytest tests/test_provenance_api.py tests/test_mcp_association_tools.py tests/test_provenance_livetest.py -x -q` → **61 passed in 5.98s** (58 baseline + 2 new livetest + 1 new hermetic). Baseline pre-sprint was 58 passed in 5.22s.
+- **Invariants preserved**:
+  - Non-provenance edge counts identical pre/post (MENTIONS/CO_OCCURS/SIMILAR_TO/INCLUDES/MEMORY_FOLLOWS/FOLLOWS unchanged).
+  - The 4 real `:base` nodes untouched — only 3 synthetic edges added + removed.
+  - `ProvenanceTestNode` teardown in `test_provenance_api.py` unchanged; the new test file does not share fixtures with the existing suite.
+  - No raw Cypher in the seeder; only the edge service layer is used.
+  - No feature-flag changes; no commits.
+- **Residual risk / open issues**: none material. The transport-layer gap is documented above; if it ever matters, the right path is a separate ops-smoke harness, not a unit test.
+- **Next-sprint gate**: Sprint 18 — Phase 8b observability (SLO metrics + alerts on association tools).
