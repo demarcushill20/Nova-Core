@@ -445,3 +445,77 @@ Per ADR-0759 and the v2 plan's Step 0.7, each sprint is ≤4 hours with an expli
   - No feature-flag changes; no commits.
 - **Residual risk / open issues**: none material. The transport-layer gap is documented above; if it ever matters, the right path is a separate ops-smoke harness, not a unit test.
 - **Next-sprint gate**: Sprint 18 — Phase 8b observability (SLO metrics + alerts on association tools).
+
+## Sprint 18 — 2026-04-23 ✓ COMPLETE (pending review) — **Phase 8b: Prometheus metrics + `/metrics` endpoint**
+
+- **Scope executed**: Instrument the associative-system hot paths with a `prometheus-client`-based metric set (8 metric objects, 7 emission helpers), mount `/metrics` on the FastAPI app, and ship hermetic tests covering every helper + a silent-failure guard monkeypatch.
+- **Scope deferred**: SLO alerting / routing (Sprint 19). No backfill-rate-limit detector, no recording rules, no alert destinations wired yet.
+- **Why prometheus-client (not OTel)**: v2 plan said "OTel → Fusion Memory Prometheus sink"; the sink does not exist. `prometheus-client` is pure Python, pull-model, no new infra — validator's amendment B.
+- **Files created** (`Nova_AI_Fusion_Memory_MCP/` root):
+  - `app/observability/__init__.py` — 25 LOC. Public re-export surface.
+  - `app/observability/metrics.py` — ~270 LOC. Registry, metric declarations, emission helpers with try/except guards, `reset_registry_for_tests()`, `declared_metric_names()`.
+  - `tests/test_observability_metrics.py` — ~290 LOC, **21 new hermetic tests** all green.
+- **Files modified**:
+  - `requirements.txt` +1 line (`prometheus-client==0.20.0`).
+  - `app/main.py` +9 lines — import `REGISTRY`, `make_asgi_app`, mount at `/metrics` with comment on bind-level isolation.
+  - `app/services/associations/edge_service.py` +30 lines — `create_edge` + `create_edges_batch` timing wrappers. Business logic untouched.
+  - `app/services/associations/similarity_linker.py` +25 lines — `enqueue_link` records `queued` / `dropped_queue_full` events + `similarity_link_enqueue_seconds`; `_link_one_safe` records `completed` / `failed` + `similarity_link_completion_seconds`.
+  - `app/services/associations/associative_recall.py` +9 lines — four return points in `expand()` emit `record_graph_expansion(mode, latency_s, candidate_count)`.
+  - `app/services/associations/entity_linker.py` +2 lines — per-MENTIONS `record_entity_mention()`.
+  - `scripts/assoc_backfill_similarity.py` +12 lines — batch-boundary + completion `set_backfill_progress`.
+  - `scripts/assoc_backfill_entities.py` +12 lines — batch-boundary + completion `set_backfill_progress`.
+- **Metric objects shipped (8)**:
+  - `edges_created_total{edge_type,outcome}` — Counter; success/error per edge type.
+  - `edge_create_latency_seconds{edge_type}` — Histogram; per-edge MERGE latency.
+  - `similarity_link_enqueue_seconds` — Histogram; SLO p95 < 5 ms.
+  - `similarity_link_completion_seconds` — Histogram; SLO p95 < 10 s.
+  - `similarity_link_queue_events_total{event}` — Counter; `queued|completed|failed|dropped_queue_full`.
+  - `graph_expansion_latency_seconds{mode}` — Histogram; SLO p95 < 200 ms at 2-hop.
+  - `graph_expansion_candidates{mode}` — Histogram; fan-out distribution.
+  - `entity_mentions_created_total` — Counter; MENTIONS edges landed.
+  - `backfill_progress{script,phase}` — Gauge; fractional 0..1.
+- **Emission helpers (7)**: `record_edge_created`, `record_similarity_enqueue`, `record_similarity_completion`, `record_similarity_queue_event`, `record_graph_expansion`, `record_entity_mention`, `set_backfill_progress`.
+- **Hot-path instrumentation checklist**: a) edge_service — SHIPPED. b) similarity_linker — SHIPPED. c) associative_recall — SHIPPED. d) entity_linker — SHIPPED. e) backfill scripts (similarity + entities) — SHIPPED. f) memory_service background path — SKIPPED (instrumentation already lives in similarity_linker `_link_one_safe`; avoiding double-counting).
+- **`/metrics` endpoint**: mounted at `/metrics` via `make_asgi_app(registry=REGISTRY)`. No auth on the FastAPI app today; the `app/main.py` mount carries a comment that binding-level isolation (127.0.0.1) is the operator's control. Sprint 19 or ops can harden later.
+- **Silent-failure guard evidence**: 5 tests in `tests/test_observability_metrics.py` monkeypatch a metric object to raise `RuntimeError` on `.inc()` / `.observe()` / `.set()` and assert the helper returns without propagating. Examples: `test_record_edge_created_swallows_inc_exception`, `test_record_similarity_queue_event_swallows_inc_exception`, `test_record_entity_mention_swallows_inc_exception`, `test_record_graph_expansion_swallows_observe_exception`, `test_set_backfill_progress_swallows_set_exception`.
+- **Async-safety**: hot paths use `time.perf_counter()` deltas + `Histogram.observe(s)`; no `with hist.time():` inside async code.
+- **Sample `/metrics` output** (first ~15 lines of response body after exercising every helper once):
+  ```
+  # HELP edges_created_total Associative edges written to Neo4j, by edge type and outcome.
+  # TYPE edges_created_total counter
+  edges_created_total{edge_type="SIMILAR_TO",outcome="success"} 1.0
+  edges_created_total{edge_type="MENTIONS",outcome="success"} 1.0
+  edges_created_total{edge_type="SIMILAR_TO",outcome="error"} 1.0
+  # HELP edge_create_latency_seconds Wall-clock latency of a single edge MERGE, by edge type.
+  # TYPE edge_create_latency_seconds histogram
+  edge_create_latency_seconds_bucket{edge_type="SIMILAR_TO",le="0.001"} 0.0
+  edge_create_latency_seconds_bucket{edge_type="SIMILAR_TO",le="0.005"} 1.0
+  edge_create_latency_seconds_bucket{edge_type="SIMILAR_TO",le="0.05"} 2.0
+  edge_create_latency_seconds_count{edge_type="SIMILAR_TO"} 2.0
+  edge_create_latency_seconds_sum{edge_type="SIMILAR_TO"} 0.053
+  # HELP similarity_link_queue_events_total Lifecycle events for the similarity linker queue.
+  # TYPE similarity_link_queue_events_total counter
+  similarity_link_queue_events_total{event="queued"} 1.0
+  ```
+- **Full-suite pre/post**:
+  - Pre-sprint baseline: `818 passed, 2 failed, 14 errors` (known: `test_zzz_production_counts_unchanged`, `test_redis_timeline`).
+  - Post-sprint: `839 passed, 2 failed, 14 errors` — +21 new tests, **zero new failures**, pre-existing failures unchanged.
+  - Observability-only run: `tests/test_observability_metrics.py` → **21 passed in 4.76s**.
+- **Live Neo4j**: no writes; this sprint is pure code + hermetic tests. Baselines unchanged (MENTIONS=9081 etc.).
+- **Open issues / surprises**: none material.
+  - The `/metrics` ASGI app binds to the `REGISTRY` object that existed at `app.main` import time; `reset_registry_for_tests()` swaps `metrics.REGISTRY` to a *new* object, so the mounted endpoint in long-running tests sees an "old" registry. The test that hits the live endpoint therefore asserts only that it returns parseable text — not that the emission from the same test body shows up there. This matches production behavior (registry is created once at import) and is documented in the test.
+  - No alert layer yet. Operator cannot page on `p95 enqueue > 5 ms` until Sprint 19.
+- **Next-sprint gate**: Sprint 19 — SLO alert shim + routing (recording rules, destinations, auth/bind gating for `/metrics` if required).
+
+### Review follow-ups (2026-04-23) — 3 MEDIUM findings addressed
+
+Reviewer returned REQUEST FIXES on 3 MEDIUMs; all addressed in-place before commit:
+
+- **MED-1 — `mode` label cardinality**: `record_graph_expansion()` in `app/observability/metrics.py` now clamps `mode` to a module-level `_ALLOWED_EXPANSION_MODES` frozenset (the 6 intents in `INTENT_EDGE_FILTER` + `"general"`, hard-coded with a sync-note comment — no import dependency on the recall module). Unknown values collapse to `"unknown"`. Covered by new test `test_record_graph_expansion_unknown_mode_collapses_to_unknown`.
+- **MED-2 — full-backfill liveness signal**: new `backfill_records_processed_total{script}` Counter + `record_backfill_record(script)` helper added to `metrics.py`. Wired into both `scripts/assoc_backfill_similarity.py` and `scripts/assoc_backfill_entities.py` at the existing batch-boundary checkpoint (every 100 processed memories), **unconditionally** (independent of `--max-total`). Help text documents `rate(backfill_records_processed_total[1m])` as the intended liveness query. Covered by new test `test_record_backfill_record_increments_counter`.
+- **MED-3 — explicit silent-failure symmetry**: two new tests `test_record_similarity_enqueue_swallows_observe_exception` and `test_record_similarity_completion_swallows_observe_exception` mirror the existing `record_graph_expansion` swallow test — monkeypatch the histogram's `.observe` to raise and assert no exception propagates.
+
+- **New metric shipped**: `backfill_records_processed_total{script}` (9th metric object; `declared_metric_names()` updated).
+- **Test counts post-fix**: `tests/test_observability_metrics.py` → **25 passed** (21 prior + 4 new). Full suite: **843 passed / 2 failed / 14 errors** (baseline 839/2/14 + 4 new tests; pre-existing 2/14 unchanged).
+- **Endpoint smoke**: `/metrics` body contains both `backfill_records_processed_total` and `mode="unknown"` after hitting the helpers.
+- **Files touched (fix-up only)**: `app/observability/metrics.py`, `tests/test_observability_metrics.py`, `scripts/assoc_backfill_similarity.py`, `scripts/assoc_backfill_entities.py`. No other Sprint 18 files re-opened.
