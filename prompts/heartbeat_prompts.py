@@ -365,6 +365,10 @@ SAVE TO MEMORY: upsert_memory(
   content=<500-1000 char summary>,
   id="research_{date_str}_<slug>",
   metadata={mem_meta})
+# PROVENANCE (PLAN-0759): only if this research explicitly supersedes a specific
+# prior memory whose exact id you identified via query_memory, include
+# `metadata["_promoted_from"] = {{"old_id": <that exact id>, "from_layer": "research", "to_layer": "research_v2"}}`.
+# Otherwise (the normal case), omit the key.
 
 SAVE TO VAULT: vault_write(
   path="40-research/<slug>-{date_str}.md",
@@ -467,6 +471,10 @@ SAVE TO MEMORY: upsert_memory(
   content=<plan summary 500-1000 chars>,
   id="plan_{date_str}_<slug>",
   metadata={plan_mem_meta})
+# PROVENANCE (PLAN-0759): if this plan revises a prior plan memory (found via
+# `query_memory` in step 1), include `_promoted_from={{"old_id": <prior_plan_memory_id>,
+# "from_layer": "plan_v1", "to_layer": "plan_v2"}}` in the upsert_memory metadata dict.
+# Otherwise omit.
 
 SAVE TO VAULT: vault_write(
   path="00-inbox/plan-nova-core-{stamp}.md",

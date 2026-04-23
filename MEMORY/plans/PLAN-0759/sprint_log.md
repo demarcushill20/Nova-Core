@@ -580,3 +580,47 @@ Reviewer returned REQUEST FIXES on 2 HIGH + 3 MEDIUM findings; all addressed in-
 - **Test counts post-fix**: `tests/test_slo_alert_check.py` → **35 passed** (30 prior + 5 new). Full suite: **878 passed / 2 failed / 14 errors** (baseline 873/2/14 + 5 new tests; pre-existing 2/14 unchanged).
 - **Fail-open semantics preserved**: every new guard (path-containment, frontmatter-type check, insufficient-history floor) logs + returns False/`no_data` and never raises into the cron loop.
 - **Files touched (fix-up only)**: `.gitignore`, `scripts/slo_alert_check.py`, `tests/test_slo_alert_check.py`, this sprint log. No change to `scripts/slo_config.yaml`, `app/`, or `requirements.txt`.
+
+## Sprint 20 — 2026-04-23 (pending review) — **Phase 9: Cross-repo provenance wiring (nova-core → Fusion MCP)**
+
+- **Scope executed**: Wire the `_promoted_from` / `_compacted_from` metadata keys at the upstream producer (this repo, `nova-core`) so the Fusion MCP write-time hooks at `Nova_AI_Fusion_Memory_MCP/app/services/memory_service.py:1342-1422` — armed at the end of Sprint 17 — actually fire PROMOTED_FROM / COMPACTED_FROM edges in production. Before this sprint, both hooks were "dead-but-armed": zero nova-core callers emitted the internal signal keys, so zero edges existed.
+- **Scope deferred**: No Fusion MCP changes. No backfill runs. No prompt restructures beyond minimal provenance additions. No new producers — prompt wiring only.
+- **Files created** (nova-core):
+  - `utils/memory_provenance.py` — 120 lines. Two pure helpers (`build_promotion_metadata`, `build_compaction_metadata`) + module constant `MAX_COMPACTION_GROUP = 20` mirroring the upstream `memory_service.py:1382` cap. Zero runtime deps outside stdlib. Module docstring cites the consumer contract and the leading-underscore scrubbing rule.
+  - `tests/test_memory_provenance.py` — 194 lines, **22 hermetic tests** all green. Covers happy paths, empty/non-str rejection (parametrized across each arg), dedup-preserving-order, 20-cap enforcement (both as-supplied and after dedup), tuple acceptance, drop-empty-optionals, and a documentation test (`test_wire_format_matches_fusion_mcp_hook_contract`) that asserts the exact keys/types the Fusion MCP hook expects.
+- **Files modified** (prompt wiring only — minimally invasive, no existing instructions restructured):
+  - `scripts/daily_summary.py` — daily summary task template now instructs the agent to include `_compacted_from={"source_ids": [...up to 20], "algorithm": "daily_summary", "reason": "daily roll-up"}` in the `upsert_memory` metadata dict, with explicit guidance to drop ids beyond 20 and to omit the key entirely when step 1 returned zero events. This is the first live producer of COMPACTED_FROM edges.
+  - `prompts/heartbeat_prompts.py` — research flow (`_build_research_prompt`, line ~368) and planning flow (`_build_planning_prompt`, line ~473) both gain a 3-line comment instructing the agent to include `_promoted_from={"old_id": <prior>, "from_layer": ..., "to_layer": ...}` **only** when the save revises a prior memory. Fresh saves omit the key. `{{...}}` brace escaping verified by successful `import prompts.heartbeat_prompts`.
+  - `prompts/research_cycle.txt` and `prompts/planning_cycle.txt` — same provenance guidance appended to the standalone `.txt` copies that mirror the heartbeat prompts. Kept in sync with the `.py` versions so either consumer sees the same instruction.
+  - `watcher.py:~415` — inline comment under the `SAVE TO MEMORY SYSTEMS` step points at `utils/memory_provenance.py` and documents both keys with shape reminders, since the task-execution prompt is general-purpose (not itself a compaction or promotion) and the decision lives with the agent.
+- **Files NOT modified** (per plan exclusions): `.claude/worktrees/` (stale copies), `tests/test_heartbeat_phase46.py` (treats `upsert_memory` as a string literal — no semantic overlap), `WORK/heartbeat_enhancements.py` (legacy).
+- **Acceptance**:
+  - New module + 22 tests green in isolation (`pytest tests/test_memory_provenance.py -v` → 22 passed).
+  - All four prompt templates updated; brace-escaping verified via live import of `prompts.heartbeat_prompts` and `watcher` modules.
+  - No Fusion MCP changes. Helper is pure-stdlib and imports cleanly.
+- **Operational gate**: the first `_compacted_from` metadata emitted from a daily summary run (next midnight cron tick of `scripts/daily_summary.py` → watcher dispatch → `upsert_memory` call) should produce the first real COMPACTED_FROM edges in Neo4j. Confirm via `MATCH ()-[r:COMPACTED_FROM]->() RETURN count(r)` on the live graph the morning after — expect ≥1. PROMOTED_FROM edges are rarer (agent must decide the revise-vs-fresh branch) and will trickle in as research/planning cycles identify prior memories to supersede.
+- **Test counts pre/post**:
+  - Pre-sprint baseline with repo-default `-x` stop-on-first-failure halted at a pre-existing intermittent failure in `tests/test_self_healing_wiring.py::TestBudgetWatchdogWiring::test_watcher_dispatch_has_budget_check` (passes in isolation — unrelated to this sprint's prompt edits, which do not touch `watcher._dispatch_inner`). Caused by test-ordering monkey-patch contamination, not by code under test.
+  - Post-sprint, fail-fast disabled (`-o "addopts=--tb=no"`), `tests/test_cross_validation.py` excluded (SIGABRT-crashing BacktestEngine on this VPS — pre-existing skip): junit-reported **tests=12295 failures=0 errors=0 skipped=6** (parametrized tests expand to individual cases in junit; 12k is the parametrize blow-up, not unique test functions).
+  - Sprint 20's new module in isolation: `pytest tests/test_memory_provenance.py -v` → **22 passed in 0.38s**.
+  - Zero new failures, zero new errors introduced by this sprint.
+- **Open issues / surprises**: none material.
+  - `prompts/*.txt` files do not appear to be loaded by any Python consumer in the current runtime (`grep -rn "research_cycle.txt\|planning_cycle.txt" --include='*.py'` returned no hits outside log filenames); edits there are belt-and-suspenders in case a future consumer re-adopts them. The live path is `prompts/heartbeat_prompts.py`.
+  - No code path was added that imports `utils.memory_provenance` at runtime — the helpers are ready for future callers (e.g., a Python-side compaction orchestrator) but current wiring is agent-side via prompt instruction. This matches the plan's explicit "prompt-template wiring" scope.
+
+### Sprint 20 fix-up pass (2026-04-23)
+
+Critical Reviewer returned REQUEST FIXES; this subsection records the debugger pass that resolved all HIGH + targeted MEDIUM findings.
+
+- **HIGH fixed (2)**:
+  - HIGH-1 — `scripts/daily_summary.py` prompt used non-existent `entity_id` (events returned by `get_recent_events` carry `id`, not `entity_id`). Rewrote the `_compacted_from` guidance to use a concrete list-comprehension shape hint against `get_recent_events_result["events"]` and explicitly name the `id` field.
+  - HIGH-2 — `_promoted_from` hint in `prompts/heartbeat_prompts.py::_build_research_prompt` and `prompts/research_cycle.txt` was near-dead-letter (agents had no reliable mechanism to discover a prior id to supersede, risk of guessed/bad edges). Added a strict precondition: emit the key only when the research explicitly supersedes a specific prior memory whose exact id was identified via `query_memory`; otherwise (the normal case) omit. Planning-branch hint left intact per task scope.
+- **MEDIUM addressed (4)**:
+  - MEDIUM-1 — corrected the factually-wrong "cap enforced upstream" note in `scripts/daily_summary.py` to "Truncate to the first 20 ids; there is no upstream cap — a >20-id payload would create 20+ edges."
+  - MEDIUM-4 — `watcher.py` DISPATCH_PROMPT_TEMPLATE provenance comment gained a closing sentence: "Emit at most one of these two keys; omit both for fresh saves (the normal case)."
+  - MEDIUM-6 — `tests/test_memory_provenance.py` dedup coverage extended with a 4-case parametrized test covering duplicate-at-front, case-sensitive non-dup (Fusion ids are case-sensitive), duplicate-at-tail, and all-duplicates-collapse.
+  - MEDIUM-7 — 3 strategic ValueError tests now pin the offending field name in `str(exc.value)`: `build_promotion_metadata` empty-string cases assert on `old_id` / `from_layer` / `to_layer`; `build_compaction_metadata` non-str-element asserts on `source_ids[2]`; empty-str-element asserts on `source_ids[1]`.
+- **Low findings deferred** per scope.
+- **Test count delta**: `pytest tests/test_memory_provenance.py -v` → **26 passed** (up from 22; +4 net: new `test_build_compaction_metadata_dedup_positions` expands to 4 parametrize cases, existing `test_build_promotion_metadata_rejects_empty_strs` / `test_build_compaction_metadata_rejects_non_str_element` / `test_build_compaction_metadata_rejects_empty_str_element` gained substring assertions without adding new cases).
+- **Import regression check** (`python3 -c "import prompts.heartbeat_prompts; import watcher; import scripts.daily_summary"`): clean — no f-string brace-escape regression from prompt edits.
+- **Files touched (fix-up only)**: `scripts/daily_summary.py`, `prompts/heartbeat_prompts.py`, `prompts/research_cycle.txt`, `watcher.py`, `tests/test_memory_provenance.py`, this sprint log. No changes outside the reviewer's called-out list.

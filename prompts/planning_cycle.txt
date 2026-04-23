@@ -108,6 +108,11 @@ Call `upsert_memory` with:
     "plan_version": "<version number>"
   }}
 
+PROVENANCE (PLAN-0759): if this plan revises a prior plan memory (found via
+`query_memory` in step 1), also include in metadata:
+  "_promoted_from": {{"old_id": "<prior_plan_memory_id>", "from_layer": "plan_v1", "to_layer": "plan_v2"}}
+Otherwise omit. See utils/memory_provenance.py for the contract.
+
 ═══════════════════════════════════════════════════════════════
 STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY)
 ═══════════════════════════════════════════════════════════════

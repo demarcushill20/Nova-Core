@@ -90,6 +90,11 @@ Call `upsert_memory` with these exact parameters:
     "source": "heartbeat"
   }}
 
+PROVENANCE (PLAN-0759): only if this research explicitly supersedes a specific
+prior memory whose exact id you identified via query_memory, include in metadata:
+  "_promoted_from": {"old_id": "<that exact id>", "from_layer": "research", "to_layer": "research_v2"}
+Otherwise (the normal case), omit the key. See utils/memory_provenance.py for the contract.
+
 ═══════════════════════════════════════════════════════════════
 STEP 6: SAVE TO OBSIDIAN VAULT (MANDATORY — do not skip)
 ═══════════════════════════════════════════════════════════════

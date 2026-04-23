@@ -414,6 +414,12 @@ REQUIRED STEPS — complete every one, in order:
    If this task involves research, analysis, or planning:
    a) Save a dense summary to Fusion Memory via `upsert_memory` with:
       - metadata: {{"category": "research", "project": "nova-core"}}
+      # PROVENANCE (PLAN-0759): if this task ROLLS UP multiple prior memories,
+      # include `_compacted_from={{"source_ids": [...up to 20], "algorithm": "<name>", "reason": "<why>"}}`
+      # in metadata. If it REVISES a single prior memory, include
+      # `_promoted_from={{"old_id": <id>, "from_layer": "<l1>", "to_layer": "<l2>"}}` instead.
+      # See utils/memory_provenance.py for exact contracts. Omit both keys for fresh saves.
+      # Emit at most one of these two keys; omit both for fresh saves (the normal case).
    b) Save full findings to Obsidian Vault via `vault_write` with:
       - path: "40-research/<topic-slug>.md" (or "00-inbox/" for plans)
       - frontmatter must include: source: "nova-core-memory", tags with "#type/research"

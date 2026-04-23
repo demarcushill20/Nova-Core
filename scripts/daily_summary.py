@@ -68,6 +68,16 @@ Generate a comprehensive daily summary report for {date_str}.
 
 4. **Save to both memory systems**:
    - Store in Fusion Memory via `upsert_memory` with category="daily_summary", tags=["daily-report", "{date_str}"]
+   - Your daily summary is a compaction of the events you queried in step 1.
+     To wire PLAN-0759 provenance edges, include a `_compacted_from` key in the
+     `metadata` dict passed to `upsert_memory`. The events returned by
+     `get_recent_events` each carry an `id` field (not `entity_id`). Shape:
+     `{{"source_ids": [e["id"] for e in get_recent_events_result["events"]
+     if e.get("id")][:20], "algorithm": "daily_summary",
+     "reason": "daily roll-up"}}`.
+     Truncate to the first 20 ids; there is no upstream cap — a >20-id payload
+     would create 20+ edges.
+     If step 1 returned zero events, omit the `_compacted_from` key entirely.
    - Write to Obsidian vault via `vault_write` at path `90-diary/{date_str}-daily-summary.md`
 
 5. **Write the report** to OUTPUT/ as the task output.
