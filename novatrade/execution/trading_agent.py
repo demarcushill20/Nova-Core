@@ -1486,6 +1486,14 @@ class TradingAgent:
             stop_loss=stop_loss,
         )
 
+        # Count against the hard-supervisor daily cap. Deduped by position_id,
+        # so same-day restart (state restore already includes position_id) or
+        # double-recovery is a no-op. First-time recovery (fresh position that
+        # notify_fill never fired for — e.g. filled during a broker API outage)
+        # correctly adds one.
+        if self._supervisor is not None:
+            self._supervisor.on_trade_opened(position_id, volume)
+
         log.info(
             "recover_position: FLAT -> %s position=%s %s vol=%.2f at %.5f",
             self._state.value,

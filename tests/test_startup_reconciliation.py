@@ -223,6 +223,28 @@ class TestTradingAgentRecoverPosition:
             or ("LONG" in str(call_kwargs))
         )
 
+    def test_notifies_supervisor_trade_opened_on_recovery(self):
+        """Supervisor's daily-cap counter must see recovered positions.
+
+        Regression: a position filled during a MetaApi rate-limit outage
+        (2026-04-24 01:32) was discovered via recover_position and never
+        counted toward the daily cap, so positions_today diverged from the
+        real count of fills.
+        """
+        supervisor = MagicMock()
+        agent = _make_trading_agent(supervisor=supervisor)
+
+        agent.recover_position(
+            position_id="POS-040",
+            side=OrderSide.BUY,
+            symbol="EURUSD",
+            volume=0.20,
+            fill_price=1.10500,
+            stop_loss=1.10000,
+        )
+
+        supervisor.on_trade_opened.assert_called_once_with("POS-040", 0.20)
+
     def test_informs_risk_engine_about_adopted_position(self):
         """Risk engine is notified about the adopted position via on_trade_fill."""
         risk = MagicMock()

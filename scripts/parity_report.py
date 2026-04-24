@@ -147,24 +147,47 @@ def _load_backtest(path: Path) -> list[BTEntry]:
     return sorted(by_bar.values(), key=lambda e: e.entry_time)
 
 
-def _align(live: list[LiveTrade], bt: list[BTEntry], tol: timedelta):
-    """Greedy nearest-time matching within tolerance + same direction."""
+def _align(live: list[LiveTrade], bt: list[BTEntry], tol: timedelta, price_tol_pips: float = 5.0):
+    """Greedy match, primary by direction+time, fallback by price+SL similarity.
+
+    Live uses broker fill time; backtest uses signal-bar time. IRB pending stops
+    can hold up to trigger_window_bars × primary_tf before filling (~60 min for
+    v5 M5), so a fill at 00:02 may correspond to a backtest signal at 23:15. We
+    widen the time tolerance and add a price/SL fingerprint as a stronger match
+    criterion (same entry ±price_tol AND same SL ±price_tol regardless of time).
+    """
     used_bt: set[int] = set()
-    matches = []  # list of (live, bt)
+    matches = []  # list of (live, bt, dt)
     live_only = []
+    price_tol = price_tol_pips / 10000.0  # pips -> price units for EURUSD
+
+    def _score(lt: LiveTrade, be: BTEntry) -> tuple[bool, float]:
+        if be.side != lt.side:
+            return False, float("inf")
+        dt_sec = abs((be.entry_time - lt.entry_time).total_seconds())
+        price_close = abs(be.entry_price - lt.entry_price) <= price_tol
+        sl_close = lt.sl is not None and be.stop_loss and abs(be.stop_loss - lt.sl) <= price_tol
+        time_ok = abs(be.entry_time - lt.entry_time) <= tol
+        # Accept if time-close OR (price+SL fingerprint close within 90 minutes)
+        if time_ok or (price_close and sl_close and dt_sec <= 5400):
+            # Composite score: lower is better. Price/SL proximity weighted more than time.
+            ppips = abs(be.entry_price - lt.entry_price) * 10000
+            slpips = abs((be.stop_loss or 0) - (lt.sl or 0)) * 10000 if lt.sl else 0
+            return True, ppips + slpips + dt_sec / 600
+        return False, float("inf")
 
     for lt in live:
         best_i = -1
+        best_score = float("inf")
         best_dt = None
         for i, be in enumerate(bt):
             if i in used_bt:
                 continue
-            if be.side != lt.side:
-                continue
-            dt = abs(be.entry_time - lt.entry_time)
-            if dt <= tol and (best_dt is None or dt < best_dt):
-                best_dt = dt
+            ok, score = _score(lt, be)
+            if ok and score < best_score:
+                best_score = score
                 best_i = i
+                best_dt = abs(be.entry_time - lt.entry_time)
         if best_i >= 0:
             matches.append((lt, bt[best_i], best_dt))
             used_bt.add(best_i)

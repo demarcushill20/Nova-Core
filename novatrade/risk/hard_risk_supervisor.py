@@ -685,7 +685,34 @@ class HardRiskSupervisor:
             self._recent_volumes.append(volume)
             if len(self._recent_volumes) > 20:
                 self._recent_volumes = self._recent_volumes[-20:]
+            count = self._trades_today
+            cap = self._limits.max_trades_per_day
         self._persist_state()
+        # Surface approach-to-cap so operators see it coming (not just at veto).
+        if cap > 0:
+            usage = count / cap
+            if usage >= 1.0:
+                log.warning(
+                    "SUPERVISOR: daily_trade_cap REACHED — trades_today=%d/%d; "
+                    "further signals will be vetoed until reset",
+                    count,
+                    cap,
+                )
+            elif usage >= 0.8:
+                log.warning(
+                    "SUPERVISOR: daily_trade_cap approaching — trades_today=%d/%d (%.0f%%)",
+                    count,
+                    cap,
+                    usage * 100,
+                )
+            else:
+                log.info(
+                    "SUPERVISOR: trade counted — position=%s trades_today=%d/%d (%.0f%% of cap)",
+                    position_id,
+                    count,
+                    cap,
+                    usage * 100,
+                )
 
     def on_trade_closed(self, pnl_usd: float) -> None:
         """Record a trade closure and update P&L tracking.
@@ -952,6 +979,7 @@ class HardRiskSupervisor:
 
     def snapshot(self) -> dict:
         """Return a point-in-time snapshot of the supervisor state."""
+        cap = self._limits.max_trades_per_day
         return {
             "halted": self._halted,
             "halt_reason": self._halt_reason,
@@ -961,6 +989,9 @@ class HardRiskSupervisor:
             "daily_pnl_usd": round(self._daily_pnl_usd, 2),
             "total_pnl_usd": round(self._total_pnl_usd, 2),
             "trades_today": self._trades_today,
+            "positions_today_count": len(self._positions_today),
+            "trades_cap_headroom": max(0, cap - self._trades_today),
+            "trades_cap_usage_pct": round(100.0 * self._trades_today / cap, 1) if cap > 0 else 0.0,
             "consecutive_losses": self._consecutive_losses,
             "cooldown_active": time.time() < self._last_loss_cooldown_until,
             "cooldown_remaining_s": max(0, int(self._last_loss_cooldown_until - time.time())),
