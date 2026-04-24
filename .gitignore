@@ -17,6 +17,7 @@ STATE/*
 
 # Runtime artifacts
 HEARTBEAT.md
+HEARTBEAT_MULTIAGENT.md
 
 # Logs
 LOGS/
@@ -44,6 +45,7 @@ LOGS/
 
 # Claude Code ephemeral
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 .bak/
 
 # Node.js
