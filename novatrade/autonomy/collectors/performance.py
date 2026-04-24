@@ -30,7 +30,7 @@ class PerformanceCollector(BaseCollector):
     # The sparse-data floor ramp endpoint.  Must exceed _MIN_SHARPE_RETURNS
     # so the floor is still partially active when Sharpe first becomes
     # computable — prevents a single-heartbeat cliff from floored → raw score.
-    _STABLE_RETURNS = 50
+    _STABLE_RETURNS = 65
 
     async def collect(self) -> DimensionScore:
         warnings: list[str] = []
