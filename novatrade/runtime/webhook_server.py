@@ -219,6 +219,29 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
         _record_event(ws, "DAILY_SUMMARY_TRIGGERED", {"path": str(path)})
         return {"ok": True, "path": str(path), "summary": summary.to_dict()}
 
+    # -- Resume endpoint -------------------------------------------------------
+
+    @app.post("/control/resume")
+    async def resume_trading(request: Request) -> dict:
+        """Clear halt state on risk engine and supervisor so trading can resume."""
+        ws: WebhookState = request.app.state.ws
+
+        resumed = []
+        if ws.risk_engine and ws.risk_engine.halted:
+            prev = ws.risk_engine.halt_reason
+            ws.risk_engine.resume()
+            resumed.append(f"risk_engine (was: {prev})")
+        if ws.supervisor and ws.supervisor.halted:
+            prev = ws.supervisor._halt_reason
+            ws.supervisor.resume()
+            resumed.append(f"supervisor (was: {prev})")
+
+        if not resumed:
+            return {"ok": True, "message": "nothing was halted"}
+
+        _record_event(ws, "OPERATOR_RESUME", {"resumed": resumed})
+        return {"ok": True, "resumed": resumed}
+
     # -- Readiness endpoint ----------------------------------------------------
 
     @app.get("/readiness")

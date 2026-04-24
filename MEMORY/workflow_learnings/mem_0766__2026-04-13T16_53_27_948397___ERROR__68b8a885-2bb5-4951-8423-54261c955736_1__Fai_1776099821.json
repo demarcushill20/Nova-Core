@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0766__2026-04-13T16_53_27_948397___ERROR__68b8a885-2bb5-4951-8423-54261c955736_1__Fai_1776099821",
+  "workflow_id": "0766__2026-04-13T16_53_27_948397___ERROR__68b8a885-2bb5-4951-8423-54261c955736_1__Fai",
+  "task_summary": "Fixed MetaApi TimeoutException caused by missing METAAPI_REGION in generated env file; added region auto-detection to setup script",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed MetaApi TimeoutException caused by missing METAAPI_REGION in generated env file; added region auto-detection to setup script"
+  ],
+  "successful_patterns": [
+    "task_completed: 0766__2026-04-13T16_53_27_948397___ERROR__68b8a885-2bb5-4951-8423-54261c955736_1__Fa"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed MetaApi TimeoutException caused by missing METAAPI_REGION in generated env file; added region auto-detection to setup script",
+  "created_at": "2026-04-13T17:03:41Z",
+  "confidence": "high"
+}

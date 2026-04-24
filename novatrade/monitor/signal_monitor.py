@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -156,6 +157,9 @@ def _load_regime() -> str:
     """Read current regime from persisted state. Returns 'ranging' as default."""
     try:
         if REGIME_FILE.exists():
+            age_min = (time.time() - REGIME_FILE.stat().st_mtime) / 60.0
+            if age_min > 30:  # stale regime — fall back to default
+                return "ranging"
             data = json.loads(REGIME_FILE.read_text())
             regime = data.get("regime", "ranging")
             if regime in REGIME_MULTIPLIERS:

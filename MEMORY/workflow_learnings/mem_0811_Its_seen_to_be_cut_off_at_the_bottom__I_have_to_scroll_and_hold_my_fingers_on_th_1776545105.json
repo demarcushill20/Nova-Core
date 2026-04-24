@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0811_Its_seen_to_be_cut_off_at_the_bottom__I_have_to_scroll_and_hold_my_fingers_on_th_1776545105",
+  "workflow_id": "0811_Its_seen_to_be_cut_off_at_the_bottom__I_have_to_scroll_and_hold_my_fingers_on_th",
+  "task_summary": "Fixed mobile footer cutoff by adding safe-area-inset-bottom padding to .page and .app-footer",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed mobile footer cutoff by adding safe-area-inset-bottom padding to .page and .app-footer"
+  ],
+  "successful_patterns": [
+    "task_completed: 0811_Its_seen_to_be_cut_off_at_the_bottom__I_have_to_scroll_and_hold_my_fingers_on_t"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed mobile footer cutoff by adding safe-area-inset-bottom padding to .page and .app-footer",
+  "created_at": "2026-04-18T20:45:05Z",
+  "confidence": "high"
+}

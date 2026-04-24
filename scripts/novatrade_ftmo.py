@@ -12,10 +12,10 @@ operator explicitly passes --live to the dry-run subcommand AND has
 dry_run=false in config.
 
 Usage:
-    python3 scripts/novatrade_ftmo.py preflight
+    python3 scripts/novatrade_ftmo.py preflight --env-file OUTPUT/novatrade.env.updated
     python3 scripts/novatrade_ftmo.py dry-run --symbol EURUSD --side BUY --volume 0.01 --sl 1.0900
-    python3 scripts/novatrade_ftmo.py health
-    python3 scripts/novatrade_ftmo.py verdict
+    python3 scripts/novatrade_ftmo.py health -v
+    python3 scripts/novatrade_ftmo.py verdict -j
 """
 
 from __future__ import annotations
@@ -254,20 +254,22 @@ async def _cmd_verdict(cfg: NovaTradeCfg, args: argparse.Namespace) -> int:
 
 
 def main() -> None:
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--env-file", default=None, help="Path to env file")
+    shared.add_argument("-j", "--json", action="store_true", dest="json_output")
+    shared.add_argument("-v", "--verbose", action="store_true")
+
     parser = argparse.ArgumentParser(
         description="NovaTrade FTMO Free Trial — operator workflow",
     )
-    parser.add_argument("--env-file", default=None, help="Path to env file")
-    parser.add_argument("-j", "--json", action="store_true", dest="json_output")
-    parser.add_argument("-v", "--verbose", action="store_true")
 
     sub = parser.add_subparsers(dest="command", help="Subcommand")
 
     # preflight
-    sub.add_parser("preflight", help="Verify config + connectivity (no trades)")
+    sub.add_parser("preflight", help="Verify config + connectivity (no trades)", parents=[shared])
 
     # dry-run
-    dr = sub.add_parser("dry-run", help="Dry-run execution attempt")
+    dr = sub.add_parser("dry-run", help="Dry-run execution attempt", parents=[shared])
     dr.add_argument("--symbol", required=True)
     dr.add_argument("--side", required=True)
     dr.add_argument("--volume", type=float, required=True)
@@ -276,10 +278,10 @@ def main() -> None:
     dr.add_argument("--live", action="store_true", help="Execute on demo account (else dry-run)")
 
     # health
-    sub.add_parser("health", help="Live health + reconciliation check (read-only)")
+    sub.add_parser("health", help="Live health + reconciliation check (read-only)", parents=[shared])
 
     # verdict
-    sub.add_parser("verdict", help="Evidence review + go/no-go verdict + readiness")
+    sub.add_parser("verdict", help="Evidence review + go/no-go verdict + readiness", parents=[shared])
 
     args = parser.parse_args()
 

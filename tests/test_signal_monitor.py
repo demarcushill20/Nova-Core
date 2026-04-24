@@ -1,6 +1,8 @@
 """Tests for signal rate monitoring functionality."""
 
 import json
+import os
+import time
 from datetime import datetime, timedelta, timezone
 
 from novatrade.monitor.signal_monitor import (
@@ -8,6 +10,7 @@ from novatrade.monitor.signal_monitor import (
     SESSION_LENIENCY,
     SignalRateMonitor,
     SignalRateStats,
+    _load_regime,
     get_current_stats,
     get_session,
     is_weekend,
@@ -418,6 +421,22 @@ class TestRegimeAwareThresholds:
 
         stats = monitor.get_stats(now=now)
         assert stats.regime == "volatile"
+
+    def test_regime_staleness_fallback(self, tmp_path, monkeypatch):
+        """Stale regime.json (>30 min old) falls back to 'ranging'."""
+        from novatrade.monitor import signal_monitor
+
+        regime_file = tmp_path / "regime.json"
+        regime_file.write_text(json.dumps({"regime": "quiet"}))
+
+        # Backdate mtime by 31 minutes
+        stale_time = time.time() - (31 * 60)
+        os.utime(str(regime_file), (stale_time, stale_time))
+
+        monkeypatch.setattr(signal_monitor, "REGIME_FILE", regime_file)
+
+        result = _load_regime()
+        assert result == "ranging"
 
     def test_missing_regime_file_defaults(self, tmp_path, monkeypatch):
         """Missing regime.json defaults to 'ranging'."""

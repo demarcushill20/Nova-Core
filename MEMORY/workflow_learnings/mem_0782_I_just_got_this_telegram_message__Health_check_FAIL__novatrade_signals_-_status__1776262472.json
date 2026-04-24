@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_0782_I_just_got_this_telegram_message__Health_check_FAIL__novatrade_signals_-_status__1776262472",
+  "workflow_id": "0782_I_just_got_this_telegram_message__Health_check_FAIL__novatrade_signals_-_status_",
+  "task_summary": "Diagnosed NovaCore signal health failure - system running but 95% of signals rejected due to volume over-sizing",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed NovaCore signal health failure - system running but 95% of signals rejected due to volume over-sizing"
+  ],
+  "successful_patterns": [
+    "task_completed: 0782_I_just_got_this_telegram_message__Health_check_FAIL__novatrade_signals_-_status"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed NovaCore signal health failure - system running but 95% of signals rejected due to volume over-sizing",
+  "created_at": "2026-04-15T14:14:32Z",
+  "confidence": "low",
+  "supersedes": "mem_0782_I_just_got_this_telegram_message__Health_check_FAIL__novatrade_signals_-_status__1776262076"
+}

@@ -86,7 +86,7 @@ class TestFeedHealthConfig:
     def test_defaults(self) -> None:
         cfg = FeedHealthConfig()
         assert cfg.poll_interval == 30.0
-        assert cfg.max_stale_seconds == 30.0
+        assert cfg.max_stale_seconds == 90.0
         assert cfg.max_clock_drift_seconds == 15.0
         assert cfg.max_spread_pips == 5.0
         assert cfg.spread_window == 20
@@ -175,13 +175,13 @@ class TestStaleness:
     def test_healthy_within_threshold(self) -> None:
         sup, clock = _make_supervisor()
         sup.on_tick(_tick(ts=clock[0]))
-        clock[0] += 29.0  # Still under 30s
+        clock[0] += 89.0  # Still under 90s
         assert sup.is_tradeable("EURUSD")
 
     def test_stale_after_threshold(self) -> None:
         sup, clock = _make_supervisor()
         sup.on_tick(_tick(ts=clock[0]))
-        clock[0] += 31.0  # Over 30s
+        clock[0] += 91.0  # Over 90s
         snap = sup.get_snapshot("EURUSD")
         assert snap.state == FeedState.STALE
         assert not sup.is_tradeable("EURUSD")
@@ -189,7 +189,7 @@ class TestStaleness:
     def test_recovery_on_new_tick(self) -> None:
         sup, clock = _make_supervisor()
         sup.on_tick(_tick(ts=clock[0]))
-        clock[0] += 31.0
+        clock[0] += 91.0
         assert not sup.is_tradeable("EURUSD")
         # New tick arrives
         state = sup.on_tick(_tick(ts=clock[0]))
@@ -200,7 +200,7 @@ class TestStaleness:
         sup, clock = _make_supervisor()
         sup.on_tick(_tick(symbol="EURUSD", ts=clock[0]))
         sup.on_tick(_tick(symbol="GBPUSD", ts=clock[0]))
-        clock[0] += 31.0
+        clock[0] += 91.0
         result = sup.check_staleness()
         assert result["EURUSD"] == FeedState.STALE
         assert result["GBPUSD"] == FeedState.STALE
@@ -524,7 +524,7 @@ class TestSnapshotAndStats:
         sup, clock = _make_supervisor()
         sup.on_tick(_tick(symbol="EURUSD", ts=clock[0]))
         sup.on_tick(_tick(symbol="GBPUSD", ts=clock[0]))
-        clock[0] += 31.0  # STALE both
+        clock[0] += 91.0  # STALE both
         stats = sup.stats
         assert stats["tracked_symbols"] == 2
         assert stats["unhealthy"] == 2
@@ -554,7 +554,7 @@ class TestMultiSymbol:
         sup, clock = _make_supervisor()
         sup.on_tick(_tick(symbol="EURUSD", ts=clock[0]))
         sup.on_tick(_tick(symbol="GBPUSD", ts=clock[0]))
-        clock[0] += 31.0
+        clock[0] += 91.0
         # Update only EURUSD
         sup.on_tick(_tick(symbol="EURUSD", ts=clock[0]))
         assert sup.is_tradeable("EURUSD")
@@ -610,7 +610,7 @@ class TestLifecycle:
         assert sup.is_tradeable("EURUSD")
 
         # 3. Go stale
-        clock[0] += 31.0
+        clock[0] += 91.0
         assert not sup.is_tradeable("EURUSD")
 
         # 4. Recover

@@ -31,6 +31,7 @@ from typing import Any
 
 from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
+from novatrade.notify import rejection_telegram
 from novatrade.strategies.base import BaseStrategy, EntrySignal, ExitSignal
 
 log = logging.getLogger(__name__)
@@ -322,6 +323,12 @@ class LiveStrategyEngine:
         # Recompute indicators on full buffer
         self._indicators = self._strategy.compute_indicators(self._h1_candles)
 
+        # Record bar evaluation for signal rate monitoring (fires regardless
+        # of engine state so held positions don't cause false LOW_RATE alerts).
+        from novatrade.monitor.signal_monitor import record_signal
+
+        record_signal("any")
+
         i = len(self._h1_candles) - 1
         signals: list[LiveSignal] = []
 
@@ -380,28 +387,30 @@ class LiveStrategyEngine:
         ):
             # Circuit breaker
             if self._env.max_consecutive_losses > 0 and self._consecutive_losses >= self._env.max_consecutive_losses:
+                msg = f"consecutive_losses={self._consecutive_losses} >= max={self._env.max_consecutive_losses}"
+                log.info("entry gate: circuit_breaker — %s", msg)
+                rejection_telegram("circuit_breaker", msg)
                 return signals
 
             # v5 frequency controls (mirrors vault Python reference entry_context_ok)
             if self._env.use_simple_trend_filter:
                 if self._env.max_trades_per_day > 0 and self._trades_today >= self._env.max_trades_per_day:
-                    log.debug(
-                        "v5 entry gate: trades_today=%d >= max_trades_per_day=%d — blocked",
-                        self._trades_today,
-                        self._env.max_trades_per_day,
-                    )
+                    msg = f"trades_today={self._trades_today} >= max_trades_per_day={self._env.max_trades_per_day}"
+                    log.info("v5 entry gate: trades_today — %s — blocked", msg)
+                    rejection_telegram("trades_today", msg)
                     return signals
                 if (
                     self._env.cooldown_bars > 0
                     and self._last_flat_bar is not None
-                    and (i - self._last_flat_bar) <= self._env.cooldown_bars
+                    and (self._total_bars - self._last_flat_bar) <= self._env.cooldown_bars
                 ):
-                    log.debug(
-                        "v5 entry gate: in cooldown (i=%d, last_flat=%d, cooldown=%d) — blocked",
-                        i,
-                        self._last_flat_bar,
-                        self._env.cooldown_bars,
+                    msg = (
+                        f"total_bars={self._total_bars},"
+                        f" last_flat={self._last_flat_bar},"
+                        f" cooldown={self._env.cooldown_bars}"
                     )
+                    log.info("v5 entry gate: in cooldown (%s) — blocked", msg)
+                    rejection_telegram("cooldown", msg)
                     return signals
 
             entry_sig = self._check_entry(i)
@@ -465,7 +474,7 @@ class LiveStrategyEngine:
 
         # v5: track the bar where we went flat for cooldown enforcement
         if self._env.use_simple_trend_filter:
-            self._last_flat_bar = max(0, len(self._h1_candles) - 1)
+            self._last_flat_bar = self._total_bars
 
         log.info("Position closed: pnl=%.2f equity=%.2f", pnl, self._equity)
 
@@ -593,6 +602,9 @@ class LiveStrategyEngine:
         # Position sizing (same formula as backtest engine)
         stop_distance_pips = abs(signal.entry_price - signal.stop_loss) / self._env.pip_value
         if stop_distance_pips <= 0:
+            msg = f"entry={signal.entry_price:.5f} sl={signal.stop_loss:.5f} dist_pips={stop_distance_pips:.2f}"
+            log.info("entry gate: stop_distance_zero — %s", msg)
+            rejection_telegram("stop_distance_zero", msg)
             return None
 
         risk_dollars = self._equity * self._env.risk_fraction
@@ -604,6 +616,9 @@ class LiveStrategyEngine:
             if self._pending.side == signal.side:
                 self._pending = None  # replace
             else:
+                msg = f"pending={self._pending.side} signal={signal.side}"
+                log.info("entry gate: opposite_pending — %s (blocked)", msg)
+                rejection_telegram("opposite_pending", msg)
                 return None  # opposite direction — ignore
 
         # Place pending stop order

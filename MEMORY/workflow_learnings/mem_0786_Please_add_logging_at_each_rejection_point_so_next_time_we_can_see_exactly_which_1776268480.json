@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0786_Please_add_logging_at_each_rejection_point_so_next_time_we_can_see_exactly_which_1776268480",
+  "workflow_id": "0786_Please_add_logging_at_each_rejection_point_so_next_time_we_can_see_exactly_which",
+  "task_summary": "Added logging at every signal rejection point in IRB strategy (10 tags), live engine (2 tags), and hard risk supervisor (13 rules)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added logging at every signal rejection point in IRB strategy (10 tags), live engine (2 tags), and hard risk supervisor (13 rules)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0786_Please_add_logging_at_each_rejection_point_so_next_time_we_can_see_exactly_whic"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added logging at every signal rejection point in IRB strategy (10 tags), live engine (2 tags), and hard risk supervisor (13 rules)",
+  "created_at": "2026-04-15T15:54:40Z",
+  "confidence": "high"
+}

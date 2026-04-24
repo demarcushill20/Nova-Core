@@ -168,19 +168,18 @@ def _eval_signals_generating(base_path: Path) -> EvalResult:
 
 
 def _eval_risk_not_halted(base_path: Path) -> EvalResult:
-    """Check STATE/novatrade/halt_state.json."""
-    p = base_path / "STATE" / "novatrade" / "halt_state.json"
+    """Check STATE/novatrade_risk_state.json (the authoritative halt source)."""
+    p = base_path / "STATE" / "novatrade_risk_state.json"
     if not p.exists():
-        # No halt file = not halted (good)
-        return 1.0, ["No halt_state.json (not halted)"], None
+        return 0.5, ["No novatrade_risk_state.json"], "Halt state unknown"
     try:
         data = json.loads(p.read_text())
         if isinstance(data, dict) and data.get("halted"):
-            reason = data.get("reason", "unknown")
+            reason = data.get("halt_reason") or data.get("reason") or "unknown"
             return 0.0, [f"Risk engine HALTED: {reason}"], f"Risk halted: {reason}"
-        return 1.0, ["halt_state.json exists, not halted"], None
+        return 1.0, ["novatrade_risk_state.json exists, not halted"], None
     except (json.JSONDecodeError, OSError):
-        return 0.5, ["halt_state.json unreadable"], "Halt state unknown"
+        return 0.5, ["novatrade_risk_state.json unreadable"], "Halt state unknown"
 
 
 def _eval_drawdown_safe(base_path: Path) -> EvalResult:

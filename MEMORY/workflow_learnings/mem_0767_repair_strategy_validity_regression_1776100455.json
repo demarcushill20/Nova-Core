@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0767_repair_strategy_validity_regression_1776100455",
+  "workflow_id": "0767_repair_strategy_validity_regression",
+  "task_summary": "Diagnosed MetaApi billing block as root cause of strategy_validity regression \u2014 all accounts UNDEPLOYED, deploy returns 403; escalated via Telegram alert",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed MetaApi billing block as root cause of strategy_validity regression \u2014 all accounts UNDEPLOYED, deploy returns 403; escalated via Telegram alert"
+  ],
+  "successful_patterns": [
+    "task_completed: 0767_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed MetaApi billing block as root cause of strategy_validity regression \u2014 all accounts UNDEPLOYED, deploy returns 403; escalated via Telegram alert",
+  "created_at": "2026-04-13T17:14:15Z",
+  "confidence": "high"
+}

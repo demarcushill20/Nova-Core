@@ -491,7 +491,7 @@ def format_post_heartbeat_report(autonomy_snapshot: dict | None = None) -> str: 
         for o in outcomes:
             dec_id = o.get("decision_id", "?")
             verdict = o.get("verdict", "pending")
-            delta = o.get("delta", 0)
+            delta = o.get("delta") or 0
             mode = o.get("mode", "?")
             sign = "+" if delta > 0 else ""
             lines.append(f"- **{mode.upper()}** ({dec_id[:30]}): {verdict} ({sign}{delta:.1f} pts)")

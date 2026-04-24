@@ -183,10 +183,11 @@ class FtmoProfile:
         """Map a display symbol to the broker symbol name.
 
         Priority: explicit map → suffix append → passthrough.
+        Idempotent: won't double-append the suffix if already present.
         """
         if display_symbol in self.symbol_map:
             return self.symbol_map[display_symbol]
-        if self.symbol_suffix:
+        if self.symbol_suffix and not display_symbol.upper().endswith(self.symbol_suffix.upper()):
             return display_symbol + self.symbol_suffix
         return display_symbol
 
@@ -204,6 +205,7 @@ class NovaTradeCfg:
     ftmo: FtmoProfile = field(default_factory=FtmoProfile)
     log_dir: Path = Path("LOGS/novatrade")
     data_dir: Path = Path("OUTPUT/novatrade")
+    dry_run: bool = False
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> NovaTradeCfg:

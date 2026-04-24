@@ -1,0 +1,21 @@
+{
+  "artifact_id": "mem_0780_repair_performance_stability_regression_1776247884",
+  "workflow_id": "0780_repair_performance_stability_regression",
+  "task_summary": "3/3 steps succeeded, 2/3 contracts valid, aggregate C (0.65)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 2/3 contracts valid, aggregate C (0.65)"
+  ],
+  "successful_patterns": [
+    "plan_revised: plan plan_0780_repair_performance_stability_regression_1776242326 (failed)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 2/3 contracts valid, aggregate C (0.65)",
+  "created_at": "2026-04-15T10:11:24Z",
+  "confidence": "medium",
+  "supersedes": "mem_0780_repair_performance_stability_regression_1776242325"
+}

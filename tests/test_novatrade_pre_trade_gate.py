@@ -896,3 +896,103 @@ class TestSpreadVsAvg:
         decision = gate.evaluate(_order(), _account(), [], price=price)
         c = next(c for c in decision.checks if c.name == "spread_vs_avg")
         assert not c.passed
+
+
+# ---------------------------------------------------------------------------
+# Volume sizing auto-resize
+# ---------------------------------------------------------------------------
+
+
+class TestVolumeSizingAutoResize:
+    """Test volume sizing auto-resize behavior."""
+
+    def test_volume_auto_resize_when_oversized(self):
+        """Test that oversized volume gets auto-resized to calculated value."""
+        gate = PreTradeGate(_cfg())
+
+        # Create an order with oversized volume (1.00) that will exceed tolerance
+        # compared to calculated volume (~0.33 for typical equity/risk params)
+        order = _order(
+            volume=1.00,  # TradingView webhook volume
+            price=1.1000,  # entry price
+            stop_loss=1.0950,  # 50 pip stop
+        )
+        account = _account(equity=10000.0, balance=10000.0)
+
+        decision = gate.evaluate(order, account, [])
+
+        # The order should pass (not be rejected)
+        assert decision.verdict == RiskVerdict.ALLOW
+        assert not decision.denied
+
+        # Find the volume_sizing check
+        vs = next(c for c in decision.checks if c.name == "volume_sizing")
+        assert vs.passed
+        assert "auto-resized from" in vs.detail
+        assert "1.00" in vs.detail  # original volume
+
+        # The order volume should have been modified to the calculated value
+        # (exact value depends on position sizer calculation)
+        assert order.volume < 1.00  # volume was reduced
+        assert order.volume > 0.0  # but still positive
+
+    def test_volume_no_resize_when_within_tolerance(self):
+        """Test that volume within tolerance is not modified."""
+        gate = PreTradeGate(_cfg())
+
+        # Use a volume that should be within tolerance of calculated value
+        order = _order(
+            volume=0.30,  # Close to typical calculated value
+            price=1.1000,
+            stop_loss=1.0950,
+        )
+        account = _account(equity=10000.0, balance=10000.0)
+        original_volume = order.volume
+
+        decision = gate.evaluate(order, account, [])
+
+        # The order should pass without modification
+        assert decision.verdict == RiskVerdict.ALLOW
+        vs = next(c for c in decision.checks if c.name == "volume_sizing")
+        assert vs.passed
+        assert "auto-resized" not in vs.detail
+
+        # Volume should be unchanged
+        assert order.volume == original_volume
+
+    def test_volume_skip_when_missing_price_data(self):
+        """Test that volume sizing is skipped when price data is missing."""
+        gate = PreTradeGate(_cfg())
+
+        # Order without price or stop_loss
+        order = _order(volume=1.00, price=None, stop_loss=None)
+        account = _account(equity=10000.0, balance=10000.0)
+
+        decision = gate.evaluate(order, account, [])
+
+        vs = next(c for c in decision.checks if c.name == "volume_sizing")
+        assert vs.passed
+        assert "sizing cross-check skipped" in vs.detail
+
+    def test_volume_auto_size_sentinel_handled(self):
+        """Test that VOLUME_AUTO_SIZE sentinel is handled correctly."""
+        from novatrade.models import VOLUME_AUTO_SIZE
+
+        gate = PreTradeGate(_cfg())
+
+        order = _order(
+            volume=VOLUME_AUTO_SIZE,  # Auto-size sentinel
+            price=1.1000,
+            stop_loss=1.0950,
+        )
+        account = _account(equity=10000.0, balance=10000.0)
+
+        decision = gate.evaluate(order, account, [])
+
+        vs = next(c for c in decision.checks if c.name == "volume_sizing")
+        assert vs.passed
+        assert "auto-sized to" in vs.detail
+
+        # Volume should have been set to calculated value
+        assert order.volume > 0.0
+        assert order.volume != VOLUME_AUTO_SIZE

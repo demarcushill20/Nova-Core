@@ -4,7 +4,7 @@ Detects three levels of operational anomaly during expected active sessions:
 
   Level 1 (Minor): No alerts for X period, stale quotes, degraded readiness,
                     adapter disconnected.
-  Level 2 (Major): No trades for 3 hours during active session with corroborating
+  Level 2 (Major): No trades for 12 hours during active session with corroborating
                     symptoms (adapter down, readiness false, quotes stale, etc.).
   Level 3 (Critical): Crash loop, adapter hard failure, webhook not booting,
                        continuous readiness failure.
@@ -190,12 +190,12 @@ class WatchdogConfig:
     """Immutable watchdog configuration with escalation thresholds."""
 
     # Level 1 thresholds
-    no_alert_threshold_seconds: float = 3600.0  # 1 hour no alerts
+    no_alert_threshold_seconds: float = 43200.0  # 12 hours no alerts
     quote_stale_threshold_seconds: float = 120.0  # 2 minutes stale
     max_consecutive_rejections: int = 5
 
     # Level 2 thresholds
-    no_trade_threshold_seconds: float = 10800.0  # 3 hours no trades
+    no_trade_threshold_seconds: float = 43200.0  # 12 hours no trades
     level2_min_symptoms: int = 1  # at least 1 corroborating symptom
 
     # Level 3 thresholds
@@ -204,13 +204,14 @@ class WatchdogConfig:
     continuous_health_failure_threshold: int = 10  # 10 consecutive failures
 
     # Cooldown periods (seconds between re-alerting at each level)
-    level1_cooldown_seconds: float = 1800.0  # 30 minutes
-    level2_cooldown_seconds: float = 900.0  # 15 minutes
+    level1_cooldown_seconds: float = 14400.0  # 4 hours
+    level2_cooldown_seconds: float = 43200.0  # 12 hours — match trade gap threshold
     level3_cooldown_seconds: float = 300.0  # 5 minutes
 
     # Session leniency
     asian_session_multiplier: float = 2.0  # 2x thresholds during Asian
     quiet_regime_multiplier: float = 1.5  # 1.5x thresholds during quiet regime
+    quiet_regime_max_hours: float = 6.0  # Hard ceiling — quiet suppression expires after this
 
 
 # ---------------------------------------------------------------------------
@@ -325,13 +326,21 @@ class SessionWatchdog:
         if level1_symptoms:
             # Safeguard 3: Suppress Level 1 during Asian session + quiet regime
             if session == "asian" and evidence.regime == "quiet":
-                assessment.suppressed = True
-                assessment.suppression_reason = "asian_quiet_regime"
-                assessment.diagnosis = (
-                    "Level 1 symptoms detected but suppressed: Asian session with quiet regime — low activity expected."
+                gap_hours = evidence.last_trade_age_seconds / 3600.0
+                if gap_hours <= self._cfg.quiet_regime_max_hours:
+                    assessment.suppressed = True
+                    assessment.suppression_reason = "asian_quiet_regime"
+                    assessment.diagnosis = (
+                        "Level 1 symptoms detected but suppressed:"
+                        " Asian session with quiet regime — low activity expected."
+                    )
+                    self._persist_state(now)
+                    return assessment
+                log.warning(
+                    "Quiet regime suppression EXPIRED (%.1fh > %.1fh ceiling) — allowing Level 1 escalation.",
+                    gap_hours,
+                    self._cfg.quiet_regime_max_hours,
                 )
-                self._persist_state(now)
-                return assessment
 
             assessment.level = AnomalyLevel.LEVEL_1
             assessment.symptoms = level1_symptoms
@@ -629,10 +638,17 @@ class SessionWatchdog:
             )
             return True
 
-        # Quiet regime — strategy is intentionally inactive
+        # Quiet regime — strategy is intentionally inactive (with hard ceiling)
         if evidence.regime == "quiet" and evidence.adapter_connected:
-            log.info("No-trade period legitimate: quiet regime with connected adapter.")
-            return True
+            gap_hours = evidence.last_trade_age_seconds / 3600.0
+            if gap_hours <= self._cfg.quiet_regime_max_hours:
+                log.info("No-trade period legitimate: quiet regime with connected adapter (%.1fh).", gap_hours)
+                return True
+            log.warning(
+                "Quiet regime suppression EXPIRED (%.1fh > %.1fh ceiling) — escalating.",
+                gap_hours,
+                self._cfg.quiet_regime_max_hours,
+            )
 
         return False
 

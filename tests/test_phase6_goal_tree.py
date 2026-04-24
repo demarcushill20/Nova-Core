@@ -191,21 +191,23 @@ class TestEvalRiskNotHalted:
 
     def test_no_halt_file(self, tmp_path: Path):
         progress, evidence, failure = _eval_risk_not_halted(tmp_path)
-        assert progress == 1.0
-        assert failure is None
+        assert progress == 0.5
+        assert failure == "Halt state unknown"
 
     def test_halted(self, tmp_path: Path):
-        state_dir = tmp_path / "STATE" / "novatrade"
+        state_dir = tmp_path / "STATE"
         state_dir.mkdir(parents=True)
-        (state_dir / "halt_state.json").write_text(json.dumps({"halted": True, "reason": "daily loss limit"}))
+        (state_dir / "novatrade_risk_state.json").write_text(
+            json.dumps({"halted": True, "halt_reason": "daily loss limit"})
+        )
         progress, evidence, failure = _eval_risk_not_halted(tmp_path)
         assert progress == 0.0
         assert failure and "halted" in failure.lower()
 
     def test_not_halted(self, tmp_path: Path):
-        state_dir = tmp_path / "STATE" / "novatrade"
+        state_dir = tmp_path / "STATE"
         state_dir.mkdir(parents=True)
-        (state_dir / "halt_state.json").write_text(json.dumps({"halted": False}))
+        (state_dir / "novatrade_risk_state.json").write_text(json.dumps({"halted": False}))
         progress, evidence, failure = _eval_risk_not_halted(tmp_path)
         assert progress == 1.0
 

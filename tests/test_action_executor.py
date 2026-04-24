@@ -241,9 +241,11 @@ class TestStrategyDiagnostics:
 
     def test_risk_halt_active(self, tmp_path):
         """Active risk halt should produce a critical finding."""
-        state_dir = tmp_path / "STATE" / "novatrade"
-        state_dir.mkdir(parents=True)
-        (state_dir / "halt_state.json").write_text(json.dumps({"halted": True, "reason": "daily loss limit exceeded"}))
+        state_dir = tmp_path / "STATE"
+        (state_dir / "novatrade").mkdir(parents=True)
+        (state_dir / "novatrade_risk_state.json").write_text(
+            json.dumps({"halted": True, "halt_reason": "daily loss limit exceeded"})
+        )
 
         executor = DirectActionExecutor(base_path=str(tmp_path))
         report = make_report(
@@ -443,24 +445,38 @@ class TestRemediation:
 
 class TestAlerting:
     def test_alert_sent_for_repair(self, tmp_path):
-        """REPAIR decisions should trigger a Telegram alert."""
+        """REPAIR decisions should trigger a Telegram alert (non-NovaTrade dimension)."""
         executor = DirectActionExecutor(base_path=str(tmp_path))
         report = make_report()
-        decision = make_decision(mode=ActionMode.REPAIR, target="strategy_validity")
+        decision = make_decision(mode=ActionMode.REPAIR, target="observability")
 
         with patch.object(DirectActionExecutor, "_send_alert") as mock_alert:
             executor.execute(decision, report)
             mock_alert.assert_called_once()
 
     def test_alert_sent_for_execute(self, tmp_path):
-        """EXECUTE decisions should trigger a Telegram alert."""
+        """EXECUTE decisions should trigger a Telegram alert (non-NovaTrade dimension)."""
         executor = DirectActionExecutor(base_path=str(tmp_path))
         report = make_report()
-        decision = make_decision(mode=ActionMode.EXECUTE, target="strategy_validity")
+        decision = make_decision(mode=ActionMode.EXECUTE, target="observability")
 
         with patch.object(DirectActionExecutor, "_send_alert") as mock_alert:
             executor.execute(decision, report)
             mock_alert.assert_called_once()
+
+    def test_novatrade_dimension_uses_log_only(self, tmp_path):
+        """NovaTrade dimensions route to _log_alert_only, not _send_alert."""
+        executor = DirectActionExecutor(base_path=str(tmp_path))
+        report = make_report()
+        decision = make_decision(mode=ActionMode.REPAIR, target="strategy_validity")
+
+        with (
+            patch.object(DirectActionExecutor, "_send_alert") as mock_alert,
+            patch.object(DirectActionExecutor, "_log_alert_only") as mock_log,
+        ):
+            executor.execute(decision, report)
+            mock_alert.assert_not_called()
+            mock_log.assert_called_once()
 
     def test_no_alert_for_monitor(self, tmp_path):
         """MONITOR decisions should NOT trigger a Telegram alert."""

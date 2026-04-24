@@ -101,9 +101,10 @@ class TestDailyLossTrackerInit:
 class TestDailyLossTrackerCheck:
     def test_not_initialized_skips(self):
         t = FtmoDailyLossTracker()
+        # equity=0 triggers the stale-data guard before the init check
         result = t.check(balance=0.0, equity=0.0)
         assert result.passed
-        assert "not initialized" in result.detail
+        assert "equity <= 0" in result.detail or "not initialized" in result.detail
 
     def test_auto_initialize_on_first_check(self):
         t = FtmoDailyLossTracker()
@@ -419,7 +420,7 @@ class TestEdgeCases:
         t = FtmoDailyLossTracker(initial_account_size=0.0)
         result = t.check(0.0, 0.0)
         assert result.passed
-        assert "not initialized" in result.detail
+        assert "equity <= 0" in result.detail or "not initialized" in result.detail
 
     def test_negative_loss_passes(self):
         """Profit (negative loss) should always pass."""

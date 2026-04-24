@@ -1,15 +1,15 @@
 """Trade gap monitor — detects prolonged periods without trade execution.
 
 Autonomous protocol that triggers when no trades have been executed for
-a configurable threshold (default 3 hours during active forex sessions).
+a configurable threshold (default 12 hours during active forex sessions).
 
 Session-aware:
   - Weekend (Fri 22 UTC → Sun 22 UTC): fully suppressed
-  - Asian session (22-07 UTC): relaxed to 6h for EURUSD
-  - London/Overlap/NY: standard 3h threshold
+  - Asian session (22-07 UTC): relaxed to 24h for EURUSD
+  - London/Overlap/NY: standard 12h threshold
 
 Regime-aware:
-  - quiet/compression: relaxed to 2× threshold (6h default)
+  - quiet/compression: relaxed to 2× threshold (24h default)
   - trending: standard threshold
   - volatile: tightened to 0.75× (2.25h default)
 
@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,12 +39,12 @@ JOURNAL_FILE = STATE_DIR / "trade_journal.jsonl"
 LIVE_METRICS_FILE = STATE_DIR / "live_metrics.json"
 REGIME_FILE = STATE_DIR / "regime.json"
 
-# Default threshold: 3 hours with no trade execution
-DEFAULT_GAP_THRESHOLD_S = 3 * 3600  # 3 hours
+# Default threshold: 12 hours with no trade execution
+DEFAULT_GAP_THRESHOLD_S = 12 * 3600  # 12 hours
 # Minimum uptime before first alert
 MIN_UPTIME_BEFORE_ALERT_S = 3600  # 1 hour
 # Cooldown between repeated alerts
-ALERT_COOLDOWN_S = 2 * 3600  # 2 hours
+ALERT_COOLDOWN_S = 12 * 3600  # 12 hours
 
 # Session multipliers widen the gap threshold during low-activity periods
 _SESSION_MULTIPLIERS = {
@@ -113,6 +114,9 @@ def _load_regime() -> str:
     """Read current regime from persisted state."""
     try:
         if REGIME_FILE.exists():
+            age_min = (time.time() - REGIME_FILE.stat().st_mtime) / 60.0
+            if age_min > 30:  # stale regime — fall back to default
+                return "ranging"
             data = json.loads(REGIME_FILE.read_text())
             regime = data.get("regime", "ranging")
             if regime in _REGIME_MULTIPLIERS:

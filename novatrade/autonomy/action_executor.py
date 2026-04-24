@@ -77,6 +77,17 @@ class DirectActionExecutor:
     # Services that we are allowed to restart (safe, idempotent)
     RESTARTABLE_SERVICES = ("novacore-novatrade",)
 
+    # NovaTrade dimensions — Telegram alerts suppressed for these; the session
+    # watchdog's 12h no-trade threshold is the sole NovaTrade alert channel.
+    _NOVATRADE_DIMENSIONS = frozenset(
+        {
+            "execution_pipeline",
+            "strategy_validity",
+            "risk_engine",
+            "performance_stability",
+        }
+    )
+
     def __init__(self, base_path: str = "/home/nova/nova-core") -> None:
         self.base_path = Path(base_path)
         self._state_dir = self.base_path / "STATE"
@@ -94,6 +105,10 @@ class DirectActionExecutor:
         if decision.mode == ActionMode.MONITOR:
             result.summary = "MONITOR mode — no action needed"
             return result
+
+        # NovaTrade dimensions → log-only, no Telegram.  The session watchdog's
+        # 12h no-trade threshold is the sole NovaTrade Telegram channel.
+        _nt_suppress = (decision.target_dimension or "") in self._NOVATRADE_DIMENSIONS
 
         # ESCALATE: skip remediation, gather evidence only, always alert
         if decision.mode == ActionMode.ESCALATE:
@@ -114,7 +129,10 @@ class DirectActionExecutor:
                     )
                 except Exception as inv_exc:
                     log.warning("Escalation investigation failed (non-fatal): %s", inv_exc)
-            self._send_alert(decision, result)
+            if _nt_suppress:
+                self._log_alert_only(decision, result)
+            else:
+                self._send_alert(decision, result)
             # Build summary
             critical = [f for f in result.findings if f.status == "critical"]
             warnings = [f for f in result.findings if f.status == "warning"]
@@ -136,7 +154,10 @@ class DirectActionExecutor:
 
         # Alert on actionable decisions only (REPAIR/EXECUTE).
         # RESEARCH/PLAN are informational — log only, don't spam Telegram.
-        if decision.mode in (ActionMode.REPAIR, ActionMode.EXECUTE):
+        # NovaTrade dimensions are always log-only (watchdog handles alerting).
+        if _nt_suppress:
+            self._log_alert_only(decision, result)
+        elif decision.mode in (ActionMode.REPAIR, ActionMode.EXECUTE):
             self._send_alert(decision, result)
         elif decision.mode in (ActionMode.RESEARCH, ActionMode.PLAN):
             self._log_alert_only(decision, result)
@@ -272,18 +293,18 @@ class DirectActionExecutor:
         # Check NovaTrade service status
         self._check_service_status("novacore-novatrade", result)
 
-        # Check halt state
-        halt_path = self._novatrade_state / "halt_state.json"
-        if halt_path.exists():
+        # Check halt state from the canonical risk-engine state file.
+        risk_state_path = self._state_dir / "novatrade_risk_state.json"
+        if risk_state_path.exists():
             try:
-                halt = json.loads(halt_path.read_text())
-                if halt.get("halted"):
+                rs = json.loads(risk_state_path.read_text())
+                if rs.get("halted") or rs.get("breached"):
+                    reason = rs.get("halt_reason") or rs.get("reason") or "unknown reason"
                     result.findings.append(
                         DiagnosticFinding(
                             check="risk_halt_active",
                             status="critical",
-                            detail=f"Risk halt is ACTIVE: {halt.get('reason', 'unknown reason')}. "
-                            "Trading is stopped by the risk engine.",
+                            detail=f"Risk halt is ACTIVE: {reason}. Trading is stopped by the risk engine.",
                         )
                     )
             except (json.JSONDecodeError, OSError):

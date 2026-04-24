@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0779_Im_getting_this_message_in_nova-link_after_the_fix_Sorry__I_hit_a_snag_processin_1776934931",
+  "workflow_id": "0779_Im_getting_this_message_in_nova-link_after_the_fix_Sorry__I_hit_a_snag_processin",
+  "task_summary": "Fixed two nova-link bugs \u2014 Claude CLI prompt consumed by variadic --disallowed-tools flag (added -- separator), and TTS crash on invalid cached voice (added validation fallback)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed two nova-link bugs \u2014 Claude CLI prompt consumed by variadic --disallowed-tools flag (added -- separator), and TTS crash on invalid cached voice (added validation fallback)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0779_Im_getting_this_message_in_nova-link_after_the_fix_Sorry__I_hit_a_snag_processi"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed two nova-link bugs \u2014 Claude CLI prompt consumed by variadic --disallowed-tools flag (added -- separator), and TTS crash on invalid cached voice (added validation fallback)",
+  "created_at": "2026-04-23T09:02:11Z",
+  "confidence": "high"
+}

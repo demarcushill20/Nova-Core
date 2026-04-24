@@ -69,7 +69,7 @@ class TestLevel1Detection:
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=4000,  # > 1h threshold
+            last_alert_age_seconds=44000,  # > 12h threshold (43200s)
             session="london",
             regime="ranging",
         )
@@ -154,7 +154,7 @@ class TestLevel1Detection:
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=4000,
+            last_alert_age_seconds=44000,  # > 12h threshold (43200s)
             session="london",
             regime="ranging",
         )
@@ -180,8 +180,8 @@ class TestLevel2Detection:
         evidence = SymptomEvidence(
             adapter_connected=False,
             adapter_state="DEGRADED",
-            last_trade_age_seconds=12000,  # > 3h
-            last_alert_age_seconds=12000,
+            last_trade_age_seconds=44000,  # > 12h
+            last_alert_age_seconds=44000,
             session="london",
             regime="ranging",
             signals_4h=0,
@@ -199,7 +199,7 @@ class TestLevel2Detection:
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_trade_age_seconds=12000,  # > 3h
+            last_trade_age_seconds=44000,  # > 12h
             quotes_stale=True,
             quote_age_seconds=300,
             session="london",
@@ -218,7 +218,7 @@ class TestLevel2Detection:
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_trade_age_seconds=12000,  # > 3h
+            last_trade_age_seconds=44000,  # > 12h
             consecutive_rejections=6,  # > threshold of 5
             session="london",
             regime="ranging",
@@ -238,7 +238,7 @@ class TestLevel2Detection:
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_trade_age_seconds=12000,  # > 3h
+            last_trade_age_seconds=44000,  # > 12h
             readiness_ok=True,
             readiness_degraded=False,
             webhook_active=True,
@@ -249,7 +249,7 @@ class TestLevel2Detection:
             regime="ranging",
             # Only corroborating symptom would be no_alerts, but
             # the system is otherwise healthy.
-            last_alert_age_seconds=12000,
+            last_alert_age_seconds=44000,
         )
 
         result = wd.evaluate(evidence)
@@ -264,8 +264,8 @@ class TestLevel2Detection:
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_trade_age_seconds=12000,
-            last_alert_age_seconds=12000,
+            last_trade_age_seconds=44000,
+            last_alert_age_seconds=44000,
             readiness_ok=True,
             webhook_active=True,
             signals_4h=0,
@@ -284,8 +284,8 @@ class TestLevel2Detection:
         evidence = SymptomEvidence(
             adapter_connected=False,
             adapter_state="DOWN",
-            last_trade_age_seconds=12000,
-            last_alert_age_seconds=12000,
+            last_trade_age_seconds=44000,
+            last_alert_age_seconds=44000,
             session="london",
             regime="ranging",
             signals_4h=0,
@@ -453,12 +453,12 @@ class TestFalsePositiveSafeguards:
         now = _tuesday_asian_time()
         wd, clock = _make_watchdog(now)
 
-        # Asian (2x) * quiet (1.5x) = 3x multiplier → threshold = 10800s
+        # Asian (2x) * quiet (1.5x) = 3x multiplier → threshold = 129600s
         # Use value above that to trigger Level 1, which then gets suppressed
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=12000,  # > 10800s (3x threshold)
+            last_alert_age_seconds=130000,  # > 129600s (3x threshold of 43200s)
             session="asian",
             regime="quiet",
         )
@@ -474,7 +474,7 @@ class TestFalsePositiveSafeguards:
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=8000,  # With 2x multiplier, threshold = 7200s
+            last_alert_age_seconds=87000,  # With 2x multiplier, threshold = 86400s
             session="asian",
             regime="ranging",
         )
@@ -496,11 +496,11 @@ class TestThresholdMultipliers:
         now = _tuesday_asian_time()
         wd, clock = _make_watchdog(now)
 
-        # 2000s > 1h (3600s) but < 2x (7200s asian adjustment)
+        # > 43200 (12h) but < 86400 (2x asian adjustment)
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=5000,  # > 3600 but < 7200
+            last_alert_age_seconds=50000,  # > 43200 but < 86400
             session="asian",
             regime="ranging",
         )
@@ -513,11 +513,11 @@ class TestThresholdMultipliers:
         now = _tuesday_overlap_time()
         wd, clock = _make_watchdog(now)
 
-        # During overlap, multiplier = 0.8, so threshold = 2880s (~48 min)
+        # During overlap, multiplier = 0.8, so threshold = 34560s (0.8 × 43200)
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=3200,  # > 2880 (0.8 × 3600)
+            last_alert_age_seconds=35000,  # > 34560 (0.8 × 43200)
             session="overlap",
             regime="ranging",
         )
@@ -529,11 +529,11 @@ class TestThresholdMultipliers:
         now = _tuesday_london_time()
         wd, clock = _make_watchdog(now)
 
-        # Quiet regime multiplier = 1.5, so threshold = 5400s (1.5h)
+        # Quiet regime multiplier = 1.5, so threshold = 64800s (1.5 × 43200)
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=4000,  # > 3600 but < 5400
+            last_alert_age_seconds=50000,  # > 43200 but < 64800
             session="london",
             regime="quiet",
         )
@@ -545,11 +545,11 @@ class TestThresholdMultipliers:
         now = _tuesday_london_time()
         wd, clock = _make_watchdog(now)
 
-        # Volatile regime multiplier = 0.7, so threshold = 2520s (~42 min)
+        # Volatile regime multiplier = 0.7, so threshold = 30240s (0.7 × 43200)
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=2800,  # > 2520 (0.7 × 3600)
+            last_alert_age_seconds=31000,  # > 30240 (0.7 × 43200)
             session="london",
             regime="volatile",
         )
@@ -589,8 +589,8 @@ class TestCooldowns:
 
         wd.mark_alerted(AnomalyLevel.LEVEL_1)
 
-        # Advance past cooldown (30 minutes)
-        clock[0] = now + 1900
+        # Advance past cooldown (4 hours)
+        clock[0] = now + 14500
         assert wd.should_alert(AnomalyLevel.LEVEL_1) is True
 
 
@@ -659,7 +659,7 @@ class TestStateTracking:
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=4000,
+            last_alert_age_seconds=44000,  # > 12h threshold
             session="london",
             regime="ranging",
         )
@@ -740,7 +740,7 @@ class TestIntegration:
         evidence1 = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=4000,
+            last_alert_age_seconds=44000,  # > 12h threshold
             session="london",
             regime="ranging",
         )
@@ -751,8 +751,8 @@ class TestIntegration:
         evidence2 = SymptomEvidence(
             adapter_connected=False,
             adapter_state="DEGRADED",
-            last_trade_age_seconds=12000,
-            last_alert_age_seconds=12000,
+            last_trade_age_seconds=44000,
+            last_alert_age_seconds=44000,
             session="london",
             regime="ranging",
             signals_4h=0,
@@ -779,7 +779,7 @@ class TestIntegration:
         bad = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=4000,
+            last_alert_age_seconds=44000,  # > 12h threshold
             session="london",
             regime="ranging",
         )

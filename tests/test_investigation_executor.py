@@ -53,12 +53,23 @@ def _make_decision(
 
 
 def _setup_state(tmp_path: Path, files: dict[str, dict | list] | None = None) -> None:
-    """Create STATE/novatrade/ directory with optional state files."""
-    state_dir = tmp_path / "STATE" / "novatrade"
-    state_dir.mkdir(parents=True, exist_ok=True)
+    """Create STATE/novatrade/ directory with optional state files.
+
+    Filenames prefixed with ``"STATE/"`` are written to the STATE root
+    (e.g. ``"STATE/novatrade_risk_state.json"``); everything else goes
+    under ``STATE/novatrade/``.
+    """
+    state_root = tmp_path / "STATE"
+    novatrade_dir = state_root / "novatrade"
+    novatrade_dir.mkdir(parents=True, exist_ok=True)
     if files:
         for name, content in files.items():
-            (state_dir / name).write_text(json.dumps(content))
+            if name.startswith("STATE/"):
+                target = state_root / name.removeprefix("STATE/")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps(content))
+            else:
+                (novatrade_dir / name).write_text(json.dumps(content))
 
 
 # ---------------------------------------------------------------------------
@@ -205,14 +216,25 @@ class TestHaltStateChecks:
     """Test halt state investigation."""
 
     def test_no_halt(self, tmp_path: Path) -> None:
-        _setup_state(tmp_path)
+        _setup_state(
+            tmp_path,
+            {"STATE/novatrade_risk_state.json": {"halted": False}},
+        )
         executor = InvestigationExecutor(str(tmp_path))
 
         step = executor._check_halt_state(1)
         assert step.status == "ok"
 
     def test_halt_active(self, tmp_path: Path) -> None:
-        _setup_state(tmp_path, {"halt_state.json": {"halted": True, "reason": "Daily loss limit"}})
+        _setup_state(
+            tmp_path,
+            {
+                "STATE/novatrade_risk_state.json": {
+                    "halted": True,
+                    "halt_reason": "Daily loss limit",
+                }
+            },
+        )
         executor = InvestigationExecutor(str(tmp_path))
 
         step = executor._check_halt_state(1)
@@ -220,7 +242,10 @@ class TestHaltStateChecks:
         assert "HALT ACTIVE" in step.result
 
     def test_halt_inactive(self, tmp_path: Path) -> None:
-        _setup_state(tmp_path, {"halt_state.json": {"halted": False}})
+        _setup_state(
+            tmp_path,
+            {"STATE/novatrade_risk_state.json": {"halted": False}},
+        )
         executor = InvestigationExecutor(str(tmp_path))
 
         step = executor._check_halt_state(1)
@@ -392,7 +417,7 @@ class TestMultiRoundInvestigation:
         _setup_state(
             tmp_path,
             {
-                "halt_state.json": {"halted": False},
+                "STATE/novatrade_risk_state.json": {"halted": False},
                 "connection_status.json": {"status": "connected"},
             },
         )

@@ -46,8 +46,18 @@ from novatrade.models import (
     RiskVerdict,
     SymbolPrice,
 )
+from novatrade.risk.auto_resume_log import (
+    MAX_AUTO_RESUMES_PER_WEEK,
+    auto_resume_allowed,
+    record_auto_resume,
+)
 from novatrade.risk.pre_trade_gate import PreTradeGate
 from novatrade.risk.session_aware_filter import SessionAwareFilter
+
+# Exact halt_reason literal used by :meth:`_check_daily_limits` when the
+# daily drawdown cap is breached. Centralized so the auto-resume eligibility
+# string stays in sync with the setter.
+DAILY_HALT_REASON = "Daily drawdown limit breached"
 
 log = logging.getLogger("novatrade.risk.risk_engine")
 
@@ -588,7 +598,7 @@ class RiskEngine:
 
         # Check for halt conditions
         if self._daily_dd.current_drawdown_pct >= self._risk.max_daily_drawdown_pct:
-            self._halt("Daily drawdown limit breached")
+            self._halt(DAILY_HALT_REASON)
         elif self._total_dd.current_drawdown_pct >= self._risk.max_total_drawdown_pct:
             self._halt("Total drawdown limit breached")
 
@@ -613,6 +623,10 @@ class RiskEngine:
     def save_ftmo_state(self) -> None:
         """Persist FTMO compliance state for crash recovery."""
         self._gate.save_ftmo_state()
+
+    def rollover_daily_trackers(self, balance: float, equity: float) -> None:
+        """Advance day-scoped trackers if the Prague day has rolled over."""
+        self._gate.rollover_daily_trackers(balance, equity)
 
     # ------------------------------------------------------------------
     # Position-level risk monitoring
@@ -717,8 +731,31 @@ class RiskEngine:
     def reset_daily(self, equity: float) -> None:
         """Reset daily drawdown tracking (call at start of each trading day).
 
-        Note: does NOT clear a halt.  See kill_switch_policy.md §7.
+        Auto-resumes daily-scoped halts (daily drawdown breach) only while
+        the rolling 7-day count of auto-resumes is below the threshold.
+        Once exceeded, the halt stays active until manual operator resume,
+        preventing silent masking of repeated daily bleeds.
+
+        Equity floor / total drawdown halts still require manual resume.
         """
+        if self._halted and self._halt_reason == DAILY_HALT_REASON:
+            if auto_resume_allowed():
+                record_auto_resume(self._halt_reason, origin="risk_engine", equity=equity)
+                log.warning(
+                    "Daily reset auto-resuming halt (was: %s) — equity=$%.2f",
+                    self._halt_reason,
+                    equity,
+                )
+                self._halted = False
+                self._halt_reason = ""
+            else:
+                log.warning(
+                    "Daily reset: auto-resume BLOCKED — >=%d resumes in last 7 days. "
+                    "Halt stays active until manual resume. (reason=%s)",
+                    MAX_AUTO_RESUMES_PER_WEEK,
+                    self._halt_reason,
+                )
+
         self._daily_start_equity = equity
         self._daily_dd = DrawdownState(
             reference_equity=equity,
@@ -870,8 +907,19 @@ class RiskEngine:
             return False
 
         if data.get("halted"):
+            reason = data.get("halt_reason", "halt restored from prior session")
+
+            # Adapter-disconnect halts should not persist — the new session
+            # will retry the connection and re-halt if it still fails.
+            if reason.startswith("adapter_disconnected_at_startup:"):
+                log.info(
+                    "Skipping stale adapter-disconnect halt from prior session: %s",
+                    reason,
+                )
+                return False
+
             self._halted = True
-            self._halt_reason = data.get("halt_reason", "halt restored from prior session")
+            self._halt_reason = reason
             log.warning(
                 "Restored HALT state from disk: %s (file: %s)",
                 self._halt_reason,

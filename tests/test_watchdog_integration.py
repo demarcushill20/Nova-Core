@@ -177,7 +177,7 @@ class TestWatchdogEvaluationDirect:
         evidence = SymptomEvidence(
             adapter_connected=True,
             adapter_state="OK",
-            last_alert_age_seconds=4000,
+            last_alert_age_seconds=50000,
             session="london",
             regime="ranging",
         )
@@ -193,8 +193,8 @@ class TestWatchdogEvaluationDirect:
         evidence = SymptomEvidence(
             adapter_connected=False,
             adapter_state="DEGRADED",
-            last_trade_age_seconds=12000,
-            last_alert_age_seconds=12000,
+            last_trade_age_seconds=50000,
+            last_alert_age_seconds=50000,
             session="london",
             regime="ranging",
             signals_4h=0,

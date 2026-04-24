@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0773_Ok_let_s_restart_novatrade_and_make_sure_the_gates_are_never_a_problem_again_1776133233",
+  "workflow_id": "0773_Ok_let_s_restart_novatrade_and_make_sure_the_gates_are_never_a_problem_again",
+  "task_summary": "Restarted NovaTrade with hardened launch gate (accepts CONDITIONALLY_READY), fixed override env to active_ready mode, updated MetaApi account to April 68b8a885, removed stale DRY_RUN",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Restarted NovaTrade with hardened launch gate (accepts CONDITIONALLY_READY), fixed override env to active_ready mode, updated MetaApi account to April 68b8a885, removed stale DRY_RUN"
+  ],
+  "successful_patterns": [
+    "task_completed: 0773_Ok_let_s_restart_novatrade_and_make_sure_the_gates_are_never_a_problem_again"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Restarted NovaTrade with hardened launch gate (accepts CONDITIONALLY_READY), fixed override env to active_ready mode, updated MetaApi account to April 68b8a885, removed stale DRY_RUN",
+  "created_at": "2026-04-14T02:20:33Z",
+  "confidence": "high"
+}

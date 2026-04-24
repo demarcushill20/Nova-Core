@@ -280,13 +280,21 @@ class TestEnvFileLoading:
         EMPTY_LINE_TEST=value
         """
 
-        with patch.object(Path, "read_text", return_value=env_content):
-            _load_env_file(Path("/fake/path"))
+        keys = ["METAAPI_TOKEN", "METAAPI_ACCOUNT_ID", "EMPTY_LINE_TEST"]
+        saved = {k: os.environ.pop(k, None) for k in keys}
+        try:
+            with patch.object(Path, "read_text", return_value=env_content):
+                _load_env_file(Path("/fake/path"))
 
-        # Function modifies os.environ directly
-        assert os.environ.get("METAAPI_TOKEN") == "test123"
-        assert os.environ.get("METAAPI_ACCOUNT_ID") == "54321"
-        assert os.environ.get("EMPTY_LINE_TEST") == "value"
+            assert os.environ.get("METAAPI_TOKEN") == "test123"
+            assert os.environ.get("METAAPI_ACCOUNT_ID") == "54321"
+            assert os.environ.get("EMPTY_LINE_TEST") == "value"
+        finally:
+            for k in keys:
+                if saved[k] is not None:
+                    os.environ[k] = saved[k]
+                else:
+                    os.environ.pop(k, None)
 
     def test_load_env_file_not_exists(self):
         """Test env file loading when file doesn't exist raises error.

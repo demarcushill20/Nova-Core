@@ -385,6 +385,16 @@ class OpsMonitor:
 
         # 7. Persist FTMO compliance state (crash recovery)
         try:
+            # Advance day-scoped trackers before saving so the persisted
+            # day_key matches today's Prague date even on low-signal days.
+            # The daily_loss_tracker's own rollover only fires inside its
+            # pre-trade check(), so without this call a signal-less 24h
+            # stretch leaves day_key stale (observed 8-day lag on 2026-04-16).
+            if cycle_account is not None:
+                try:
+                    self._risk.rollover_daily_trackers(cycle_account.balance, cycle_account.equity)
+                except Exception as exc:
+                    log.debug("Daily rollover failed: %s", exc)
             self._risk.save_ftmo_state()
         except Exception as exc:
             log.debug("FTMO state save failed: %s", exc)

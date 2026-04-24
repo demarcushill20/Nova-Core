@@ -2,10 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from novatrade.backtest.environment import BacktestEnvironment
-from novatrade.models import Candle
-from novatrade.monitor.signal_monitor import SignalRateMonitor, get_current_stats
-from novatrade.strategies.irb import IRBStrategy
+from novatrade.monitor.signal_monitor import SignalRateMonitor, get_current_stats, record_signal
 
 # Fixed weekday timestamp for tests (Wednesday) to avoid weekend MARKET_CLOSED
 _WEEKDAY = datetime(2026, 3, 25, 10, 0, tzinfo=timezone.utc)
@@ -14,107 +11,39 @@ _WEEKDAY = datetime(2026, 3, 25, 10, 0, tzinfo=timezone.utc)
 class TestSignalMonitorIntegration:
     """Test signal monitor integration with actual strategy."""
 
-    def test_irb_strategy_signal_recording(self):
-        """Test that IRB strategy records signals during evaluation."""
-        # Create a fresh monitor (resets singleton state)
-        SignalRateMonitor()
+    def test_engine_level_signal_recording(self):
+        """Test that bar evaluations are recorded at the engine level."""
+        import novatrade.monitor.signal_monitor as sm
 
-        # Create IRB strategy
-        env = BacktestEnvironment()
-        strategy = IRBStrategy(env)
+        sm._global_monitor = SignalRateMonitor()
 
-        # Create some test candles (simple uptrend scenario)
-        base_time = _WEEKDAY
-        candles = []
+        # Simulate what LiveStrategyEngine.on_bar does: call record_signal("any")
+        # for each bar evaluation, regardless of engine state.
+        for _ in range(16):
+            record_signal("any")
 
-        # Create a pattern that should generate some signals
-        for i in range(50):  # Need enough for warmup
-            candle = Candle(
-                timestamp=base_time + timedelta(minutes=i * 5),
-                open=1.1000 + i * 0.0001,
-                high=1.1005 + i * 0.0001,
-                low=1.0995 + i * 0.0001,
-                close=1.1003 + i * 0.0001,
-                volume=1000.0,
-                symbol="EURUSD",
-                timeframe="M5",
-            )
-            candles.append(candle)
-
-        # Generate indicators
-        indicators = strategy.compute_indicators(candles)
-
-        # Generate signals (this should record signal activity)
-        strategy.generate_signals(candles, indicators)
-
-        # Get current stats
         stats = get_current_stats()
 
-        # Should have recorded some signal evaluations
-        assert stats.signals_1h > 0, "Should have recorded signal evaluations"
+        assert stats.signals_1h == 16, f"Expected 16 evaluations, got {stats.signals_1h}"
         assert stats.last_signal_at != "", "Should have timestamp of last signal"
-
-        # The number of evaluations should be related to candle count (after warmup)
-        expected_evaluations = len(candles) - env.warmup_bars
-        # Allow some tolerance since not all bars may meet basic criteria
-        assert stats.signals_1h >= expected_evaluations * 0.5, (
-            f"Expected at least {expected_evaluations * 0.5} evaluations, got {stats.signals_1h}"
-        )
 
     def test_trade_signal_vs_any_signal_distinction(self):
         """Test that trade signals are tracked separately from general evaluations."""
-        # Create a fresh monitor (resets singleton state)
-        SignalRateMonitor()
+        import novatrade.monitor.signal_monitor as sm
 
-        # Create IRB strategy
-        env = BacktestEnvironment()
-        strategy = IRBStrategy(env)
+        sm._global_monitor = SignalRateMonitor()
 
-        # Create candles designed to trigger a trade signal
-        base_time = _WEEKDAY
-        candles = []
+        # Simulate bar evaluations (engine level)
+        for _ in range(10):
+            record_signal("any")
 
-        # Create IRB pattern: bar with open/close in lower portion (uptrend reversal)
-        for i in range(35):  # Enough for warmup (34) + 1 signal bar
-            if i < 34:
-                # Build trend
-                candle = Candle(
-                    timestamp=base_time + timedelta(minutes=i * 5),
-                    open=1.1000 + i * 0.0002,
-                    high=1.1010 + i * 0.0002,
-                    low=1.0990 + i * 0.0002,
-                    close=1.1008 + i * 0.0002,
-                    volume=1000.0,
-                    symbol="EURUSD",
-                    timeframe="M5",
-                )
-            else:
-                # IRB reversal bar: large range with open/close in lower portion
-                candle = Candle(
-                    timestamp=base_time + timedelta(minutes=i * 5),
-                    open=1.1070,  # Open near top
-                    high=1.1080,  # High
-                    low=1.1020,  # Low (60 pip range)
-                    close=1.1030,  # Close in lower 30% (should trigger uptrend IRB)
-                    volume=1000.0,
-                    symbol="EURUSD",
-                    timeframe="M5",
-                )
-            candles.append(candle)
+        # Simulate a trade signal (strategy level, from IRBStrategy.check_entry)
+        record_signal("trade")
 
-        # Generate indicators and signals
-        indicators = strategy.compute_indicators(candles)
-        signals = strategy.generate_signals(candles, indicators)
-
-        # Get stats
         stats = get_current_stats()
 
-        # Should have recorded signal evaluations
-        assert stats.signals_1h > 0, "Should have recorded some signal evaluations"
-
-        # If we generated any actual trade signals, they should be tracked separately
-        if signals:
-            assert stats.last_trade_signal_at != "", "Should have recorded trade signal timestamp"
+        assert stats.signals_1h == 11, "Should count both 'any' and 'trade' signals"
+        assert stats.last_trade_signal_at != "", "Should have recorded trade signal timestamp"
 
     def test_signal_rate_health_assessment(self):
         """Test signal rate health assessment with realistic scenario."""

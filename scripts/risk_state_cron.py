@@ -44,16 +44,26 @@ def setup_logging():
 
 
 def load_last_equity() -> float:
-    """Load the last known equity from the risk state file."""
+    """Load the most recent live equity from the equity history file.
+
+    The risk_state.json file only stores drawdown *percentages*, not an
+    absolute equity, so deriving equity from it always produces a
+    misleading value (zero drawdown → $100,000 exactly, regardless of
+    the actual account). The equity snapshot maintained by the live loop
+    is the correct source.
+    """
+    default_equity = 100_000.0
     try:
-        risk_state_path = Path("STATE") / "novatrade_risk_state.json"
-        if risk_state_path.exists():
-            with open(risk_state_path) as f:
-                data = json.load(f)
-                return float(data.get("equity_drawdown_pct", 0.0)) * 100000.0 + 100000.0
+        history_path = Path("STATE") / "novatrade" / "equity_history.json"
+        if history_path.exists():
+            data = json.loads(history_path.read_text(encoding="utf-8"))
+            snapshots = data.get("snapshots") or []
+            if snapshots:
+                return float(snapshots[-1].get("equity", default_equity))
+            return float(data.get("initial_equity", default_equity))
     except Exception as e:
-        logging.getLogger(__name__).debug(f"Failed to read equity from {risk_state_path}: {e}")
-    return 100313.62  # Fallback to known recent value
+        logging.getLogger(__name__).debug(f"Failed to read equity history: {e}")
+    return default_equity
 
 
 async def update_risk_state() -> bool:

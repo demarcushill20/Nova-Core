@@ -34,6 +34,18 @@ from enum import Enum
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from novatrade.notify import rejection_telegram
+from novatrade.risk.auto_resume_log import (
+    MAX_AUTO_RESUMES_PER_WEEK,
+    auto_resume_allowed,
+    record_auto_resume,
+)
+
+# Prefix used to identify halt reasons that are daily-scoped and therefore
+# eligible for the daily-reset auto-resume path. Kept as a module constant
+# so it stays in sync with :mod:`novatrade.risk.risk_engine`.
+DAILY_HALT_REASON_PREFIX = "Daily loss"
+
 _FTMO_TZ = ZoneInfo("Europe/Prague")
 
 log = logging.getLogger("novatrade.risk.hard_supervisor")
@@ -167,6 +179,10 @@ class HardRiskSupervisor:
 
         # Trade tracking
         self._trades_today: int = 0
+        # Position IDs counted toward _trades_today today. Used to dedupe so
+        # that pending-order replacements on the same position don't bump the
+        # counter multiple times.
+        self._positions_today: set[str] = set()
         self._consecutive_losses: int = 0
         self._last_loss_cooldown_until: float = 0.0
         self._recent_losses: list[float] = []  # timestamps of recent losses
@@ -226,20 +242,69 @@ class HardRiskSupervisor:
     def initialize(self, initial_equity: float) -> None:
         """Set initial equity.  Call once at session start.
 
-        Restores halted state from disk if present.
+        Restores halted state from disk if present.  When the broker returns
+        stale/zero equity, persisted equity values are preserved so that loss
+        calculations remain valid.
         """
-        self._initial_equity = initial_equity
-        self._daily_start_equity = initial_equity
-        self._current_equity = initial_equity
         self._session_start = time.time()
         self._last_daily_reset = self._today_prague()
 
-        # Restore persisted halt state
+        # Restore persisted state first (halt status, counters, AND equity)
         self._restore_state()
 
+        # Override equity with fresh broker data when available.  If broker
+        # returns $0 (MetaAPI disconnect / stale cache), keep the persisted
+        # values to avoid corrupting daily/total loss calculations.
+        if initial_equity > 0:
+            self._initial_equity = initial_equity
+            self._daily_start_equity = initial_equity
+            self._current_equity = initial_equity
+        elif self._initial_equity > 0:
+            log.warning(
+                "SUPERVISOR: broker equity=$%.2f (stale) — preserving persisted equity=$%.2f",
+                initial_equity,
+                self._initial_equity,
+            )
+        else:
+            self._initial_equity = initial_equity
+            self._daily_start_equity = initial_equity
+            self._current_equity = initial_equity
+
+        # Auto-clear stale equity-floor halts.  Use the best available equity:
+        # fresh broker equity if valid, otherwise the persisted value.
+        effective_equity = initial_equity if initial_equity > 0 else self._initial_equity
+        if self._halted and "below floor" in self._halt_reason and effective_equity >= self._limits.equity_floor_usd:
+            log.warning(
+                "SUPERVISOR: Cleared stale equity-floor halt — effective_equity=$%.2f >= floor=$%.2f (was: %s)",
+                effective_equity,
+                self._limits.equity_floor_usd,
+                self._halt_reason,
+            )
+            self._halted = False
+            self._halt_reason = ""
+            self._clear_kill_switch_if_stale()
+            self._persist_state()
+
+        # Auto-clear stale daily-loss halts.  If the cap was raised since the
+        # halt was persisted, the current daily loss may be below the new cap.
+        if self._halted and self._halt_reason.startswith(DAILY_HALT_REASON_PREFIX) and self._daily_start_equity > 0:
+            daily_loss = self._daily_start_equity - effective_equity
+            if daily_loss < self._limits.max_daily_loss_usd:
+                log.warning(
+                    "SUPERVISOR: Cleared stale daily-loss halt — loss=$%.2f < cap=$%.2f (was: %s)",
+                    daily_loss,
+                    self._limits.max_daily_loss_usd,
+                    self._halt_reason,
+                )
+                self._halted = False
+                self._halt_reason = ""
+                self._clear_kill_switch_if_stale()
+                self._persist_state()
+
         log.info(
-            "HardRiskSupervisor initialized — equity=$%.2f limits=%s halted=%s",
+            "HardRiskSupervisor initialized — equity=$%.2f (effective=$%.2f) limits=%s halted=%s",
             initial_equity,
+            effective_equity,
             f"floor=${self._limits.equity_floor_usd} "
             f"daily_cap=${self._limits.max_daily_loss_usd} "
             f"total_cap=${self._limits.max_total_loss_usd}",
@@ -311,14 +376,42 @@ class HardRiskSupervisor:
 
         # Rule 0: Halted — nothing gets through
         if self._halted:
+            log.warning("supervisor VETO [halted] %s %s vol=%.2f — %s", symbol, side, volume, self._halt_reason)
+            rejection_telegram("halted", f"{symbol} {side} vol={volume:.2f} — {self._halt_reason}")
             return SupervisorDecision(
                 verdict=SupervisorVerdict.EMERGENCY_HALT,
                 rule="halted",
                 detail=f"Supervisor halted: {self._halt_reason}",
             )
 
+        # Guard: zero/negative equity is a broker data-fetch error, not a
+        # real account state.  VETO (not HALT) so the halt doesn't persist
+        # to disk from transient MetaAPI disconnects.
+        if account_equity <= 0:
+            log.warning(
+                "supervisor VETO [stale_equity] %s %s — equity=$%.2f (likely stale data)", symbol, side, account_equity
+            )
+            return SupervisorDecision(
+                verdict=SupervisorVerdict.VETO,
+                rule="stale_equity",
+                detail=(
+                    f"Equity ${account_equity:.2f} — likely stale broker data, blocking until valid equity available"
+                ),
+            )
+
         # Rule 1: Equity floor
         if account_equity < self._limits.equity_floor_usd:
+            log.warning(
+                "supervisor VETO [equity_floor] %s %s — equity=$%.2f floor=$%.2f",
+                symbol,
+                side,
+                account_equity,
+                self._limits.equity_floor_usd,
+            )
+            rejection_telegram(
+                "equity_floor",
+                f"{symbol} {side} — equity=${account_equity:.2f} floor=${self._limits.equity_floor_usd:.2f}",
+            )
             self._emergency_halt(f"Equity ${account_equity:.2f} below floor ${self._limits.equity_floor_usd:.2f}")
             return SupervisorDecision(
                 verdict=SupervisorVerdict.EMERGENCY_HALT,
@@ -330,6 +423,16 @@ class HardRiskSupervisor:
         self._update_equity(account_equity)
         daily_loss = self._daily_start_equity - account_equity
         if daily_loss >= self._limits.max_daily_loss_usd:
+            log.warning(
+                "supervisor VETO [daily_loss_cap] %s %s — loss=$%.2f cap=$%.2f",
+                symbol,
+                side,
+                daily_loss,
+                self._limits.max_daily_loss_usd,
+            )
+            rejection_telegram(
+                "daily_loss_cap", f"{symbol} {side} — loss=${daily_loss:.2f} cap=${self._limits.max_daily_loss_usd:.2f}"
+            )
             self._emergency_halt(f"Daily loss ${daily_loss:.2f} >= cap ${self._limits.max_daily_loss_usd:.2f}")
             return SupervisorDecision(
                 verdict=SupervisorVerdict.EMERGENCY_HALT,
@@ -340,6 +443,16 @@ class HardRiskSupervisor:
         # Rule 3: Total loss cap
         total_loss = self._initial_equity - account_equity
         if total_loss >= self._limits.max_total_loss_usd:
+            log.warning(
+                "supervisor VETO [total_loss_cap] %s %s — loss=$%.2f cap=$%.2f",
+                symbol,
+                side,
+                total_loss,
+                self._limits.max_total_loss_usd,
+            )
+            rejection_telegram(
+                "total_loss_cap", f"{symbol} {side} — loss=${total_loss:.2f} cap=${self._limits.max_total_loss_usd:.2f}"
+            )
             self._emergency_halt(f"Total loss ${total_loss:.2f} >= cap ${self._limits.max_total_loss_usd:.2f}")
             return SupervisorDecision(
                 verdict=SupervisorVerdict.EMERGENCY_HALT,
@@ -349,6 +462,16 @@ class HardRiskSupervisor:
 
         # Rule 4: Max lot size (fat finger)
         if volume > self._limits.max_lot_size:
+            log.warning(
+                "supervisor VETO [max_lot_size] %s %s — vol=%.2f max=%.2f",
+                symbol,
+                side,
+                volume,
+                self._limits.max_lot_size,
+            )
+            rejection_telegram(
+                "max_lot_size", f"{symbol} {side} — vol={volume:.2f} max={self._limits.max_lot_size:.2f}"
+            )
             return SupervisorDecision(
                 verdict=SupervisorVerdict.VETO,
                 rule="max_lot_size",
@@ -357,6 +480,17 @@ class HardRiskSupervisor:
 
         # Rule 5: Max concurrent positions
         if len(open_positions) >= self._limits.max_concurrent_positions:
+            log.warning(
+                "supervisor VETO [max_concurrent_positions] %s %s — open=%d max=%d",
+                symbol,
+                side,
+                len(open_positions),
+                self._limits.max_concurrent_positions,
+            )
+            rejection_telegram(
+                "max_concurrent_positions",
+                f"{symbol} {side} — open={len(open_positions)} max={self._limits.max_concurrent_positions}",
+            )
             return SupervisorDecision(
                 verdict=SupervisorVerdict.VETO,
                 rule="max_concurrent_positions",
@@ -366,6 +500,17 @@ class HardRiskSupervisor:
         # Rule 6: Currency concentration
         same_symbol = sum(1 for p in open_positions if p.get("symbol") == symbol)
         if same_symbol >= self._limits.max_same_symbol_positions:
+            log.warning(
+                "supervisor VETO [symbol_concentration] %s %s — same_symbol=%d max=%d",
+                symbol,
+                side,
+                same_symbol,
+                self._limits.max_same_symbol_positions,
+            )
+            rejection_telegram(
+                "symbol_concentration",
+                f"{symbol} {side} — same_symbol={same_symbol} max={self._limits.max_same_symbol_positions}",
+            )
             return SupervisorDecision(
                 verdict=SupervisorVerdict.VETO,
                 rule="symbol_concentration",
@@ -376,6 +521,17 @@ class HardRiskSupervisor:
 
         # Rule 7: Daily trade count
         if self._trades_today >= self._limits.max_trades_per_day:
+            log.warning(
+                "supervisor VETO [daily_trade_cap] %s %s — trades=%d max=%d",
+                symbol,
+                side,
+                self._trades_today,
+                self._limits.max_trades_per_day,
+            )
+            rejection_telegram(
+                "daily_trade_cap",
+                f"{symbol} {side} — trades={self._trades_today} max={self._limits.max_trades_per_day}",
+            )
             return SupervisorDecision(
                 verdict=SupervisorVerdict.VETO,
                 rule="daily_trade_cap",
@@ -386,6 +542,17 @@ class HardRiskSupervisor:
         now = time.time()
         if now < self._last_loss_cooldown_until:
             remaining = int(self._last_loss_cooldown_until - now)
+            log.warning(
+                "supervisor VETO [consecutive_loss_cooldown] %s %s — losses=%d remaining=%ds",
+                symbol,
+                side,
+                self._consecutive_losses,
+                remaining,
+            )
+            rejection_telegram(
+                "consecutive_loss_cooldown",
+                f"{symbol} {side} — losses={self._consecutive_losses} remaining={remaining}s",
+            )
             return SupervisorDecision(
                 verdict=SupervisorVerdict.VETO,
                 rule="consecutive_loss_cooldown",
@@ -395,6 +562,17 @@ class HardRiskSupervisor:
         # Rule 9: Rapid loss detection
         self._prune_recent_losses()
         if len(self._recent_losses) >= self._limits.rapid_loss_count:
+            log.warning(
+                "supervisor VETO [rapid_loss_detection] %s %s — %d losses in %ds",
+                symbol,
+                side,
+                len(self._recent_losses),
+                self._limits.rapid_loss_window_s,
+            )
+            rejection_telegram(
+                "rapid_loss_detection",
+                f"{symbol} {side} — {len(self._recent_losses)} losses in {self._limits.rapid_loss_window_s}s",
+            )
             self._emergency_halt(f"{len(self._recent_losses)} losses in {self._limits.rapid_loss_window_s}s window")
             return SupervisorDecision(
                 verdict=SupervisorVerdict.EMERGENCY_HALT,
@@ -406,6 +584,18 @@ class HardRiskSupervisor:
         if stop_loss is not None and entry_price > 0:
             distance_pips = abs(entry_price - stop_loss) / _pip_value(symbol)
             if distance_pips < self._limits.min_stop_distance_pips:
+                log.warning(
+                    "supervisor VETO [min_stop_distance] %s %s — dist=%.1f pips min=%.1f pips",
+                    symbol,
+                    side,
+                    distance_pips,
+                    self._limits.min_stop_distance_pips,
+                )
+                rejection_telegram(
+                    "min_stop_distance",
+                    f"{symbol} {side} — dist={distance_pips:.1f} pips"
+                    f" min={self._limits.min_stop_distance_pips:.1f} pips",
+                )
                 return SupervisorDecision(
                     verdict=SupervisorVerdict.VETO,
                     rule="min_stop_distance",
@@ -437,6 +627,8 @@ class HardRiskSupervisor:
                         risk_usd,
                     )
                 else:
+                    log.warning("supervisor VETO [max_loss_per_trade] %s %s — zero risk-per-lot", symbol, side)
+                    rejection_telegram("max_loss_per_trade", f"{symbol} {side} — zero risk-per-lot")
                     return SupervisorDecision(
                         verdict=SupervisorVerdict.VETO,
                         rule="max_loss_per_trade",
@@ -448,6 +640,18 @@ class HardRiskSupervisor:
             sorted_vols = sorted(self._recent_volumes)
             median = sorted_vols[len(sorted_vols) // 2]
             if median > 0 and volume > median * self._limits.max_volume_ratio:
+                log.warning(
+                    "supervisor VETO [fat_finger_volume] %s %s — vol=%.2f median=%.2f ratio=%.1f",
+                    symbol,
+                    side,
+                    volume,
+                    median,
+                    self._limits.max_volume_ratio,
+                )
+                rejection_telegram(
+                    "fat_finger_volume",
+                    f"{symbol} {side} — vol={volume:.2f} median={median:.2f} ratio={self._limits.max_volume_ratio:.1f}",
+                )
                 return SupervisorDecision(
                     verdict=SupervisorVerdict.VETO,
                     rule="fat_finger_volume",
@@ -461,13 +665,27 @@ class HardRiskSupervisor:
     # Post-trade tracking
     # ------------------------------------------------------------------
 
-    def on_trade_opened(self, volume: float) -> None:
-        """Record that a trade was opened (for daily count and volume tracking)."""
+    def on_trade_opened(self, position_id: str, volume: float) -> None:
+        """Record that a trade was opened (for daily count and volume tracking).
+
+        Must be called when a pending order actually FILLS into a position,
+        not at pending-order placement time. ``position_id`` is the broker's
+        position identifier; the supervisor dedupes on it so repeated calls
+        for the same position (e.g. if the monitor re-fires notify_fill) do
+        not double-count against ``max_trades_per_day``.
+        """
+        if not position_id:
+            log.warning("on_trade_opened called without position_id — skipping to avoid miscount")
+            return
         with self._lock:
+            if position_id in self._positions_today:
+                return
+            self._positions_today.add(position_id)
             self._trades_today += 1
             self._recent_volumes.append(volume)
             if len(self._recent_volumes) > 20:
                 self._recent_volumes = self._recent_volumes[-20:]
+        self._persist_state()
 
     def on_trade_closed(self, pnl_usd: float) -> None:
         """Record a trade closure and update P&L tracking.
@@ -530,6 +748,12 @@ class HardRiskSupervisor:
         """
         actions: list[SupervisorAction] = []
         positions = positions or []
+
+        # Guard: zero/negative equity is a data-fetch error.  Skip all
+        # equity-based checks to avoid persisting a false halt to disk.
+        if account_equity <= 0:
+            log.warning("supervisor check_account: equity=$%.2f — skipping (likely stale data)", account_equity)
+            return actions
 
         self._update_equity(account_equity)
         self._maybe_daily_reset(account_equity)
@@ -655,14 +879,63 @@ class HardRiskSupervisor:
     def reset_daily(self, equity: float) -> None:
         """Reset daily counters.  Call at start of each trading day.
 
-        Does NOT clear a halt state.
+        Auto-resumes daily-scoped halts (daily loss cap) only if the
+        rolling 7-day count of auto-resumes is below the threshold. Once
+        the threshold is exceeded, the halt stays active and requires a
+        manual operator resume — this prevents repeated daily bleeds from
+        being silently masked by the daily reset.
+
+        Equity floor / total loss / rapid loss halts still require manual
+        resume regardless.
         """
+        blocked_halt_reason: str | None = None
         with self._lock:
+            eligible = self._halted and self._halt_reason.startswith(DAILY_HALT_REASON_PREFIX)
+            if eligible:
+                if auto_resume_allowed():
+                    record_auto_resume(
+                        self._halt_reason,
+                        origin="hard_supervisor",
+                        equity=equity,
+                    )
+                    log.warning(
+                        "SUPERVISOR: Daily reset auto-resuming halt (was: %s) — equity=$%.2f",
+                        self._halt_reason,
+                        equity,
+                    )
+                    self._halted = False
+                    self._halt_reason = ""
+                    self._consecutive_losses = 0
+                    self._recent_losses.clear()
+                else:
+                    blocked_halt_reason = self._halt_reason
+                    log.warning(
+                        "SUPERVISOR: Daily auto-resume BLOCKED — >=%d resumes in last 7 "
+                        "days. Halt stays active until manual resume. (reason=%s)",
+                        MAX_AUTO_RESUMES_PER_WEEK,
+                        self._halt_reason,
+                    )
+
             self._daily_start_equity = equity
             self._trades_today = 0
+            self._positions_today.clear()
             self._daily_pnl_usd = 0.0
             self._last_daily_reset = self._today_prague()
             self._recent_losses.clear()
+
+        # Notify outside the lock — urllib.urlopen can block up to 10s
+        # and must not hold the supervisor lock (other callers such as
+        # on_trade_closed, veto, and _persist_state acquire it).
+        if blocked_halt_reason is not None:
+            rejection_telegram(
+                "auto_resume_blocked",
+                (
+                    f"SUPERVISOR: daily auto-resume blocked "
+                    f"(>={MAX_AUTO_RESUMES_PER_WEEK} resumes/7d). "
+                    f"halt_reason={blocked_halt_reason}. "
+                    "Manual operator resume required."
+                ),
+            )
 
         self._persist_state()
         log.info("SUPERVISOR: Daily reset — equity=$%.2f", equity)
@@ -731,6 +1004,7 @@ class HardRiskSupervisor:
                 "daily_pnl_usd": self._daily_pnl_usd,
                 "total_pnl_usd": self._total_pnl_usd,
                 "trades_today": self._trades_today,
+                "positions_today": sorted(self._positions_today),
                 "consecutive_losses": self._consecutive_losses,
                 "cooldown_until": self._last_loss_cooldown_until,
                 "last_daily_reset": self._last_daily_reset,
@@ -771,10 +1045,28 @@ class HardRiskSupervisor:
         # Restore counters
         self._consecutive_losses = data.get("consecutive_losses", 0)
         self._trades_today = data.get("trades_today", 0)
+        persisted_positions = data.get("positions_today") or []
+        if isinstance(persisted_positions, list):
+            self._positions_today = {str(pid) for pid in persisted_positions}
         self._daily_pnl_usd = data.get("daily_pnl_usd", 0.0)
         self._total_pnl_usd = data.get("total_pnl_usd", 0.0)
         self._last_loss_cooldown_until = data.get("cooldown_until", 0.0)
         self._last_daily_reset = data.get("last_daily_reset", "")
+
+        # Restore equity values for continuity when broker returns stale data
+        self._initial_equity = data.get("initial_equity", self._initial_equity)
+        self._daily_start_equity = data.get("daily_start_equity", self._daily_start_equity)
+        self._current_equity = data.get("current_equity", self._current_equity)
+
+    def _clear_kill_switch_if_stale(self) -> None:
+        """Remove kill switch file left by a now-cleared halt."""
+        kill_file = self._kill_switch_dir / "nova-kill"
+        if kill_file.exists():
+            try:
+                kill_file.unlink()
+                log.info("SUPERVISOR: Removed stale kill switch file %s", kill_file)
+            except OSError as exc:
+                log.warning("SUPERVISOR: Could not remove kill switch file: %s", exc)
 
     def _write_kill_switch(self, reason: str) -> None:
         """Write the system kill switch file.

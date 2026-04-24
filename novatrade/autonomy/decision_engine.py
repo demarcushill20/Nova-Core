@@ -421,7 +421,7 @@ class DecisionEngine:
                 suggested_actions=[
                     "Check novacore-novatrade.service status with systemctl",
                     "Check STATE/novatrade/trade_journal.jsonl for recent OPEN events",
-                    "Check STATE/novatrade/halt_state.json for active risk halt",
+                    "Check STATE/novatrade_risk_state.json for active risk halt",
                     "Check MetaApi connection status and recent errors",
                     "Check LOGS/ for order rejection or broker connection errors",
                     "Restart novacore-novatrade.service if service is down",
@@ -525,7 +525,7 @@ class DecisionEngine:
                 "Check for orphaned tasks in TASKS/ older than 2 hours",
             ],
             "risk_engine": [
-                "Check STATE/novatrade/halt_state.json for active halts",
+                "Check STATE/novatrade_risk_state.json for active halts",
                 "Review daily_loss_tracker.json for drawdown status",
                 "Check risk_policy.yaml for current risk parameters",
                 "Review pre-trade gate logs for rejection patterns",
@@ -551,7 +551,7 @@ class DecisionEngine:
         extras = {
             "strategy_validity": [
                 "Check if novacore-novatrade.service is running",
-                "Check for risk halt in STATE/novatrade/halt_state.json",
+                "Check for risk halt in STATE/novatrade_risk_state.json",
                 "Restart service if down: sudo systemctl restart novacore-novatrade",
                 "Verify trades resume after fix",
             ],

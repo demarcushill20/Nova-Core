@@ -269,8 +269,13 @@ class TestMultiFactorRanking:
         assert score_h > score_l
 
     def test_recent_ranks_higher(self):
-        recent = _sample_result(timestamp="2026-03-13T12:00:00Z")
-        old = _sample_result(timestamp="2025-01-01T00:00:00Z")
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        recent_ts = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        old_ts = (now - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        recent = _sample_result(timestamp=recent_ts)
+        old = _sample_result(timestamp=old_ts)
         score_r, _ = compute_ranking_score(recent)
         score_o, _ = compute_ranking_score(old)
         assert score_r > score_o

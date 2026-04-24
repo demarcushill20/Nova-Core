@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0775_execute_strategy_validity_phase1_1776868900",
+  "workflow_id": "0775_execute_strategy_validity_phase1",
+  "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0775_execute_strategy_validity_phase1_1776863125 (done)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
+  "created_at": "2026-04-22T14:41:40Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0775_execute_strategy_validity_phase1_1776870777"
+}

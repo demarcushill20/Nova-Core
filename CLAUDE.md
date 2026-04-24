@@ -53,6 +53,8 @@ Confirmation required before:
 
 User preference: Full YOLO mode. Do not ask permission for any operation. Act on best judgment.
 
+User preference (path-choice autonomy, set 2026-04-16): When at a decision point with multiple paths/options, do NOT ask the operator to choose. Pick the option judged best for the situation, execute it, and report the choice afterwards with the trade-offs that informed it. Still confirm before destructive or hard-to-reverse actions (commits, pushes, deletes outside `~/nova-core`, external messages) — autonomy applies to execution decisions inside the work, not to safety-gated actions.
+
 ## Persistent Memory (Fusion Memory MCP)
 
 Nova-Memory is the primary cross-session memory system. It persists across all Claude Code sessions via Pinecone (semantic), Neo4j (graph), and Redis (timeline).
@@ -84,6 +86,17 @@ Nova-Memory is the primary cross-session memory system. It persists across all C
 - Secrets, API keys, passwords
 - Ephemeral task state (use TASKS/ for that)
 - Raw file contents (store summaries/insights instead)
+
+## NovaTrade Live System Safety
+
+**NEVER exercise supervisor guards with synthetic data on the live system.**
+
+- Do not call `HardRiskSupervisor.emergency_halt()`, `veto()`, or `RiskEngine._halt()` with test/synthetic parameters outside of `pytest`.
+- Do not send crafted trade requests through the live pipeline to "test" or "verify" risk guards.
+- The live supervisor persists halt state to disk — synthetic halts block real trading until manually cleared.
+- Rejection notifications (`rejection_telegram`) fire on every veto — synthetic tests spam the operator's Telegram.
+- Use `pytest` for guard verification. The test suite (`tests/test_hard_risk_supervisor.py`) already covers all 14 guards with isolated instances.
+- If you need to verify guard behavior during diagnostics, **read the code and config values** — do not invoke guards with fake data.
 
 ## Skill Creation Policy
 

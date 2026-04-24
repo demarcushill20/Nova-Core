@@ -361,9 +361,9 @@ class TestRule6CurrencyConcentration:
 
 class TestRule7DailyTradeCount:
     def test_exceeds_daily_cap(self, tight_supervisor: HardRiskSupervisor) -> None:
-        # Simulate 5 trades opened today
-        for _ in range(5):
-            tight_supervisor.on_trade_opened(0.1)
+        # Simulate 5 distinct trades opened today
+        for i in range(5):
+            tight_supervisor.on_trade_opened(f"pos-{i}", 0.1)
 
         d = tight_supervisor.veto(
             "EURUSD",
@@ -377,8 +377,8 @@ class TestRule7DailyTradeCount:
         assert d.rule == "daily_trade_cap"
 
     def test_within_daily_cap(self, tight_supervisor: HardRiskSupervisor) -> None:
-        for _ in range(3):
-            tight_supervisor.on_trade_opened(0.1)
+        for i in range(3):
+            tight_supervisor.on_trade_opened(f"pos-{i}", 0.1)
 
         d = tight_supervisor.veto(
             "EURUSD",
@@ -389,6 +389,77 @@ class TestRule7DailyTradeCount:
             10_000.0,
         )
         assert d.rule != "daily_trade_cap"
+
+    def test_dedupes_repeat_calls_for_same_position(self, tight_supervisor: HardRiskSupervisor) -> None:
+        """Repeated on_trade_opened calls for the same position_id count once.
+
+        Regression for 2026-04-22: IRB's pending-order revalidate loop
+        replaced pending stops repeatedly, each placement incremented the
+        daily counter, and the cap triggered after ~4 real fills instead of 10.
+        """
+        for _ in range(10):
+            tight_supervisor.on_trade_opened("position-42", 0.1)
+
+        assert tight_supervisor.trades_today == 1
+
+        d = tight_supervisor.veto(
+            "EURUSD",
+            "BUY",
+            0.1,
+            1.1000,
+            1.0900,
+            10_000.0,
+        )
+        assert d.rule != "daily_trade_cap"
+
+    def test_missing_position_id_does_not_increment(self, tight_supervisor: HardRiskSupervisor) -> None:
+        """Guard against silent miscount if a caller forgets position_id."""
+        tight_supervisor.on_trade_opened("", 0.1)
+        tight_supervisor.on_trade_opened(None, 0.1)  # type: ignore[arg-type]
+        assert tight_supervisor.trades_today == 0
+
+    def test_daily_reset_clears_position_dedupe(self, tight_supervisor: HardRiskSupervisor) -> None:
+        """After reset_daily, previously-seen position_ids can count again."""
+        tight_supervisor.on_trade_opened("position-A", 0.1)
+        assert tight_supervisor.trades_today == 1
+
+        tight_supervisor.reset_daily(equity=10_000.0)
+        assert tight_supervisor.trades_today == 0
+
+        # Same position_id on a new day should count (edge case; position_ids
+        # are broker-globally-unique in practice but the dedupe set is
+        # intentionally per-day).
+        tight_supervisor.on_trade_opened("position-A", 0.1)
+        assert tight_supervisor.trades_today == 1
+
+    def test_positions_today_persists_and_restores(self, tmp_state: tuple[Path, Path]) -> None:
+        """positions_today survives a restart so replacements still dedupe."""
+        state_dir, kill_dir = tmp_state
+        s1 = HardRiskSupervisor(
+            limits=HardLimits(max_trades_per_day=10),
+            state_dir=state_dir,
+            kill_switch_dir=kill_dir,
+        )
+        s1.initialize(initial_equity=10_000.0)
+        s1.on_trade_opened("position-99", 0.2)
+        assert s1.trades_today == 1
+
+        # Second supervisor restores the persisted state
+        s2 = HardRiskSupervisor(
+            limits=HardLimits(max_trades_per_day=10),
+            state_dir=state_dir,
+            kill_switch_dir=kill_dir,
+        )
+        s2.initialize(initial_equity=10_000.0)
+        assert s2.trades_today == 1
+
+        # Repeat notification for the same position must not double-count
+        s2.on_trade_opened("position-99", 0.2)
+        assert s2.trades_today == 1
+
+        # A new position does count
+        s2.on_trade_opened("position-100", 0.2)
+        assert s2.trades_today == 2
 
 
 # ---------------------------------------------------------------------------
@@ -568,8 +639,8 @@ class TestRule11PerTradeRisk:
 class TestRule12FatFingerVolume:
     def test_fat_finger_detected(self, supervisor: HardRiskSupervisor) -> None:
         # Build history of small trades (use default supervisor with 30 trade cap)
-        for _ in range(5):
-            supervisor.on_trade_opened(0.01)
+        for i in range(5):
+            supervisor.on_trade_opened(f"fat-finger-{i}", 0.01)
 
         # Now try a much larger volume (0.1 > 5.0 × 0.01)
         d = supervisor.veto(
@@ -584,8 +655,8 @@ class TestRule12FatFingerVolume:
         assert d.rule == "fat_finger_volume"
 
     def test_normal_volume_ok(self, supervisor: HardRiskSupervisor) -> None:
-        for _ in range(5):
-            supervisor.on_trade_opened(0.1)
+        for i in range(5):
+            supervisor.on_trade_opened(f"normal-vol-{i}", 0.1)
 
         d = supervisor.veto(
             "EURUSD",
@@ -599,7 +670,7 @@ class TestRule12FatFingerVolume:
 
     def test_insufficient_history_skips(self, supervisor: HardRiskSupervisor) -> None:
         # Less than 3 trades — skip fat finger check
-        supervisor.on_trade_opened(0.01)
+        supervisor.on_trade_opened("pid-test_insufficient_history_skips-1", 0.01)
         d = supervisor.veto(
             "EURUSD",
             "BUY",
@@ -651,8 +722,8 @@ class TestPostTradeTracking:
         assert supervisor.total_pnl_usd == 50.0
 
     def test_trade_count(self, supervisor: HardRiskSupervisor) -> None:
-        supervisor.on_trade_opened(0.1)
-        supervisor.on_trade_opened(0.2)
+        supervisor.on_trade_opened("pid-test_trade_count-1", 0.1)
+        supervisor.on_trade_opened("pid-test_trade_count-2", 0.2)
         assert supervisor.trades_today == 2
 
 
@@ -752,8 +823,8 @@ class TestResume:
 
 class TestDailyReset:
     def test_reset_clears_daily_counters(self, supervisor: HardRiskSupervisor) -> None:
-        supervisor.on_trade_opened(0.1)
-        supervisor.on_trade_opened(0.1)
+        supervisor.on_trade_opened("pid-test_reset_clears_daily_counters-1", 0.1)
+        supervisor.on_trade_opened("pid-test_reset_clears_daily_counters-2", 0.1)
         supervisor.on_trade_closed(-10.0)
         supervisor.reset_daily(9_990.0)
         assert supervisor.trades_today == 0
@@ -765,7 +836,7 @@ class TestDailyReset:
         assert supervisor.halted
 
     def test_auto_reset_on_date_change(self, supervisor: HardRiskSupervisor) -> None:
-        supervisor.on_trade_opened(0.1)
+        supervisor.on_trade_opened("pid-test_auto_reset_on_date_change-1", 0.1)
         assert supervisor.trades_today == 1
         # Force the last reset date to yesterday
         supervisor._last_daily_reset = "2020-01-01"
@@ -791,7 +862,7 @@ class TestSnapshot:
         assert "timestamp" in snap
 
     def test_snapshot_reflects_state(self, supervisor: HardRiskSupervisor) -> None:
-        supervisor.on_trade_opened(0.1)
+        supervisor.on_trade_opened("pid-test_snapshot_reflects_state-1", 0.1)
         supervisor.on_trade_closed(-25.0)
         snap = supervisor.snapshot()
         assert snap["trades_today"] == 1
@@ -811,7 +882,7 @@ class TestStatePersistence:
         # First instance: create state
         s1 = HardRiskSupervisor(state_dir=state_dir, kill_switch_dir=kill_dir)
         s1.initialize(initial_equity=10_000.0)
-        s1.on_trade_opened(0.1)
+        s1.on_trade_opened("pid-test_state_roundtrip-1", 0.1)
         s1.on_trade_closed(-50.0)
         s1.on_trade_closed(-30.0)
 
@@ -886,13 +957,13 @@ class TestFullLifecycle:
         # First trade
         d = supervisor.veto("EURUSD", "BUY", 0.1, 1.1000, 1.0950, 10_000.0)
         assert d.verdict == SupervisorVerdict.ALLOW
-        supervisor.on_trade_opened(0.1)
+        supervisor.on_trade_opened("pid-test_normal_trading_session-1", 0.1)
         supervisor.on_trade_closed(50.0)
 
         # Second trade
         d = supervisor.veto("EURUSD", "SELL", 0.1, 1.1000, 1.1050, 10_050.0)
         assert d.verdict == SupervisorVerdict.ALLOW
-        supervisor.on_trade_opened(0.1)
+        supervisor.on_trade_opened("pid-test_normal_trading_session-2", 0.1)
         supervisor.on_trade_closed(-30.0)
 
         assert supervisor.trades_today == 2
@@ -932,12 +1003,19 @@ class TestFullLifecycle:
 
 class TestEdgeCases:
     def test_zero_equity(self, supervisor: HardRiskSupervisor) -> None:
+        # Zero equity is treated as stale broker data — VETO (not HALT)
+        # to avoid persisting a false halt to disk from MetaAPI disconnects.
         d = supervisor.veto("EURUSD", "BUY", 0.1, 1.1, 1.09, 0.0)
-        assert d.verdict == SupervisorVerdict.EMERGENCY_HALT
+        assert d.verdict == SupervisorVerdict.VETO
+        assert d.rule == "stale_equity"
+        assert not supervisor.halted
 
     def test_negative_equity(self, supervisor: HardRiskSupervisor) -> None:
+        # Negative equity is also treated as stale broker data — VETO (not HALT).
         d = supervisor.veto("EURUSD", "BUY", 0.1, 1.1, 1.09, -500.0)
-        assert d.verdict == SupervisorVerdict.EMERGENCY_HALT
+        assert d.verdict == SupervisorVerdict.VETO
+        assert d.rule == "stale_equity"
+        assert not supervisor.halted
 
     def test_no_positions_passed(self, supervisor: HardRiskSupervisor) -> None:
         d = supervisor.veto("EURUSD", "BUY", 0.1, 1.1, 1.09, 10_000.0)

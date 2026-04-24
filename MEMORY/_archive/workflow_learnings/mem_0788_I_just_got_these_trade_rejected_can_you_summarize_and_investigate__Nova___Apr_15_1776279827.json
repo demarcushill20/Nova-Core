@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0788_I_just_got_these_trade_rejected_can_you_summarize_and_investigate__Nova___Apr_15_1776279827",
+  "workflow_id": "0788_I_just_got_these_trade_rejected_can_you_summarize_and_investigate__Nova___Apr_15",
+  "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0788_I_just_got_these_trade_rejected_can_you_summarize_and_investigate__Nova"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-04-15T19:03:47Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0795_687___0_550___1776298059"
+}

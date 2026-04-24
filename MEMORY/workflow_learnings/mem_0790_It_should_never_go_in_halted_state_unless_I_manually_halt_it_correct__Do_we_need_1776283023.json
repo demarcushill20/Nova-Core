@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0790_It_should_never_go_in_halted_state_unless_I_manually_halt_it_correct__Do_we_need_1776283023",
+  "workflow_id": "0790_It_should_never_go_in_halted_state_unless_I_manually_halt_it_correct__Do_we_need",
+  "task_summary": "Added /control/resume endpoint, daily auto-resume for daily-scoped halts, and skip adapter-disconnect halt restore across restarts. No restart needed.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added /control/resume endpoint, daily auto-resume for daily-scoped halts, and skip adapter-disconnect halt restore across restarts. No restart needed."
+  ],
+  "successful_patterns": [
+    "task_failed: 0790_It_should_never_go_in_halted_state_unless_I_manually_halt_it_correct__Do_we_need"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added /control/resume endpoint, daily auto-resume for daily-scoped halts, and skip adapter-disconnect halt restore across restarts. No restart needed.",
+  "created_at": "2026-04-15T19:57:03Z",
+  "confidence": "high"
+}

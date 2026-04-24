@@ -7,6 +7,7 @@ stays in the engine module to maintain zero regression risk.
 
 from __future__ import annotations
 
+import logging
 import math
 from datetime import datetime, timezone
 from typing import Any
@@ -15,7 +16,10 @@ from novatrade.backtest.engine import compute_adx, compute_atr, compute_ema
 from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
 from novatrade.monitor.signal_monitor import record_signal
+from novatrade.notify import rejection_telegram
 from novatrade.strategies.base import BaseStrategy, EntrySignal, ExitSignal
+
+log = logging.getLogger(__name__)
 
 # Session filter: London+NY overlap window (UTC hours)
 SESSION_START_HOUR_UTC = 7
@@ -87,9 +91,6 @@ class IRBStrategy(BaseStrategy):
         if i < e.warmup_bars or i >= len(candles):
             return None
 
-        # Record that strategy evaluation occurred (for signal rate monitoring)
-        record_signal("any")
-
         bar = candles[i]
         ema = indicators.get("ema", [])
         atr = indicators.get("atr", [])
@@ -125,14 +126,17 @@ class IRBStrategy(BaseStrategy):
             ema_fast = indicators.get("ema_fast", [])
             ema_slow = indicators.get("ema_slow", [])
             if i >= len(ema_fast) or i >= len(ema_slow):
+                log.info("IRB REJECTED [v5_ema_length] bar=%d ema_fast=%d ema_slow=%d", i, len(ema_fast), len(ema_slow))
                 return None
             lb = min(e.ema_slope_lookback, i)
             if lb < 1:
+                log.info("IRB REJECTED [v5_slope_lookback] bar=%d lookback=%d", i, lb)
                 return None
             ef = ema_fast[i]
             es = ema_slow[i]
             ef_prev = ema_fast[i - lb]
             if math.isnan(ef) or math.isnan(es) or math.isnan(ef_prev):
+                log.info("IRB REJECTED [v5_nan_ema] bar=%d ef=%.5f es=%.5f ef_prev=%.5f", i, ef, es, ef_prev)
                 return None
             bull_trend = ef > es and ef > ef_prev
             bear_trend = ef < es and ef < ef_prev
@@ -141,6 +145,18 @@ class IRBStrategy(BaseStrategy):
             elif is_downtrend_irb and bear_trend:
                 side = "SHORT"
             else:
+                log.info(
+                    "IRB REJECTED [trend_filter] bar=%d irb_up=%s irb_dn=%s "
+                    "bull=%s bear=%s ef=%.5f es=%.5f ef_prev=%.5f",
+                    i,
+                    is_uptrend_irb,
+                    is_downtrend_irb,
+                    bull_trend,
+                    bear_trend,
+                    ef,
+                    es,
+                    ef_prev,
+                )
                 return None
 
             # --- v5 HTF EMA slope filter (vault Pine: htfLongOk = htfSlopeUp) ---
@@ -159,13 +175,26 @@ class IRBStrategy(BaseStrategy):
                             htf_rising = htf_ema_now > htf_ema_prev
                             htf_falling = htf_ema_now < htf_ema_prev
                             if side == "LONG" and not htf_rising:
+                                msg = (
+                                    f"bar={i} side=LONG "
+                                    f"htf_ema_now={htf_ema_now:.5f} htf_ema_prev={htf_ema_prev:.5f} (not rising)"
+                                )
+                                log.info("IRB REJECTED [htf_ema] %s", msg)
+                                rejection_telegram("htf_ema", msg)
                                 return None
                             if side == "SHORT" and not htf_falling:
+                                msg = (
+                                    f"bar={i} side=SHORT "
+                                    f"htf_ema_now={htf_ema_now:.5f} htf_ema_prev={htf_ema_prev:.5f} (not falling)"
+                                )
+                                log.info("IRB REJECTED [htf_ema] %s", msg)
+                                rejection_telegram("htf_ema", msg)
                                 return None
             # v5 mode SKIPS ADX threshold and ADX slope filters (vault reference does not check ADX).
         else:
             lookback = min(20, i)
             if lookback < 1:
+                log.info("IRB REJECTED [v4_lookback] bar=%d lookback=%d", i, lookback)
                 return None
             ema_slope = (ema[i] - ema[i - lookback]) / atr[i]
 
@@ -177,10 +206,24 @@ class IRBStrategy(BaseStrategy):
             elif is_downtrend_irb and trend_dn:
                 side = "SHORT"
             else:
+                log.info(
+                    "IRB REJECTED [v4_trend] bar=%d irb_up=%s irb_dn=%s slope=%.4f threshold=%.4f",
+                    i,
+                    is_uptrend_irb,
+                    is_downtrend_irb,
+                    ema_slope,
+                    e.trend_slope_threshold,
+                )
                 return None
 
             # --- ADX sideways filter (v4 only) ---
             if math.isnan(adx[i]) or adx[i] < e.adx_threshold:
+                log.info(
+                    "IRB REJECTED [adx_threshold] bar=%d adx=%.2f threshold=%.2f",
+                    i,
+                    adx[i],
+                    e.adx_threshold,
+                )
                 return None
 
             # --- ADX slope check: trend must be strengthening (v4 only) ---
@@ -189,21 +232,38 @@ class IRBStrategy(BaseStrategy):
                 and not math.isnan(adx[i - ADX_SLOPE_LOOKBACK])
                 and adx[i] < adx[i - ADX_SLOPE_LOOKBACK]
             ):
-                return None  # ADX declining → trend weakening, skip
+                log.info(
+                    "IRB REJECTED [adx_slope] bar=%d adx=%.2f adx_prev=%.2f (declining)",
+                    i,
+                    adx[i],
+                    adx[i - ADX_SLOPE_LOOKBACK],
+                )
+                return None
 
         # --- Session filter: only trade during London+NY overlap (07-16 UTC) ---
         if e.session_filter == "london" and bar.timestamp > 0:
             bar_hour = datetime.fromtimestamp(bar.timestamp, tz=timezone.utc).hour
             if not (SESSION_START_HOUR_UTC <= bar_hour < SESSION_END_HOUR_UTC):
+                msg = (
+                    f"bar={i} side={side} hour={bar_hour} (outside {SESSION_START_HOUR_UTC}-{SESSION_END_HOUR_UTC} UTC)"
+                )
+                log.info("IRB REJECTED [session] %s", msg)
+                rejection_telegram("session", msg)
                 return None
 
         # --- Overextension filter (max signal range / ATR) ---
         overext_ratio = rng / atr[i]
         if overext_ratio > e.overextension_threshold:
+            msg = f"bar={i} side={side} ratio={overext_ratio:.3f} threshold={e.overextension_threshold:.3f}"
+            log.info("IRB REJECTED [overextension] %s", msg)
+            rejection_telegram("overextension", msg)
             return None
 
         # --- v5 minimum signal size filter (min signal range / ATR) ---
         if e.min_signal_atr_mult > 0 and overext_ratio < e.min_signal_atr_mult:
+            msg = f"bar={i} side={side} ratio={overext_ratio:.3f} min={e.min_signal_atr_mult:.3f}"
+            log.info("IRB REJECTED [min_signal_size] %s", msg)
+            rejection_telegram("min_signal_size", msg)
             return None
 
         # --- Compute entry/stop levels ---

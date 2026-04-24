@@ -258,6 +258,38 @@ TELEGRAM_COOLDOWN_COST = 14400  # 4 hours for cost alerts
 TELEGRAM_COOLDOWN_TIER = 14400  # 4 hours for degradation tier alerts (same tier re-triggers aren't news)
 TELEGRAM_COOLDOWN_FILE = STATE_DIR / "telegram_cooldown.json"
 
+# NovaTrade message suppression — these keywords in an outbound Telegram message
+# indicate NovaTrade-specific health chatter that should NOT go to Telegram.
+# NovaTrade has its own dedicated 12-hour alert pipeline; duplicating here is spam.
+_NT_MSG_KEYWORDS = (
+    "novatrade",
+    "signal_health",
+    "trade_gap",
+    "feed_health",
+    "execution_pipeline",
+    "novatrade_signals",
+    "novatrade_watchdog",
+    "novatrade_trade_gap",
+    "low_rate",
+    "no trades",
+    "trade execution",
+    "signal rate",
+    "signal generation",
+    "adapter disconnect",
+    "trading pipeline",
+    "irb strategy",
+    "session watchdog",
+    "performance_stability",
+    "strategy_validity",
+    "risk_engine",
+)
+
+
+def _is_novatrade_message(text: str) -> bool:
+    """Return True if *text* looks like NovaTrade health noise."""
+    lower = text.lower()
+    return any(kw in lower for kw in _NT_MSG_KEYWORDS)
+
 
 # --- Health checks -----------------------------------------------------------
 
@@ -839,7 +871,14 @@ def check_novatrade_signals() -> dict:
     """Check NovaTrade signal generation rates and health status."""
     try:
         import json
+        from datetime import datetime, timezone
         from pathlib import Path
+
+        now = datetime.now(timezone.utc)
+        wd = now.weekday()  # 0=Mon … 4=Fri, 5=Sat, 6=Sun
+        weekend = wd == 5 or (wd == 4 and now.hour >= 21) or (wd == 6 and now.hour < 22)
+        if weekend:
+            return {"name": "novatrade_signals", "ok": True, "detail": "skipped: forex markets closed (weekend)"}
 
         signal_stats_file = Path("/home/nova/nova-core/STATE/novatrade/signal_stats.json")
 
@@ -850,7 +889,6 @@ def check_novatrade_signals() -> dict:
             stats = json.load(f)
 
         status = stats.get("status", "UNKNOWN")
-        concern_level = stats.get("concern_level", "UNKNOWN")
         signals_1h = stats.get("signals_1h", 0)
         signals_4h = stats.get("signals_4h", 0)
         signals_24h = stats.get("signals_24h", 0)
@@ -875,20 +913,20 @@ def check_novatrade_signals() -> dict:
 
         if last_signal_at:
             try:
-                from datetime import datetime, timezone
-
                 last_dt = datetime.fromisoformat(last_signal_at.replace("Z", "+00:00"))
-                now = datetime.now(timezone.utc)
-                hours_ago = (now - last_dt).total_seconds() / 3600
+                now_utc = datetime.now(timezone.utc)
+                hours_ago = (now_utc - last_dt).total_seconds() / 3600
                 detail_parts.append(f"last: {hours_ago:.1f}h ago")
             except (ValueError, TypeError, KeyError):
                 detail_parts.append(f"last: {last_signal_at[:19]}")
 
         detail = " | ".join(detail_parts)
 
-        # Health assessment: RED/YELLOW = not ok, GREEN = ok
-        # MARKET_CLOSED is always GREEN (expected during weekends)
-        ok = concern_level == "GREEN"
+        # Always ok=True: NovaTrade alerting is handled exclusively by the
+        # session watchdog's 12h no-trade threshold.  Marking this check as
+        # unhealthy triggers autonomy REPAIR actions and self-healing alerts
+        # that spam Telegram with low-value noise.
+        ok = True
 
         return {"name": "novatrade_signals", "ok": ok, "detail": detail}
 
@@ -938,6 +976,194 @@ def check_novatrade_watchdog() -> dict:
 
     except Exception as e:
         return {"name": "novatrade_watchdog", "ok": True, "detail": f"check failed: {e}"}
+
+
+# --- NovaTrade auto-investigation --------------------------------------------
+
+
+def _run_novatrade_investigation() -> str:
+    """Gather comprehensive NovaTrade health data when 12h no-trade threshold fires.
+
+    Checks adapter connectivity, signal pipeline, live metrics, trade journal,
+    and service health, then returns a formatted diagnostic report.
+    """
+    lines: list[str] = []
+    state_dir = Path("/home/nova/nova-core/STATE/novatrade")
+
+    # 1. Service health
+    for svc in ("novacore-watcher",):
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", svc],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            status = result.stdout.strip()
+            lines.append(f"Service {svc}: {status}")
+        except Exception as e:
+            lines.append(f"Service {svc}: check failed ({e})")
+
+    # 2. Live metrics
+    metrics_file = state_dir / "live_metrics.json"
+    try:
+        if metrics_file.exists():
+            data = json.loads(metrics_file.read_text())
+            uptime_h = data.get("uptime_seconds", 0) / 3600
+            lines.append(f"Uptime: {uptime_h:.1f}h")
+            lines.append(f"Approved trades: {data.get('approved', 0)}")
+            lines.append(f"Rejected signals: {data.get('rejected', 0)}")
+            lines.append(f"Entry signals: {data.get('signals_entry', 0)}")
+            lines.append(f"Exit signals: {data.get('signals_exit', 0)}")
+        else:
+            lines.append("Live metrics: file missing (NovaTrade may not be running)")
+    except Exception as e:
+        lines.append(f"Live metrics: read failed ({e})")
+
+    # 3. Signal stats
+    signal_file = state_dir / "signal_stats.json"
+    try:
+        if signal_file.exists():
+            stats = json.loads(signal_file.read_text())
+            lines.append(f"Signal status: {stats.get('status', '?')}")
+            lines.append(f"Concern level: {stats.get('concern_level', '?')}")
+            s1 = stats.get("signals_1h", 0)
+            s4 = stats.get("signals_4h", 0)
+            s24 = stats.get("signals_24h", 0)
+            lines.append(f"Signals 1h/4h/24h: {s1}/{s4}/{s24}")
+            lines.append(f"Regime: {stats.get('regime', '?')} | Session: {stats.get('session', '?')}")
+            last_sig = stats.get("last_signal_at", "")
+            if last_sig:
+                try:
+                    dt = datetime.fromisoformat(last_sig.replace("Z", "+00:00"))
+                    age_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+                    lines.append(f"Last signal: {age_h:.1f}h ago")
+                except (ValueError, TypeError):
+                    lines.append(f"Last signal: {last_sig[:19]}")
+        else:
+            lines.append("Signal stats: file missing")
+    except Exception as e:
+        lines.append(f"Signal stats: read failed ({e})")
+
+    # 4. Trade journal — last trade
+    journal_file = state_dir / "trade_journal.jsonl"
+    try:
+        if journal_file.exists():
+            last_open = None
+            with open(journal_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("event") == "OPEN" and "logged_at" in entry:
+                            last_open = entry
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+            if last_open:
+                ts = last_open.get("logged_at", "?")
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    age_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+                    sym = last_open.get("symbol", "?")
+                    direction = last_open.get("direction", "?")
+                    lines.append(f"Last trade: {age_h:.1f}h ago ({sym} {direction})")
+                except (ValueError, TypeError):
+                    lines.append(f"Last trade: {ts}")
+            else:
+                lines.append("Last trade: no OPEN events in journal")
+        else:
+            lines.append("Trade journal: file missing")
+    except Exception as e:
+        lines.append(f"Trade journal: read failed ({e})")
+
+    # 5. Adapter/connection state from watchdog state
+    wd_file = state_dir / "session_watchdog.json"
+    try:
+        if wd_file.exists():
+            wd = json.loads(wd_file.read_text())
+            last_healthy = wd.get("last_healthy_at", 0)
+            if last_healthy > 0:
+                age_h = (time.time() - last_healthy) / 3600
+                lines.append(f"Last healthy check: {age_h:.1f}h ago")
+            consec_fail = wd.get("consecutive_health_failures", 0)
+            if consec_fail > 0:
+                lines.append(f"Consecutive health failures: {consec_fail}")
+    except Exception as e:
+        lines.append(f"Watchdog state: read failed ({e})")
+
+    # 6. NovaTrade systemd service status
+    for svc in ("novacore-novatrade",):
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", svc],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            svc_status = result.stdout.strip()
+            lines.append(f"Service {svc}: {svc_status}")
+            if svc_status == "active":
+                uptime_result = subprocess.run(
+                    ["systemctl", "show", svc, "--property=ActiveEnterTimestamp"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                for prop_line in uptime_result.stdout.strip().splitlines():
+                    if "=" in prop_line:
+                        lines.append(f"  {prop_line}")
+        except Exception as e:
+            lines.append(f"Service {svc}: check failed ({e})")
+
+    # 7. Recent NovaTrade errors from journalctl
+    try:
+        err_result = subprocess.run(
+            [
+                "journalctl",
+                "-u",
+                "novacore-novatrade",
+                "--since",
+                "6 hours ago",
+                "--no-pager",
+                "-p",
+                "err",
+                "-q",
+                "--output",
+                "short-precise",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        err_lines = [line.strip() for line in err_result.stdout.strip().splitlines() if line.strip()]
+        if err_lines:
+            lines.append(f"Recent errors (last 6h): {len(err_lines)} error(s)")
+            for el in err_lines[-3:]:
+                lines.append(f"  {el[:120]}")
+        else:
+            lines.append("Recent errors (last 6h): none")
+    except Exception as e:
+        lines.append(f"Error log check: failed ({e})")
+
+    # --- Verdict ---
+    problems = []
+    for line in lines:
+        lower = line.lower()
+        if any(w in lower for w in ("not active", "missing", "failed", "critical", "down", "stale", "error")):
+            problems.append(line.strip())
+    if problems:
+        lines.append("")
+        lines.append(f"VERDICT: {len(problems)} issue(s) found — needs attention")
+        for p in problems[:5]:
+            lines.append(f"  >> {p}")
+    else:
+        lines.append("")
+        lines.append("VERDICT: All systems connected and healthy — no trades may be normal market conditions")
+
+    header = "NovaTrade Health Investigation (auto-triggered at 12h no-trade)"
+    return f"{header}\n" + "\n".join(f"  {line}" for line in lines)
 
 
 # --- Output ------------------------------------------------------------------
@@ -1311,19 +1537,30 @@ def send_telegram_alert(checks: list) -> None:
 
 
 def send_telegram_heartbeat(checks: list) -> None:
-    """Send a compact heartbeat pulse to Telegram on every run."""
-    all_ok = all(c["ok"] for c in checks)
+    """Send a compact heartbeat pulse to Telegram, excluding NovaTrade noise.
+
+    NovaTrade-specific checks (signals, watchdog, trade_gap) are handled by
+    their own dedicated 12-hour alert pipeline; including them here just spams.
+    Healthy pulses go through a 4-hour cooldown; unhealthy pulses 1-hour.
+    """
+    _NOVATRADE_CHECK_PREFIXES = ("novatrade_signals", "novatrade_watchdog", "novatrade_trade_gap")
+
+    non_nt_checks = [c for c in checks if not c["name"].startswith(_NOVATRADE_CHECK_PREFIXES)]
+    all_ok = all(c["ok"] for c in non_nt_checks)
     now = datetime.now(timezone.utc).strftime("%H:%M UTC")
-    fail_count = len([c for c in checks if not c["ok"]])
+    failed = [c for c in non_nt_checks if not c["ok"]]
 
     if all_ok:
         text = f"All systems healthy at {now}."
+        if not _telegram_cooldown_gate(text, cooldown_secs=14400):
+            return
     else:
-        failed = [c for c in checks if not c["ok"]]
-        lines = [f"Heads up — {fail_count} issue{'s' if fail_count != 1 else ''} at {now}:"]
+        lines = [f"Heads up — {len(failed)} issue{'s' if len(failed) != 1 else ''} at {now}:"]
         for c in failed:
             lines.append(f"- {c['name']}: {c['detail']}")
         text = "\n".join(lines)
+        if not _telegram_cooldown_gate(text, cooldown_secs=3600):
+            return
 
     _send_telegram(text)
 
@@ -1667,6 +1904,10 @@ def _handle_agent_actions(response: str, checks: list | None = None) -> None:
             if action_type == "notify":
                 msg = action.get("message", "")
                 if msg:
+                    # Suppress NovaTrade health noise — handled by dedicated pipeline
+                    if _is_novatrade_message(msg):
+                        print(f"[heartbeat] NT-suppress (notify): {msg[:80]}")
+                        continue
                     full_msg = msg
                     if not _ground_service_alert(msg, checks):
                         continue
@@ -1677,8 +1918,12 @@ def _handle_agent_actions(response: str, checks: list | None = None) -> None:
             elif action_type == "task":
                 title = action.get("title", "heartbeat_proactive")
                 body = action.get("body", "")
-                # Ground task injections too — suppress hallucinated service-down tasks
+                # Suppress NovaTrade health noise — handled by dedicated pipeline
                 task_text = f"{title} {body}"
+                if _is_novatrade_message(task_text):
+                    print(f"[heartbeat] NT-suppress (task): {title}")
+                    continue
+                # Ground task injections too — suppress hallucinated service-down tasks
                 if not _ground_service_alert(task_text, checks):
                     print(f"[heartbeat] SUPPRESSED false service-down task: {title}")
                     continue
@@ -1686,6 +1931,10 @@ def _handle_agent_actions(response: str, checks: list | None = None) -> None:
     else:
         # No structured JSON — treat the whole response as a notification
         full_msg = response[:500]
+        # Suppress NovaTrade health noise — handled by dedicated pipeline
+        if _is_novatrade_message(full_msg):
+            print(f"[heartbeat] NT-suppress (fallback): {full_msg[:80]}")
+            return
         if not _ground_service_alert(response, checks):
             return
         if _telegram_cooldown_gate(full_msg):
@@ -2070,7 +2319,9 @@ def _run_claude_cycle(
         if outcome.memory_write == WriteStatus.SUCCESS:
             sinks.append("memory \u2713")
         sink_str = f" [{', '.join(sinks)}]" if sinks else ""
-        _send_telegram(f"Finished {label.lower()}: {title}{sink_str}")
+        _finish_msg = f"Finished {label.lower()}: {title}{sink_str}"
+        if not _is_novatrade_message(_finish_msg):
+            _send_telegram(_finish_msg)
 
     except subprocess.TimeoutExpired:
         if _mpg_record is not None:
@@ -2727,9 +2978,15 @@ def main() -> int:
         sh_result = check_self_healing()
         checks.append(sh_result)
         # Send Telegram alert for self-healing issues
+        # NovaTrade alerts are suppressed here — the watchdog 12h no-trade
+        # threshold is the sole NovaTrade Telegram channel.
+        _NT_KEYWORDS = ("novatrade", "signal_health", "trade_gap", "feed_health", "execution_pipeline")
         sh_alerts = sh_result.get("alerts", [])
         for alert in sh_alerts:
             if alert.get("severity") in ("warning", "critical"):
+                _alert_text = f"{alert.get('title', '')} {alert.get('detail', '')}".lower()
+                if any(kw in _alert_text for kw in _NT_KEYWORDS):
+                    continue
                 alert_msg = f"Self-healing ({alert['severity']}): {alert['title']}\n{alert['detail']}"
                 # Degradation tier alerts repeat every cycle with varying reasons
                 # (budget exceeded, circuit breaker mcp opened, etc.), which each
@@ -2859,7 +3116,8 @@ def main() -> int:
     try:
         watchdog_check = check_novatrade_watchdog()
         checks.append(watchdog_check)
-        # Send Telegram alert for any detected anomaly (Level 1+)
+        # Send Telegram alert only for Level 2+ (12h no-trade threshold).
+        # Level 1 is suppressed to avoid NovaTrade message spam.
         if "LEVEL_" in watchdog_check.get("detail", ""):
             detail = watchdog_check["detail"]
             level = detail.split(":")[0] if ":" in detail else "LEVEL_1"
@@ -2869,8 +3127,12 @@ def main() -> int:
 
                 _wd_hb = _get_wd_hb()
                 _level_enum = AnomalyLevel(level)
-                if _wd_hb.should_alert(_level_enum):
-                    send_watchdog_alert(detail, level)
+                if _level_enum in (AnomalyLevel.LEVEL_2, AnomalyLevel.LEVEL_3) and _wd_hb.should_alert(_level_enum):
+                    _investigation = _run_novatrade_investigation()
+                    send_watchdog_alert(
+                        detail + "\n\n--- Auto-Investigation ---\n" + _investigation,
+                        level,
+                    )
                     _wd_hb.mark_alerted(_level_enum)
             except Exception:
                 pass  # Non-critical — don't fail heartbeat

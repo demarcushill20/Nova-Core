@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0771_Can_you_check_and_see_if_your_getting_price_data_from_metaapi_1776107299",
+  "workflow_id": "0771_Can_you_check_and_see_if_your_getting_price_data_from_metaapi",
+  "task_summary": "Verified MetaAPI price data is working - all tests passed, account deployed, real-time and historical data flowing correctly",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Verified MetaAPI price data is working - all tests passed, account deployed, real-time and historical data flowing correctly"
+  ],
+  "successful_patterns": [
+    "task_completed: 0771_Can_you_check_and_see_if_your_getting_price_data_from_metaapi"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Verified MetaAPI price data is working - all tests passed, account deployed, real-time and historical data flowing correctly",
+  "created_at": "2026-04-13T19:08:19Z",
+  "confidence": "high"
+}

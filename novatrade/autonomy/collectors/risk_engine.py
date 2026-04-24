@@ -116,11 +116,12 @@ class RiskCollector(BaseCollector):
             except OSError:
                 pass
 
-        # Fallback: check secondary files when primary is missing or stale
+        # Fallback: check secondary files when primary is missing or stale.
+        # (``halt_state.json`` was previously listed here but has no writer
+        # anywhere in the repo, so its presence-check only muddied the score.)
         state_dir = Path(self.base_path) / "STATE" / "novatrade"
         key_files = [
             state_dir / "daily_loss_tracker.json",
-            state_dir / "halt_state.json",
             state_dir / "live_metrics.json",
         ]
 
@@ -297,60 +298,31 @@ class RiskCollector(BaseCollector):
         return 100.0  # well within limits
 
     def _check_halt_state(self) -> tuple[float, float]:
-        """Check halt status from halt_state.json or novatrade_risk_state.json.
+        """Check halt status from ``novatrade_risk_state.json``.
 
-        Reads the actual halt state rather than just checking file existence.
-        - If halt_state shows active halt → score reflects halt appropriately
-        - If no halt (or no halt file) → score high
-        - If file is missing → check risk_state.json as fallback
+        The canonical halt source is the risk engine's own state file,
+        written by ``RiskEngine.write_risk_state()``. A legacy
+        ``halt_state.json`` path was tolerated but never had a writer,
+        which sent operators on wild goose chases when they went looking
+        for it. Read only the risk state file here.
         """
         state_dir = Path(self.base_path) / "STATE" / "novatrade"
-        halt_path = state_dir / "halt_state.json"
+        risk_state = Path(self.base_path) / "STATE" / "novatrade_risk_state.json"
 
-        if not halt_path.exists():
-            # No halt_state.json — check novatrade_risk_state.json as fallback
-            risk_state = Path(self.base_path) / "STATE" / "novatrade_risk_state.json"
-            if risk_state.exists():
-                try:
-                    data = json.loads(risk_state.read_text())
-                    if isinstance(data, dict):
-                        if data.get("breached") or data.get("halted"):
-                            return 40.0, 1.0  # halted per risk state
-                        return 100.0, 0.0  # not halted, authoritative source
-                except (json.JSONDecodeError, OSError):
-                    pass
+        if risk_state.exists():
+            try:
+                data = json.loads(risk_state.read_text())
+                if isinstance(data, dict):
+                    if data.get("breached") or data.get("halted"):
+                        return 40.0, 1.0  # halted per risk state
+                    return 100.0, 0.0  # not halted, authoritative source
+            except (json.JSONDecodeError, OSError):
+                pass
 
-            # No halt file, no risk state — check if NovaTrade is running
-            if state_dir.is_dir() and any(state_dir.glob("*.json")):
-                # Active state dir with other files.  Absence of halt_state.json
-                # is the normal case when the risk engine has never halted.
-                # Score 90 (not 100 because we'd prefer an explicit file).
-                return 90.0, 0.0
-            return 50.0, -1.0  # no state dir at all — uncertain
-
-        try:
-            data = json.loads(halt_path.read_text())
-            if not isinstance(data, dict):
-                return 60.0, 0.0  # file exists but not proper format
-
-            halted = data.get("halted", data.get("is_halted", False))
-
-            if halted:
-                # Trading is halted — this is a valid risk state
-                # Score depends on whether halt is protective (good) vs broken (bad)
-                halt_type = data.get("type", data.get("halt_type", ""))
-                if halt_type in ("manual", "protective", "scheduled"):
-                    # Intentional halt — risk engine is working correctly
-                    return 70.0, 1.0
-                else:
-                    # Unplanned halt — risk engine triggered on anomaly
-                    return 40.0, 1.0
-            else:
-                # Not halted — normal operation
-                return 100.0, 0.0
-
-        except (json.JSONDecodeError, OSError):
-            return 50.0, 0.0  # can't read halt file → uncertain
+        # No risk state file — check if NovaTrade state dir is populated.
+        if state_dir.is_dir() and any(state_dir.glob("*.json")):
+            return 90.0, 0.0
+        return 50.0, -1.0  # no state dir at all — uncertain
 
     def _check_capital_allocation(self) -> tuple[float, float]:
         """Check if position sizing / lot config exists."""

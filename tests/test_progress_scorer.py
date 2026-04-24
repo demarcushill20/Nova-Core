@@ -774,9 +774,9 @@ async def test_strategy_pipeline_health_with_metrics(strat_collector, tmp_path):
 @pytest.mark.asyncio
 async def test_strategy_pipeline_health_halted(strat_collector, tmp_path):
     """Halted system = loses 25 points on halt check."""
-    state_dir = tmp_path / "STATE" / "novatrade"
-    state_dir.mkdir(parents=True)
-    (state_dir / "halt_state.json").write_text(json.dumps({"halted": True}))
+    state_dir = tmp_path / "STATE"
+    (state_dir / "novatrade").mkdir(parents=True, exist_ok=True)
+    (state_dir / "novatrade_risk_state.json").write_text(json.dumps({"halted": True}))
 
     result = await strat_collector.collect()
     sp = next(m for m in result.sub_metrics if m.name == "signal_pipeline_health")
@@ -1418,56 +1418,23 @@ async def test_tracker_peak_above_reference(risk_collector, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_halt_manual_halt(risk_collector, tmp_path):
-    """Manual halt → score 70 (intentional, risk engine working)."""
-    state_dir = tmp_path / "STATE" / "novatrade"
+async def test_halt_halted_via_risk_state(risk_collector, tmp_path):
+    """Halted via novatrade_risk_state.json → score 40."""
+    state_dir = tmp_path / "STATE"
     state_dir.mkdir(parents=True)
-    (state_dir / "halt_state.json").write_text(
-        json.dumps(
-            {
-                "halted": True,
-                "type": "manual",
-            }
-        )
-    )
+    (state_dir / "novatrade_risk_state.json").write_text(json.dumps({"halted": True}))
 
     result = await risk_collector.collect()
     halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
-    assert halt.value == 70.0
+    assert halt.value == 40.0
 
 
 @pytest.mark.asyncio
-async def test_halt_protective_halt(risk_collector, tmp_path):
-    """Protective halt → score 70 (risk engine correctly triggered)."""
-    state_dir = tmp_path / "STATE" / "novatrade"
+async def test_halt_breached_via_risk_state(risk_collector, tmp_path):
+    """Breached via novatrade_risk_state.json → score 40."""
+    state_dir = tmp_path / "STATE"
     state_dir.mkdir(parents=True)
-    (state_dir / "halt_state.json").write_text(
-        json.dumps(
-            {
-                "halted": True,
-                "type": "protective",
-            }
-        )
-    )
-
-    result = await risk_collector.collect()
-    halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
-    assert halt.value == 70.0
-
-
-@pytest.mark.asyncio
-async def test_halt_unplanned(risk_collector, tmp_path):
-    """Unplanned halt (anomaly) → score 40."""
-    state_dir = tmp_path / "STATE" / "novatrade"
-    state_dir.mkdir(parents=True)
-    (state_dir / "halt_state.json").write_text(
-        json.dumps(
-            {
-                "halted": True,
-                "type": "anomaly",
-            }
-        )
-    )
+    (state_dir / "novatrade_risk_state.json").write_text(json.dumps({"breached": True}))
 
     result = await risk_collector.collect()
     halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
@@ -1476,14 +1443,26 @@ async def test_halt_unplanned(risk_collector, tmp_path):
 
 @pytest.mark.asyncio
 async def test_halt_not_halted(risk_collector, tmp_path):
-    """halted=False → score 100 (normal operation)."""
-    state_dir = tmp_path / "STATE" / "novatrade"
+    """halted=False via risk state → score 100 (normal operation)."""
+    state_dir = tmp_path / "STATE"
     state_dir.mkdir(parents=True)
-    (state_dir / "halt_state.json").write_text(json.dumps({"halted": False}))
+    (state_dir / "novatrade_risk_state.json").write_text(json.dumps({"halted": False, "breached": False}))
 
     result = await risk_collector.collect()
     halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
     assert halt.value == 100.0
+
+
+@pytest.mark.asyncio
+async def test_halt_state_dir_only(risk_collector, tmp_path):
+    """No risk state file but state dir has JSON → score 90."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "some_state.json").write_text(json.dumps({"ok": True}))
+
+    result = await risk_collector.collect()
+    halt = next(m for m in result.sub_metrics if m.name == "halt_state_persistence")
+    assert halt.value == 90.0
 
 
 @pytest.mark.asyncio

@@ -67,13 +67,13 @@ class TestThresholdMultipliers:
         assert _REGIME_MULTIPLIERS["volatile"] < 1.0
 
     def test_effective_threshold_quiet_asian(self):
-        """Quiet regime + Asian session → 4× base = 12h threshold."""
+        """Quiet regime + Asian session → 4× base = 48h threshold."""
         base = DEFAULT_GAP_THRESHOLD_S
         effective = base * _SESSION_MULTIPLIERS["asian"] * _REGIME_MULTIPLIERS["quiet"]
         assert effective == base * 4.0
 
     def test_effective_threshold_volatile_overlap(self):
-        """Volatile regime + overlap session → 0.75× base = 2.25h."""
+        """Volatile regime + overlap session → 0.75× base = 9h."""
         base = DEFAULT_GAP_THRESHOLD_S
         effective = base * _SESSION_MULTIPLIERS["overlap"] * _REGIME_MULTIPLIERS["volatile"]
         assert effective == base * 0.75

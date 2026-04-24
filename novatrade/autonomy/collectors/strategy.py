@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -158,6 +159,19 @@ class StrategyCollector(BaseCollector):
     # private helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_shadow_symbol(symbol: str) -> bool:
+        """Return True if symbol indicates shadow/dry-run mode.
+
+        FTMO demo accounts use ".sim" as their real broker symbol suffix
+        (configured via FTMO_SYMBOL_SUFFIX env var). When the suffix
+        matches the configured broker suffix, the trade is real.
+        """
+        if not symbol.endswith(".sim"):
+            return False
+        ftmo_suffix = os.environ.get("FTMO_SYMBOL_SUFFIX", "")
+        return not (ftmo_suffix and symbol.endswith(ftmo_suffix))
+
     def _load_trade_log(self) -> list[dict]:
         """Load trades from STATE/novatrade/trade_journal.jsonl.
 
@@ -244,9 +258,10 @@ class StrategyCollector(BaseCollector):
         trades = self._load_trade_log()
         cutoff = time.time() - 24 * 3600
 
-        # Count only real trades (exclude shadow-mode ".sim" symbols)
         recent = [
-            t for t in trades if t.get("timestamp", 0) >= cutoff and not str(t.get("symbol", "")).endswith(".sim")
+            t
+            for t in trades
+            if t.get("timestamp", 0) >= cutoff and not self._is_shadow_symbol(str(t.get("symbol", "")))
         ]
         count = len(recent)
 
@@ -686,21 +701,22 @@ class StrategyCollector(BaseCollector):
                 score += 25.0
                 checks_passed += 1
 
-        # Check 4: No halt/error state
-        halt_path = state_dir / "halt_state.json"
-        if halt_path.exists():
+        # Check 4: No halt/error state — read the canonical risk-engine
+        # state file. (Legacy ``halt_state.json`` had no writer anywhere.)
+        risk_state_path = Path(self.base_path) / "STATE" / "novatrade_risk_state.json"
+        if risk_state_path.exists():
             try:
-                halt_data = json.loads(halt_path.read_text())
-                if halt_data.get("halted"):
+                rs_data = json.loads(risk_state_path.read_text())
+                if rs_data.get("halted") or rs_data.get("breached"):
                     pass  # halted — don't add points
                 else:
                     score += 25.0
                     checks_passed += 1
             except (json.JSONDecodeError, OSError):
-                score += 25.0  # can't read halt file → assume OK
+                score += 25.0  # can't read → assume OK
                 checks_passed += 1
         else:
-            score += 25.0  # no halt file → not halted
+            score += 25.0  # no risk-state file → assume not halted
             checks_passed += 1
 
         return score, float(checks_passed)

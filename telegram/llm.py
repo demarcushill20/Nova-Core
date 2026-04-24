@@ -105,8 +105,12 @@ async def generate_response(
         if conversation_context:
             positional_parts.append(f"RECENT CONVERSATION:\n{conversation_context}")
         positional_parts.append(f"USER MESSAGE:\n{prompt}")
+        # "--" ends option parsing so --disallowed-tools (variadic) doesn't
+        # consume the positional prompt as a tool name.
+        cmd.append("--")
         cmd.append("\n\n".join(positional_parts))
     else:
+        cmd.append("--")
         cmd.append(full_prompt)
 
     # Strip CLAUDECODE env var so child doesn't refuse to start

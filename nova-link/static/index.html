@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=8">
+  <link rel="stylesheet" href="/static/app.css?v=11">
   <title>Nova-Link</title>
 </head>
 <body>
@@ -61,6 +61,15 @@
 
       <!-- Chat body -->
       <div class="chat-body">
+        <!-- Walkie-talkie indicator -->
+        <div id="wt-indicator" class="wt-indicator" data-state="ready">
+          <div class="wt-pulse"></div>
+          <div class="wt-content">
+            <span id="wt-status" class="wt-status">Press play to talk</span>
+            <span id="wt-transcript" class="wt-transcript"></span>
+          </div>
+        </div>
+
         <!-- Empty / welcome state -->
         <div class="chat-empty" id="chat-empty">
           <div class="empty-glow"></div>
@@ -115,21 +124,14 @@
         <div id="voice-settings" class="voice-settings" style="display:none">
           <div class="voice-setting-row">
             <label>Voice</label>
-            <select id="voice-select" onchange="saveVoiceSetting()"></select>
-          </div>
-          <div class="voice-setting-row">
-            <label>Speed</label>
-            <div class="speed-control">
-              <input type="range" id="voice-speed" min="0.5" max="2" step="0.1" value="1" oninput="updateSpeedLabel(); saveVoiceSetting()">
-              <span id="speed-label">1.0x</span>
-            </div>
-          </div>
-          <div class="voice-setting-row">
-            <label>Pitch</label>
-            <div class="speed-control">
-              <input type="range" id="voice-pitch" min="0.5" max="2" step="0.1" value="1" oninput="updatePitchLabel(); saveVoiceSetting()">
-              <span id="pitch-label">1.0x</span>
-            </div>
+            <select id="ttsVoice" onchange="saveVoiceSetting()">
+              <option value="en-US-AriaNeural">Aria (Female)</option>
+              <option value="en-US-GuyNeural">Guy (Male)</option>
+              <option value="en-US-JennyNeural">Jenny (Female)</option>
+              <option value="en-US-EricNeural">Eric (Male)</option>
+              <option value="en-US-DavisNeural">Davis (Male)</option>
+              <option value="en-US-SaraNeural">Sara (Female)</option>
+            </select>
           </div>
           <button class="control-btn" onclick="testVoice()" style="width:100%;margin-top:8px">Test Voice</button>
         </div>
@@ -160,6 +162,15 @@
             autocorrect="off"
             spellcheck="true"></textarea>
           <div class="composer-actions">
+            <button id="wt-toggle" class="btn-icon composer-btn" onclick="toggleWalkieTalkie()" aria-label="Walkie-talkie mode" title="Walkie-talkie mode">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="2"/>
+                <path d="M16.24 7.76a6 6 0 0 1 0 8.49"/>
+                <path d="M7.76 16.24a6 6 0 0 1 0-8.49"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                <path d="M4.93 19.07a10 10 0 0 1 0-14.14"/>
+              </svg>
+            </button>
             <button class="btn-icon composer-btn" onclick="setChatMode('voice')" aria-label="Voice mode" title="Voice mode">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -280,12 +291,22 @@
       <div class="card-title">Last Planning Cycle</div>
       <div class="card-detail" id="last-planning">--</div>
     </div>
+
+    <footer class="app-footer">
+      <div class="footer-accent"></div>
+      <span class="footer-text">Built by <strong>Demarcus Hill</strong> &amp; <strong>NovaCore</strong></span>
+    </footer>
   </div>
 
   <!-- Reports Page -->
   <div id="page-reports" class="page">
     <div id="reports-list"></div>
     <div id="report-detail" style="display:none"></div>
+
+    <footer class="app-footer">
+      <div class="footer-accent"></div>
+      <span class="footer-text">Built by <strong>Demarcus Hill</strong> &amp; <strong>NovaCore</strong></span>
+    </footer>
   </div>
 
   <!-- Controls Page -->
@@ -321,6 +342,11 @@
         Refresh Dashboard
       </button>
     </div>
+
+    <footer class="app-footer">
+      <div class="footer-accent"></div>
+      <span class="footer-text">Built by <strong>Demarcus Hill</strong> &amp; <strong>NovaCore</strong></span>
+    </footer>
   </div>
 
   <!-- Conversation sidebar (slides in from left) -->
@@ -350,6 +376,7 @@
   <!-- Toast -->
   <div id="toast" class="toast"></div>
 
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=16"></script>
+  <audio id="tts-player" playsinline></audio>
 </body>
 </html>

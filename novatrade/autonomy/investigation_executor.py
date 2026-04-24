@@ -379,22 +379,23 @@ class InvestigationExecutor:
             )
 
     def _check_halt_state(self, round_num: int) -> InvestigationStep:
-        """Check if trading is halted by risk engine."""
-        path = self._novatrade_state / "halt_state.json"
+        """Check if trading is halted per novatrade_risk_state.json."""
+        path = self._state_dir / "novatrade_risk_state.json"
         if not path.exists():
             return InvestigationStep(
                 round_num=round_num,
                 check="check_halt_state",
-                result="No halt_state.json — no halt active",
-                status="ok",
+                result="No novatrade_risk_state.json — halt state unknown",
+                status="warning",
             )
         try:
             data = json.loads(path.read_text())
             if data.get("halted"):
+                reason = data.get("halt_reason") or data.get("reason") or "unknown"
                 return InvestigationStep(
                     round_num=round_num,
                     check="check_halt_state",
-                    result=f"HALT ACTIVE: {data.get('reason', 'unknown')}",
+                    result=f"HALT ACTIVE: {reason}",
                     status="critical",
                 )
             return InvestigationStep(
@@ -407,7 +408,7 @@ class InvestigationExecutor:
             return InvestigationStep(
                 round_num=round_num,
                 check="check_halt_state",
-                result="halt_state.json unreadable",
+                result="novatrade_risk_state.json unreadable",
                 status="warning",
             )
 

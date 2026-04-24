@@ -94,6 +94,7 @@ class PerformanceCollector(BaseCollector):
 
         # Distinguish "no data available" from "low performance"
         data_points = len(equity_data)
+        meaningful_returns = self._count_meaningful_returns(equity_data)
         if not has_data:
             warnings.append(
                 f"No equity data available — scores are neutral placeholders "
@@ -108,9 +109,12 @@ class PerformanceCollector(BaseCollector):
         sub_metrics.append(
             SubMetric(
                 name="insufficient_data",
-                value=min(100.0, (data_points / self._MIN_TRADES_FULL) * 100.0),
-                raw_value=float(data_points),
-                description=f"Data points: {data_points}/{self._MIN_TRADES_FULL} needed for full confidence",
+                value=min(100.0, (meaningful_returns / self._MIN_TRADES_FULL) * 100.0),
+                raw_value=float(meaningful_returns),
+                description=(
+                    f"Meaningful returns: {meaningful_returns}/{self._MIN_TRADES_FULL}"
+                    f" needed for full confidence (from {data_points} equity snapshots)"
+                ),
             )
         )
 
@@ -141,21 +145,25 @@ class PerformanceCollector(BaseCollector):
         else:
             avg = sum(m.value for m in scorable) / len(scorable)
 
-        # Sparse-data floor: with fewer than MIN_TRADES_FULL data points,
-        # metrics that barely clear their minimum thresholds produce
-        # unreliable scores.  A short negative streak in 10-15 equity
-        # snapshots can push Sharpe to score=20, dragging the average
-        # below 70 and triggering false YELLOW repair tasks.  Apply the
-        # same floor used in the incomplete-coverage branch above.
-        if data_points < self._MIN_TRADES_FULL:
-            avg = max(avg, 72.0)
+        # Sparse-data floor aligned with confidence thresholds.
+        # Below _MIN_TRADES_PARTIAL: hard floor (near-zero data).
+        # _MIN_TRADES_PARTIAL → _MIN_TRADES_FULL: linear ramp-off.
+        # At _MIN_TRADES_FULL (confidence 1.0): no floor — score reflects
+        # reality so the decision engine can detect genuine regressions.
+        _FLOOR = 72.0
+        if meaningful_returns < self._MIN_TRADES_PARTIAL:
+            avg = max(avg, _FLOOR)
+        elif meaningful_returns < self._MIN_TRADES_FULL:
+            ramp = (meaningful_returns - self._MIN_TRADES_PARTIAL) / (self._MIN_TRADES_FULL - self._MIN_TRADES_PARTIAL)
+            blended_floor = _FLOOR * (1.0 - ramp) + avg * ramp
+            avg = max(avg, blended_floor)
 
-        # Set confidence based on data availability
-        if data_points >= self._MIN_TRADES_FULL:
+        # Set confidence based on meaningful returns, not snapshot count
+        if meaningful_returns >= self._MIN_TRADES_FULL:
             confidence = 1.0
-        elif data_points >= self._MIN_TRADES_PARTIAL:
+        elif meaningful_returns >= self._MIN_TRADES_PARTIAL:
             confidence = 0.5
-        elif data_points >= 2:
+        elif meaningful_returns >= 2:
             confidence = 0.3
         else:
             confidence = 0.1
@@ -171,6 +179,23 @@ class PerformanceCollector(BaseCollector):
     # ------------------------------------------------------------------
     # private helpers
     # ------------------------------------------------------------------
+
+    def _count_meaningful_returns(self, equity_data: list[dict]) -> int:
+        """Count non-noise equity returns (actual trade-like movements).
+
+        Hourly equity snapshots accumulate regardless of trading activity.
+        Only returns exceeding the noise floor represent real trades.
+        """
+        if len(equity_data) < 2:
+            return 0
+        values = [e.get("equity", e.get("value", 0)) for e in equity_data]
+        base_equity = values[0] if values[0] > 0 else 1.0
+        noise_floor = base_equity * self._PF_NOISE_FLOOR_PCT
+        count = 0
+        for i in range(1, len(values)):
+            if abs(values[i] - values[i - 1]) > noise_floor:
+                count += 1
+        return count
 
     def _load_equity_history(self) -> list[dict]:
         """Load equity history from STATE/novatrade/equity_history.json.

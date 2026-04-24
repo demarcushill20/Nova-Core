@@ -51,12 +51,12 @@ async def setup(args: argparse.Namespace) -> int:
     print()
 
     # --- 1. Initialize SDK ---------------------------------------------------
-    print("[1/5] Initializing MetaApi SDK...")
+    print("[1/6] Initializing MetaApi SDK...")
     api = MetaApi(args.token)
     print("  OK")
 
     # --- 2. Create account ---------------------------------------------------
-    print(f"[2/5] Creating cloud account (login={args.login}, server={args.server})...")
+    print(f"[2/6] Creating cloud account (login={args.login}, server={args.server})...")
     try:
         account = await api.metatrader_account_api.create_account(
             {
@@ -83,40 +83,62 @@ async def setup(args: argparse.Namespace) -> int:
         return 2
 
     # --- 3. Wait for deployment ----------------------------------------------
-    print("[3/5] Deploying account (this may take 1-3 minutes)...")
+    print("[3/6] Deploying account (this may take 1-3 minutes)...")
+    deploy_ok = False
     try:
         await account.deploy()
         await account.wait_deployed(timeout_in_seconds=180)
         print("  Deployed")
+        deploy_ok = True
     except Exception as exc:
-        print(f"  Deploy timeout/error: {exc}")
-        print(f"  Account ID is still: {account_id}")
-        print("  You can check status at https://app.metaapi.cloud")
-        # Don't fail — account may still deploy, write env anyway
+        exc_str = str(exc)
+        if "top up your account" in exc_str or "403" in exc_str:
+            print("  FAILED: MetaApi billing limit reached.")
+            print("  Your MetaApi account needs a paid plan or credits to deploy accounts.")
+            print("  Visit https://app.metaapi.cloud/billing to top up.")
+            print(f"  Account ID (saved but not usable yet): {account_id}")
+            # Write env anyway so user doesn't lose the account ID
+        else:
+            print(f"  Deploy timeout/error: {exc}")
+            print(f"  Account ID is still: {account_id}")
+            print("  You can check status at https://app.metaapi.cloud")
 
     # --- 4. Verify connection ------------------------------------------------
-    print("[4/5] Verifying connection...")
+    print("[4/6] Verifying connection...")
     connected = False
+    if not deploy_ok:
+        print("  Skipped — account not deployed (see step 3 above)")
+    else:
+        try:
+            connection = account.get_rpc_connection()
+            await connection.connect()
+            await connection.wait_synchronized(timeout_in_seconds=120)
+
+            info = await connection.get_account_information()
+            print(f"  Broker:    {info.get('broker', 'unknown')}")
+            print(f"  Server:    {info.get('server', 'unknown')}")
+            print(f"  Balance:   {info.get('balance', 0)} {info.get('currency', 'USD')}")
+            print(f"  Leverage:  1:{info.get('leverage', '?')}")
+            print(f"  Name:      {info.get('name', 'unknown')}")
+            connected = True
+
+            await connection.close()
+        except Exception as exc:
+            print(f"  Connection verification failed: {exc}")
+            print("  The account may still be deploying — check MetaApi dashboard")
+
+    # --- 5. Detect region from account metadata --------------------------------
+    print("[5/6] Detecting account region...")
+    region = "new-york"
     try:
-        connection = account.get_rpc_connection()
-        await connection.connect()
-        await connection.wait_synchronized(timeout_in_seconds=120)
+        acct_data = await api.metatrader_account_api.get_account(account_id)
+        region = getattr(acct_data, "region", None) or "new-york"
+        print(f"  Region: {region}")
+    except Exception:
+        print(f"  Could not detect — defaulting to {region}")
 
-        info = await connection.get_account_information()
-        print(f"  Broker:    {info.get('broker', 'unknown')}")
-        print(f"  Server:    {info.get('server', 'unknown')}")
-        print(f"  Balance:   {info.get('balance', 0)} {info.get('currency', 'USD')}")
-        print(f"  Leverage:  1:{info.get('leverage', '?')}")
-        print(f"  Name:      {info.get('name', 'unknown')}")
-        connected = True
-
-        await connection.close()
-    except Exception as exc:
-        print(f"  Connection verification failed: {exc}")
-        print("  The account may still be deploying — check MetaApi dashboard")
-
-    # --- 5. Write env file ---------------------------------------------------
-    print(f"[5/5] Writing env file → {args.env_out}")
+    # --- 6. Write env file ---------------------------------------------------
+    print(f"[6/6] Writing env file → {args.env_out}")
 
     symbols = args.symbols or "EURUSD,GBPUSD,USDJPY"
     campaign = args.campaign or "ftmo-free-trial"
@@ -127,6 +149,7 @@ async def setup(args: argparse.Namespace) -> int:
 # MetaApi credentials
 METAAPI_TOKEN={args.token}
 METAAPI_ACCOUNT_ID={account_id}
+METAAPI_REGION={region}
 
 # NovaTrade core
 NOVATRADE_MODE=DEMO

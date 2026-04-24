@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0799_Can_you_check_my_telegram_messages_for_the_last_4_hours_and_investigate_the_spam_1776312884",
+  "workflow_id": "0799_Can_you_check_my_telegram_messages_for_the_last_4_hours_and_investigate_the_spam",
+  "task_summary": "Audited last 4h of Telegram (4 benign outbound msgs, no spam), confirmed 0 trade rejections, proved the \"halt\" was stale synthetic data on the deprecated STATE/supervisor path while the live canonical supervisor is not halted; archived the stale file.",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Audited last 4h of Telegram (4 benign outbound msgs, no spam), confirmed 0 trade rejections, proved the \"halt\" was stale synthetic data on the deprecated STATE/supervisor path while the live canonical supervisor is not halted; archived the stale file."
+  ],
+  "successful_patterns": [
+    "task_completed: 0799_Can_you_check_my_telegram_messages_for_the_last_4_hours_and_investigate_the_spa"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Audited last 4h of Telegram (4 benign outbound msgs, no spam), confirmed 0 trade rejections, proved the \"halt\" was stale synthetic data on the deprecated STATE/supervisor path while the live canonical supervisor is not halted; archived the stale file.",
+  "created_at": "2026-04-16T04:14:44Z",
+  "confidence": "low"
+}

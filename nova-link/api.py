@@ -12,14 +12,16 @@ import importlib
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import edge_tts
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -102,6 +104,11 @@ class CreateThreadRequest(BaseModel):
 
 class TokenRequest(BaseModel):
     token: str | None = None
+
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str | None = None
 
 
 # --- Background task tracking ------------------------------------------------
@@ -326,7 +333,6 @@ async def create_task(req: TaskRequest):
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     # Sanitize title for filename
-    import re
 
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", req.title.strip()).strip("_").lower()[:60]
     stem = f"nl_{ts}_{slug}"
@@ -938,6 +944,52 @@ async def trigger_heartbeat(req: TokenRequest):
         return {"status": "triggered", "pid": proc.pid}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# --- Text-to-Speech (edge-tts) -----------------------------------------------
+
+DEFAULT_TTS_VOICE = "en-US-AriaNeural"
+
+_VALID_TTS_VOICES = {
+    "en-US-AriaNeural",
+    "en-US-GuyNeural",
+    "en-US-JennyNeural",
+    "en-US-EricNeural",
+    "en-US-DavisNeural",
+    "en-US-SaraNeural",
+}
+
+
+@app.post("/api/tts")
+async def text_to_speech(req: TTSRequest):
+    """Convert text to speech audio via edge-tts. Returns MP3."""
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty text")
+
+    text = re.sub(r"```[\s\S]*?```", "code block omitted", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"\*([^*]+)\*", r"\1", text)
+    text = re.sub(r"#{1,6}\s", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"[-*]\s", "", text)
+    text = text.strip()
+
+    if not text:
+        raise HTTPException(status_code=400, detail="No speakable text")
+
+    voice = req.voice or DEFAULT_TTS_VOICE
+    if voice not in _VALID_TTS_VOICES:
+        LOG.warning("Invalid TTS voice %r, falling back to default", voice)
+        voice = DEFAULT_TTS_VOICE
+    communicate = edge_tts.Communicate(text, voice)
+    audio_bytes = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_bytes += chunk["data"]
+
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
 # --- Static files (PWA) -----------------------------------------------------

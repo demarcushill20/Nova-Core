@@ -332,17 +332,19 @@ async def build_stack(
     # --- Wire WebhookState into MonitorLoop for canonical health state ---
     loop._webhook_state = ws
 
-    # --- Active demo gate check ---
-    if mode == LaunchMode.ACTIVE_DEMO and readiness.verdict != ReadinessVerdict.READY_FOR_ACTIVE_DEMO:
+    # --- Launch gate check ---
+    if readiness.verdict == ReadinessVerdict.NOT_READY:
         log.error(
-            "ACTIVE_DEMO requested but launch gate says %s",
-            readiness.verdict.value,
+            "launch gate verdict NOT_READY for mode %s",
+            mode.value,
         )
         report = generate_readiness_report(readiness)
         log.error("\n%s", report)
-        raise RuntimeError(
-            f"Cannot enter active_demo mode — launch gate verdict: {readiness.verdict.value}. "
-            f"Blockers: {readiness.blockers}"
+        raise RuntimeError(f"Cannot start — launch gate verdict: NOT_READY. Blockers: {readiness.blockers}")
+    if readiness.verdict == ReadinessVerdict.CONDITIONALLY_READY:
+        log.warning(
+            "launch gate CONDITIONALLY_READY — proceeding with pending external confirmations: %s",
+            readiness.external_confirmations,
         )
 
     # --- Persist strategy config for autonomy collector ---
@@ -782,6 +784,7 @@ async def build_live_stack(
         state_store=state_store,
         adapter=adapter,
         hard_risk_supervisor=supervisor,
+        risk_engine=risk_engine,
     )
 
     # --- Persist strategy config for autonomy collector ---

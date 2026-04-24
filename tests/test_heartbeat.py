@@ -341,7 +341,10 @@ class TestTelegramHeartbeat:
             {"name": "svc", "ok": True, "detail": "ok"},
             {"name": "disk", "ok": True, "detail": "ok"},
         ]
-        with mock.patch("heartbeat._send_telegram") as m:
+        with (
+            mock.patch("heartbeat._send_telegram") as m,
+            mock.patch("heartbeat._telegram_cooldown_gate", return_value=True),
+        ):
             heartbeat.send_telegram_heartbeat(checks)
         m.assert_called_once()
         msg = m.call_args[0][0]
@@ -352,7 +355,10 @@ class TestTelegramHeartbeat:
             {"name": "svc", "ok": True, "detail": "ok"},
             {"name": "disk", "ok": False, "detail": "full"},
         ]
-        with mock.patch("heartbeat._send_telegram") as m:
+        with (
+            mock.patch("heartbeat._send_telegram") as m,
+            mock.patch("heartbeat._telegram_cooldown_gate", return_value=True),
+        ):
             heartbeat.send_telegram_heartbeat(checks)
         m.assert_called_once()
         msg = m.call_args[0][0]
@@ -552,6 +558,13 @@ def _mock_all_heartbeat_checks(stack, *, overrides=None):
     stack.enter_context(mock.patch("agents.memory_triggers.trigger_engine.fire"))
     # Skip expensive post-check phases (LLM agent, memory, autonomy)
     stack.enter_context(mock.patch("heartbeat._heartbeat_shutdown_requested", True))
+    # Mock kill switch so tests aren't affected by live kill switch state
+    _ks_mod = mock.MagicMock()
+    _ks_mod.MODE_RUN = "run"
+    _ks_mod.MODE_STOPPED = "stopped"
+    _ks_mod.check_kill_switch = mock.MagicMock(return_value="run")
+    _ks_mod.heartbeat_alive = mock.MagicMock()
+    stack.enter_context(mock.patch.dict("sys.modules", {"nova_kill_switch": _ks_mod}))
 
     # -- Observable mocks (tests may assert on these) --
     mocks["send_telegram_heartbeat"] = stack.enter_context(mock.patch("heartbeat.send_telegram_heartbeat"))
@@ -670,3 +683,81 @@ class TestSelfReferentialRunaway:
             code = heartbeat.main()
         # The self-referential runaway should be suppressed: overall HEALTHY
         assert code == 0
+
+
+# ---------------------------------------------------------------------------
+# _handle_agent_actions: NovaTrade message suppression
+# ---------------------------------------------------------------------------
+
+
+class TestHandleAgentActionsNTSuppression:
+    """Verify that NovaTrade health noise is suppressed in _handle_agent_actions."""
+
+    def test_structured_notify_novatrade_suppressed(self, capsys):
+        """Structured JSON notify with NovaTrade keywords should NOT send Telegram."""
+        nt_msg = "Health check FAIL: novatrade_signals - status=LOW_RATE | signals: 1h=0"
+        response = json.dumps([{"type": "notify", "message": nt_msg}])
+        with (
+            mock.patch("heartbeat._send_telegram") as m_send,
+            mock.patch("heartbeat._telegram_cooldown_gate", return_value=True),
+            mock.patch("heartbeat._extract_json_actions", return_value=[{"type": "notify", "message": nt_msg}]),
+        ):
+            heartbeat._handle_agent_actions(response, checks=[])
+        m_send.assert_not_called()
+        assert "NT-suppress" in capsys.readouterr().out
+
+    def test_structured_notify_non_novatrade_passes(self):
+        """Structured JSON notify WITHOUT NovaTrade keywords should send normally."""
+        msg = "Disk usage at 92% — please investigate"
+        with (
+            mock.patch("heartbeat._send_telegram") as m_send,
+            mock.patch("heartbeat._telegram_cooldown_gate", return_value=True),
+            mock.patch("heartbeat._ground_service_alert", return_value=True),
+            mock.patch("heartbeat._extract_json_actions", return_value=[{"type": "notify", "message": msg}]),
+        ):
+            heartbeat._handle_agent_actions(msg, checks=[])
+        m_send.assert_called_once()
+
+    def test_structured_task_novatrade_suppressed(self, capsys):
+        """Structured JSON task with NovaTrade keywords should NOT inject task."""
+        action = {"type": "task", "title": "fix novatrade_signals feed_health", "body": "check pipeline"}
+        with (
+            mock.patch("heartbeat._inject_proactive_task") as m_task,
+            mock.patch("heartbeat._extract_json_actions", return_value=[action]),
+        ):
+            heartbeat._handle_agent_actions("ignored", checks=[])
+        m_task.assert_not_called()
+        assert "NT-suppress" in capsys.readouterr().out
+
+    def test_fallback_novatrade_suppressed(self, capsys):
+        """Unstructured fallback response with NovaTrade keywords should NOT send."""
+        response = "Health check FAIL: novatrade_signals - status=LOW_RATE"
+        with (
+            mock.patch("heartbeat._send_telegram") as m_send,
+            mock.patch("heartbeat._extract_json_actions", return_value=None),
+        ):
+            heartbeat._handle_agent_actions(response, checks=[])
+        m_send.assert_not_called()
+        assert "NT-suppress" in capsys.readouterr().out
+
+    def test_fallback_non_novatrade_passes(self):
+        """Unstructured fallback WITHOUT NovaTrade keywords should send normally."""
+        response = "Service watcher is not responding, please check"
+        with (
+            mock.patch("heartbeat._send_telegram") as m_send,
+            mock.patch("heartbeat._telegram_cooldown_gate", return_value=True),
+            mock.patch("heartbeat._ground_service_alert", return_value=True),
+            mock.patch("heartbeat._extract_json_actions", return_value=None),
+        ):
+            heartbeat._handle_agent_actions(response, checks=[])
+        m_send.assert_called_once()
+
+    def test_is_novatrade_message_keywords(self):
+        """_is_novatrade_message should match all expected keywords."""
+        assert heartbeat._is_novatrade_message("novatrade_signals check failed")
+        assert heartbeat._is_novatrade_message("signal_health degraded")
+        assert heartbeat._is_novatrade_message("TRADE_GAP detected")
+        assert heartbeat._is_novatrade_message("feed_health LOW_RATE")
+        assert heartbeat._is_novatrade_message("execution_pipeline stalled")
+        assert not heartbeat._is_novatrade_message("Disk usage at 92%")
+        assert not heartbeat._is_novatrade_message("Service watcher stopped")

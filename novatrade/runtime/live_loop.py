@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -38,6 +39,7 @@ from novatrade.execution.trading_agent import AgentState
 from novatrade.monitor.enhanced_health import EnhancedHealthMonitor
 from novatrade.monitor.feed_health import FeedHealthSupervisor, FeedState
 from novatrade.risk.hard_risk_supervisor import HardRiskSupervisor, SupervisorAction
+from novatrade.risk.risk_engine import RiskEngine
 from novatrade.strategy.live_engine import LiveSignal, LiveStrategyEngine, SignalType
 
 log = logging.getLogger("novatrade.runtime.live_loop")
@@ -132,6 +134,7 @@ class LiveLoop:
         state_store=None,
         adapter=None,
         hard_risk_supervisor: HardRiskSupervisor | None = None,
+        risk_engine: RiskEngine | None = None,
     ) -> None:
         self._poller = poller
         self._aggregator = aggregator
@@ -142,6 +145,7 @@ class LiveLoop:
         self._state_store = state_store
         self._adapter = adapter  # MetaApiAdapter for periodic resubscription
         self._hard_supervisor = hard_risk_supervisor
+        self._risk_engine = risk_engine
         self._enhanced_health = EnhancedHealthMonitor(adapter) if adapter else None
 
         self._signal_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_maxsize)
@@ -602,6 +606,61 @@ class LiveLoop:
                     # Persist equity snapshot for performance_stability scoring
                     self._persist_equity_snapshot()
 
+                    # Persist risk-engine state so the autonomy collector's
+                    # freshness probe sees this file refreshed every health
+                    # cycle. Previously this was only written by OpsMonitor —
+                    # if that loop stalled, the risk_engine score decayed even
+                    # though in-memory risk evaluation was healthy.
+                    # Bounded try/except + timer so a slow disk write cannot
+                    # back-pressure the tick loop.
+                    if self._risk_engine is not None:
+                        t0 = time.monotonic()
+                        try:
+                            self._risk_engine.write_risk_state()
+                        except Exception:
+                            log.warning("risk-state write failed", exc_info=True)
+                        else:
+                            dt_ms = (time.monotonic() - t0) * 1000.0
+                            if dt_ms > 200.0:
+                                log.warning("risk-state write slow: %.1fms", dt_ms)
+
+                        # Advance FTMO day-scoped trackers and persist so
+                        # daily_loss_tracker.json rolls over its day_key at
+                        # the Prague midnight boundary even when OpsMonitor
+                        # is not driving cycles. The rollover used to live
+                        # only in OpsMonitor.run_cycle() step 7 — when that
+                        # loop went silent the tracker file stuck at an old
+                        # day_key for 8+ days, capping the collector score.
+                        # Equity is our best-available signal on this path;
+                        # _set_day_reference() takes max(balance, equity)
+                        # so passing equity twice is safe (slightly
+                        # conservative on day boundary).
+                        equity = None
+                        if self._adapter is not None and hasattr(self._adapter, "get_equity"):
+                            try:
+                                equity = self._adapter.get_equity()
+                            except Exception:
+                                equity = None
+                        if equity is None and hasattr(self._live_agent, "last_equity"):
+                            equity = self._live_agent.last_equity
+                        if equity is not None and equity > 0:
+                            t1 = time.monotonic()
+                            try:
+                                self._risk_engine.rollover_daily_trackers(equity, equity)
+                                self._risk_engine.save_ftmo_state()
+                            except Exception:
+                                log.warning(
+                                    "ftmo rollover/save failed",
+                                    exc_info=True,
+                                )
+                            else:
+                                dt_ms = (time.monotonic() - t1) * 1000.0
+                                if dt_ms > 300.0:
+                                    log.warning(
+                                        "ftmo rollover/save slow: %.1fms",
+                                        dt_ms,
+                                    )
+
                     # Broker ↔ Agent state reconciliation + supervisor check.
                     # When the agent has no open or pending position, these
                     # broker polls produce no useful work but still burn
@@ -974,19 +1033,53 @@ class LiveLoop:
             pos = positions[0]
             broker_side = "LONG" if getattr(pos, "type", "BUY") in ("BUY", "buy", "POSITION_TYPE_BUY") else "SHORT"
             order_side = OrderSide.BUY if broker_side == "LONG" else OrderSide.SELL
+
+            # Volume sanity gate — refuse to adopt absurdly large positions.
+            # A $100K FTMO account should never exceed ~5 lots on a single pair.
+            _raw_max_vol = os.environ.get("NOVATRADE_MAX_ADOPT_VOLUME", "5.0")
+            try:
+                max_adopt_volume = float(_raw_max_vol)
+            except (ValueError, TypeError):
+                max_adopt_volume = 5.0
+                log.error(
+                    "RECONCILE: invalid NOVATRADE_MAX_ADOPT_VOLUME=%r, defaulting to %.1f",
+                    _raw_max_vol,
+                    max_adopt_volume,
+                )
+            if max_adopt_volume <= 0:
+                log.error(
+                    "RECONCILE: NOVATRADE_MAX_ADOPT_VOLUME=%.2f is non-positive, clamping to 5.0", max_adopt_volume
+                )
+                max_adopt_volume = 5.0
+            if pos.volume > max_adopt_volume:
+                log.critical(
+                    "RECONCILE: REFUSING orphan adoption — volume %.2f lots exceeds "
+                    "max_adopt_volume=%.1f. position=%s %s at %.5f. "
+                    "Manual review required.",
+                    pos.volume,
+                    max_adopt_volume,
+                    pos.position_id,
+                    broker_side,
+                    pos.open_price,
+                )
+                return
+
+            sym = (
+                pos.symbol
+                if hasattr(pos, "symbol")
+                else (self._live_agent._cfg.symbols[0] if self._live_agent._cfg.symbols else "EURUSD")
+            )
             log.warning(
-                "RECONCILE: agent is FLAT but broker has position %s %s — adopting orphan.",
+                "RECONCILE: agent is FLAT but broker has position %s %s vol=%.2f %s — adopting orphan.",
                 pos.position_id,
                 broker_side,
+                pos.volume,
+                sym,
             )
             agent.recover_position(
                 position_id=pos.position_id,
                 side=order_side,
-                symbol=(
-                    pos.symbol
-                    if hasattr(pos, "symbol")
-                    else (self._live_agent._cfg.symbols[0] if self._live_agent._cfg.symbols else "EURUSD")
-                ),
+                symbol=sym,
                 volume=pos.volume,
                 fill_price=pos.open_price,
                 stop_loss=getattr(pos, "stop_loss", 0.0) or 0.0,

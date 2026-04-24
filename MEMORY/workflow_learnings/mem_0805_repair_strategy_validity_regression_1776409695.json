@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0805_repair_strategy_validity_regression_1776409695",
+  "workflow_id": "0805_repair_strategy_validity_regression",
+  "task_summary": "Diagnosed zero-trade issue - strategy blocked by 1-bar cooldown in M5 timeframe, should resolve automatically",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed zero-trade issue - strategy blocked by 1-bar cooldown in M5 timeframe, should resolve automatically"
+  ],
+  "successful_patterns": [
+    "task_completed: 0805_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed zero-trade issue - strategy blocked by 1-bar cooldown in M5 timeframe, should resolve automatically",
+  "created_at": "2026-04-17T07:08:15Z",
+  "confidence": "low"
+}

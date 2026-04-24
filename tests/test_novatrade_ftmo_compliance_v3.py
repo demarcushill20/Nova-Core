@@ -403,9 +403,9 @@ class TestConfigAlignment:
     def test_supervisor_vetoes_at_10_daily_trades(self, tmp_path):
         supervisor = HardRiskSupervisor(state_dir=str(tmp_path / "state"), kill_switch_dir=str(tmp_path / "kill"))
         supervisor.initialize(100_000.0)
-        # Record 10 trades
-        for _ in range(10):
-            supervisor.on_trade_opened(0.10)
+        # Record 10 distinct trades
+        for i in range(10):
+            supervisor.on_trade_opened(f"ftmo-pos-{i}", 0.10)
         decision = supervisor.veto(
             symbol="EURUSD",
             side="BUY",

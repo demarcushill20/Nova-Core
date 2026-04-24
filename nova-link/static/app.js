@@ -139,6 +139,13 @@ let ttsEnabled = true;
 let isListening = false;
 let recognition = null;
 
+// Walkie-talkie state
+let walkieTalkieEnabled = false;
+let walkieTalkieAudio = null;
+let walkieTalkieRecognition = null;
+let wtListening = false;
+let wakeLock = null;
+
 // --- Markdown renderer (small subset, no deps) ---
 function renderMarkdown(src) {
   if (!src) return '';
@@ -470,7 +477,6 @@ async function sendChat() {
   const msg = input.value.trim();
   if (!msg) return;
 
-  unlockTTS();
   input.value = '';
   autoResizeTextarea(input);
 
@@ -602,7 +608,6 @@ function _flashSendButton(state) {
 
 // --- Voice mode ---
 function setChatMode(mode) {
-  unlockTTS();
   chatMode = mode;
   document.getElementById('composer-row').style.display = mode === 'text' ? 'flex' : 'none';
   document.getElementById('voice-input-bar').style.display = mode === 'voice' ? 'flex' : 'none';
@@ -615,23 +620,16 @@ function toggleTTS() {
   ttsEnabled = !ttsEnabled;
   const btn = document.getElementById('tts-toggle');
   if (btn) btn.style.color = ttsEnabled ? 'var(--accent)' : 'var(--text-dim)';
-  if (!ttsEnabled) window.speechSynthesis.cancel();
+  if (!ttsEnabled) cancelTTS();
   toast(ttsEnabled ? 'Voice responses on' : 'Voice responses off');
 }
 
-let ttsUnlocked = false;
-function unlockTTS() {
-  if (ttsUnlocked || !('speechSynthesis' in window)) return;
-  const utter = new SpeechSynthesisUtterance('');
-  utter.volume = 0;
-  window.speechSynthesis.speak(utter);
-  ttsUnlocked = true;
-}
 
-function speak(text) {
-  if (!('speechSynthesis' in window) || !ttsEnabled) return;
-  window.speechSynthesis.cancel();
+let currentTTSAudio = null;
+let _ttsBlobUrl = null;
 
+async function speak(text) {
+  if (!ttsEnabled) return;
   const clean = text
     .replace(/```[\s\S]*?```/g, 'code block omitted')
     .replace(/`([^`]+)`/g, '$1')
@@ -641,92 +639,85 @@ function speak(text) {
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/[-*]\s/g, '')
     .trim();
-
   if (!clean) return;
+  cancelTTS();
+  try {
+    const voice = localStorage.getItem('nova-tts-voice') || '';
+    const body = { text: clean };
+    if (voice) body.voice = voice;
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
 
-  const chunks = [];
-  const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [clean];
-  let current = '';
-  for (const s of sentences) {
-    if ((current + s).length > 200) {
-      if (current) chunks.push(current.trim());
-      current = s;
-    } else {
-      current += s;
-    }
+    // Always play TTS through the DOM <audio id="tts-player"> element.
+    // iOS/WebKit routes DOM-attached media elements to the Bluetooth sink
+    // (same path YouTube <video> takes). Detached `new Audio()` objects
+    // (the walkie keepalive) tend to fall back to the phone speaker, so
+    // we don't use them for actual TTS playback.
+    const audio = document.getElementById('tts-player');
+    if (_ttsBlobUrl) URL.revokeObjectURL(_ttsBlobUrl);
+    _ttsBlobUrl = url;
+    currentTTSAudio = audio;
+
+    // Pause the silent keepalive while TTS plays so iOS doesn't mix two
+    // streams through different sinks — TTS stream should own the route.
+    const hadKeepalive = walkieTalkieEnabled && walkieTalkieAudio && !walkieTalkieAudio.paused;
+    if (hadKeepalive) { try { walkieTalkieAudio.pause(); } catch (_) {} }
+
+    audio.loop = false;
+    audio.volume = 1.0;
+    audio.src = url;
+    const finish = () => {
+      URL.revokeObjectURL(url); _ttsBlobUrl = null; currentTTSAudio = null;
+      if (walkieTalkieEnabled && walkieTalkieAudio) {
+        walkieTalkieAudio.play().catch(() => {});
+        _updateWtUI('ready');
+      }
+    };
+    audio.onended = finish;
+    audio.onerror = finish;
+    await audio.play();
+  } catch (err) {
+    console.warn('TTS error:', err);
   }
-  if (current.trim()) chunks.push(current.trim());
-
-  const voice = getSelectedVoice();
-  const rate = parseFloat(localStorage.getItem('nova-tts-speed') || '1');
-  const pitch = parseFloat(localStorage.getItem('nova-tts-pitch') || '1');
-
-  for (const chunk of chunks) {
-    const utter = new SpeechSynthesisUtterance(chunk);
-    utter.rate = rate;
-    utter.pitch = pitch;
-    if (voice) utter.voice = voice;
-    window.speechSynthesis.speak(utter);
-  }
-
-  const keepAlive = setInterval(() => {
-    if (!window.speechSynthesis.speaking) clearInterval(keepAlive);
-    else window.speechSynthesis.resume();
-  }, 5000);
 }
+
+
+function cancelTTS() {
+  // Stop whichever element is currently carrying TTS (may be walkieTalkieAudio
+  // in walkie mode, tts-player otherwise). Also stop the DOM player for safety.
+  if (currentTTSAudio) {
+    try { currentTTSAudio.pause(); currentTTSAudio.currentTime = 0; } catch (_) {}
+  }
+  const ttsPlayer = document.getElementById('tts-player');
+  if (ttsPlayer && ttsPlayer !== currentTTSAudio) {
+    ttsPlayer.pause();
+    ttsPlayer.currentTime = 0;
+  }
+  if (_ttsBlobUrl) { URL.revokeObjectURL(_ttsBlobUrl); _ttsBlobUrl = null; }
+  currentTTSAudio = null;
+}
+
 
 // --- Voice settings ---
-function getSelectedVoice() {
-  const voices = window.speechSynthesis.getVoices();
-  const saved = localStorage.getItem('nova-tts-voice');
-  if (saved) {
-    const match = voices.find(v => v.name === saved);
-    if (match) return match;
-  }
-  return voices.find(v =>
-    v.name.includes('Samantha') || v.name.includes('Karen') ||
-    v.name.includes('Google') || v.name.includes('Natural')
-  ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
-}
 
 function populateVoiceSelect() {
-  const select = document.getElementById('voice-select');
+  // Voices are now static <option> elements in HTML (edge-tts server-side)
+  const select = document.getElementById('ttsVoice');
   if (!select) return;
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return;
-
   const saved = localStorage.getItem('nova-tts-voice');
-  select.innerHTML = '';
-
-  const groups = {};
-  for (const v of voices) {
-    const lang = v.lang.split('-')[0].toUpperCase();
-    if (!groups[lang]) groups[lang] = [];
-    groups[lang].push(v);
-  }
-
-  const sortedLangs = Object.keys(groups).sort((a, b) => {
-    if (a === 'EN') return -1;
-    if (b === 'EN') return 1;
-    return a.localeCompare(b);
-  });
-
-  for (const lang of sortedLangs) {
-    const optgroup = document.createElement('optgroup');
-    optgroup.label = lang;
-    for (const v of groups[lang]) {
-      const opt = document.createElement('option');
-      opt.value = v.name;
-      opt.textContent = v.name + (v.localService ? '' : ' (network)');
-      if (v.name === saved) opt.selected = true;
-      optgroup.appendChild(opt);
+  if (saved) {
+    const validValues = Array.from(select.options).map(o => o.value);
+    if (validValues.includes(saved)) {
+      select.value = saved;
+    } else {
+      localStorage.removeItem('nova-tts-voice');
     }
-    select.appendChild(optgroup);
-  }
-
-  if (!saved) {
-    const def = getSelectedVoice();
-    if (def) select.value = def.name;
   }
 }
 
@@ -734,42 +725,20 @@ function toggleVoiceSettings() {
   const panel = document.getElementById('voice-settings');
   const isOpen = panel.style.display !== 'none';
   panel.style.display = isOpen ? 'none' : 'block';
-  if (!isOpen) populateVoiceSelect();
+  if (!isOpen) { populateVoiceSelect(); }
 }
 
 function saveVoiceSetting() {
-  const select = document.getElementById('voice-select');
-  const speed = document.getElementById('voice-speed');
-  const pitch = document.getElementById('voice-pitch');
-  if (select.value) localStorage.setItem('nova-tts-voice', select.value);
-  localStorage.setItem('nova-tts-speed', speed.value);
-  localStorage.setItem('nova-tts-pitch', pitch.value);
-}
-
-function updateSpeedLabel() {
-  const val = document.getElementById('voice-speed').value;
-  document.getElementById('speed-label').textContent = parseFloat(val).toFixed(1) + 'x';
-}
-
-function updatePitchLabel() {
-  const val = document.getElementById('voice-pitch').value;
-  document.getElementById('pitch-label').textContent = parseFloat(val).toFixed(1) + 'x';
+  const select = document.getElementById('ttsVoice');
+  if (select && select.value) localStorage.setItem('nova-tts-voice', select.value);
 }
 
 function testVoice() {
-  unlockTTS();
   speak('Hey, this is Nova. How does this voice sound?');
 }
 
 function loadVoiceSettings() {
-  const speed = localStorage.getItem('nova-tts-speed') || '1';
-  const pitch = localStorage.getItem('nova-tts-pitch') || '1';
-  const speedEl = document.getElementById('voice-speed');
-  const pitchEl = document.getElementById('voice-pitch');
-  if (speedEl) speedEl.value = speed;
-  if (pitchEl) pitchEl.value = pitch;
-  updateSpeedLabel();
-  updatePitchLabel();
+  populateVoiceSelect();
 }
 
 // --- Speech recognition ---
@@ -828,8 +797,7 @@ function toggleVoice() {
 function startListening() {
   if (!recognition) initSpeechRecognition();
   if (!recognition) return;
-  unlockTTS();
-  window.speechSynthesis.cancel();
+  cancelTTS();
   try { recognition.start(); } catch { /* already started */ }
 }
 
@@ -845,8 +813,14 @@ async function sendVoiceMessage(text) {
   chatMessages.push({ role: 'typing', content: '' });
   renderChat();
 
-  document.getElementById('voice-status').textContent = 'Nova is thinking…';
-  document.getElementById('voice-transcript').textContent = '';
+  if (walkieTalkieEnabled) {
+    _updateWtUI('thinking');
+  } else {
+    const vs = document.getElementById('voice-status');
+    const vt = document.getElementById('voice-transcript');
+    if (vs) vs.textContent = 'Nova is thinking…';
+    if (vt) vt.textContent = '';
+  }
 
   const data = await api('/api/chat', {
     method: 'POST',
@@ -858,6 +832,189 @@ async function sendVoiceMessage(text) {
   } else {
     _deliverChatResponse(null, 'Failed to send message.');
   }
+}
+
+// --- Walkie-talkie mode (glasses push-to-talk) ---
+function toggleWalkieTalkie() {
+  if (walkieTalkieEnabled) disableWalkieTalkie();
+  else enableWalkieTalkie();
+}
+
+function enableWalkieTalkie() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('Speech recognition not supported'); return; }
+
+  if (!walkieTalkieAudio) {
+    walkieTalkieAudio = new Audio(_createSilentWavUrl());
+    walkieTalkieAudio.loop = true;
+    walkieTalkieAudio.volume = 0.01;
+  }
+
+  walkieTalkieAudio.play().then(() => {
+    // Prime the DOM tts-player element with a user-gesture play so iOS
+    // binds it to the Bluetooth route (matches how YouTube's <video> gets
+    // routed). Without this, the first TTS playback can fall back to the
+    // phone speaker even though later plays on the same element route to BT.
+    const ttsPlayer = document.getElementById('tts-player');
+    if (ttsPlayer) {
+      ttsPlayer.loop = false;
+      ttsPlayer.volume = 1.0;
+      ttsPlayer.src = _createSilentWavUrl();
+      ttsPlayer.play().catch(() => {});
+    }
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'Nova-Link',
+        artist: 'Walkie-Talkie',
+        album: 'NovaCore',
+      });
+      navigator.mediaSession.playbackState = 'playing';
+
+      navigator.mediaSession.setActionHandler('play', () => {
+        _wtStartListening();
+        walkieTalkieAudio.play().catch(() => {});
+        navigator.mediaSession.playbackState = 'playing';
+      });
+
+      navigator.mediaSession.setActionHandler('pause', () => {
+        if (wtListening && walkieTalkieRecognition) {
+          walkieTalkieRecognition.stop();
+        }
+        setTimeout(() => {
+          if (walkieTalkieAudio) walkieTalkieAudio.play().catch(() => {});
+          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+        }, 100);
+      });
+    }
+
+    _initWtRecognition();
+    walkieTalkieEnabled = true;
+    _updateWtUI('ready');
+    _requestWakeLock();
+    toast('Walkie-talkie on — press play to talk');
+  }).catch(() => {
+    toast('Could not start walkie-talkie — tap again');
+  });
+}
+
+function disableWalkieTalkie() {
+  walkieTalkieEnabled = false;
+  if (walkieTalkieAudio) { walkieTalkieAudio.pause(); walkieTalkieAudio = null; }
+  if (walkieTalkieRecognition && wtListening) walkieTalkieRecognition.abort();
+  walkieTalkieRecognition = null;
+  wtListening = false;
+
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.setActionHandler('play', null);
+    navigator.mediaSession.setActionHandler('pause', null);
+    navigator.mediaSession.metadata = null;
+  }
+
+  _releaseWakeLock();
+  _updateWtUI('off');
+  toast('Walkie-talkie off');
+}
+
+function _initWtRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+
+  walkieTalkieRecognition = new SR();
+  walkieTalkieRecognition.continuous = false;
+  walkieTalkieRecognition.interimResults = true;
+  walkieTalkieRecognition.lang = 'en-US';
+
+  walkieTalkieRecognition.onresult = (e) => {
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+    _updateWtUI('listening', transcript);
+    if (e.results[e.results.length - 1].isFinal && transcript.trim()) {
+      _updateWtUI('sending');
+      if ('vibrate' in navigator) navigator.vibrate([50, 50, 50]);
+      sendVoiceMessage(transcript.trim());
+    }
+  };
+
+  walkieTalkieRecognition.onstart = () => {
+    wtListening = true;
+    if ('vibrate' in navigator) navigator.vibrate(100);
+    _updateWtUI('listening');
+  };
+
+  walkieTalkieRecognition.onend = () => {
+    wtListening = false;
+    if (walkieTalkieEnabled) {
+      setTimeout(() => {
+        if (walkieTalkieEnabled && !wtListening) _updateWtUI('ready');
+      }, 800);
+    }
+  };
+
+  walkieTalkieRecognition.onerror = (e) => {
+    wtListening = false;
+    if (e.error === 'not-allowed') {
+      toast('Microphone access denied');
+      disableWalkieTalkie();
+    } else if (walkieTalkieEnabled) {
+      _updateWtUI('ready');
+    }
+  };
+}
+
+function _wtStartListening() {
+  if (!walkieTalkieEnabled || wtListening) return;
+  cancelTTS();
+  if (!walkieTalkieRecognition) _initWtRecognition();
+  try { walkieTalkieRecognition.start(); } catch { /* already started */ }
+}
+
+function _updateWtUI(state, transcript) {
+  const indicator = document.getElementById('wt-indicator');
+  const btn = document.getElementById('wt-toggle');
+  const statusEl = document.getElementById('wt-status');
+  const transcriptEl = document.getElementById('wt-transcript');
+
+  if (btn) btn.classList.toggle('active', state !== 'off');
+
+  if (!indicator) return;
+
+  if (state === 'off') {
+    indicator.classList.remove('visible');
+    return;
+  }
+
+  indicator.classList.add('visible');
+  indicator.dataset.state = state;
+
+  if (statusEl) {
+    const labels = { ready: 'Press play to talk', listening: 'Listening…', sending: 'Sending…', thinking: 'Nova is thinking…' };
+    statusEl.textContent = labels[state] || '';
+  }
+  if (transcriptEl) transcriptEl.textContent = transcript || '';
+}
+
+let _silentWavUrl = null;
+function _createSilentWavUrl() {
+  if (_silentWavUrl) return _silentWavUrl;
+  const rate = 8000, len = rate;
+  const buf = new ArrayBuffer(44 + len);
+  const v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + len, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate, true);
+  v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, len, true);
+  for (let i = 0; i < len; i++) v.setUint8(44 + i, 128);
+  _silentWavUrl = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  return _silentWavUrl;
+}
+
+async function _requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch { /* unavailable */ }
+}
+
+function _releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
 }
 
 // --- Reports ---
@@ -1031,22 +1188,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   updateSendButtonState();
 
-  // Sidebar dismiss with Escape
+  // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       const sb = document.getElementById('chat-sidebar');
       if (sb && sb.classList.contains('is-open')) closeSidebar();
     }
+    if (e.key === 'MediaPlayPause' && walkieTalkieEnabled) {
+      e.preventDefault();
+      if (wtListening) { if (walkieTalkieRecognition) walkieTalkieRecognition.stop(); }
+      else _wtStartListening();
+    }
+  });
+
+  // Re-acquire wake lock and audio session when tab becomes visible
+  document.addEventListener('visibilitychange', () => {
+    if (walkieTalkieEnabled && document.visibilityState === 'visible') {
+      _requestWakeLock();
+      if (walkieTalkieAudio) walkieTalkieAudio.play().catch(() => {});
+    }
   });
 
   // TTS init
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.onvoiceschanged = () => {
-      window.speechSynthesis.getVoices();
-      populateVoiceSelect();
-    };
-  }
   loadVoiceSettings();
   const ttsBtn = document.getElementById('tts-toggle');
   if (ttsBtn) ttsBtn.style.color = ttsEnabled ? 'var(--accent)' : 'var(--text-dim)';

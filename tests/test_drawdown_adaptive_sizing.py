@@ -89,7 +89,7 @@ class TestDrawdownProportionalIntegration:
         At 3.5% DD (cautious tier = 70% risk):
           risk = 0.015 * 0.70 = 0.0105
           volume = (96500 * 0.0105) / (50 * 10) = ~2.03 lots
-        A 3.5-lot request should exceed this by enough to fail (>25% tolerance).
+        A 3.5-lot request should be auto-resized down to ~2.03 lots.
         """
         oversized_request = OrderRequest(
             symbol="EURUSD",
@@ -101,8 +101,9 @@ class TestDrawdownProportionalIntegration:
         )
         result = gate._check_volume_sizing(oversized_request, stressed_account)
 
-        # Should fail validation because 3.5 lots exceeds calculated volume (~2.03)
-        assert not result.passed
+        # Should auto-resize (pass) and note the over-sized condition
+        assert result.passed
+        assert "auto-resized" in result.detail
         assert "over-sized" in result.detail
 
         # Test with a more conservative request that should pass
@@ -136,8 +137,9 @@ class TestDrawdownProportionalIntegration:
         )
         result = gate._check_volume_sizing(oversized_request, critical_account)
 
-        # Should fail validation due to proportional risk reduction
-        assert not result.passed
+        # Should auto-resize (pass) and note the over-sized condition
+        assert result.passed
+        assert "auto-resized" in result.detail
         assert "over-sized" in result.detail
 
         # Test with minimal request that should pass

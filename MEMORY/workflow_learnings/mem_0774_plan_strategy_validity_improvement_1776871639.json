@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0774_plan_strategy_validity_improvement_1776871639",
+  "workflow_id": "0774_plan_strategy_validity_improvement",
+  "task_summary": "Created 5-phase strategy_validity improvement plan identifying pre-trade gate rejections (equity=$0, lot-size mismatch, request ceiling) as root cause blocking real trades; Phase 1 alone projects score from 68 to 76+",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Created 5-phase strategy_validity improvement plan identifying pre-trade gate rejections (equity=$0, lot-size mismatch, request ceiling) as root cause blocking real trades; Phase 1 alone projects score from 68 to 76+"
+  ],
+  "successful_patterns": [
+    "task_failed: 0774_plan_strategy_validity_improvement"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Created 5-phase strategy_validity improvement plan identifying pre-trade gate rejections (equity=$0, lot-size mismatch, request ceiling) as root cause blocking real trades; Phase 1 alone projects score from 68 to 76+",
+  "created_at": "2026-04-22T15:27:19Z",
+  "confidence": "high"
+}

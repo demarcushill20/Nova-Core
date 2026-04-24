@@ -801,9 +801,11 @@ class TradingAgent:
                 elapsed_ms=elapsed,
             )
 
-        # Notify supervisor of trade opened
-        if self._supervisor is not None:
-            self._supervisor.on_trade_opened(payload["volume"])
+        # Do NOT notify the supervisor here — this is a PENDING stop order, not
+        # a real trade. IRB revalidates/replaces pending orders on every bar,
+        # and counting each placement as a trade blows through the daily cap
+        # after ~4 real fills. The supervisor is notified in notify_fill()
+        # once the broker confirms the position, deduped by position_id.
 
         # State transition
         new_state = AgentState.PENDING_LONG if side == OrderSide.BUY else AgentState.PENDING_SHORT
@@ -1355,6 +1357,11 @@ class TradingAgent:
                 stop_loss=stop_loss,
             )
 
+        # Count the trade against the hard-supervisor daily cap now that a
+        # real fill has occurred. Deduped by position_id inside the supervisor.
+        if self._supervisor is not None:
+            self._supervisor.on_trade_opened(position_id, volume)
+
         log.info(
             "fill: PENDING -> %s position=%s at %.5f vol=%.2f",
             self._state.value,
@@ -1468,11 +1475,11 @@ class TradingAgent:
         self._pending_symbol = None
         self._persist()
 
-        # Inform risk engine about the adopted position
-        resolved = self._resolve_symbol({"symbol": symbol})
+        # Inform risk engine — symbol is already the broker symbol (e.g. "EURUSD.sim"),
+        # so do NOT re-resolve it (that would double the suffix → "EURUSD.sim.sim").
         self._risk.on_trade_fill(
             position_id=position_id,
-            symbol=resolved,
+            symbol=symbol,
             side=side,
             volume=volume,
             fill_price=fill_price,

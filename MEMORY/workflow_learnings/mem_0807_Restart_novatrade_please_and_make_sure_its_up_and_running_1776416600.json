@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0807_Restart_novatrade_please_and_make_sure_its_up_and_running_1776416600",
+  "workflow_id": "0807_Restart_novatrade_please_and_make_sure_its_up_and_running",
+  "task_summary": "Restarted NovaTrade via SIGTERM (systemd auto-respawn); verified healthy startup with live pipeline, EURUSD feed streaming, and clean reconciliation",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Restarted NovaTrade via SIGTERM (systemd auto-respawn); verified healthy startup with live pipeline, EURUSD feed streaming, and clean reconciliation"
+  ],
+  "successful_patterns": [
+    "task_completed: 0807_Restart_novatrade_please_and_make_sure_its_up_and_running"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Restarted NovaTrade via SIGTERM (systemd auto-respawn); verified healthy startup with live pipeline, EURUSD feed streaming, and clean reconciliation",
+  "created_at": "2026-04-17T09:03:20Z",
+  "confidence": "low"
+}

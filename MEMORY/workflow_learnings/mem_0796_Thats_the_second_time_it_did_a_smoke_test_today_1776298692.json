@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0796_Thats_the_second_time_it_did_a_smoke_test_today_1776298692",
+  "workflow_id": "0796_Thats_the_second_time_it_did_a_smoke_test_today",
+  "task_summary": "Diagnosed duplicate smoke test as ad-hoc Claude agent testing live supervisor guards; added CLAUDE.md policy and feedback memory to prevent recurrence",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed duplicate smoke test as ad-hoc Claude agent testing live supervisor guards; added CLAUDE.md policy and feedback memory to prevent recurrence"
+  ],
+  "successful_patterns": [
+    "task_completed: 0796_Thats_the_second_time_it_did_a_smoke_test_today"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed duplicate smoke test as ad-hoc Claude agent testing live supervisor guards; added CLAUDE.md policy and feedback memory to prevent recurrence",
+  "created_at": "2026-04-16T00:18:12Z",
+  "confidence": "low"
+}

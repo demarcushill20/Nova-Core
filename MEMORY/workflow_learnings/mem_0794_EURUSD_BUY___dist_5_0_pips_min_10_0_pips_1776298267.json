@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0794_EURUSD_BUY___dist_5_0_pips_min_10_0_pips_1776298267",
+  "workflow_id": "0794_EURUSD_BUY___dist_5_0_pips_min_10_0_pips",
+  "task_summary": "Diagnosed 14+ trade rejections from Apr 15 \u2014 split into synthetic smoke-test (14 guards verified, caused halt as side effect) and real live-trading rejections (7 filters, 3 had parameter discrepancies now resolved). No code changes; diagnostic only.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed 14+ trade rejections from Apr 15 \u2014 split into synthetic smoke-test (14 guards verified, caused halt as side effect) and real live-trading rejections (7 filters, 3 had parameter discrepancies now resolved). No code changes; diagnostic only."
+  ],
+  "successful_patterns": [
+    "task_completed: 0794_EURUSD_BUY___dist_5_0_pips_min_10_0_pips"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed 14+ trade rejections from Apr 15 \u2014 split into synthetic smoke-test (14 guards verified, caused halt as side effect) and real live-trading rejections (7 filters, 3 had parameter discrepancies now resolved). No code changes; diagnostic only.",
+  "created_at": "2026-04-16T00:11:07Z",
+  "confidence": "low"
+}

@@ -184,7 +184,7 @@ class PreTradeGate:
         checks.append(self._check_feed_health(request.symbol))
         checks.append(self._check_symbol(request))
         checks.append(self._check_volume(request))
-        checks.append(self._lot_checker.check(request.volume))
+        checks.append(self._lot_checker.check(request.volume, request.symbol))
         checks.append(self._request_counter.check())
         checks.append(self._check_stop_loss(request))
         checks.append(self._check_sl_distance(request))
@@ -308,6 +308,18 @@ class PreTradeGate:
         self._daily_loss_tracker.save_state()
         self._sl_mod_counter.save_state()
         self._weekly_loss_tracker.save_state()
+
+    def rollover_daily_trackers(self, balance: float, equity: float) -> None:
+        """Advance day-scoped trackers to the current Prague day if crossed.
+
+        The daily loss tracker only rolls its own day key inside ``check()``,
+        which only fires on real pre-trade signals. Low-signal days leave the
+        tracker file stale and its day_key lagging. Callers on the periodic
+        ops cycle invoke this so the tracker advances regardless of signal
+        flow.
+        """
+        if balance > 0:
+            self._daily_loss_tracker._maybe_new_day(balance, equity)
 
     def _day_start_prague_tz(self, ts: float) -> float:
         """Return midnight Prague timezone timestamp for the day containing *ts*.
@@ -722,6 +734,17 @@ class PreTradeGate:
             tolerance=0.25,
         )
 
+        if not ok:
+            # Auto-resize order to calculated volume instead of rejecting
+            original_volume = request.volume
+            request.volume = calculated
+            log.warning("Auto-resized volume from %.2f to %.2f lots: %s", original_volume, calculated, reason)
+            return RiskCheckResult(
+                name="volume_sizing",
+                passed=True,
+                detail=f"auto-resized from {original_volume:.2f} to {calculated:.2f} lots — {reason}",
+            )
+
         return RiskCheckResult(
             name="volume_sizing",
             passed=ok,
@@ -822,6 +845,12 @@ class PreTradeGate:
                 name="drawdown",
                 passed=True,
                 detail="balance=0 — skipped",
+            )
+        if account.equity <= 0:
+            return RiskCheckResult(
+                name="drawdown",
+                passed=True,
+                detail="equity <= 0 — likely stale broker data, skipped",
             )
         drawdown_pct = ((account.balance - account.equity) / account.balance) * 100
         limit = self._risk.max_drawdown_equity_pct

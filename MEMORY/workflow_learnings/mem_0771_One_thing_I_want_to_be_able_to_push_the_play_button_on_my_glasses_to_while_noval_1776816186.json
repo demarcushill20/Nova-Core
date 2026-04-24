@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0771_One_thing_I_want_to_be_able_to_push_the_play_button_on_my_glasses_to_while_noval_1776816186",
+  "workflow_id": "0771_One_thing_I_want_to_be_able_to_push_the_play_button_on_my_glasses_to_while_noval",
+  "task_summary": "Added walkie-talkie mode to NovaLink \u2014 glasses play button triggers voice recording via MediaSession API",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added walkie-talkie mode to NovaLink \u2014 glasses play button triggers voice recording via MediaSession API"
+  ],
+  "successful_patterns": [
+    "task_completed: 0771_One_thing_I_want_to_be_able_to_push_the_play_button_on_my_glasses_to_while_nova"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added walkie-talkie mode to NovaLink \u2014 glasses play button triggers voice recording via MediaSession API",
+  "created_at": "2026-04-22T00:03:06Z",
+  "confidence": "high"
+}

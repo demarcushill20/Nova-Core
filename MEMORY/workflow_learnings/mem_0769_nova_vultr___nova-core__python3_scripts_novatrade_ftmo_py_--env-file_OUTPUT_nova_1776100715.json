@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0769_nova_vultr___nova-core__python3_scripts_novatrade_ftmo_py_--env-file_OUTPUT_nova_1776100715",
+  "workflow_id": "0769_nova_vultr___nova-core__python3_scripts_novatrade_ftmo_py_--env-file_OUTPUT_nova",
+  "task_summary": "Analyzed FTMO preflight failure - MetaAPI deployment blocked by billing limits, 6/7 checks pass, requires account top-up",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Analyzed FTMO preflight failure - MetaAPI deployment blocked by billing limits, 6/7 checks pass, requires account top-up"
+  ],
+  "successful_patterns": [
+    "task_completed: 0769_nova_vultr___nova-core__python3_scripts_novatrade_ftmo_py_--env-file_OUTPUT_nov"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Analyzed FTMO preflight failure - MetaAPI deployment blocked by billing limits, 6/7 checks pass, requires account top-up",
+  "created_at": "2026-04-13T17:18:35Z",
+  "confidence": "high"
+}

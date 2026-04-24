@@ -110,8 +110,15 @@ class LotSizeConsistencyChecker:
         """Record a completed trade's lot size."""
         self._history.append(LotRecord(time.time(), volume, symbol))
 
-    def check(self, proposed_volume: float) -> RiskCheckResult:
-        """Check if proposed volume is consistent with recent history."""
+    def check(self, proposed_volume: float, symbol: str = "") -> RiskCheckResult:
+        """Check if proposed volume is consistent with recent history.
+
+        Args:
+            proposed_volume: The lot size being proposed.
+            symbol: The trade symbol.  When checking a real (non-.sim) trade,
+                shadow-mode ``.sim`` records are excluded from the median so
+                that shadow-mode volumes don't pollute real-trade enforcement.
+        """
         from novatrade.models import VOLUME_AUTO_SIZE
 
         if proposed_volume == VOLUME_AUTO_SIZE:
@@ -129,8 +136,23 @@ class LotSizeConsistencyChecker:
                 f"(need {self.min_trades_for_enforcement} for enforcement)",
             )
 
-        volumes = [r.volume for r in self._history]
-        med = median(volumes)
+        # Exclude shadow-mode (.sim) trades when checking real trade consistency.
+        # Shadow-mode trades use different sizing and should not influence the
+        # median for real broker orders.
+        is_real_trade = symbol and not symbol.endswith(".sim")
+        base_history: list[LotRecord] = list(self._history)
+        if is_real_trade:
+            base_history = [r for r in base_history if not r.symbol.endswith(".sim")]
+            if len(base_history) < self.min_trades_for_enforcement:
+                return RiskCheckResult(
+                    name="lot_consistency",
+                    passed=True,
+                    detail=f"only {len(base_history)} non-sim trades in history "
+                    f"(need {self.min_trades_for_enforcement} for enforcement)",
+                )
+
+        volumes = [r.volume for r in base_history]
+        med = median(volumes) if volumes else 0
 
         if med <= 0:
             return RiskCheckResult(
@@ -141,7 +163,7 @@ class LotSizeConsistencyChecker:
 
         # DEFENSIVE: Check for stale historical data first (older than 30 days)
         now = time.time()
-        recent_history = [r for r in self._history if (now - r.timestamp) < (30 * 24 * 3600)]
+        recent_history = [r for r in base_history if (now - r.timestamp) < (30 * 24 * 3600)]
 
         if len(recent_history) < self.min_trades_for_enforcement:
             log.info(
@@ -716,6 +738,16 @@ class FtmoDailyLossTracker:
         Returns:
             RiskCheckResult. Fails if current daily loss >= buffer_limit.
         """
+        # Guard: zero/negative equity is a broker data-fetch error (MetaAPI
+        # disconnect, stale cache).  Skip rather than computing a false 100%
+        # loss that blocks all trading.
+        if equity <= 0:
+            return RiskCheckResult(
+                name="ftmo_daily_loss",
+                passed=True,
+                detail="equity <= 0 — likely stale broker data, skipped",
+            )
+
         if not self._initialized:
             if balance > 0:
                 self.initialize(balance, equity)

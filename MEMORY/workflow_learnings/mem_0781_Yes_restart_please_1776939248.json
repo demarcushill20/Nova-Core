@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0781_Yes_restart_please_1776939248",
+  "workflow_id": "0781_Yes_restart_please",
+  "task_summary": "Restarted nova-link service (PID 3990223 \u2192 4006529) with walkie-talkie audio fixes already applied",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Restarted nova-link service (PID 3990223 \u2192 4006529) with walkie-talkie audio fixes already applied"
+  ],
+  "successful_patterns": [
+    "task_completed: 0781_Yes_restart_please"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Restarted nova-link service (PID 3990223 \u2192 4006529) with walkie-talkie audio fixes already applied",
+  "created_at": "2026-04-23T10:14:08Z",
+  "confidence": "high"
+}

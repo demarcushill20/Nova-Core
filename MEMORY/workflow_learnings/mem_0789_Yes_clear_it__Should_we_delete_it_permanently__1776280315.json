@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0789_Yes_clear_it__Should_we_delete_it_permanently__1776280315",
+  "workflow_id": "0789_Yes_clear_it__Should_we_delete_it_permanently_",
+  "task_summary": "Permanently deleted stale supervisor halt state file caused by synthetic test data; live trading can resume",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Permanently deleted stale supervisor halt state file caused by synthetic test data; live trading can resume"
+  ],
+  "successful_patterns": [
+    "task_completed: 0789_Yes_clear_it__Should_we_delete_it_permanently_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Permanently deleted stale supervisor halt state file caused by synthetic test data; live trading can resume",
+  "created_at": "2026-04-15T19:11:55Z",
+  "confidence": "low"
+}

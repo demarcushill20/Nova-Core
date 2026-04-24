@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0776_We_definitely_took_a_trade_after_the_metaapi_outage_and_fix_1776191795",
+  "workflow_id": "0776_We_definitely_took_a_trade_after_the_metaapi_outage_and_fix",
+  "task_summary": "Fixed 3 bugs enabling the post-outage phantom trade \u2014 double .sim suffix, unguarded orphan adoption volume, non-idempotent resolve_symbol",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed 3 bugs enabling the post-outage phantom trade \u2014 double .sim suffix, unguarded orphan adoption volume, non-idempotent resolve_symbol"
+  ],
+  "successful_patterns": [
+    "task_completed: 0776_We_definitely_took_a_trade_after_the_metaapi_outage_and_fix"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed 3 bugs enabling the post-outage phantom trade \u2014 double .sim suffix, unguarded orphan adoption volume, non-idempotent resolve_symbol",
+  "created_at": "2026-04-14T18:36:35Z",
+  "confidence": "high"
+}

@@ -157,7 +157,13 @@ class TestHardRiskSupervisorIntegration:
 
     @pytest.mark.asyncio
     async def test_supervisor_trade_counting(self, trading_agent, mock_adapter):
-        """Test that supervisor tracks trades opened."""
+        """Supervisor counts on FILL, not on pending-order placement.
+
+        Regression for 2026-04-22: the counter used to increment at place-order
+        time, so IRB's revalidate-and-replace loop blew through max_trades_per_day
+        after ~4 real fills. Counting now happens in notify_fill() and is
+        deduped by position_id.
+        """
         payload = {
             "strategy_name": "Rob Hoffman IRB",
             "strategy_version": "5.0.0",
@@ -174,13 +180,24 @@ class TestHardRiskSupervisorIntegration:
             "campaign": "test",
         }
 
-        # Initial trade count
         initial_trades = trading_agent._supervisor.trades_today
 
+        # Pending-order placement must NOT increment the counter.
         result = await trading_agent.process_alert(payload)
-
         assert result.success
-        # Supervisor should count the opened trade
+        assert trading_agent._supervisor.trades_today == initial_trades
+
+        # Fill notification does increment — once per unique position_id.
+        trading_agent.notify_fill(
+            position_id="pos-abc",
+            fill_price=1.1000,
+            volume=0.3,
+            stop_loss=1.0985,
+        )
+        assert trading_agent._supervisor.trades_today == initial_trades + 1
+
+        # A replacement on the same position must not double-count.
+        trading_agent._supervisor.on_trade_opened("pos-abc", 0.3)
         assert trading_agent._supervisor.trades_today == initial_trades + 1
 
     @pytest.mark.asyncio

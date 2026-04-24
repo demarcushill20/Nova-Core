@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0760_Hey_Nova__can_you_check_Novat_trade_and_make_sure_that_it_s_up_and_running_as_it_1776710422",
+  "workflow_id": "0760_Hey_Nova__can_you_check_Novat_trade_and_make_sure_that_it_s_up_and_running_as_it",
+  "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0760_Hey_Nova__can_you_check_Novat_trade_and_make_sure_that_it_s_up_and_runn"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-04-20T18:40:22Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0762_research_risk_engine_gaps_1776713239"
+}

@@ -4,6 +4,9 @@
 # Designed to catch silent WebSocket disconnects where the process stays alive
 # but stops syncing.
 
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+
 SYNC_LOG="/home/nova/.config/obsidian-headless/sync/976ea1245cbf37fc6ac815d4bf8d313c/sync.log"
 SERVICE="obsidian-headless-sync.service"
 STALE_SECONDS=3600  # 1 hour

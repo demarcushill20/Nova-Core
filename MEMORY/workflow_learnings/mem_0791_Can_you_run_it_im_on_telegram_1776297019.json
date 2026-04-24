@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0791_Can_you_run_it_im_on_telegram_1776297019",
+  "workflow_id": "0791_Can_you_run_it_im_on_telegram",
+  "task_summary": "Restarted NovaTrade live runner with fresh code, cleared supervisor halt, verified healthy, notified operator via Telegram",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Restarted NovaTrade live runner with fresh code, cleared supervisor halt, verified healthy, notified operator via Telegram"
+  ],
+  "successful_patterns": [
+    "task_completed: 0791_Can_you_run_it_im_on_telegram"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Restarted NovaTrade live runner with fresh code, cleared supervisor halt, verified healthy, notified operator via Telegram",
+  "created_at": "2026-04-15T23:50:19Z",
+  "confidence": "low"
+}

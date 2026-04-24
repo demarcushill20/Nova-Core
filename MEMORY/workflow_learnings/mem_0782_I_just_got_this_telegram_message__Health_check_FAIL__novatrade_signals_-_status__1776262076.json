@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0782_I_just_got_this_telegram_message__Health_check_FAIL__novatrade_signals_-_status__1776262076",
+  "workflow_id": "0782_I_just_got_this_telegram_message__Health_check_FAIL__novatrade_signals_-_status_",
+  "task_summary": "Fixed false LOW_RATE health check alerts caused by record_signal only firing during entry evaluation, not during position management",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed false LOW_RATE health check alerts caused by record_signal only firing during entry evaluation, not during position management"
+  ],
+  "successful_patterns": [
+    "task_failed: 0782_I_just_got_this_telegram_message__Health_check_FAIL__novatrade_signals_-_status_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed false LOW_RATE health check alerts caused by record_signal only firing during entry evaluation, not during position management",
+  "created_at": "2026-04-15T14:07:56Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0782_I_just_got_this_telegram_message__Health_check_FAIL__novatrade_signals_-_status__1776262472"
+}

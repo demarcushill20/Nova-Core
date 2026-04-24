@@ -65,7 +65,7 @@ class FeedHealthConfig:
     """Immutable configuration for FeedHealthSupervisor."""
 
     poll_interval: float = 30.0
-    max_stale_seconds: float = 30.0
+    max_stale_seconds: float = 90.0
     max_clock_drift_seconds: float = 15.0
     max_spread_pips: float = 5.0
     spread_window: int = 20
