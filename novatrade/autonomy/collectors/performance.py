@@ -21,6 +21,11 @@ class PerformanceCollector(BaseCollector):
     _MIN_TRADES_FULL = 30
     _MIN_TRADES_PARTIAL = 10
 
+    # Annualized Sharpe estimation requires ≥36 returns for a standard error
+    # below ~2.6 (sqrt((1+S²/2)/n) * sqrt(252)).  Fewer points produce
+    # extreme, unreliable ratios that swing the dimension score on noise.
+    _MIN_SHARPE_RETURNS = 36
+
     async def collect(self) -> DimensionScore:
         warnings: list[str] = []
         sub_metrics: list[SubMetric] = []
@@ -310,7 +315,7 @@ class PerformanceCollector(BaseCollector):
             if values[i - 1] != 0 and abs(values[i] - values[i - 1]) > noise_floor:
                 returns.append((values[i] - values[i - 1]) / values[i - 1])
 
-        if len(returns) < 4:
+        if len(returns) < self._MIN_SHARPE_RETURNS:
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         mean_r = sum(returns) / len(returns)
@@ -355,12 +360,12 @@ class PerformanceCollector(BaseCollector):
 
         dd_pct = max_dd * 100.0
 
-        # Score based on FTMO 5% limit
-        if dd_pct < 2:
+        # Score based on FTMO 10% overall loss limit (not the 5% daily limit).
+        if dd_pct < 3:
             score = 100.0
-        elif dd_pct < 4:
+        elif dd_pct < 6:
             score = 70.0
-        elif dd_pct < 5:
+        elif dd_pct < 10:
             score = 40.0
         else:
             score = 0.0

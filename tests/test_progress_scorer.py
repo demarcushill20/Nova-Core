@@ -1653,18 +1653,18 @@ async def test_perf_bad_equity(perf_collector, tmp_path):
 
 @pytest.mark.asyncio
 async def test_perf_drawdown_above_ftmo(perf_collector, tmp_path):
-    """Drawdown > 5% = score 0."""
+    """Drawdown > 10% (FTMO overall loss limit) = score 0."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    # Gradual decline from 10000 to 9400 (~6% drawdown) in realistic steps
+    # Gradual decline from 10000 to 8900 (~11% drawdown) in realistic steps
     data = [
         {"equity": 10000},
-        {"equity": 9900},
         {"equity": 9800},
-        {"equity": 9700},
         {"equity": 9600},
-        {"equity": 9500},
         {"equity": 9400},
+        {"equity": 9200},
+        {"equity": 9000},
+        {"equity": 8900},
     ]
     (state_dir / "equity_history.json").write_text(json.dumps(data))
 
@@ -1696,7 +1696,7 @@ async def test_perf_dict_format_equity(perf_collector, tmp_path):
     """Dict-format equity_history.json with 'snapshots' key is parsed correctly."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    snapshots = [{"equity": 10000 + i * 50} for i in range(30)]
+    snapshots = [{"equity": 10000 + i * 50} for i in range(40)]
     data = {"snapshots": snapshots, "last_updated": "2026-03-26T00:00:00Z", "initial_equity": 10000}
     (state_dir / "equity_history.json").write_text(json.dumps(data))
 
