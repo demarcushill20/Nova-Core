@@ -21,10 +21,16 @@ class PerformanceCollector(BaseCollector):
     _MIN_TRADES_FULL = 30
     _MIN_TRADES_PARTIAL = 10
 
-    # Annualized Sharpe estimation requires ≥36 returns for a standard error
-    # below ~2.6 (sqrt((1+S²/2)/n) * sqrt(252)).  Fewer points produce
-    # extreme, unreliable ratios that swing the dimension score on noise.
-    _MIN_SHARPE_RETURNS = 36
+    # Annualized Sharpe estimation: aligned with _STABLE_RETURNS so Sharpe
+    # first becomes computable exactly when the sparse-data floor ramps off.
+    # This eliminates the cliff transition where Sharpe suddenly appears with
+    # a noisy value while the floor is still partially active.
+    _MIN_SHARPE_RETURNS = 50
+
+    # The sparse-data floor ramp endpoint.  Must exceed _MIN_SHARPE_RETURNS
+    # so the floor is still partially active when Sharpe first becomes
+    # computable — prevents a single-heartbeat cliff from floored → raw score.
+    _STABLE_RETURNS = 50
 
     async def collect(self) -> DimensionScore:
         warnings: list[str] = []
@@ -150,16 +156,17 @@ class PerformanceCollector(BaseCollector):
         else:
             avg = sum(m.value for m in scorable) / len(scorable)
 
-        # Sparse-data floor aligned with confidence thresholds.
-        # Below _MIN_TRADES_PARTIAL: hard floor (near-zero data).
-        # _MIN_TRADES_PARTIAL → _MIN_TRADES_FULL: linear ramp-off.
-        # At _MIN_TRADES_FULL (confidence 1.0): no floor — score reflects
-        # reality so the decision engine can detect genuine regressions.
+        # Sparse-data floor: prevents noise-driven regressions while data
+        # matures.  Ramps from hard floor → raw average over
+        # _MIN_TRADES_PARTIAL → _STABLE_RETURNS.  Using _STABLE_RETURNS
+        # (not _MIN_TRADES_FULL) ensures the floor is still partially
+        # active when Sharpe first becomes computable at _MIN_SHARPE_RETURNS,
+        # avoiding a single-heartbeat cliff transition.
         _FLOOR = 72.0
         if meaningful_returns < self._MIN_TRADES_PARTIAL:
             avg = max(avg, _FLOOR)
-        elif meaningful_returns < self._MIN_TRADES_FULL:
-            ramp = (meaningful_returns - self._MIN_TRADES_PARTIAL) / (self._MIN_TRADES_FULL - self._MIN_TRADES_PARTIAL)
+        elif meaningful_returns < self._STABLE_RETURNS:
+            ramp = (meaningful_returns - self._MIN_TRADES_PARTIAL) / (self._STABLE_RETURNS - self._MIN_TRADES_PARTIAL)
             blended_floor = _FLOOR * (1.0 - ramp) + avg * ramp
             avg = max(avg, blended_floor)
 
@@ -465,14 +472,16 @@ class PerformanceCollector(BaseCollector):
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         # Require minimum diversity: both winning AND losing returns must be
-        # present in sufficient quantity.  With <2 losses (or wins), a single
+        # present in sufficient quantity.  With few wins or losses, a single
         # outlier landing in one half can swing the trend score from 80→30,
         # producing misleading "strongly declining" signals during low-activity
-        # periods (e.g., balance/equity oscillation with no real trades).
-        _MIN_SIDE_COUNT = 2
+        # periods.  Also require enough total returns so each half has ≥10
+        # data points for meaningful PF comparison.
+        _MIN_SIDE_COUNT = 4
+        _MIN_PF_TREND_RETURNS = 20
         wins_count = sum(1 for r in returns if r > self._MIN_RETURN_THRESHOLD)
         losses_count = sum(1 for r in returns if r < -self._MIN_RETURN_THRESHOLD)
-        if wins_count < _MIN_SIDE_COUNT or losses_count < _MIN_SIDE_COUNT:
+        if len(returns) < _MIN_PF_TREND_RETURNS or wins_count < _MIN_SIDE_COUNT or losses_count < _MIN_SIDE_COUNT:
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
         # Split into two halves and compute profit factor for each

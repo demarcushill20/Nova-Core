@@ -1696,7 +1696,7 @@ async def test_perf_dict_format_equity(perf_collector, tmp_path):
     """Dict-format equity_history.json with 'snapshots' key is parsed correctly."""
     state_dir = tmp_path / "STATE" / "novatrade"
     state_dir.mkdir(parents=True)
-    snapshots = [{"equity": 10000 + i * 50} for i in range(40)]
+    snapshots = [{"equity": 10000 + i * 50} for i in range(55)]
     data = {"snapshots": snapshots, "last_updated": "2026-03-26T00:00:00Z", "initial_equity": 10000}
     (state_dir / "equity_history.json").write_text(json.dumps(data))
 
