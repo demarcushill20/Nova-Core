@@ -100,7 +100,7 @@ Then: cleanup worktree (Step 5).
 
 1. **Fusion Memory checkpoint** — follow `.claude/commands/ship.md` Step 1 verbatim (get last checkpoint → recent events → compose summary → `create_checkpoint` with `session-YYYY-MM-DD[-N]` id → verify).
 2. **Git commit** — follow `.claude/commands/ship.md` Step 2 (review status/diff, stage specific paths, HEREDOC commit message with Co-Authored-By, verify). **Skip this step entirely if `git status --porcelain` is empty.**
-3. **Git push** — follow `.claude/commands/ship.md` Step 3. **On rejection (stderr contains `rejected` or `non-fast-forward`), see "Error handling" below.** **Skip this step if `git rev-list --count origin/<branch>..HEAD == 0` (nothing to push).**
+3. **Git push** — follow `.claude/commands/ship.md` Step 3. **On rejection (stderr contains `rejected` or `non-fast-forward`), see "Error handling" below.** **Skip this step only if the branch already exists on origin and has no unpushed commits** (`git rev-parse --verify origin/<branch>` succeeds AND `git rev-list --count origin/<branch>..HEAD` returns 0). On a brand-new local branch not yet on origin, always push.
 
 **Build the PR draft:**
 

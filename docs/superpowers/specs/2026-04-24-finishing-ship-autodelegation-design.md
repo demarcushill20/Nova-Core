@@ -156,7 +156,12 @@ No rollback of the push.
 
 Detection: `git status --porcelain` is empty.
 
-Action: skip checkpoint, skip commit. If `git rev-list --count origin/<branch>..HEAD == 0` also, skip push — jump directly to PR draft against whatever is on the remote. If there are unpushed commits but no staged changes, skip commit only, push + PR normally. Mirrors `/ship`'s existing rule.
+Action: skip checkpoint, skip commit. Then decide push by the upstream state:
+
+- If `git rev-parse --verify origin/<branch>` succeeds AND `git rev-list --count origin/<branch>..HEAD` returns 0 → branch is fully synced; skip push and jump directly to PR draft against the remote.
+- If `origin/<branch>` does not exist (brand-new local branch) OR there are unpushed commits → push normally (commit was already skipped above).
+
+Mirrors `/ship`'s "skip if nothing to commit" rule while being explicit about the first-push case, where `origin/<branch>..HEAD` would otherwise be a malformed ref.
 
 ### 6.5 Cross-cutting invariant
 
