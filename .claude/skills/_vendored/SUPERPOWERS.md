@@ -94,6 +94,7 @@ Every deviation from upstream content is listed here. Each entry is an intention
 - **Option 2** ("Push and create a Pull Request") now delegates to `/ship` as the standard path. Raw `git push` + `gh pr create` is a documented fallback. Phase 2 wiring makes the `/ship` handoff concrete.
 - **Caller list** updated: `implementation-team` replaces `subagent-driven-development` and `executing-plans`.
 - **Baseline test command** defaults to `pytest`.
+- **Option 2 expanded beyond upstream scope.** Upstream's Option 2 is "push + create PR" with `git push` + `gh pr create` inline. NovaCore's Option 2 additionally (a) runs a Fusion Memory checkpoint via the `/ship` contract, (b) assembles a plan-tracker-aware PR draft with a fallback chain, (c) gates PR creation on a single-round operator confirm, and (d) delegates remote-divergence handling to the `ship-rebase-conflict-resolution` skill. Recorded here as a NovaCore adaptation.
 
 ### `dispatching-parallel-agents`
 - **Cost-optimized model-selection guidance added** (adopted from upstream v5's "use cheapest capable model" pattern): Haiku 4.5 default for bounded mechanical tasks, escalate to Sonnet/Opus only when the subtask's reasoning profile requires it.
@@ -107,10 +108,10 @@ The vendored skills are now wired into NovaCore's memory and orchestration stack
 - ✅ `writing-plans` → output retargeted through `plan-tracker` to the Obsidian vault at `10-plans/plan-<plan_id>.md` with the `type: implementation-plan` schema; optionally queues a `TASKS/<plan_id>.md` entry. Execution handoff invokes `implementation-team`.
 - ✅ `systematic-debugging` → 3+ failure escalation now dispatches the **Critic agent** (`AGENTS/critic/AGENT.md`) with the full evidence trail, logs the root cause via **`memory-store`** (`memory_type: research`, tag `debug`), and presents the verdict to the operator before fix #4. See the new "3+ Failed Fixes — Escalation" section in `systematic-debugging/SKILL.md`.
 - ✅ `verification-before-completion` content → **merged into `self-verification`** as the "Evidence-Before-Claims Gate" section (Iron Law, gate function, rationalization table, red-flag patterns). `self-verification/SKILL.md` frontmatter records the merge provenance under `merged_from:`.
-- ⏳ `finishing-a-development-branch` → Option 2 references `/ship` as the preferred path. Direct delegation contract (auto-invoking `/ship` from inside the skill) is still **deferred**; the skill currently documents the handoff and the operator triggers `/ship` manually.
+- ✅ `finishing-a-development-branch` → Option 2 executes the `/ship` contract (`.claude/commands/ship.md` steps 1-3) **inline** using an announce-and-continue pattern (no nested slash-command invocation), then the skill owns `gh pr create` with a plan-tracker-aware PR draft and one-round operator confirm. Failure modes delegate to the existing `ship-rebase-conflict-resolution` skill. Contract and acceptance criteria: `docs/superpowers/specs/2026-04-24-finishing-ship-autodelegation-design.md`.
 - ⏳ `dispatching-parallel-agents` → budget rules from `AGENTS/orchestrator/AGENT.md` are referenced in the skill as an expectation. Making them a **hard gate** (programmatic budget enforcement) is deferred until the orchestrator exposes a budget-check hook.
 
-The two ⏳ items are intentionally left as content-level references rather than programmatic gates, because both depend on deeper harness integration (a slash-command delegation contract and an orchestrator budget API). They can be upgraded without re-touching the vendored skills.
+The remaining ⏳ item (`dispatching-parallel-agents`) is left as a content-level reference rather than a programmatic gate because it depends on an orchestrator budget API that does not yet exist. It can be upgraded without re-touching the vendored skill.
 
 ## Re-pull procedure
 
@@ -129,3 +130,4 @@ When a new upstream release lands:
 | Date | Event | Tag | Commit SHA |
 |---|---|---|---|
 | 2026-04-24 | Initial Phase 1 vendoring | v5.0.7 | `1f20bef3f59b85ad7b52718f822e37c4478a3ff5` |
+| 2026-04-24 | Phase 2 wiring — finishing-branch Option 2 auto-delegation | v5.0.7 | `1f20bef3f59b85ad7b52718f822e37c4478a3ff5` |
