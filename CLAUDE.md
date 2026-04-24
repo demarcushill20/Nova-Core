@@ -40,6 +40,40 @@ Claude operates as the **Chief Orchestrator** of a disciplined multi-agent engin
 
 See `.claude/skills/implementation-team/SKILL.md` for the full orchestration playbook.
 
+## Structured Development Workflows
+
+NovaCore vendors seven structured-development skills from the Superpowers plugin ([`obra/superpowers`](https://github.com/obra/superpowers) v5.0.7, MIT). They complement the governance in **Execution Model** above — they are **recommended, not mandatory**. Follow them when the task benefits from discipline; skip them (with explicit one-line justification) for quick edits, one-off scripts, or trivial renames. This departs from upstream's "mandatory workflows" posture and keeps the path-choice autonomy policy authoritative.
+
+**Intent → skill map:**
+
+| If the operator… | Invoke | Entry |
+|---|---|---|
+| Describes a new feature / behavior without an approved design | `brainstorming` — clarify intent, propose 2–3 approaches, get design approval (HARD-GATE: no implementation until approved) | `/brainstorm` |
+| Hands over an approved design doc | `writing-plans` — bite-sized tasks with exact paths + code; writes to vault via `plan-tracker` | `/write-plan` |
+| Asks to start implementing a plan | `implementation-team` — validate → implement → review → verify (already the default orchestrator) | — |
+| Hits a bug, test failure, or unexpected behavior | `systematic-debugging` — 4-phase root-cause investigation; 3-attempt escalation routes to Critic agent + logs via `memory-store` | `/debug` |
+| Adds a feature / bugfix | `test-driven-development` — red-green-refactor, Iron Law: no production code without a failing test first (exceptions require operator approval) | *auto-activates* |
+| Needs isolated workspace before risky / parallel work | `using-git-worktrees` — `.worktrees/<branch>`, clean test baseline | `/worktree` |
+| Has work complete, asking "can we ship?" | `finishing-a-development-branch` — pre-ship gates (tests, clean tree) then 4-option menu; Option 2 delegates to `/ship` | *auto-activates* |
+| Has 2+ independent failures / subsystems to fix | `dispatching-parallel-agents` — one focused subagent per domain, cost-optimized model selection (Haiku default for bounded tasks) | *auto-activates* |
+| Is about to claim "done" / "passes" / "fixed" | `self-verification` — evidence-before-claims gate: run the verification command *this turn*, read the output, then claim | *auto-activates* |
+
+**End-to-end flow for non-trivial work:**
+
+```
+/brainstorm → /write-plan → /worktree → implementation-team → finishing-a-development-branch → /ship
+```
+
+Every step gates the next: don't build what isn't designed, don't execute what isn't planned, don't ship what isn't reviewed. When skipping a step, note it explicitly (e.g., "skipping /brainstorm — trivial one-line config change").
+
+**Governance keeps NovaCore authoritative, not upstream:**
+- Plans live in the Obsidian vault via `plan-tracker` (not upstream's `docs/superpowers/plans/`).
+- Debugging escalation routes to the Critic agent (`AGENTS/critic/AGENT.md`) and `memory-store`; code review uses `dual-code-review` (Codex + Opus) rather than upstream's single-model review.
+- Skill creation still happens via `skill-creator` — upstream's `writing-skills` is not vendored.
+- Visual Companion and `EnterPlanMode` hook interception are deliberately out of scope.
+
+Provenance, deviations, and re-pull cadence: `.claude/skills/_vendored/SUPERPOWERS.md`.
+
 ## Autonomy Policy
 
 Claude operates with full autonomy inside `~/nova-core`. No confirmation needed for:

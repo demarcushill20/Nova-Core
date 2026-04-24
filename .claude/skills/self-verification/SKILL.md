@@ -1,6 +1,13 @@
 ---
 name: self-verification
-description: "Validate tool results and skill outputs to ensure correctness, completeness, and contract compliance before finalizing a task."
+description: "Validate tool results and skill outputs to ensure correctness, completeness, and contract compliance before finalizing a task. Enforces evidence-before-claims: no completion claim without fresh verification output."
+merged_from:
+  - upstream: obra/superpowers
+    tag: v5.0.7
+    commit: 1f20bef3f59b85ad7b52718f822e37c4478a3ff5
+    path: skills/verification-before-completion/SKILL.md
+    license: MIT
+    merged: "2026-04-24"
 activation:
   keywords:
     - verify
@@ -52,6 +59,120 @@ output_contract:
 7. **Report** — emit a structured verification result.
 
 For verification philosophy, confidence scoring, and false-positive guidance, see `reference.md`.
+
+# Evidence-Before-Claims Gate
+
+> Merged from Superpowers `verification-before-completion` (v5.0.7).
+
+Claiming work is complete without verification is dishonesty, not efficiency.
+
+**Core principle:** evidence before claims, always.
+
+## The Iron Law
+
+```
+NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
+```
+
+If you haven't run the verification command **in this message**, you cannot claim it passes. Stale evidence from an earlier turn does not count.
+
+## The Gate Function
+
+Before claiming any status or expressing satisfaction:
+
+1. **IDENTIFY** — what command proves this claim?
+2. **RUN** — execute the full command fresh and complete; no shortcuts.
+3. **READ** — full output, check exit code, count failures.
+4. **VERIFY** — does the output confirm the claim?
+    - If NO: state actual status with evidence.
+    - If YES: state the claim with evidence.
+5. **ONLY THEN** make the claim.
+
+Skipping any step = lying, not verifying.
+
+## What Each Claim Requires
+
+| Claim | Requires | Not Sufficient |
+|-------|----------|----------------|
+| Tests pass | Test command output: 0 failures | Previous run, "should pass" |
+| Linter clean | Linter output: 0 errors | Partial check, extrapolation |
+| Build succeeds | Build command: exit 0 | Linter passing, logs look good |
+| Bug fixed | Test original symptom: passes | Code changed, assumed fixed |
+| Regression test works | Red-green cycle verified | Test passes once |
+| Agent completed | VCS diff shows changes | Agent reports "success" |
+| Requirements met | Line-by-line checklist | Tests passing |
+
+## Red Flags — STOP
+
+- Using "should", "probably", "seems to"
+- Expressing satisfaction before verification ("Great!", "Perfect!", "Done!")
+- About to commit / push / PR without verification
+- Trusting an agent's success report without checking the diff
+- Relying on partial verification
+- Thinking "just this once"
+- Tired and wanting work over
+- Any wording implying success without having run verification
+
+## Rationalization Prevention
+
+| Excuse | Reality |
+|--------|---------|
+| "Should work now" | Run the verification. |
+| "I'm confident" | Confidence ≠ evidence. |
+| "Just this once" | No exceptions. |
+| "Linter passed" | Linter ≠ compiler. |
+| "Agent said success" | Verify independently (check diff). |
+| "I'm tired" | Exhaustion ≠ excuse. |
+| "Partial check is enough" | Partial proves nothing. |
+| "Different words, rule doesn't apply" | Spirit over letter. |
+
+## Key Patterns
+
+**Tests:**
+```
+✅ [run test command] [see: 34/34 pass] → "All tests pass"
+❌ "Should pass now" / "Looks correct"
+```
+
+**Regression tests (TDD red-green):**
+```
+✅ Write → Run (pass) → Revert fix → Run (MUST FAIL) → Restore → Run (pass)
+❌ "I've written a regression test" (without red-green verification)
+```
+
+**Build:**
+```
+✅ [run build] [see: exit 0] → "Build passes"
+❌ "Linter passed" (linter doesn't check compilation)
+```
+
+**Requirements:**
+```
+✅ Re-read plan → create checklist → verify each → report gaps or completion
+❌ "Tests pass, phase complete"
+```
+
+**Agent delegation:**
+```
+✅ Agent reports success → check VCS diff → verify changes → report actual state
+❌ Trust the agent report as-is
+```
+
+## When This Applies
+
+Always, before:
+- Any variation of a success / completion claim
+- Any expression of satisfaction
+- Any positive statement about work state
+- Committing, creating a PR, marking a task complete
+- Moving to the next task
+- Delegating to a subagent
+
+The rule covers exact phrases, paraphrases, synonyms, and any implication of success.
+
+## The Bottom Line
+
+No shortcuts for verification. Run the command. Read the output. Then claim the result. This is non-negotiable.
 
 # Tool Usage Rules
 
