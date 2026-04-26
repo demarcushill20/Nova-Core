@@ -119,3 +119,30 @@ def _block_rejection_telegram():
     """
     with patch("novatrade.notify.rejection_telegram"):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _default_disable_live_engine_market_hours():
+    """Disable the LiveStrategyEngine market-hours guard during tests.
+
+    LiveStrategyEngine builds a session filter at __init__ when
+    LiveConfig.enable_market_hours_check is True (the production default);
+    that filter rejects synthetic test timestamps falling outside
+    London/NY sessions, breaking e2e tests that expect bar-by-bar state
+    transitions. Replacing create_london_ny_focus_filter with a stub that
+    always permits trading is scoped to the live-engine import path only,
+    so RiskEngine's separately-imported session filter is unaffected and
+    tests targeting the production guard can patch this fixture back.
+    """
+    try:
+        from unittest.mock import MagicMock
+
+        permissive = MagicMock()
+        permissive.is_trading_allowed.return_value = True
+        with patch(
+            "novatrade.strategy.live_engine.create_london_ny_focus_filter",
+            return_value=permissive,
+        ):
+            yield
+    except (ImportError, AttributeError):
+        yield
