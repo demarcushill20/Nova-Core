@@ -32,6 +32,7 @@ from typing import Any
 from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
 from novatrade.notify import rejection_telegram
+from novatrade.risk.session_aware_filter import SessionAwareFilter, create_london_ny_focus_filter
 from novatrade.strategies.base import BaseStrategy, EntrySignal, ExitSignal
 
 log = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class LiveConfig:
     higher_timeframe: str = "H4"
     max_candles: int = 500  # rolling buffer cap
     trigger_window_bars: int = 20  # pending order expiry
+    enable_market_hours_check: bool = True  # skip signal evaluation during market close
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +241,11 @@ class LiveStrategyEngine:
         self._current_day_key: Any = None  # date object
         self._last_flat_bar: int | None = None
 
+        # Market hours session filter
+        self._session_filter: SessionAwareFilter | None = None
+        if self._config.enable_market_hours_check:
+            self._session_filter = create_london_ny_focus_filter()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -385,6 +392,17 @@ class LiveStrategyEngine:
             LiveState.PENDING_LONG,
             LiveState.PENDING_SHORT,
         ):
+            # Market hours check — skip entry evaluation if market is closed
+            if self._session_filter is not None and bar.timestamp > 0:
+                import datetime as dt
+                from datetime import timezone as tz
+
+                timestamp_dt = dt.datetime.fromtimestamp(bar.timestamp, tz=tz.utc)
+                if not self._session_filter.is_trading_allowed(timestamp_dt):
+                    session_info = self._session_filter.check_session(timestamp_dt)
+                    log.debug("Market hours check: skipping entry evaluation — %s", session_info.reason)
+                    return signals
+
             # Circuit breaker
             if self._env.max_consecutive_losses > 0 and self._consecutive_losses >= self._env.max_consecutive_losses:
                 msg = f"consecutive_losses={self._consecutive_losses} >= max={self._env.max_consecutive_losses}"
