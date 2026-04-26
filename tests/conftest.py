@@ -105,3 +105,17 @@ def _freeze_gate_time():
             yield
     except (ImportError, AttributeError):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _block_rejection_telegram():
+    """Prevent tests from sending real Telegram rejection notifications.
+
+    HardRiskSupervisor.veto() and strategy modules call rejection_telegram()
+    on every guard failure. Without this patch, running the test suite with
+    live TELEGRAM_BOT_TOKEN/ALLOWED_CHAT_ID env vars sends real messages
+    to the operator's Telegram — causing the "rejected trade spam when
+    market is closed" issue (task 0790).
+    """
+    with patch("novatrade.notify.rejection_telegram"):
+        yield
