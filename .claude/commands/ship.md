@@ -50,3 +50,4 @@ Output a brief summary:
 - If the checkpoint fails, still proceed with commit and push — report the checkpoint failure
 - Never force-push. Never skip pre-commit hooks
 - Do not ask for confirmation — full YOLO mode
+- This contract is also followed inline by the `finishing-a-development-branch` skill (Option 2). Any edit here that changes step semantics must update that skill's Option 2 in the same commit.

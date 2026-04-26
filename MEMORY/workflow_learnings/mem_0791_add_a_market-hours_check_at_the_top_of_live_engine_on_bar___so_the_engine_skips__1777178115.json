@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0791_add_a_market-hours_check_at_the_top_of_live_engine_on_bar___so_the_engine_skips__1777178115",
+  "workflow_id": "0791_add_a_market-hours_check_at_the_top_of_live_engine_on_bar___so_the_engine_skips_",
+  "task_summary": "Added market hours check to LiveStrategyEngine.on_bar() that skips entry signal evaluation when market is closed",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Added market hours check to LiveStrategyEngine.on_bar() that skips entry signal evaluation when market is closed"
+  ],
+  "successful_patterns": [
+    "task_completed: 0791_add_a_market-hours_check_at_the_top_of_live_engine_on_bar___so_the_engine_skips"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Added market hours check to LiveStrategyEngine.on_bar() that skips entry signal evaluation when market is closed",
+  "created_at": "2026-04-26T04:35:15Z",
+  "confidence": "high"
+}
