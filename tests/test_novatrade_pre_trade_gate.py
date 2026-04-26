@@ -941,8 +941,9 @@ class TestVolumeSizingAutoResize:
         gate = PreTradeGate(_cfg())
 
         # Use a volume that should be within tolerance of calculated value
+        # At 0.33% risk on $10K equity with 50-pip stop: calculated ≈ 0.07 lots
         order = _order(
-            volume=0.30,  # Close to typical calculated value
+            volume=0.07,
             price=1.1000,
             stop_loss=1.0950,
         )

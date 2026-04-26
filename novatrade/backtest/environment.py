@@ -162,7 +162,7 @@ class BacktestEnvironment:
 
     # --- Position sizing ---
     initial_equity: float = 100_000.0
-    risk_fraction: float = 0.015  # 1.5% risk per trade ($1,500 on $100K)
+    risk_fraction: float = 0.0033  # 0.33% risk per trade ($330 on $100K)
     min_volume: float = 0.01
     max_volume: float = 50.00  # Maximum for $100K accounts
 

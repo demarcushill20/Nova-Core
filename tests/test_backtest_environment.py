@@ -51,7 +51,7 @@ class TestBacktestEnvironment:
     def test_default_position_sizing(self):
         env = DEFAULT_ENVIRONMENT
         assert env.initial_equity == 100_000.0
-        assert env.risk_fraction == 0.015  # 1.5% risk per trade ($1,500 on $100K)
+        assert env.risk_fraction == 0.0033  # 0.33% risk per trade ($330 on $100K)
         assert env.min_volume == 0.01
         assert env.max_volume == 50.00  # Maximum for $100K accounts
 
