@@ -172,3 +172,67 @@ stag_atr_mult: 0.3
         assert env.use_stagnation_guard is True
         assert env.stag_bars == 12
         assert env.stag_atr_mult == pytest.approx(0.3)
+
+
+class TestStopGeometryFieldsSurfaced:
+    """Verify atr_sl_floor_multiplier and sl_spread_buffer_pips can be set
+    via YAML/StrategyConfig and reach BacktestEnvironment unchanged.
+
+    Regression guard for an "invisible parameters" parity-gap finding: both
+    fields exist as BacktestEnvironment defaults but were not surfaced into
+    StrategyConfig, so they couldn't be configured per-strategy. They silently
+    widened every Python stop in a way Pine v5 doesn't, contributing to the
+    PF gap.
+    """
+
+    def test_atr_sl_floor_multiplier_round_trips(self, tmp_path):
+        from dataclasses import replace as dc_replace
+
+        from novatrade.cli.config_schema import StrategyConfig
+
+        cfg_path = tmp_path / "strategy.yaml"
+        cfg_path.write_text(
+            """
+strategy_type: irb
+name: irb_test
+version: "5.0.0-test"
+atr_sl_floor_multiplier: 0.0
+""".strip()
+        )
+
+        cfg = StrategyConfig.from_yaml(cfg_path)
+        assert cfg.atr_sl_floor_multiplier == 0.0
+
+        kwargs = cfg.to_environment_kwargs()
+        assert kwargs["atr_sl_floor_multiplier"] == 0.0
+
+        env = dc_replace(
+            DEFAULT_ENVIRONMENT, **{k: v for k, v in kwargs.items() if k in DEFAULT_ENVIRONMENT.__dataclass_fields__}
+        )
+        assert env.atr_sl_floor_multiplier == 0.0
+
+    def test_sl_spread_buffer_pips_round_trips(self, tmp_path):
+        from dataclasses import replace as dc_replace
+
+        from novatrade.cli.config_schema import StrategyConfig
+
+        cfg_path = tmp_path / "strategy.yaml"
+        cfg_path.write_text(
+            """
+strategy_type: irb
+name: irb_test
+version: "5.0.0-test"
+sl_spread_buffer_pips: 0.0
+""".strip()
+        )
+
+        cfg = StrategyConfig.from_yaml(cfg_path)
+        assert cfg.sl_spread_buffer_pips == 0.0
+
+        kwargs = cfg.to_environment_kwargs()
+        assert kwargs["sl_spread_buffer_pips"] == 0.0
+
+        env = dc_replace(
+            DEFAULT_ENVIRONMENT, **{k: v for k, v in kwargs.items() if k in DEFAULT_ENVIRONMENT.__dataclass_fields__}
+        )
+        assert env.sl_spread_buffer_pips == 0.0

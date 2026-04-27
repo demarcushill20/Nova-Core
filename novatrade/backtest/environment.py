@@ -485,6 +485,8 @@ class BacktestEnvironment:
             "use_stagnation_guard": "use_stagnation_guard",
             "stag_bars": "stag_bars",
             "stag_atr_mult": "stag_atr_mult",
+            "atr_sl_floor_multiplier": "atr_sl_floor_multiplier",
+            "sl_spread_buffer_pips": "sl_spread_buffer_pips",
         }
 
         # Apply mappings from config
