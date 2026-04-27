@@ -97,6 +97,10 @@ class StrategyConfig(BaseModel):
     cooldown_bars: int = Field(default=0, ge=0, le=50)
     revalidate_pending: bool = Field(default=False)
     min_signal_atr_mult: float = Field(default=0.0, ge=0.0, le=2.0)
+    # --- v5 Stagnation Guard (Pine USE_STAG / STAG_BARS / STAG_ATR) ---
+    use_stagnation_guard: bool = Field(default=False)
+    stag_bars: int = Field(default=12, ge=3, le=20)
+    stag_atr_mult: float = Field(default=0.3, ge=0.1, le=2.0)
 
     # --- Level 2: filter toggles ----------------------------------------
     filters_enabled: list[str] = Field(default_factory=list)
@@ -271,6 +275,9 @@ class StrategyConfig(BaseModel):
             "cooldown_bars": self.cooldown_bars,
             "revalidate_pending": self.revalidate_pending,
             "min_signal_atr_mult": self.min_signal_atr_mult,
+            "use_stagnation_guard": self.use_stagnation_guard,
+            "stag_bars": self.stag_bars,
+            "stag_atr_mult": self.stag_atr_mult,
         }
 
     def content_hash(self) -> str:

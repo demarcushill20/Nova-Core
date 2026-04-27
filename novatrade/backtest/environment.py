@@ -210,6 +210,13 @@ class BacktestEnvironment:
     cooldown_bars: int = 0  # v5: bars to wait after going flat (0=disabled)
     revalidate_pending: bool = False  # v5: re-check trend/HTF each bar for pending orders
     min_signal_atr_mult: float = 0.0  # v5: min signal range / ATR (0=disabled)
+    # v5 Stagnation Guard (Pine USE_STAG / STAG_BARS / STAG_ATR):
+    #   At exactly bars_held == stag_bars, if peak favourable excursion is
+    #   below stag_atr_mult * entry-bar-ATR AND the close is still adverse to
+    #   entry, close the trade at market with STAG_EXIT.
+    use_stagnation_guard: bool = False  # v5: enable the guard
+    stag_bars: int = 12  # v5: bar count at which to check
+    stag_atr_mult: float = 0.3  # v5: peak-fav threshold multiplier on entry ATR
 
     # --- ATR-adaptive stop loss (Quick Win) ---
     atr_sl_floor_multiplier: float = 1.0  # min SL distance = ATR * this multiplier (0=disabled)
