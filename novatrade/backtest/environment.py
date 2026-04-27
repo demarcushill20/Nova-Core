@@ -478,6 +478,13 @@ class BacktestEnvironment:
             "breakeven_r": "breakeven_r",
             "trail_delay_bars": "trail_delay_bars",
             "use_volatility_filter": "use_volatility_filter",
+            # Pine v5 trade-management parameters (added to close parity-gap
+            # where these fields silently fell back to defaults):
+            "trail_ema_period": "trail_ema_period",
+            "ema_confirm_bars": "ema_confirm_bars",
+            "use_stagnation_guard": "use_stagnation_guard",
+            "stag_bars": "stag_bars",
+            "stag_atr_mult": "stag_atr_mult",
         }
 
         # Apply mappings from config

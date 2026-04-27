@@ -132,3 +132,43 @@ class TestFillModel:
     def test_values(self):
         assert FillModel.NEXT_BAR_OHLC.value == "next_bar_ohlc"
         assert FillModel.INTRA_BAR_STOP.value == "intra_bar_stop"
+
+
+class TestFromChampionConfigFieldMapping:
+    """Verify from_champion_config propagates all v5 strategy fields.
+
+    Regression guard for a missing-field-mapping bug where Pine v5 trade-management
+    parameters (trail_ema_period, ema_confirm_bars, stagnation guard) silently
+    fell back to BacktestEnvironment defaults instead of the YAML-supplied values.
+    """
+
+    def _write_yaml(self, tmp_path, body: str):
+        path = tmp_path / "irb_v5_test.yaml"
+        path.write_text(body)
+        return path
+
+    def test_v5_fields_round_trip_through_from_champion_config(self, tmp_path):
+        cfg = self._write_yaml(
+            tmp_path,
+            """
+strategy_type: irb
+name: irb_v5_test
+version: "5.0.0-test"
+trail_ema_period: 40
+ema_confirm_bars: 3
+use_stagnation_guard: true
+stag_bars: 12
+stag_atr_mult: 0.3
+""".strip(),
+        )
+
+        env = BacktestEnvironment.from_champion_config(cfg)
+
+        # If any of these fail, the field_mapping is dropping the value and
+        # silently using the BacktestEnvironment default — exactly the
+        # parity-gap surfaced by the parity-engine-fixes investigation.
+        assert env.trail_ema_period == 40
+        assert env.ema_confirm_bars == 3
+        assert env.use_stagnation_guard is True
+        assert env.stag_bars == 12
+        assert env.stag_atr_mult == pytest.approx(0.3)
