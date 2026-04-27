@@ -4,6 +4,9 @@ __pycache__/
 *.so
 .venv/
 
+# Git worktrees (isolated feature branches)
+.worktrees/
+
 # Runtime directories — all contents are transient; keep .gitkeep placeholders
 TASKS/*
 !TASKS/.gitkeep
