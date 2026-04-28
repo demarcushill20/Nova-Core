@@ -874,6 +874,11 @@ class IRBBacktester:
             self._close_position(i, bar.open, reason)
             return
 
+        # D1 probe: ratchet BEFORE stop-loss check so same-bar wick-hit fills
+        # at post-ratchet (tighter) stop level (Pine cur_stop semantics).
+        if "d1_post_ratchet_stop_fill" in self.env.parity_audit_toggles:
+            self._ratchet_trail_only(i, bar, atr_h1, trail_ema)
+
         pos.bars_held = i - pos.entry_bar
 
         # --- Check stop-loss hit intra-bar ---
@@ -1009,6 +1014,56 @@ class IRBBacktester:
                     if bar.high >= pos.current_stop and bar.high < old_stop:
                         self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
                         return
+
+    def _ratchet_trail_only(
+        self,
+        i: int,
+        bar: Candle,
+        atr_h1: list[float],
+        trail_ema: list[float] | None,
+    ) -> None:
+        """Update pos.current_stop via EMA-trail or ATR-trail without firing
+        any exit. Used by the D1 parity probe (``d1_post_ratchet_stop_fill``)
+        to ratchet BEFORE the stop-loss check so a same-bar wick-hit fills at
+        the post-ratchet (tighter) stop level — matches Pine ``cur_stop``
+        semantics where ``strategy.exit`` evaluates the wick against the
+        already-updated trail.
+
+        NOTE: this duplicates the ratchet portion of ``_manage_position``
+        (the ``--- Update trailing stop ---`` block). The DRY violation is
+        accepted for this audit; the canonical ratchet stays untouched so
+        the live default path is bit-identical.
+        """
+        pos = self._position
+        if pos is None:
+            return
+
+        use_ema_trail = self.env.trail_ema_period > 0 and trail_ema is not None and i < len(trail_ema)
+
+        if use_ema_trail and trail_ema is not None:
+            ema_val = trail_ema[i]
+            if math.isnan(ema_val):
+                return
+            if pos.side == TradeSide.LONG:
+                if ema_val > pos.current_stop:
+                    pos.current_stop = ema_val
+            else:
+                if ema_val < pos.current_stop:
+                    pos.current_stop = ema_val
+        else:
+            atr_val = atr_h1[i] if i < len(atr_h1) and not math.isnan(atr_h1[i]) else 0
+            if atr_val <= 0:
+                return
+            if pos.side == TradeSide.LONG:
+                pos.best_close = max(pos.best_close, bar.close)
+                new_trail = pos.best_close - self.env.trail_atr_multiplier * atr_val
+                if new_trail > pos.current_stop:
+                    pos.current_stop = new_trail
+            else:
+                pos.best_close = min(pos.best_close, bar.close)
+                new_trail = pos.best_close + self.env.trail_atr_multiplier * atr_val
+                if new_trail < pos.current_stop:
+                    pos.current_stop = new_trail
 
     def _partial_close_position(self, bar_idx: int, exit_price: float) -> None:
         """Realise a partial exit. Books the cash on equity and stashes the
