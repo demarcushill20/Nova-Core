@@ -334,6 +334,83 @@ class TestIRBBacktester:
         assert irb.close <= threshold
 
 
+class TestParityAuditToggleNoOp(TestIRBBacktester):
+    """Live-safety regression: empty parity_audit_toggles MUST produce bit-identical
+    results to the current engine. If this test fails, a parity-audit toggle has
+    leaked into the default code path and live behavior may have changed.
+
+    Inherits ``_make_env`` from ``TestIRBBacktester`` so the regression mirrors
+    the same environment construction the rest of the suite uses.
+    """
+
+    @staticmethod
+    def _build_inputs() -> tuple[list[Candle], list[Candle]]:
+        """Small synthetic backtest input that exercises signal generation.
+
+        Mirrors the shape used by ``test_stop_loss_exit`` and
+        ``test_irb_geometry_detection_uptrend`` — uptrend with an IRB candle
+        injected so the engine reaches _manage_position / _close_position
+        and any toggle leak would diverge.
+        """
+        candles = _trending_up_candles(40, start=1.1000, step=0.0015)
+        irb_base = 1.1000 + 38 * 0.0015
+        candles[38] = _make_irb_candle_uptrend(irb_base)
+        candles.append(
+            _candle(
+                o=irb_base + 0.0040,
+                h=irb_base + 0.0060,
+                low=irb_base + 0.0030,
+                c=irb_base + 0.0055,
+                ts=39 * 3600.0,
+            )
+        )
+        h4 = _trending_up_candles(11, start=1.1000, step=0.0060)
+        return candles, h4
+
+    def _run(self, env: BacktestEnvironment) -> BacktestResult:
+        candles, h4 = self._build_inputs()
+        return IRBBacktester(env=env).run(candles, h4)
+
+    def test_empty_toggles_match_default(self):
+        """Default (field unset) and explicit empty frozenset must be identical."""
+        env_a = self._make_env(warmup_bars=5)
+        env_b = self._make_env(warmup_bars=5, parity_audit_toggles=frozenset())
+
+        result_a = self._run(env_a)
+        result_b = self._run(env_b)
+
+        assert result_a.final_equity == result_b.final_equity
+        assert len(result_a.trades) == len(result_b.trades)
+        for ta, tb in zip(result_a.trades, result_b.trades, strict=True):
+            assert ta.entry_price == tb.entry_price
+            assert ta.exit_price == tb.exit_price
+            assert ta.exit_reason == tb.exit_reason
+            assert ta.pnl_pips == tb.pnl_pips
+            assert ta.pnl_usd == tb.pnl_usd
+
+    def test_unknown_toggle_is_no_op(self):
+        """An unknown toggle label must not change behavior — the engine should
+        only react to known labels added in later phases. Unknown strings are a
+        no-op so a typo or stale config never silently flips behavior."""
+        env_default = self._make_env(warmup_bars=5)
+        env_unknown = self._make_env(
+            warmup_bars=5,
+            parity_audit_toggles=frozenset({"this_does_not_exist"}),
+        )
+
+        result_default = self._run(env_default)
+        result_unknown = self._run(env_unknown)
+
+        assert result_default.final_equity == result_unknown.final_equity
+        assert len(result_default.trades) == len(result_unknown.trades)
+        for td, tu in zip(result_default.trades, result_unknown.trades, strict=True):
+            assert td.entry_price == tu.entry_price
+            assert td.exit_price == tu.exit_price
+            assert td.exit_reason == tu.exit_reason
+            assert td.pnl_pips == tu.pnl_pips
+            assert td.pnl_usd == tu.pnl_usd
+
+
 class TestStrategyState:
     def test_all_states(self):
         states = list(StrategyState)
