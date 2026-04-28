@@ -882,13 +882,25 @@ class IRBBacktester:
         pos.bars_held = i - pos.entry_bar
 
         # --- Check stop-loss hit intra-bar ---
+        # D12 probe: when toggle d12_gap_fill_at_open is set, a stop-loss
+        # exit on a bar that GAPS through the stop level fills at bar.open
+        # instead of pos.current_stop (Pine strategy.exit gap-fill semantics:
+        # if the trigger is already passed at the open, the order executes
+        # at the open). The toggle only takes effect on a true gap-through;
+        # if bar.open is on the same side as the stop the fill is unchanged.
         if pos.side == TradeSide.LONG:
             if bar.low <= pos.current_stop:
-                self._close_position(i, pos.current_stop, ExitReason.STOP_LOSS)
+                exit_price = pos.current_stop
+                if "d12_gap_fill_at_open" in self.env.parity_audit_toggles and bar.open < pos.current_stop:
+                    exit_price = bar.open
+                self._close_position(i, exit_price, ExitReason.STOP_LOSS)
                 return
         else:
             if bar.high >= pos.current_stop:
-                self._close_position(i, pos.current_stop, ExitReason.STOP_LOSS)
+                exit_price = pos.current_stop
+                if "d12_gap_fill_at_open" in self.env.parity_audit_toggles and bar.open > pos.current_stop:
+                    exit_price = bar.open
+                self._close_position(i, exit_price, ExitReason.STOP_LOSS)
                 return
 
         # --- Track peak favourable excursion (for stagnation guard) ---
