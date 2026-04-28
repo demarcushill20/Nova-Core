@@ -863,6 +863,13 @@ class IRBBacktester:
         if i == pos.entry_bar:
             return
 
+        # D2 probe: fire deferred STAG/TIME_STOP exit on this bar's open
+        if pos.deferred_exit_reason is not None and i >= pos.deferred_exit_fire_at_bar:
+            reason = pos.deferred_exit_reason
+            pos.deferred_exit_reason = None
+            self._close_position(i, bar.open, reason)
+            return
+
         pos.bars_held = i - pos.entry_bar
 
         # --- Check stop-loss hit intra-bar ---
@@ -891,6 +898,10 @@ class IRBBacktester:
             stag_threshold = self.env.stag_atr_mult * pos.entry_atr
             adverse = bar.close < pos.entry_price if pos.side == TradeSide.LONG else bar.close > pos.entry_price
             if pos.peak_fav < stag_threshold and adverse:
+                if "d2_strategy_close_next_open" in self.env.parity_audit_toggles:
+                    pos.deferred_exit_reason = ExitReason.STAG_EXIT
+                    pos.deferred_exit_fire_at_bar = i + 1
+                    return
                 self._close_position(i, bar.close, ExitReason.STAG_EXIT)
                 return
 
@@ -912,6 +923,10 @@ class IRBBacktester:
 
         # --- Time stop [U3] ---
         if pos.bars_held >= self.env.time_stop_bars:
+            if "d2_strategy_close_next_open" in self.env.parity_audit_toggles:
+                pos.deferred_exit_reason = ExitReason.TIME_STOP
+                pos.deferred_exit_fire_at_bar = i + 1
+                return
             self._close_position(i, bar.close, ExitReason.TIME_STOP)
             return
 

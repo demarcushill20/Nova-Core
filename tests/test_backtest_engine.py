@@ -414,6 +414,151 @@ class TestParityAuditToggleNoOp(TestIRBBacktester):
             assert td == tu
 
 
+class TestD2StagTimeStopNextBarOpen(TestIRBBacktester):
+    """D2 probe: when toggle ``d2_strategy_close_next_open`` is set,
+    STAG_EXIT and TIME_STOP exits fire on the NEXT bar's open instead of
+    the current bar's close (Pine ``strategy.close`` semantics).
+
+    NOTE: this test exercises the TIME_STOP code-path, which shares the
+    exact same toggle gate (and identical defer-then-fire-on-open
+    machinery) as STAG_EXIT in ``_manage_position``. Validating the
+    TIME_STOP path therefore covers the STAG_EXIT path by construction —
+    they branch through the same ``deferred_exit_reason`` /
+    ``deferred_exit_fire_at_bar`` state on ``_OpenPosition`` and the
+    same firing block at the top of ``_manage_position``.
+
+    The TIME_STOP scenario is preferred over STAG_EXIT here because
+    constructing a synthetic peak-favourable-excursion-controlled window
+    (where peak_fav stays below ``stag_atr_mult * entry_atr`` for the
+    full ``stag_bars`` window AND the close is adverse to entry on
+    bar ``stag_bars``) is significantly more brittle than letting the
+    position run for ``time_stop_bars`` bars in a near-flat tape.
+    """
+
+    @staticmethod
+    def _build_time_stop_window() -> tuple[list[Candle], list[Candle]]:
+        """Build a window where an IRB long fills, then TIME_STOP triggers
+        with several bars remaining so the deferred fire is observable.
+
+        Layout (mirrors ``TestParityAuditToggleNoOp._build_inputs`` which
+        is known to actually produce a trade through the IRB filter
+        chain — sideways/overextension/MTF filters need the trend
+        context):
+          - bars 0..37: clean uptrend (warmup + setup context)
+          - bar 38: uptrend IRB candle
+          - bar 39: gap up to fill the buy-stop above the IRB high
+          - bars 40..49: near-flat tape so neither SL nor partial
+            fires and the position simply ages until TIME_STOP
+        """
+        candles = _trending_up_candles(40, start=1.1000, step=0.0015)
+        irb_base = 1.1000 + 38 * 0.0015
+        candles[38] = _make_irb_candle_uptrend(irb_base)
+        # Fill bar — drive up that takes out the buy-stop.
+        candles.append(
+            _candle(
+                o=irb_base + 0.0040,
+                h=irb_base + 0.0060,
+                low=irb_base + 0.0030,
+                c=irb_base + 0.0055,
+                ts=39 * 3600.0,
+            )
+        )
+        # Post-entry: hold a near-flat tape well above the IRB low so
+        # neither SL nor partial fires; let the position age until
+        # TIME_STOP. Each bar has a slightly different open so the
+        # deferred-exit price (next bar's open) is distinguishable from
+        # the current bar's close — otherwise the assertion is vacuous.
+        for i in range(40, 50):
+            mid = irb_base + 0.0050 + (i - 40) * 0.00005
+            candles.append(
+                _candle(
+                    o=mid,
+                    h=mid + 0.0003,
+                    low=mid - 0.0003,
+                    c=mid + 0.0001,
+                    ts=i * 3600.0,
+                )
+            )
+        h4 = _trending_up_candles(13, start=1.1000, step=0.0060)
+        return candles, h4
+
+    def _make_d2_env(self, *, toggle: bool, **overrides) -> BacktestEnvironment:
+        """Env with a small ``time_stop_bars`` so TIME_STOP fires well
+        before end-of-data, and partial/breakeven disabled to keep the
+        exit attribution unambiguous."""
+        kwargs: dict = {
+            "warmup_bars": 5,
+            "trigger_window_bars": 20,
+            "time_stop_bars": 3,
+            "partial_exit_enabled": False,
+            "breakeven_r": 0.0,
+        }
+        kwargs.update(overrides)
+        if toggle:
+            kwargs["parity_audit_toggles"] = frozenset({"d2_strategy_close_next_open"})
+        return self._make_env(**kwargs)
+
+    def test_d2_defers_time_stop_to_next_bar_open(self):
+        """Toggle on: trade exits one bar later, at that bar's OPEN price."""
+        candles, h4 = self._build_time_stop_window()
+
+        env_off = self._make_d2_env(toggle=False)
+        env_on = self._make_d2_env(toggle=True)
+
+        result_off = IRBBacktester(env=env_off).run(candles, h4)
+        result_on = IRBBacktester(env=env_on).run(candles, h4)
+
+        # Vacuous-test guard: must actually produce a TIME_STOP exit.
+        assert len(result_off.trades) == 1, "fixture must produce exactly one trade"
+        assert len(result_on.trades) == 1, "fixture must produce exactly one trade"
+
+        trade_off = result_off.trades[0]
+        trade_on = result_on.trades[0]
+
+        # Both must hit TIME_STOP — toggle changes timing, not reason.
+        assert trade_off.exit_reason == ExitReason.TIME_STOP
+        assert trade_on.exit_reason == ExitReason.TIME_STOP
+
+        # Toggle on holds the position exactly one bar longer.
+        assert trade_on.hold_bars == trade_off.hold_bars + 1, (
+            f"expected toggle-on hold_bars to be off+1; off={trade_off.hold_bars} on={trade_on.hold_bars}"
+        )
+
+        # Toggle on exits on the FOLLOWING bar (exit_bar offset +1).
+        assert trade_on.exit_bar == trade_off.exit_bar + 1
+
+        # Toggle on exits at the next bar's OPEN price, while toggle
+        # off exits at the trigger bar's CLOSE — verify these are the
+        # actual prices used. (CompletedTrade.exit_timestamp is left at
+        # default 0.0 by ``_close_position``, so we anchor on bar
+        # indices and prices, which the engine sets explicitly.)
+        trigger_bar_idx = trade_off.exit_bar
+        next_bar_idx = trigger_bar_idx + 1
+        assert trade_off.exit_price == pytest.approx(candles[trigger_bar_idx].close)
+        assert trade_on.exit_price == pytest.approx(candles[next_bar_idx].open)
+        # And the two exit prices must actually differ — otherwise the
+        # assertion above is vacuous (window built so they don't).
+        assert trade_off.exit_price != trade_on.exit_price
+
+    def test_d2_default_off_keeps_current_bar_close(self):
+        """Toggle off (default): TIME_STOP exits at the trigger bar's close.
+
+        Distinct from the comparison test above — this one anchors the
+        baseline behavior independently so a future regression that
+        changes default-path pricing fails here even if the toggle-on
+        path also drifts.
+        """
+        candles, h4 = self._build_time_stop_window()
+        env = self._make_d2_env(toggle=False)
+        result = IRBBacktester(env=env).run(candles, h4)
+
+        assert len(result.trades) == 1
+        trade = result.trades[0]
+        assert trade.exit_reason == ExitReason.TIME_STOP
+        # Default path: exit price equals the trigger bar's close.
+        assert trade.exit_price == pytest.approx(candles[trade.exit_bar].close)
+
+
 class TestStrategyState:
     def test_all_states(self):
         states = list(StrategyState)
