@@ -89,6 +89,9 @@ class _OpenPosition:
     # v5 stagnation guard: ATR at entry, peak favourable excursion in price units
     entry_atr: float = 0.0
     peak_fav: float = 0.0
+    # D2 probe: deferred exit (when parity_audit_toggles contains "d2_strategy_close_next_open")
+    deferred_exit_reason: ExitReason | None = None
+    deferred_exit_fire_at_bar: int = -1
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +451,11 @@ class IRBBacktester:
             return
 
         # --- v5: Cooldown bars ---
-        if e.cooldown_bars > 0 and (i - self._last_flat_bar) <= e.cooldown_bars:
+        if (
+            e.cooldown_bars > 0
+            and (i - self._last_flat_bar) <= e.cooldown_bars
+            and "d3_zero_cooldown" not in e.parity_audit_toggles
+        ):
             self._rejections.circuit_breaker += 1
             return
 
@@ -860,16 +867,40 @@ class IRBBacktester:
         if i == pos.entry_bar:
             return
 
+        # D2 probe: fire deferred STAG/TIME_STOP exit on this bar's open
+        if pos.deferred_exit_reason is not None and i >= pos.deferred_exit_fire_at_bar:
+            reason = pos.deferred_exit_reason
+            pos.deferred_exit_reason = None
+            self._close_position(i, bar.open, reason)
+            return
+
+        # D1 probe: ratchet BEFORE stop-loss check so same-bar wick-hit fills
+        # at post-ratchet (tighter) stop level (Pine cur_stop semantics).
+        if "d1_post_ratchet_stop_fill" in self.env.parity_audit_toggles:
+            self._ratchet_trail_only(i, bar, atr_h1, trail_ema)
+
         pos.bars_held = i - pos.entry_bar
 
         # --- Check stop-loss hit intra-bar ---
+        # D12 probe: when toggle d12_gap_fill_at_open is set, a stop-loss
+        # exit on a bar that GAPS through the stop level fills at bar.open
+        # instead of pos.current_stop (Pine strategy.exit gap-fill semantics:
+        # if the trigger is already passed at the open, the order executes
+        # at the open). The toggle only takes effect on a true gap-through;
+        # if bar.open is on the same side as the stop the fill is unchanged.
         if pos.side == TradeSide.LONG:
             if bar.low <= pos.current_stop:
-                self._close_position(i, pos.current_stop, ExitReason.STOP_LOSS)
+                exit_price = pos.current_stop
+                if "d12_gap_fill_at_open" in self.env.parity_audit_toggles and bar.open < pos.current_stop:
+                    exit_price = bar.open
+                self._close_position(i, exit_price, ExitReason.STOP_LOSS)
                 return
         else:
             if bar.high >= pos.current_stop:
-                self._close_position(i, pos.current_stop, ExitReason.STOP_LOSS)
+                exit_price = pos.current_stop
+                if "d12_gap_fill_at_open" in self.env.parity_audit_toggles and bar.open > pos.current_stop:
+                    exit_price = bar.open
+                self._close_position(i, exit_price, ExitReason.STOP_LOSS)
                 return
 
         # --- Track peak favourable excursion (for stagnation guard) ---
@@ -888,6 +919,10 @@ class IRBBacktester:
             stag_threshold = self.env.stag_atr_mult * pos.entry_atr
             adverse = bar.close < pos.entry_price if pos.side == TradeSide.LONG else bar.close > pos.entry_price
             if pos.peak_fav < stag_threshold and adverse:
+                if "d2_strategy_close_next_open" in self.env.parity_audit_toggles:
+                    pos.deferred_exit_reason = ExitReason.STAG_EXIT
+                    pos.deferred_exit_fire_at_bar = i + 1
+                    return
                 self._close_position(i, bar.close, ExitReason.STAG_EXIT)
                 return
 
@@ -909,6 +944,10 @@ class IRBBacktester:
 
         # --- Time stop [U3] ---
         if pos.bars_held >= self.env.time_stop_bars:
+            if "d2_strategy_close_next_open" in self.env.parity_audit_toggles:
+                pos.deferred_exit_reason = ExitReason.TIME_STOP
+                pos.deferred_exit_fire_at_bar = i + 1
+                return
             self._close_position(i, bar.close, ExitReason.TIME_STOP)
             return
 
@@ -987,6 +1026,56 @@ class IRBBacktester:
                     if bar.high >= pos.current_stop and bar.high < old_stop:
                         self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
                         return
+
+    def _ratchet_trail_only(
+        self,
+        i: int,
+        bar: Candle,
+        atr_h1: list[float],
+        trail_ema: list[float] | None,
+    ) -> None:
+        """Update pos.current_stop via EMA-trail or ATR-trail without firing
+        any exit. Used by the D1 parity probe (``d1_post_ratchet_stop_fill``)
+        to ratchet BEFORE the stop-loss check so a same-bar wick-hit fills at
+        the post-ratchet (tighter) stop level — matches Pine ``cur_stop``
+        semantics where ``strategy.exit`` evaluates the wick against the
+        already-updated trail.
+
+        NOTE: this duplicates the ratchet portion of ``_manage_position``
+        (the ``--- Update trailing stop ---`` block). The DRY violation is
+        accepted for this audit; the canonical ratchet stays untouched so
+        the live default path is bit-identical.
+        """
+        pos = self._position
+        if pos is None:
+            return
+
+        use_ema_trail = self.env.trail_ema_period > 0 and trail_ema is not None and i < len(trail_ema)
+
+        if use_ema_trail and trail_ema is not None:
+            ema_val = trail_ema[i]
+            if math.isnan(ema_val):
+                return
+            if pos.side == TradeSide.LONG:
+                if ema_val > pos.current_stop:
+                    pos.current_stop = ema_val
+            else:
+                if ema_val < pos.current_stop:
+                    pos.current_stop = ema_val
+        else:
+            atr_val = atr_h1[i] if i < len(atr_h1) and not math.isnan(atr_h1[i]) else 0
+            if atr_val <= 0:
+                return
+            if pos.side == TradeSide.LONG:
+                pos.best_close = max(pos.best_close, bar.close)
+                new_trail = pos.best_close - self.env.trail_atr_multiplier * atr_val
+                if new_trail > pos.current_stop:
+                    pos.current_stop = new_trail
+            else:
+                pos.best_close = min(pos.best_close, bar.close)
+                new_trail = pos.best_close + self.env.trail_atr_multiplier * atr_val
+                if new_trail < pos.current_stop:
+                    pos.current_stop = new_trail
 
     def _partial_close_position(self, bar_idx: int, exit_price: float) -> None:
         """Realise a partial exit. Books the cash on equity and stashes the

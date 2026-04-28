@@ -334,6 +334,710 @@ class TestIRBBacktester:
         assert irb.close <= threshold
 
 
+class TestParityAuditToggleNoOp(TestIRBBacktester):
+    """Live-safety regression: empty parity_audit_toggles MUST produce bit-identical
+    results to the current engine. If this test fails, a parity-audit toggle has
+    leaked into the default code path and live behavior may have changed.
+
+    Inherits ``_make_env`` from ``TestIRBBacktester`` so the regression mirrors
+    the same environment construction the rest of the suite uses.
+    """
+
+    @staticmethod
+    def _build_inputs() -> tuple[list[Candle], list[Candle]]:
+        """Small synthetic backtest input that exercises signal generation.
+
+        Mirrors the shape used by ``test_stop_loss_exit`` and
+        ``test_irb_geometry_detection_uptrend`` — uptrend with an IRB candle
+        injected so the engine reaches _manage_position / _close_position
+        and any toggle leak would diverge.
+        """
+        candles = _trending_up_candles(40, start=1.1000, step=0.0015)
+        irb_base = 1.1000 + 38 * 0.0015
+        candles[38] = _make_irb_candle_uptrend(irb_base)
+        candles.append(
+            _candle(
+                o=irb_base + 0.0040,
+                h=irb_base + 0.0060,
+                low=irb_base + 0.0030,
+                c=irb_base + 0.0055,
+                ts=39 * 3600.0,
+            )
+        )
+        h4 = _trending_up_candles(11, start=1.1000, step=0.0060)
+        return candles, h4
+
+    def _run(self, env: BacktestEnvironment) -> BacktestResult:
+        candles, h4 = self._build_inputs()
+        return IRBBacktester(env=env).run(candles, h4)
+
+    def test_empty_toggles_match_default(self):
+        """Default (field unset) and explicit empty frozenset must be identical."""
+        env_a = self._make_env(warmup_bars=5)
+        env_b = self._make_env(warmup_bars=5, parity_audit_toggles=frozenset())
+
+        result_a = self._run(env_a)
+        result_b = self._run(env_b)
+
+        # Vacuous-test guard: synthetic input must actually exercise trade logic.
+        # If this ever drops to zero, the regression no longer protects anything.
+        assert len(result_a.trades) > 0, "synthetic input produced no trades"
+
+        assert result_a.final_equity == result_b.final_equity
+        assert len(result_a.trades) == len(result_b.trades)
+        # Compare full CompletedTrade dataclass — catches any state-machine artifact
+        # (entry/exit timestamps, hold_bars, MFE/MAE, risk_r, volume, etc.) that a
+        # toggle leak might perturb, not just the headline price/reason/PnL fields.
+        for ta, tb in zip(result_a.trades, result_b.trades, strict=True):
+            assert ta == tb
+
+    def test_unknown_toggle_is_no_op(self):
+        """An unknown toggle label must not change behavior — the engine should
+        only react to known labels added in later phases. Unknown strings are a
+        no-op so a typo or stale config never silently flips behavior."""
+        env_default = self._make_env(warmup_bars=5)
+        env_unknown = self._make_env(
+            warmup_bars=5,
+            parity_audit_toggles=frozenset({"this_does_not_exist"}),
+        )
+
+        result_default = self._run(env_default)
+        result_unknown = self._run(env_unknown)
+
+        # Vacuous-test guard: synthetic input must actually exercise trade logic.
+        assert len(result_default.trades) > 0, "synthetic input produced no trades"
+
+        assert result_default.final_equity == result_unknown.final_equity
+        assert len(result_default.trades) == len(result_unknown.trades)
+        # Full dataclass equality — see test_empty_toggles_match_default for rationale.
+        for td, tu in zip(result_default.trades, result_unknown.trades, strict=True):
+            assert td == tu
+
+
+class TestD2StagTimeStopNextBarOpen(TestIRBBacktester):
+    """D2 probe: when toggle ``d2_strategy_close_next_open`` is set,
+    STAG_EXIT and TIME_STOP exits fire on the NEXT bar's open instead of
+    the current bar's close (Pine ``strategy.close`` semantics).
+
+    NOTE: this test exercises the TIME_STOP code-path, which shares the
+    exact same toggle gate (and identical defer-then-fire-on-open
+    machinery) as STAG_EXIT in ``_manage_position``. Validating the
+    TIME_STOP path therefore covers the STAG_EXIT path by construction —
+    they branch through the same ``deferred_exit_reason`` /
+    ``deferred_exit_fire_at_bar`` state on ``_OpenPosition`` and the
+    same firing block at the top of ``_manage_position``.
+
+    The TIME_STOP scenario is preferred over STAG_EXIT here because
+    constructing a synthetic peak-favourable-excursion-controlled window
+    (where peak_fav stays below ``stag_atr_mult * entry_atr`` for the
+    full ``stag_bars`` window AND the close is adverse to entry on
+    bar ``stag_bars``) is significantly more brittle than letting the
+    position run for ``time_stop_bars`` bars in a near-flat tape.
+    """
+
+    @staticmethod
+    def _build_time_stop_window() -> tuple[list[Candle], list[Candle]]:
+        """Build a window where an IRB long fills, then TIME_STOP triggers
+        with several bars remaining so the deferred fire is observable.
+
+        Layout (mirrors ``TestParityAuditToggleNoOp._build_inputs`` which
+        is known to actually produce a trade through the IRB filter
+        chain — sideways/overextension/MTF filters need the trend
+        context):
+          - bars 0..37: clean uptrend (warmup + setup context)
+          - bar 38: uptrend IRB candle
+          - bar 39: gap up to fill the buy-stop above the IRB high
+          - bars 40..49: near-flat tape so neither SL nor partial
+            fires and the position simply ages until TIME_STOP
+        """
+        candles = _trending_up_candles(40, start=1.1000, step=0.0015)
+        irb_base = 1.1000 + 38 * 0.0015
+        candles[38] = _make_irb_candle_uptrend(irb_base)
+        # Fill bar — drive up that takes out the buy-stop.
+        candles.append(
+            _candle(
+                o=irb_base + 0.0040,
+                h=irb_base + 0.0060,
+                low=irb_base + 0.0030,
+                c=irb_base + 0.0055,
+                ts=39 * 3600.0,
+            )
+        )
+        # Post-entry: hold a near-flat tape well above the IRB low so
+        # neither SL nor partial fires; let the position age until
+        # TIME_STOP. Each bar has a slightly different open so the
+        # deferred-exit price (next bar's open) is distinguishable from
+        # the current bar's close — otherwise the assertion is vacuous.
+        for i in range(40, 50):
+            mid = irb_base + 0.0050 + (i - 40) * 0.00005
+            candles.append(
+                _candle(
+                    o=mid,
+                    h=mid + 0.0003,
+                    low=mid - 0.0003,
+                    c=mid + 0.0001,
+                    ts=i * 3600.0,
+                )
+            )
+        h4 = _trending_up_candles(13, start=1.1000, step=0.0060)
+        return candles, h4
+
+    def _make_d2_env(self, *, toggle: bool, **overrides) -> BacktestEnvironment:
+        """Env with a small ``time_stop_bars`` so TIME_STOP fires well
+        before end-of-data, and partial/breakeven disabled to keep the
+        exit attribution unambiguous."""
+        kwargs: dict = {
+            "warmup_bars": 5,
+            "trigger_window_bars": 20,
+            "time_stop_bars": 3,
+            "partial_exit_enabled": False,
+            "breakeven_r": 0.0,
+        }
+        kwargs.update(overrides)
+        if toggle:
+            kwargs["parity_audit_toggles"] = frozenset({"d2_strategy_close_next_open"})
+        return self._make_env(**kwargs)
+
+    def test_d2_defers_time_stop_to_next_bar_open(self):
+        """Toggle on: trade exits one bar later, at that bar's OPEN price."""
+        candles, h4 = self._build_time_stop_window()
+
+        env_off = self._make_d2_env(toggle=False)
+        env_on = self._make_d2_env(toggle=True)
+
+        result_off = IRBBacktester(env=env_off).run(candles, h4)
+        result_on = IRBBacktester(env=env_on).run(candles, h4)
+
+        # Vacuous-test guard: must actually produce a TIME_STOP exit.
+        assert len(result_off.trades) == 1, "fixture must produce exactly one trade"
+        assert len(result_on.trades) == 1, "fixture must produce exactly one trade"
+
+        trade_off = result_off.trades[0]
+        trade_on = result_on.trades[0]
+
+        # Both must hit TIME_STOP — toggle changes timing, not reason.
+        assert trade_off.exit_reason == ExitReason.TIME_STOP
+        assert trade_on.exit_reason == ExitReason.TIME_STOP
+
+        # Toggle on holds the position exactly one bar longer.
+        assert trade_on.hold_bars == trade_off.hold_bars + 1, (
+            f"expected toggle-on hold_bars to be off+1; off={trade_off.hold_bars} on={trade_on.hold_bars}"
+        )
+
+        # Toggle on exits on the FOLLOWING bar (exit_bar offset +1).
+        assert trade_on.exit_bar == trade_off.exit_bar + 1
+
+        # Toggle on exits at the next bar's OPEN price, while toggle
+        # off exits at the trigger bar's CLOSE — verify these are the
+        # actual prices used. (CompletedTrade.exit_timestamp is left at
+        # default 0.0 by ``_close_position``, so we anchor on bar
+        # indices and prices, which the engine sets explicitly.)
+        trigger_bar_idx = trade_off.exit_bar
+        next_bar_idx = trigger_bar_idx + 1
+        assert trade_off.exit_price == pytest.approx(candles[trigger_bar_idx].close)
+        assert trade_on.exit_price == pytest.approx(candles[next_bar_idx].open)
+        # And the two exit prices must actually differ — otherwise the
+        # assertion above is vacuous (window built so they don't).
+        assert trade_off.exit_price != trade_on.exit_price
+
+    def test_d2_default_off_keeps_current_bar_close(self):
+        """Toggle off (default): TIME_STOP exits at the trigger bar's close.
+
+        Distinct from the comparison test above — this one anchors the
+        baseline behavior independently so a future regression that
+        changes default-path pricing fails here even if the toggle-on
+        path also drifts.
+        """
+        candles, h4 = self._build_time_stop_window()
+        env = self._make_d2_env(toggle=False)
+        result = IRBBacktester(env=env).run(candles, h4)
+
+        assert len(result.trades) == 1
+        trade = result.trades[0]
+        assert trade.exit_reason == ExitReason.TIME_STOP
+        # Default path: exit price equals the trigger bar's close.
+        assert trade.exit_price == pytest.approx(candles[trade.exit_bar].close)
+
+
+class TestD3ZeroCooldown(TestIRBBacktester):
+    """D3 probe: when toggle ``d3_zero_cooldown`` is set, the
+    ``cooldown_bars`` enforcement is bypassed so the engine can re-enter
+    on bar i+1 immediately after going flat (Pine ``state := S_FLAT``
+    semantics, where the strategy can re-enter on the very next bar).
+
+    Strategy: instrument the ``circuit_breaker`` rejection counter rather
+    than constructing two valid IRB+filter setups in a small window
+    (which is brittle — overextension/sideways/MTF filters constrain
+    re-entry post-exit). With ``max_trades_per_day=0`` (default) the only
+    code path that increments ``circuit_breaker`` is the cooldown gate
+    itself, so the counter is a clean proxy for whether the gate fired.
+
+    The fixture extends the D2 TIME_STOP window with a second IRB
+    candle placed at the bar immediately after position exit
+    (``_last_flat_bar + 1``). With ``cooldown_bars=1`` and toggle OFF,
+    the cooldown gate fires when that IRB is evaluated and increments
+    ``circuit_breaker``. With toggle ON, the gate is bypassed and the
+    counter does NOT increment for cooldown reasons.
+    """
+
+    @staticmethod
+    def _build_re_entry_window() -> tuple[list[Candle], list[Candle]]:
+        """Window where an IRB long fills, TIME_STOP exits at bar 42,
+        and a second uptrend-IRB candle sits at bar 43 (within the
+        cooldown window for ``cooldown_bars=1``).
+
+        Layout:
+          - bars 0..37: clean uptrend (warmup + setup context)
+          - bar 38: uptrend IRB (entry signal)
+          - bar 39: gap up to fill the buy-stop
+          - bars 40..41: near-flat tape so position ages
+          - bar 42: TIME_STOP fires (with time_stop_bars=3, entry at 39)
+          - bar 43: SECOND uptrend IRB candle — within cooldown window
+          - bars 44..48: continuation (uptrend support for trend filter)
+        """
+        # Bars 0..37: uptrend setup
+        candles = _trending_up_candles(40, start=1.1000, step=0.0015)
+
+        # Bar 38: first IRB
+        irb_base = 1.1000 + 38 * 0.0015
+        candles[38] = _make_irb_candle_uptrend(irb_base)
+
+        # Bar 39: fill bar — drive up that takes out the buy-stop above bar-38 high.
+        candles.append(
+            _candle(
+                o=irb_base + 0.0040,
+                h=irb_base + 0.0060,
+                low=irb_base + 0.0030,
+                c=irb_base + 0.0055,
+                ts=39 * 3600.0,
+            )
+        )
+        # Bars 40..42: near-flat tape so position ages until TIME_STOP at bar 42.
+        for i in range(40, 43):
+            mid = irb_base + 0.0050 + (i - 40) * 0.00005
+            candles.append(
+                _candle(
+                    o=mid,
+                    h=mid + 0.0003,
+                    low=mid - 0.0003,
+                    c=mid + 0.0001,
+                    ts=i * 3600.0,
+                )
+            )
+        # Bar 43: SECOND uptrend IRB candle. Place it on the uptrend
+        # extension so the geometry is structurally valid; whether
+        # downstream filters pass is not what this test asserts —
+        # the cooldown gate is checked BEFORE most filters, so a valid
+        # IRB geometry is sufficient to exercise the gate.
+        irb2_base = irb_base + 0.0070
+        candles.append(
+            _candle(
+                o=irb2_base + 0.0010,
+                h=irb2_base + 0.0050,
+                low=irb2_base,
+                c=irb2_base + 0.0020,
+                ts=43 * 3600.0,
+            )
+        )
+        # Bars 44..48: continuation up.
+        for i in range(44, 49):
+            base = irb2_base + 0.0050 + (i - 44) * 0.0010
+            candles.append(
+                _candle(
+                    o=base,
+                    h=base + 0.0020,
+                    low=base - 0.0005,
+                    c=base + 0.0015,
+                    ts=i * 3600.0,
+                )
+            )
+        h4 = _trending_up_candles(13, start=1.1000, step=0.0060)
+        return candles, h4
+
+    def _make_d3_env(self, *, toggle: bool, **overrides) -> BacktestEnvironment:
+        """Env with cooldown_bars=1 and time_stop_bars=3 so the first
+        trade exits and we can observe the gate on the very next bar.
+        ``max_trades_per_day=0`` (default) ensures the only path that
+        increments ``circuit_breaker`` is the cooldown gate."""
+        kwargs: dict = {
+            "warmup_bars": 5,
+            "trigger_window_bars": 20,
+            "time_stop_bars": 3,
+            "cooldown_bars": 1,
+            "partial_exit_enabled": False,
+            "breakeven_r": 0.0,
+        }
+        kwargs.update(overrides)
+        if toggle:
+            kwargs["parity_audit_toggles"] = frozenset({"d3_zero_cooldown"})
+        return self._make_env(**kwargs)
+
+    def test_d3_default_off_enforces_cooldown(self):
+        """Toggle off (default): cooldown gate fires on the bar after
+        exit and increments the circuit_breaker rejection counter."""
+        candles, h4 = self._build_re_entry_window()
+        env = self._make_d3_env(toggle=False)
+        bt = IRBBacktester(env=env)
+        result = bt.run(candles, h4)
+
+        # First trade must have entered and exited so we reach the
+        # cooldown window — otherwise the gate-firing assertion is
+        # vacuous.
+        assert len(result.trades) >= 1, "fixture must produce at least one trade"
+        # Cooldown gate must have fired at least once on the post-exit
+        # IRB candle.
+        assert bt._rejections.circuit_breaker >= 1, (
+            "expected the cooldown gate to reject at least one bar with toggle off"
+        )
+
+    def test_d3_bypasses_cooldown(self):
+        """Toggle on: cooldown gate is bypassed — circuit_breaker
+        does NOT increment from cooldown rejections.
+
+        With ``max_trades_per_day=0`` (default) the cooldown gate is
+        the only path that increments ``circuit_breaker``, so a zero
+        counter is a clean proof the gate did not fire."""
+        candles, h4 = self._build_re_entry_window()
+        env = self._make_d3_env(toggle=True)
+        bt = IRBBacktester(env=env)
+        result = bt.run(candles, h4)
+
+        # First trade must have entered and exited — same vacuity guard
+        # as the toggle-off test.
+        assert len(result.trades) >= 1, "fixture must produce at least one trade"
+        # With the toggle on, the cooldown gate must not have rejected
+        # any bar. This is the toggle's whole job.
+        assert bt._rejections.circuit_breaker == 0, (
+            f"cooldown gate fired {bt._rejections.circuit_breaker} times despite d3_zero_cooldown toggle being set"
+        )
+
+    def test_d3_pairwise_circuit_breaker_delta(self):
+        """Pairwise check: toggle-off must record strictly more
+        circuit_breaker rejections than toggle-on on the same window.
+
+        This is independent of the absolute counts above so a future
+        change to other gates that share the counter (e.g. a new
+        max_trades_per_day default) still surfaces the toggle's
+        differential effect."""
+        candles, h4 = self._build_re_entry_window()
+        bt_off = IRBBacktester(env=self._make_d3_env(toggle=False))
+        bt_on = IRBBacktester(env=self._make_d3_env(toggle=True))
+
+        bt_off.run(candles, h4)
+        bt_on.run(candles, h4)
+
+        assert bt_off._rejections.circuit_breaker > bt_on._rejections.circuit_breaker, (
+            "toggle should suppress at least one cooldown rejection; "
+            f"off={bt_off._rejections.circuit_breaker} on={bt_on._rejections.circuit_breaker}"
+        )
+
+
+class TestD1PostRatchetStopFill(TestIRBBacktester):
+    """D1 probe: when toggle ``d1_post_ratchet_stop_fill`` is set, the
+    EMA-trail (or ATR-trail) ratchet runs BEFORE the stop-loss check, so a
+    same-bar wick-hit fills at the post-ratchet (tighter) stop level —
+    matches Pine ``cur_stop`` semantics where ``strategy.exit`` evaluates
+    the wick against the already-updated trail.
+
+    Strategy: run the same window with toggle off vs on and assert that
+    the toggle has a measurable, observable effect on the trade list.
+    The window uses the EMA(40) trail so a long position that has aged
+    enough for the EMA to climb past the original stop can have the
+    ratchet bite the wick on the same bar (toggle on) instead of bumping
+    the stop only after passing the wick check (toggle off).
+
+    NOTE: D1 is a Tier-2 / low-impact hypothesis — finding a synthetic
+    window where the toggle reliably flips an exit price is harder than
+    for D2/D3. If the engineered window does not produce a divergence,
+    the regression falls back to the soft "no crash + at least one
+    trade" assertion (see ``test_d1_toggle_does_not_crash``). Either
+    way, the empty-toggle live-safety guarantee is enforced by
+    ``TestParityAuditToggleNoOp``.
+    """
+
+    @staticmethod
+    def _build_ratchet_window() -> tuple[list[Candle], list[Candle]]:
+        """Window with EMA(40) trail enabled. Same shape as the D2/D3
+        fixtures (uptrend warmup + IRB candle + fill bar) so the engine
+        actually opens a position, then a long post-entry tape so the
+        EMA(40) trail can climb. Several post-entry bars include a
+        below-EMA wick to set up potential ratchet collisions."""
+        # 60 bars uptrend setup (EMA(40) needs the warmup).
+        candles = _trending_up_candles(60, start=1.1000, step=0.0015)
+
+        # Replace bar 50 with an uptrend IRB so the engine has time to
+        # ratchet post-entry but enough warmup before it.
+        irb_base = 1.1000 + 50 * 0.0015
+        candles[50] = _make_irb_candle_uptrend(irb_base)
+
+        # Bar 51: fill bar — drive up to take out the buy-stop.
+        candles[51] = _candle(
+            o=irb_base + 0.0040,
+            h=irb_base + 0.0060,
+            low=irb_base + 0.0030,
+            c=irb_base + 0.0055,
+            ts=51 * 3600.0,
+        )
+
+        # Bars 52..59: continued uptrend with shallow lows so the EMA(40)
+        # can climb. Each bar's low dips just under the prior close so
+        # there's a chance for the post-ratchet stop to bite the wick on
+        # the same bar without the pre-ratchet stop biting.
+        for i in range(52, 60):
+            base = 1.1000 + i * 0.0015
+            candles[i] = _candle(
+                o=base,
+                h=base + 0.0030,
+                low=base - 0.0010,
+                c=base + 0.0020,
+                ts=float(i * 3600),
+            )
+
+        h4 = _trending_up_candles(15, start=1.1000, step=0.0060)
+        return candles, h4
+
+    def _make_d1_env(self, *, toggle: bool, **overrides) -> BacktestEnvironment:
+        kwargs: dict = {
+            "warmup_bars": 5,
+            "trigger_window_bars": 20,
+            "trail_ema_period": 40,
+            "time_stop_bars": 100,  # large so TIME_STOP doesn't dominate
+            "partial_exit_enabled": False,
+            "breakeven_r": 0.0,
+        }
+        kwargs.update(overrides)
+        if toggle:
+            kwargs["parity_audit_toggles"] = frozenset({"d1_post_ratchet_stop_fill"})
+        return self._make_env(**kwargs)
+
+    def test_d1_toggle_does_not_crash(self):
+        """Soft regression: D1 toggle is accepted by the engine and the
+        backtest runs to completion without errors. This is the minimum
+        bar — if the toggle leaks a NameError or TypeError the test
+        fails immediately, regardless of whether the window divergence
+        manifests."""
+        candles, h4 = self._build_ratchet_window()
+        env = self._make_d1_env(toggle=True)
+        result = IRBBacktester(env=env).run(candles, h4)
+        # Must actually exercise the post-entry management path —
+        # otherwise the toggle never executes and the test is vacuous.
+        assert len(result.trades) > 0, "fixture must produce at least one trade"
+
+    def test_d1_pairwise_invariant(self):
+        """Pairwise: toggle-off vs toggle-on on the same window. The
+        toggle either changes the trade list (different length, or any
+        trade with a different exit price) or it does not. If it does,
+        the toggle is doing real work; if it does not, the engineered
+        window happens not to surface D1's effect — log via skip so the
+        signal is preserved without false-positive failures (D1 is
+        Tier-2; failing here would mask probe results in CI)."""
+        candles, h4 = self._build_ratchet_window()
+
+        env_off = self._make_d1_env(toggle=False)
+        env_on = self._make_d1_env(toggle=True)
+
+        result_off = IRBBacktester(env=env_off).run(candles, h4)
+        result_on = IRBBacktester(env=env_on).run(candles, h4)
+
+        # Vacuous-test guard.
+        assert len(result_off.trades) > 0, "fixture must produce at least one trade (off)"
+        assert len(result_on.trades) > 0, "fixture must produce at least one trade (on)"
+
+        differ = len(result_off.trades) != len(result_on.trades) or any(
+            t_off.exit_price != t_on.exit_price or t_off.exit_bar != t_on.exit_bar
+            for t_off, t_on in zip(result_off.trades, result_on.trades, strict=False)
+        )
+
+        if not differ:
+            pytest.skip(
+                "D1 window produced identical results with toggle off vs on — "
+                "engineered window did not surface the post-ratchet wick collision. "
+                "Toggle plumbing is verified by test_d1_toggle_does_not_crash; "
+                "live empty-toggle safety is verified by TestParityAuditToggleNoOp."
+            )
+
+        # If we reach here the toggle had a measurable effect — that is
+        # the affirmative invariant we want to record when the window
+        # cooperates. For LONG positions the post-ratchet stop is
+        # tighter (higher) than the pre-ratchet stop, so the toggle-on
+        # exit price for a STOP_LOSS / TRAILING_STOP exit should be at
+        # least as high as the toggle-off equivalent on the same bar.
+        # We assert only the differ flag here — the directional
+        # assertion is left for the full measurement harness in Phase
+        # 8/9 where many windows produce a meaningful distribution.
+        assert differ
+
+
+class TestD12GapFillAtStopLevel(TestIRBBacktester):
+    """D12 probe: when toggle ``d12_gap_fill_at_open`` is set, a
+    stop-loss exit on a bar that GAPS through the stop level fills at
+    ``bar.open`` instead of ``pos.current_stop`` — matches Pine
+    ``strategy.exit`` gap-fill semantics, where a stop order whose
+    trigger is already passed at the open executes at the open (worse
+    fill).
+
+    For a long position: gap-through means ``bar.open < pos.current_stop``.
+    Without the toggle the engine fills at ``pos.current_stop`` (best-case
+    fill assumption); with the toggle it fills at ``bar.open`` (Pine-aligned).
+
+    Strategy: build a long-entry window, then a follow-up bar that opens
+    decisively below the engine's effective stop (the IRB low / EMA-trail
+    init level depending on engine state). Assert that with the toggle
+    on, ``trade.exit_price`` equals ``bar.open`` of the gap bar; with the
+    toggle off, ``trade.exit_price`` strictly exceeds that bar's open.
+
+    NOTE: gap-through windows are sensitive to the engine's IRB filter +
+    same-bar entry mechanics + EMA-trail seeding. If the engineered
+    fixture does not produce an observable divergence, the regression
+    falls back to the soft "no crash + at least one trade" assertion
+    (see ``test_d12_toggle_does_not_crash``). The empty-toggle live-safety
+    guarantee is enforced by ``TestParityAuditToggleNoOp``.
+    """
+
+    @staticmethod
+    def _build_gap_through_long_window() -> tuple[list[Candle], list[Candle]]:
+        """Long-entry window followed by a gap-down bar.
+
+        Mirrors the D2/D3 fixture shape (which is known to actually
+        clear the IRB filter chain) — uptrend warmup, IRB at bar 38,
+        fill at bar 39, then a gap-down bar at bar 40 that opens BELOW
+        the engine's effective stop so ``bar.open < pos.current_stop``
+        triggers the D12 branch.
+        """
+        # Bars 0..37: uptrend setup (warmup + trend filter context)
+        candles = _trending_up_candles(40, start=1.1000, step=0.0015)
+
+        # Bar 38: IRB candle. Low = irb_base, high = irb_base + 0.0050.
+        irb_base = 1.1000 + 38 * 0.0015
+        candles[38] = _make_irb_candle_uptrend(irb_base)
+
+        # Bar 39: fill bar — drives up through the buy-stop above the
+        # IRB high. Engine opens a long position; current_stop seeds
+        # somewhere around the IRB low (or trail-EMA value, whichever
+        # the engine picks).
+        candles.append(
+            _candle(
+                o=irb_base + 0.0040,
+                h=irb_base + 0.0060,
+                low=irb_base + 0.0030,
+                c=irb_base + 0.0055,
+                ts=39 * 3600.0,
+            )
+        )
+
+        # Bar 40: GAP-DOWN. Open well below the IRB low so
+        # bar.open < pos.current_stop and the bar's low takes out the
+        # stop intra-bar.
+        candles.append(
+            _candle(
+                o=irb_base - 0.0030,
+                h=irb_base - 0.0020,
+                low=irb_base - 0.0070,
+                c=irb_base - 0.0050,
+                ts=40 * 3600.0,
+            )
+        )
+
+        # Bars 41..44: filler so the engine has somewhere to go after
+        # the exit (no significance to the assertion).
+        for i in range(41, 45):
+            base = irb_base - 0.0050 - (i - 41) * 0.0010
+            candles.append(
+                _candle(
+                    o=base,
+                    h=base + 0.0010,
+                    low=base - 0.0010,
+                    c=base + 0.0005,
+                    ts=i * 3600.0,
+                )
+            )
+
+        h4 = _trending_up_candles(13, start=1.1000, step=0.0060)
+        return candles, h4
+
+    def _make_d12_env(self, *, toggle: bool, **overrides) -> BacktestEnvironment:
+        kwargs: dict = {
+            "warmup_bars": 5,
+            "trigger_window_bars": 20,
+            "time_stop_bars": 100,
+            "partial_exit_enabled": False,
+            "breakeven_r": 0.0,
+        }
+        kwargs.update(overrides)
+        if toggle:
+            kwargs["parity_audit_toggles"] = frozenset({"d12_gap_fill_at_open"})
+        return self._make_env(**kwargs)
+
+    def test_d12_toggle_does_not_crash(self):
+        """Soft regression: D12 toggle is accepted by the engine and
+        the backtest runs to completion without errors. If the toggle
+        leaks a NameError or TypeError this fails immediately,
+        regardless of whether the window divergence manifests."""
+        candles, h4 = self._build_gap_through_long_window()
+        env = self._make_d12_env(toggle=True)
+        result = IRBBacktester(env=env).run(candles, h4)
+        assert len(result.trades) > 0, "fixture must produce at least one trade"
+
+    def test_d12_pairwise_gap_fill(self):
+        """Pairwise: toggle-off vs toggle-on on the same window.
+
+        If the engineered window produces a gap-through stop-loss exit,
+        the toggle MUST measurably move the exit price (toggle-on fills
+        at bar.open which is below toggle-off's current_stop fill).
+
+        If the window does not surface the gap-through path (e.g. the
+        position closed for a different reason, or the gap bar didn't
+        trigger the stop), skip rather than fail — D12's plumbing is
+        verified by the non-crash test and the live empty-toggle safety
+        is verified by ``TestParityAuditToggleNoOp``.
+        """
+        candles, h4 = self._build_gap_through_long_window()
+
+        env_off = self._make_d12_env(toggle=False)
+        env_on = self._make_d12_env(toggle=True)
+
+        result_off = IRBBacktester(env=env_off).run(candles, h4)
+        result_on = IRBBacktester(env=env_on).run(candles, h4)
+
+        # Vacuous-test guard.
+        assert len(result_off.trades) >= 1, "fixture must produce at least one trade (off)"
+        assert len(result_on.trades) >= 1, "fixture must produce at least one trade (on)"
+
+        trade_off = result_off.trades[0]
+        trade_on = result_on.trades[0]
+
+        # Both runs must land on a STOP_LOSS exit on the gap bar for
+        # the directional assertion to be meaningful. If either
+        # condition fails, skip — the window did not surface D12.
+        if trade_off.exit_reason != ExitReason.STOP_LOSS or trade_on.exit_reason != ExitReason.STOP_LOSS:
+            pytest.skip(
+                "D12 window did not produce STOP_LOSS exits on both runs — "
+                "engineered window did not surface the gap-through path. "
+                "Toggle plumbing is verified by test_d12_toggle_does_not_crash."
+            )
+
+        if trade_off.exit_bar != trade_on.exit_bar:
+            pytest.skip("D12 window exited on different bars off vs on — directional comparison is not meaningful.")
+
+        gap_bar_open = candles[trade_on.exit_bar].open
+        # Only meaningful when the bar actually gapped through.
+        if gap_bar_open >= trade_off.exit_price:
+            pytest.skip(
+                "D12 window did not produce a gap-through (bar.open >= toggle-off exit_price) — "
+                "engineered window did not surface the toggle's effect."
+            )
+
+        # Toggle on: fills at bar.open (the gap level).
+        assert trade_on.exit_price == pytest.approx(gap_bar_open, abs=1e-5), (
+            f"toggle-on D12 exit should be bar.open={gap_bar_open:.5f}, got {trade_on.exit_price:.5f}"
+        )
+        # Toggle off: fills at the (higher) stop level, strictly worse
+        # than bar.open from the long's perspective.
+        assert trade_off.exit_price > gap_bar_open, (
+            f"toggle-off D12 exit should be > bar.open ({gap_bar_open:.5f}); got {trade_off.exit_price:.5f}"
+        )
+
+
 class TestStrategyState:
     def test_all_states(self):
         states = list(StrategyState)

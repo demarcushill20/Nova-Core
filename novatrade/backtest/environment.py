@@ -230,6 +230,14 @@ class BacktestEnvironment:
     # backtest results conservatively pessimistic vs live execution.
     sl_spread_buffer_pips: float = 1.0
 
+    # --- Parity-audit toggles (diagnostic only; live configs MUST leave empty) ---
+    # Each entry is a string label gating one suspect behavior in _manage_position /
+    # _close_position / cooldown enforcement, used by the Pine v5 exit-timing audit.
+    # An empty set MUST produce bit-identical results to the current engine — enforced
+    # by `tests/test_backtest_engine.py::TestParityAuditToggleNoOp`.
+    # Production configs MUST omit this field; live-loader rejection of non-empty values is TBD.
+    parity_audit_toggles: frozenset[str] = field(default_factory=frozenset)
+
     # --- Measurement vs inference ---
     directly_measured: tuple[str, ...] = (
         "Pine syntax/compile readiness (Phase 3 static analysis, 45 checks)",

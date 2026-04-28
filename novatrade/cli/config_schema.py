@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 # YAML support — pyyaml required, hard dependency
 # ---------------------------------------------------------------------------
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Parameter bounds descriptor (for search engines)
@@ -95,6 +95,26 @@ class StrategyConfig(BaseModel):
     partial_r_target: float = Field(default=1.0, ge=0.5, le=3.0)
     max_trades_per_day: int = Field(default=0, ge=0, le=20)
     cooldown_bars: int = Field(default=0, ge=0, le=50)
+    parity_audit_toggles: frozenset[str] = Field(default_factory=frozenset)
+
+    @field_validator("parity_audit_toggles", mode="before")
+    @classmethod
+    def _validate_parity_toggles(cls, v):
+        if v is None:
+            return frozenset()
+        if isinstance(v, (list, tuple, set, frozenset)):
+            # Strict element-type check: silently coercing non-strings would let a
+            # phantom toggle (e.g. an int 0 or a typo'd Enum) sneak through and
+            # match nothing while looking active.
+            for x in v:
+                if not isinstance(x, str):
+                    raise ValueError(f"parity_audit_toggles entries must be strings; got {type(x).__name__} ({x!r}).")
+            return frozenset(v)
+        raise ValueError(
+            "parity_audit_toggles must be a list/set of strings (or omitted). "
+            "Live configs MUST leave this empty/omitted."
+        )
+
     revalidate_pending: bool = Field(default=False)
     min_signal_atr_mult: float = Field(default=0.0, ge=0.0, le=2.0)
     # --- v5 Stagnation Guard (Pine USE_STAG / STAG_BARS / STAG_ATR) ---
@@ -288,6 +308,7 @@ class StrategyConfig(BaseModel):
             "stag_atr_mult": self.stag_atr_mult,
             "atr_sl_floor_multiplier": self.atr_sl_floor_multiplier,
             "sl_spread_buffer_pips": self.sl_spread_buffer_pips,
+            "parity_audit_toggles": self.parity_audit_toggles,
         }
 
     def content_hash(self) -> str:
@@ -300,6 +321,8 @@ class StrategyConfig(BaseModel):
         # Include filter state in hash — filters change signal behaviour
         params["filters_enabled"] = sorted(self.filters_enabled)
         params["session_filter"] = self.session_filter
+        # Normalize frozenset to sorted list — frozenset is not JSON-serializable
+        params["parity_audit_toggles"] = sorted(self.parity_audit_toggles)
         raw = json.dumps(params, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
