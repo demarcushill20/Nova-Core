@@ -311,10 +311,20 @@ def main() -> None:  # noqa: C901
             failure_counts["ema10_confirm"] += 1
             continue
 
-        # If all Pine filters pass, then Pine SHOULD have taken the trade — but
-        # it didn't. Some hidden state-machine factor (cooldown? warmup?
-        # bar-of-fill timing?) blocked Pine.
-        failure_counts["all_pine_filters_pass"] += 1
+        # If all Pine filters pass, check whether Pine was in a position AT
+        # THE IRB BAR (not just at entry_ts). Pine's state machine requires
+        # state == S_FLAT at the IRB bar to fire a new signal. If Pine had
+        # an open trade spanning the IRB bar, it couldn't fire the new signal
+        # even though every filter technically passes.
+        irb_bar_ts = int(h1[irb_bar].timestamp)
+        pine_busy_at_irb = any(pt["entry_ts"] <= irb_bar_ts < pt["exit_ts"] for pt in pine_trades)
+        if pine_busy_at_irb:
+            failure_counts["pine_busy_at_irb_bar"] += 1
+        else:
+            # Pine was FLAT at IRB bar, all filters pass, yet didn't enter.
+            # This is the residual mystery — likely Pine pending-order cancel
+            # /replace dynamics, trigger window, or a Pine filter we missed.
+            failure_counts["all_pine_filters_pass"] += 1
 
     total_replayed = sum(failure_counts.values())
     print(f"  Replayed Pine filters on {total_replayed:,} of {len(bucket_f):,} Bucket-F entries")
