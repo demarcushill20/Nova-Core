@@ -363,6 +363,7 @@ class IRBBacktester:
         """Process a single H1 bar."""
         # Stash current-bar indicators so _check_pending_fill can stamp them
         # on the new position without changing the call signature.
+        self._cur_bar = i  # exposed for diagnostic tooling (e.g. parity_match_why.py)
         self._cur_atr = atr_h1[i] if i < len(atr_h1) and not math.isnan(atr_h1[i]) else 0.0
         self._cur_trail_ema = (
             trail_ema[i]
