@@ -52,7 +52,7 @@ from novatrade.risk.ftmo_compliance import (  # noqa: E402
     WeekendAutoCloser,
     WeeklyLossTracker,
 )
-from novatrade.risk.position_sizer import DrawdownProportionalRisk, PositionSizer  # noqa: E402
+from novatrade.risk.position_sizer import PositionSizer  # noqa: E402
 from novatrade.risk.profit_cushion_protocol import ProfitCushionProtocol  # noqa: E402
 from novatrade.risk.symbol_helpers import pip_value as _pip_value_for_symbol  # noqa: E402
 
@@ -60,6 +60,10 @@ log = logging.getLogger("novatrade.risk.pre_trade_gate")
 
 # Modes that the MVP is allowed to trade in.
 _MVP_ALLOWED_MODES = frozenset({AccountMode.DEMO, AccountMode.FUNDED_PRESERVATION})
+
+# Fixed base risk per trade — must match the backtest baseline exactly
+# (Pine f_qty() and the validated IRB v5 strategy). No adaptive scaling.
+BASE_RISK_PCT = 0.0033
 
 
 class PreTradeGate:
@@ -114,13 +118,6 @@ class PreTradeGate:
         self._sizer = PositionSizer(
             min_lot=self._risk.min_volume_per_trade,
             max_lot=self._risk.max_volume_per_trade,
-        )
-        # Drawdown-proportional risk adjustment (Zeno's Paradox — deep research P0)
-        # Reduces base risk_pct as total drawdown deepens, creating exponential
-        # safety margin.
-        self._proportional_risk = DrawdownProportionalRisk(
-            base_risk_pct=0.0033,
-            enabled=True,
         )
         # Profit cushion protocol (P2 priority from funded account survival research)
         # Auto-loads existing state or requires initialization for new cycles
@@ -591,46 +588,13 @@ class PreTradeGate:
             )
 
         try:
-            # Resolve initial equity for drawdown calculations (used by both
-            # proportional risk and drawdown scaler).
-            estimated_initial_equity = account.balance
-            if hasattr(account, "initial_equity") and account.initial_equity > 0:
-                estimated_initial_equity = account.initial_equity
-            elif self._cfg.ftmo.account_size > 0:
-                estimated_initial_equity = float(self._cfg.ftmo.account_size)
-
-            # Drawdown-proportional risk: adjust base risk_pct by drawdown depth
-            # (Zeno's Paradox — exponential safety as drawdown deepens)
-            adaptive_risk = self._proportional_risk.get_risk_pct(
-                equity=account.equity,
-                initial_balance=estimated_initial_equity,
-            )
-            if adaptive_risk <= 0:
-                tier = self._proportional_risk.get_tier_name(account.equity, estimated_initial_equity)
-                return RiskCheckResult(
-                    name="volume_sizing",
-                    passed=False,
-                    detail=(
-                        f"drawdown proportional risk = 0% (tier={tier}) — "
-                        f"account drawdown exceeds 10% of initial ${estimated_initial_equity:,.0f}"
-                    ),
-                )
-
-            risk_tier = self._proportional_risk.get_tier_name(account.equity, estimated_initial_equity)
-            if risk_tier != "normal":
-                log.info(
-                    "Drawdown-proportional risk: tier=%s, risk=%.4f%% (base=%.4f%%)",
-                    risk_tier,
-                    adaptive_risk * 100,
-                    self._proportional_risk.base_risk_pct * 100,
-                )
-
-            # Calculate base volume using drawdown-proportional risk
+            # Calculate base volume at the fixed BASE_RISK_PCT — matches the
+            # validated backtest baseline; no drawdown-based scaling.
             base_calculated = self._sizer.calculate(
                 equity=account.equity,
                 entry=request.price,
                 stop=request.stop_loss,
-                risk_pct=adaptive_risk,
+                risk_pct=BASE_RISK_PCT,
             )
 
             # Initialize profit cushion on first trade if needed
