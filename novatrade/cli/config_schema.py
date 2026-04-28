@@ -315,6 +315,8 @@ class StrategyConfig(BaseModel):
         # Include filter state in hash — filters change signal behaviour
         params["filters_enabled"] = sorted(self.filters_enabled)
         params["session_filter"] = self.session_filter
+        # Normalize frozenset to sorted list — frozenset is not JSON-serializable
+        params["parity_audit_toggles"] = sorted(self.parity_audit_toggles)
         raw = json.dumps(params, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
