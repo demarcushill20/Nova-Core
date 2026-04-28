@@ -969,3 +969,47 @@ class TestInitialStopFromEmaTrail:
         assert bt._position is not None
         assert bt._position.current_stop == pytest.approx(ema_below_entry, abs=1e-6)
         assert bt._position.initial_stop == pytest.approx(wick_stop, abs=1e-6)
+
+    def test_wrong_sided_ema_actually_exits_at_ema_price_long(self):
+        """Spec §4 step 6: end-to-end stop-out at EMA price.
+
+        After a wrong-sided long fill (EMA above entry), stepping the engine
+        forward one bar must close the position with ExitReason.STOP_LOSS at
+        exit_price ≈ trail_ema_at_entry. This is faithful to Pine v5 cur_stop
+        semantics: a positive-pnl STOP_LOSS is the expected outcome — the
+        engine must NOT clamp current_stop to the wick.
+        """
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800  # 20 pips below entry
+        ema_above_entry = 1.10050  # 5 pips ABOVE entry — wrong side
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_above_entry,
+        )
+
+        # Bar 1: fill bar — high crosses entry (1.10000)
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+        assert bt._position is not None
+        assert bt._position.current_stop == pytest.approx(ema_above_entry, abs=1e-6)
+
+        # Bar 2: any bar whose low <= ema_above_entry (1.10050) triggers SL.
+        # Use a realistic next-bar candle straddling the EMA stop.
+        next_bar = _candle(o=1.10005, h=1.10060, low=1.10000, c=1.10040, ts=7200.0)
+        bt._manage_position(2, next_bar, atr_h1=[0.0010, 0.0010, 0.0010], trail_ema=None)
+
+        # Position must have stopped out
+        assert bt._position is None, "expected position to be closed by SL on bar 2"
+        assert len(bt._trades) == 1
+        trade = bt._trades[0]
+        assert trade.exit_reason == ExitReason.STOP_LOSS
+        # Exit price must be the EMA value used as cur_stop (Pine semantics)
+        assert trade.exit_price == pytest.approx(ema_above_entry, abs=1e-5)
+        # Sanity: this is a positive-pip outcome before spread costs — Pine
+        # v5 produces exactly this kind of "winning STOP_LOSS" when the EMA
+        # gaps wrong-sided at fill time. Don't assert sign of pnl_pips here
+        # because spread costs flip the sign at small magnitudes; the
+        # load-bearing assertion is the exit_price == EMA equality above.

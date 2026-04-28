@@ -246,6 +246,11 @@ class IRBBacktester:
         self._last_flat_bar = -999  # v5: bar index when last went flat
         self._current_day_key: int = -1  # v5: day boundary tracker
 
+        # Per-bar stash (set fresh by _process_bar each H1 bar). Initialised
+        # here to make the contract explicit; _check_pending_fill still uses
+        # getattr() defensively in case of future ordering changes.
+        self._cur_trail_ema: float = float("nan")
+
         # Result accumulators
         self._trades: list[CompletedTrade] = []
         self._pending_orders: list[PendingOrderRecord] = []
