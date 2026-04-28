@@ -1015,6 +1015,76 @@ class TestInitialStopFromEmaTrail:
         # because spread costs flip the sign at small magnitudes; the
         # load-bearing assertion is the exit_price == EMA equality above.
 
+    def test_no_same_bar_exit_when_ema_above_bar_high_long(self):
+        """Pine semantics: strategy.exit evaluates next-tick. Even when the
+        EMA-initialized current_stop is ABOVE bar.high (a long can't have
+        traded that high yet), Python must NOT close the trade on the entry
+        bar — it must wait for the next bar.
+        """
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800
+        ema_above_bar_high = 1.10100  # ABOVE the fill bar's high
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_above_bar_high,
+        )
+        # Fill bar: range 1.09990-1.10010 — does NOT trade up to 1.10100
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+
+        # Mirror _process_bar's order: _check_pending_fill then _manage_position
+        # on the same bar. Pine's strategy.exit only triggers from the next bar.
+        bt._check_pending_fill(1, fill_bar)
+        bt._manage_position(1, fill_bar, [0.0010] * 5, [ema_above_bar_high] * 5)
+
+        # Position must still be open — Pine wouldn't fire strategy.exit on entry bar
+        assert bt._position is not None, (
+            "Position closed on entry bar — Pine wouldn't fire strategy.exit until next tick"
+        )
+        assert len(bt._trades) == 0
+
+        # Step to next bar: bar.low <= ema (1.10100) → exit fires at EMA
+        next_bar = _candle(o=1.10005, h=1.10110, low=1.10005, c=1.10100, ts=7200.0)
+        bt._manage_position(2, next_bar, [0.0010] * 5, [ema_above_bar_high] * 5)
+        assert bt._position is None
+        assert len(bt._trades) == 1
+        ct = bt._trades[0]
+        assert ct.exit_reason == ExitReason.STOP_LOSS
+        assert ct.exit_price == pytest.approx(ema_above_bar_high, abs=1e-5)
+
+    def test_no_same_bar_exit_when_ema_below_bar_low_short(self):
+        """Symmetric guard for SHORT side: EMA below bar.low must not fire on
+        the entry bar.
+        """
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.10200
+        ema_below_bar_low = 1.09900  # BELOW the fill bar's low
+        bt = self._setup_pending(
+            env,
+            TradeSide.SHORT,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_below_bar_low,
+        )
+        # Fill bar: range 1.09990-1.10010 — does NOT trade down to 1.09900
+        fill_bar = _candle(o=1.10010, h=1.10010, low=1.09990, c=1.09995, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+        bt._manage_position(1, fill_bar, [0.0010] * 5, [ema_below_bar_low] * 5)
+
+        assert bt._position is not None
+        assert len(bt._trades) == 0
+
+        # Next bar: bar.high reaches the EMA (1.09900); short stops out
+        next_bar = _candle(o=1.09895, h=1.09905, low=1.09890, c=1.09900, ts=7200.0)
+        bt._manage_position(2, next_bar, [0.0010] * 5, [ema_below_bar_low] * 5)
+        assert bt._position is None
+        assert len(bt._trades) == 1
+        ct = bt._trades[0]
+        assert ct.exit_reason == ExitReason.STOP_LOSS
+        assert ct.exit_price == pytest.approx(ema_below_bar_low, abs=1e-5)
+
 
 class TestPineAlignedParitySmoke:
     """End-to-end smoke: Pine-aligned config + EMA-stop fix should produce

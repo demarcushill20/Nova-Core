@@ -842,6 +842,15 @@ class IRBBacktester:
         if pos is None:
             return
 
+        # Pine fidelity: strategy.exit evaluates next-tick after order
+        # submission, so exit checks (and ratchet updates that could trigger
+        # same-bar closes) must NOT fire on the entry bar. The override in
+        # _check_pending_fill has already initialized current_stop to
+        # trail_ema[entry_bar]; subsequent bars will run normal exit/ratchet
+        # logic.
+        if i == pos.entry_bar:
+            return
+
         pos.bars_held = i - pos.entry_bar
 
         # --- Check stop-loss hit intra-bar ---
