@@ -1201,3 +1201,40 @@ class TestPineAlignedParitySmoke:
         for t in trades_2022:
             if t.exit_reason == ExitReason.STOP_LOSS:
                 assert t.pnl_pips > -150, f"trade {t.trade_id}: SL hit at {t.pnl_pips:.1f} pips — runaway stop?"
+
+
+class TestMtfLookbackSemantic:
+    """Locks the documented semantic of env.mtf_lookback: H4 bars (NOT H1 bars).
+
+    Pine's MTF_H1_LOOKBACK = 20 is in H1 bars (configs/pinescript/irb_v5_stag.pine
+    line 79; indexed via `ema_h4[MTF_H1_LOOKBACK]` on the H1 timeline). The Python
+    engine indexes the H4 EMA array directly via `ema_h4[h4_idx - mtf_lookback]`
+    (engine.py:585), which interprets the value in H4 bars.
+
+    On the standard 4:1 H1→H4 ratio, Pine's 20-H1-bar lookback equals 5 H4 bars.
+    Pine-derived configs must therefore set `mtf_lookback: 5`, NOT 20.
+
+    Diagnostic evidence: scripts/parity_match.py + parity_irb_at_irb_bar.py
+    showed 314 of 716 Bucket-B pine_only entries (43.9%) were rejected by
+    Python's `mtf_alignment` filter at the exact IRB bar — caused by this 4×
+    over-wide lookback window.
+    """
+
+    def test_pine_aligned_yaml_uses_h4_bar_lookback(self):
+        from novatrade.cli.config_schema import StrategyConfig
+
+        cfg_path = Path("configs/strategies/irb_v5_m5_pine_aligned.yaml")
+        if not cfg_path.exists():
+            pytest.skip("pine-aligned config not present")
+
+        cfg = StrategyConfig.from_yaml(cfg_path)
+        # Pine's MTF_H1_LOOKBACK = 20 H1 bars = 5 H4 bars on 4:1 ratio.
+        # The engine interprets mtf_lookback as H4 bars, so the yaml must
+        # encode the H4 value.
+        assert cfg.mtf_lookback == 5, (
+            f"pine_aligned.yaml mtf_lookback={cfg.mtf_lookback}, expected 5 "
+            "(Pine MTF_H1_LOOKBACK=20 H1 bars / 4 H1-per-H4 = 5 H4 bars). "
+            "If raising this, also document why Python's H4 trend gate should "
+            "be more conservative than Pine's, and re-run scripts/parity_match.py "
+            "to quantify the impact on 'mtf_alignment' rejections."
+        )

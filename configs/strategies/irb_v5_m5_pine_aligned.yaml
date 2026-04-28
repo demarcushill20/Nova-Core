@@ -34,10 +34,12 @@ trend_slope_threshold: 0.4      # Pine SLOPE_THRESH
 ema_confirm_bars: 3             # Pine EMA_CONFIRM_BARS (bypassed by simple mode in champion ✗)
 use_ema_stack_filter: true      # Pine v5 source line 399 — always-on, not optional
 
-# --- HTF (H1) trend confirmation ---
-# Pine MTF_H1_LOOKBACK=20 — H1 EMA must be moving in the trade direction
-# over the last 20 H1 bars (~20h), not the 1-bar slope the champion uses.
-mtf_lookback: 20                # Pine MTF_H1_LOOKBACK (yaml champion had 1 ✗)
+# --- HTF (H4) trend confirmation ---
+# Pine MTF_H1_LOOKBACK = 20 in H1 bars. The Python engine indexes the H4 EMA
+# array directly (engine.py:585: ema_h4[h4_idx - mtf_lookback]), so the value
+# is interpreted in H4 BARS, not H1 bars. On the standard 4:1 ratio, Pine's
+# 20 H1 bars = 5 H4 bars. See engine.py:574 docstring for the contract.
+mtf_lookback: 5                 # Pine MTF_H1_LOOKBACK=20 H1 bars / 4 = 5 H4 bars
 
 # --- Signal filters ---
 atr_period: 14

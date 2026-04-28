@@ -572,6 +572,14 @@ class IRBBacktester:
                     return
 
         # --- MTF alignment [A8] ---
+        # NOTE on `env.mtf_lookback` semantic: this value is interpreted in H4 BARS
+        # (the index step on the H4 EMA array below). Pine's `MTF_H1_LOOKBACK = 20`
+        # is in H1 bars and uses `ema_h4[20]` which indexes the H1 timeline. On the
+        # standard 4:1 H1→H4 ratio, Pine's 20 H1-bar lookback equals 5 H4 bars —
+        # so any Pine-derived config must divide by 4 (e.g., set mtf_lookback=5,
+        # NOT 20). Mismatching this collapses parity by ~44% of pine_only entries.
+        # See scripts/parity_match.py and tests/test_backtest_engine.py
+        # ::TestMtfLookbackSemantic for the regression contract.
         h4_idx = h4_map[i] if i < len(h4_map) else -1
         if h4_idx < 0 or h4_idx >= len(ema_h4):
             self._rejections.mtf_alignment += 1
