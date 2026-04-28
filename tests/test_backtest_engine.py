@@ -909,3 +909,20 @@ class TestInitialStopFromEmaTrail:
         # Override must NOT fire when trail_ema_period == 0
         assert bt._position.current_stop == pytest.approx(wick_stop, abs=1e-6)
         assert bt._position.stop_loss == pytest.approx(wick_stop, abs=1e-6)
+
+    def test_initial_stop_falls_back_to_wick_when_ema_is_nan(self):
+        """If EMA isn't computed yet (warmup race), fall back to wick stop."""
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=float("nan"),
+        )
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+
+        assert bt._position is not None
+        assert bt._position.current_stop == pytest.approx(wick_stop, abs=1e-6)
