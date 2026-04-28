@@ -559,6 +559,179 @@ class TestD2StagTimeStopNextBarOpen(TestIRBBacktester):
         assert trade.exit_price == pytest.approx(candles[trade.exit_bar].close)
 
 
+class TestD3ZeroCooldown(TestIRBBacktester):
+    """D3 probe: when toggle ``d3_zero_cooldown`` is set, the
+    ``cooldown_bars`` enforcement is bypassed so the engine can re-enter
+    on bar i+1 immediately after going flat (Pine ``state := S_FLAT``
+    semantics, where the strategy can re-enter on the very next bar).
+
+    Strategy: instrument the ``circuit_breaker`` rejection counter rather
+    than constructing two valid IRB+filter setups in a small window
+    (which is brittle — overextension/sideways/MTF filters constrain
+    re-entry post-exit). With ``max_trades_per_day=0`` (default) the only
+    code path that increments ``circuit_breaker`` is the cooldown gate
+    itself, so the counter is a clean proxy for whether the gate fired.
+
+    The fixture extends the D2 TIME_STOP window with a second IRB
+    candle placed at the bar immediately after position exit
+    (``_last_flat_bar + 1``). With ``cooldown_bars=1`` and toggle OFF,
+    the cooldown gate fires when that IRB is evaluated and increments
+    ``circuit_breaker``. With toggle ON, the gate is bypassed and the
+    counter does NOT increment for cooldown reasons.
+    """
+
+    @staticmethod
+    def _build_re_entry_window() -> tuple[list[Candle], list[Candle]]:
+        """Window where an IRB long fills, TIME_STOP exits at bar 42,
+        and a second uptrend-IRB candle sits at bar 43 (within the
+        cooldown window for ``cooldown_bars=1``).
+
+        Layout:
+          - bars 0..37: clean uptrend (warmup + setup context)
+          - bar 38: uptrend IRB (entry signal)
+          - bar 39: gap up to fill the buy-stop
+          - bars 40..41: near-flat tape so position ages
+          - bar 42: TIME_STOP fires (with time_stop_bars=3, entry at 39)
+          - bar 43: SECOND uptrend IRB candle — within cooldown window
+          - bars 44..48: continuation (uptrend support for trend filter)
+        """
+        # Bars 0..37: uptrend setup
+        candles = _trending_up_candles(40, start=1.1000, step=0.0015)
+
+        # Bar 38: first IRB
+        irb_base = 1.1000 + 38 * 0.0015
+        candles[38] = _make_irb_candle_uptrend(irb_base)
+
+        # Bar 39: fill bar — drive up that takes out the buy-stop above bar-38 high.
+        candles.append(
+            _candle(
+                o=irb_base + 0.0040,
+                h=irb_base + 0.0060,
+                low=irb_base + 0.0030,
+                c=irb_base + 0.0055,
+                ts=39 * 3600.0,
+            )
+        )
+        # Bars 40..42: near-flat tape so position ages until TIME_STOP at bar 42.
+        for i in range(40, 43):
+            mid = irb_base + 0.0050 + (i - 40) * 0.00005
+            candles.append(
+                _candle(
+                    o=mid,
+                    h=mid + 0.0003,
+                    low=mid - 0.0003,
+                    c=mid + 0.0001,
+                    ts=i * 3600.0,
+                )
+            )
+        # Bar 43: SECOND uptrend IRB candle. Place it on the uptrend
+        # extension so the geometry is structurally valid; whether
+        # downstream filters pass is not what this test asserts —
+        # the cooldown gate is checked BEFORE most filters, so a valid
+        # IRB geometry is sufficient to exercise the gate.
+        irb2_base = irb_base + 0.0070
+        candles.append(
+            _candle(
+                o=irb2_base + 0.0010,
+                h=irb2_base + 0.0050,
+                low=irb2_base,
+                c=irb2_base + 0.0020,
+                ts=43 * 3600.0,
+            )
+        )
+        # Bars 44..48: continuation up.
+        for i in range(44, 49):
+            base = irb2_base + 0.0050 + (i - 44) * 0.0010
+            candles.append(
+                _candle(
+                    o=base,
+                    h=base + 0.0020,
+                    low=base - 0.0005,
+                    c=base + 0.0015,
+                    ts=i * 3600.0,
+                )
+            )
+        h4 = _trending_up_candles(13, start=1.1000, step=0.0060)
+        return candles, h4
+
+    def _make_d3_env(self, *, toggle: bool, **overrides) -> BacktestEnvironment:
+        """Env with cooldown_bars=1 and time_stop_bars=3 so the first
+        trade exits and we can observe the gate on the very next bar.
+        ``max_trades_per_day=0`` (default) ensures the only path that
+        increments ``circuit_breaker`` is the cooldown gate."""
+        kwargs: dict = {
+            "warmup_bars": 5,
+            "trigger_window_bars": 20,
+            "time_stop_bars": 3,
+            "cooldown_bars": 1,
+            "partial_exit_enabled": False,
+            "breakeven_r": 0.0,
+        }
+        kwargs.update(overrides)
+        if toggle:
+            kwargs["parity_audit_toggles"] = frozenset({"d3_zero_cooldown"})
+        return self._make_env(**kwargs)
+
+    def test_d3_default_off_enforces_cooldown(self):
+        """Toggle off (default): cooldown gate fires on the bar after
+        exit and increments the circuit_breaker rejection counter."""
+        candles, h4 = self._build_re_entry_window()
+        env = self._make_d3_env(toggle=False)
+        bt = IRBBacktester(env=env)
+        result = bt.run(candles, h4)
+
+        # First trade must have entered and exited so we reach the
+        # cooldown window — otherwise the gate-firing assertion is
+        # vacuous.
+        assert len(result.trades) >= 1, "fixture must produce at least one trade"
+        # Cooldown gate must have fired at least once on the post-exit
+        # IRB candle.
+        assert bt._rejections.circuit_breaker >= 1, (
+            "expected the cooldown gate to reject at least one bar with toggle off"
+        )
+
+    def test_d3_bypasses_cooldown(self):
+        """Toggle on: cooldown gate is bypassed — circuit_breaker
+        does NOT increment from cooldown rejections.
+
+        With ``max_trades_per_day=0`` (default) the cooldown gate is
+        the only path that increments ``circuit_breaker``, so a zero
+        counter is a clean proof the gate did not fire."""
+        candles, h4 = self._build_re_entry_window()
+        env = self._make_d3_env(toggle=True)
+        bt = IRBBacktester(env=env)
+        result = bt.run(candles, h4)
+
+        # First trade must have entered and exited — same vacuity guard
+        # as the toggle-off test.
+        assert len(result.trades) >= 1, "fixture must produce at least one trade"
+        # With the toggle on, the cooldown gate must not have rejected
+        # any bar. This is the toggle's whole job.
+        assert bt._rejections.circuit_breaker == 0, (
+            f"cooldown gate fired {bt._rejections.circuit_breaker} times despite d3_zero_cooldown toggle being set"
+        )
+
+    def test_d3_pairwise_circuit_breaker_delta(self):
+        """Pairwise check: toggle-off must record strictly more
+        circuit_breaker rejections than toggle-on on the same window.
+
+        This is independent of the absolute counts above so a future
+        change to other gates that share the counter (e.g. a new
+        max_trades_per_day default) still surfaces the toggle's
+        differential effect."""
+        candles, h4 = self._build_re_entry_window()
+        bt_off = IRBBacktester(env=self._make_d3_env(toggle=False))
+        bt_on = IRBBacktester(env=self._make_d3_env(toggle=True))
+
+        bt_off.run(candles, h4)
+        bt_on.run(candles, h4)
+
+        assert bt_off._rejections.circuit_breaker > bt_on._rejections.circuit_breaker, (
+            "toggle should suppress at least one cooldown rejection; "
+            f"off={bt_off._rejections.circuit_breaker} on={bt_on._rejections.circuit_breaker}"
+        )
+
+
 class TestStrategyState:
     def test_all_states(self):
         states = list(StrategyState)

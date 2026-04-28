@@ -451,7 +451,11 @@ class IRBBacktester:
             return
 
         # --- v5: Cooldown bars ---
-        if e.cooldown_bars > 0 and (i - self._last_flat_bar) <= e.cooldown_bars:
+        if (
+            e.cooldown_bars > 0
+            and (i - self._last_flat_bar) <= e.cooldown_bars
+            and "d3_zero_cooldown" not in e.parity_audit_toggles
+        ):
             self._rejections.circuit_breaker += 1
             return
 
