@@ -89,6 +89,9 @@ class _OpenPosition:
     # v5 stagnation guard: ATR at entry, peak favourable excursion in price units
     entry_atr: float = 0.0
     peak_fav: float = 0.0
+    # D2 probe: deferred exit (when parity_audit_toggles contains "d2_strategy_close_next_open")
+    deferred_exit_reason: ExitReason | None = None
+    deferred_exit_fire_at_bar: int = -1
 
 
 # ---------------------------------------------------------------------------
