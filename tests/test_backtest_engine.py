@@ -1,6 +1,7 @@
 """Tests for novatrade.backtest.engine — IRB backtesting engine."""
 
 import math
+from pathlib import Path
 
 import pytest
 
@@ -1013,3 +1014,120 @@ class TestInitialStopFromEmaTrail:
         # gaps wrong-sided at fill time. Don't assert sign of pnl_pips here
         # because spread costs flip the sign at small magnitudes; the
         # load-bearing assertion is the exit_price == EMA equality above.
+
+
+class TestPineAlignedParitySmoke:
+    """End-to-end smoke: Pine-aligned config + EMA-stop fix should produce
+    PF >= 1.0 on the 2022 EURUSD H1+H4 slice. Pine reports PF 2.06 / +$11k
+    for that year; PF >= 1.0 is a generous floor confirming the fix moves
+    the engine into Pine's profitable regime.
+
+    Data-availability gated: data/candles/EURUSD_H1_10yr.csv is in /data/
+    (gitignored), so this test is skipped in CI but runs locally for
+    developers and as a /finishing-a-development-branch gate.
+    """
+
+    DATA_PATH = Path("data/candles/EURUSD_H1_10yr.csv")
+    CFG_PATH = Path("configs/strategies/irb_v5_m5_pine_aligned.yaml")
+
+    @pytest.mark.skipif(
+        not DATA_PATH.exists() or not CFG_PATH.exists(),
+        reason="10yr historical CSV or pine-aligned config not available locally",
+    )
+    def test_pine_aligned_2022_pf_crosses_one(self):
+        from dataclasses import replace
+        from datetime import datetime, timezone
+
+        from novatrade.backtest.metrics import ExitReason
+        from novatrade.cli.commands.data import aggregate_h1_to_h4
+        from novatrade.cli.config_schema import StrategyConfig
+
+        # Load full H1 series, slice to 2022 with 30d warmup
+        warmup_start = datetime(2021, 12, 1, tzinfo=timezone.utc).timestamp()
+        end = datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp()
+        h1_all: list[Candle] = []
+        with self.DATA_PATH.open() as f:
+            import csv
+
+            for r in csv.DictReader(f):
+                ts_str = r["timestamp"].strip()
+                ts = (
+                    float(ts_str)
+                    if ts_str.replace(".", "").isdigit()
+                    else datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+                )
+                if not (warmup_start <= ts < end):
+                    continue
+                h1_all.append(
+                    Candle(
+                        timestamp=ts,
+                        open=float(r["open"]),
+                        high=float(r["high"]),
+                        low=float(r["low"]),
+                        close=float(r["close"]),
+                        volume=float(r.get("volume") or 0),
+                        symbol="EURUSD",
+                        timeframe="H1",
+                    )
+                )
+        h1 = sorted(h1_all, key=lambda c: c.timestamp)
+        h4 = aggregate_h1_to_h4(h1)
+        assert len(h1) > 6000, f"expected ~8800 H1 bars, got {len(h1)}"
+
+        cfg = StrategyConfig.from_yaml(self.CFG_PATH)
+        env_kwargs = cfg.to_environment_kwargs()
+        # The Pine source has the EMA-stack filter always-on; pine_aligned.yaml
+        # already sets use_ema_stack_filter: true. Belt-and-braces here.
+        env_kwargs["use_ema_stack_filter"] = True
+
+        base = BacktestEnvironment.for_v5_m5()
+        valid = {k: v for k, v in env_kwargs.items() if k in base.__dataclass_fields__}
+        env = replace(
+            base,
+            primary_timeframe="H1",
+            higher_timeframe="H4",
+            h1_to_h4_ratio=4,
+            h1_bars_per_day=24,
+            h4_bars_per_day=6,
+            min_volume=1.0,
+            max_volume=1.0,  # fixed-1-lot to match Pine sizing semantics
+            **valid,
+        )
+
+        bt = IRBBacktester(env=env)
+        res = bt.run(h1, h4)
+
+        # In-2022 trades only (filter on entry_bar timestamp)
+        jan22 = datetime(2022, 1, 1, tzinfo=timezone.utc).timestamp()
+        trades_2022 = [t for t in res.trades if 0 <= t.entry_bar < len(h1) and h1[t.entry_bar].timestamp >= jan22]
+        assert len(trades_2022) > 0, "no 2022 trades — config or data path broken"
+
+        wins = [t for t in trades_2022 if t.pnl_usd > 0]
+        losses = [t for t in trades_2022 if t.pnl_usd < 0]
+        gross_w = sum(t.pnl_usd for t in wins)
+        gross_l = -sum(t.pnl_usd for t in losses)
+        pf = gross_w / gross_l if gross_l > 0 else float("inf")
+
+        # Headline assertion: PF crosses 1.0 (Pine reports PF 2.06 for 2022)
+        assert pf >= 1.0, (
+            f"Pine-aligned 2022 PF={pf:.3f} < 1.0 — engine-stop-divergence fix "
+            f"did not close the parity gap. Pine baseline: PF 2.06."
+        )
+        # Sanity floor only — Pine's 108 baseline is on M5 cadence; this test
+        # runs H1+H4 because data/candles/EURUSD_H1_10yr.csv is the only local
+        # dataset (M5 not yet checked in). Trade count is expected to be lower
+        # than Pine's M5 figure due to coarser bars, not a strategy regression.
+        # Floor at 40 confirms the entry pipeline is firing meaningfully.
+        assert len(trades_2022) >= 40, (
+            f"Pine-aligned 2022 trade count {len(trades_2022)} below sanity floor of 40 — "
+            "entry pipeline may be over-filtering or data slice broken."
+        )
+        # Sanity: no SL trade lost more than 150 pips. Threshold is loose
+        # because this test runs H1 bars (M5 not available locally) — H1
+        # bar gaps can carry the close 50–100 pips beyond the trigger before
+        # the engine evaluates the exit, which Pine's M5 cadence avoids.
+        # 150 pips still catches genuine runaway-stop bugs while tolerating
+        # the cadence artifact.
+        for t in trades_2022:
+            if t.exit_reason == ExitReason.STOP_LOSS:
+                assert t.pnl_pips > -150, f"trade {t.trade_id}: SL hit at {t.pnl_pips:.1f} pips — runaway stop?"
