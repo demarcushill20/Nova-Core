@@ -926,3 +926,46 @@ class TestInitialStopFromEmaTrail:
 
         assert bt._position is not None
         assert bt._position.current_stop == pytest.approx(wick_stop, abs=1e-6)
+
+    def test_initial_stop_unconditional_when_ema_wrong_sided_long(self):
+        """Pine-faithful: if EMA >= fill_price for a long, current_stop is
+        still set to EMA (instant SL on next adverse tick). Pine does not
+        clamp; Python must not either.
+        """
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800  # 20 pips below entry
+        ema_above_entry = 1.10050  # 5 pips ABOVE entry — wrong side
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_above_entry,
+        )
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+
+        assert bt._position is not None
+        # No clamping to wick; EMA used unconditionally per Pine semantics
+        assert bt._position.current_stop == pytest.approx(ema_above_entry, abs=1e-6)
+        # Wick still the sizing anchor
+        assert bt._position.initial_stop == pytest.approx(wick_stop, abs=1e-6)
+
+    def test_initial_stop_unconditional_when_ema_wrong_sided_short(self):
+        """Symmetric guard for short side."""
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.10200  # 20 pips above entry
+        ema_below_entry = 1.09950  # 5 pips BELOW entry — wrong side for short
+        bt = self._setup_pending(
+            env,
+            TradeSide.SHORT,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_below_entry,
+        )
+        fill_bar = _candle(o=1.10010, h=1.10010, low=1.09990, c=1.09995, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+
+        assert bt._position is not None
+        assert bt._position.current_stop == pytest.approx(ema_below_entry, abs=1e-6)
+        assert bt._position.initial_stop == pytest.approx(wick_stop, abs=1e-6)
