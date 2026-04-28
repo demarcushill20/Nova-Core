@@ -1,6 +1,7 @@
 """Tests for novatrade.backtest.engine — IRB backtesting engine."""
 
 import math
+from pathlib import Path
 
 import pytest
 
@@ -818,3 +819,385 @@ class TestEngineATRFloorParity:
             big_dists = [abs(t.entry_price - t.stop_loss) for t in bt_big._trades]
             base_dists = [abs(t.entry_price - t.stop_loss) for t in bt_base._trades]
             assert sum(big_dists) / len(big_dists) >= sum(base_dists) / len(base_dists)
+
+
+class TestInitialStopFromEmaTrail:
+    """Pine v5 initializes the live trigger stop from EMA(40), not the IRB
+    wick. These tests guard that semantics in the Python engine.
+
+    Spec: docs/superpowers/specs/2026-04-27-engine-stop-divergence-fix-design.md
+    """
+
+    def _make_env(self, **overrides) -> BacktestEnvironment:
+        defaults = dict(
+            warmup_bars=5,
+            initial_equity=100_000.0,
+            trail_ema_period=40,
+            atr_sl_floor_multiplier=0.0,
+            sl_spread_buffer_pips=0.0,
+            partial_exit_enabled=False,
+            use_simple_trend_filter=True,
+        )
+        defaults.update(overrides)
+        return BacktestEnvironment(**defaults)  # type: ignore[arg-type]
+
+    def _setup_pending(
+        self,
+        env: BacktestEnvironment,
+        side: TradeSide,
+        entry_price: float,
+        wick_stop: float,
+        cur_trail_ema: float,
+    ) -> IRBBacktester:
+        """Create a backtester with a _PendingOrder injected and the
+        per-bar trail_ema stash set, ready for a _check_pending_fill call.
+        """
+        from novatrade.backtest.engine import _PendingOrder
+
+        bt = IRBBacktester(env=env)
+        bt._state = StrategyState.PENDING_LONG if side == TradeSide.LONG else StrategyState.PENDING_SHORT
+        bt._pending = _PendingOrder(
+            side=side,
+            entry_price=entry_price,
+            stop_loss=wick_stop,
+            volume=0.10,
+            bar_placed=0,
+            irb_bar=0,
+        )
+        bt._cur_atr = 0.0010  # arbitrary non-zero
+        bt._cur_trail_ema = cur_trail_ema
+        return bt
+
+    def test_initial_stop_uses_trail_ema_when_enabled(self):
+        """Long fill with trail_ema_period>0 → current_stop = trail_ema, not wick."""
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800  # 20 pips below entry
+        ema_at_entry = 1.09950  # 5 pips below entry — closer than wick
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_at_entry,
+        )
+
+        # Bar that triggers fill (high crosses entry_price)
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+
+        assert bt._position is not None
+        # Live trigger stop must be the EMA value (Pine cur_stop semantics)
+        assert bt._position.current_stop == pytest.approx(ema_at_entry, abs=1e-6)
+        # Sizing/R anchors must remain at the wick
+        assert bt._position.stop_loss == pytest.approx(wick_stop, abs=1e-6)
+        assert bt._position.initial_stop == pytest.approx(wick_stop, abs=1e-6)
+
+    def test_initial_stop_uses_wick_when_trail_ema_disabled(self):
+        """Live-champion regression guard: trail_ema_period=0 keeps wick stop."""
+        env = self._make_env(trail_ema_period=0)
+        wick_stop = 1.09800
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=float("nan"),  # _process_bar stashes NaN when disabled
+        )
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+
+        assert bt._position is not None
+        # Override must NOT fire when trail_ema_period == 0
+        assert bt._position.current_stop == pytest.approx(wick_stop, abs=1e-6)
+        assert bt._position.stop_loss == pytest.approx(wick_stop, abs=1e-6)
+
+    def test_initial_stop_falls_back_to_wick_when_ema_is_nan(self):
+        """If EMA isn't computed yet (warmup race), fall back to wick stop."""
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=float("nan"),
+        )
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+
+        assert bt._position is not None
+        assert bt._position.current_stop == pytest.approx(wick_stop, abs=1e-6)
+
+    def test_initial_stop_unconditional_when_ema_wrong_sided_long(self):
+        """Pine-faithful: if EMA >= fill_price for a long, current_stop is
+        still set to EMA (instant SL on next adverse tick). Pine does not
+        clamp; Python must not either.
+        """
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800  # 20 pips below entry
+        ema_above_entry = 1.10050  # 5 pips ABOVE entry — wrong side
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_above_entry,
+        )
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+
+        assert bt._position is not None
+        # No clamping to wick; EMA used unconditionally per Pine semantics
+        assert bt._position.current_stop == pytest.approx(ema_above_entry, abs=1e-6)
+        # Wick still the sizing anchor
+        assert bt._position.initial_stop == pytest.approx(wick_stop, abs=1e-6)
+
+    def test_initial_stop_unconditional_when_ema_wrong_sided_short(self):
+        """Symmetric guard for short side."""
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.10200  # 20 pips above entry
+        ema_below_entry = 1.09950  # 5 pips BELOW entry — wrong side for short
+        bt = self._setup_pending(
+            env,
+            TradeSide.SHORT,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_below_entry,
+        )
+        fill_bar = _candle(o=1.10010, h=1.10010, low=1.09990, c=1.09995, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+
+        assert bt._position is not None
+        assert bt._position.current_stop == pytest.approx(ema_below_entry, abs=1e-6)
+        assert bt._position.initial_stop == pytest.approx(wick_stop, abs=1e-6)
+
+    def test_wrong_sided_ema_actually_exits_at_ema_price_long(self):
+        """Spec §4 step 6: end-to-end stop-out at EMA price.
+
+        After a wrong-sided long fill (EMA above entry), stepping the engine
+        forward one bar must close the position with ExitReason.STOP_LOSS at
+        exit_price ≈ trail_ema_at_entry. This is faithful to Pine v5 cur_stop
+        semantics: a positive-pnl STOP_LOSS is the expected outcome — the
+        engine must NOT clamp current_stop to the wick.
+        """
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800  # 20 pips below entry
+        ema_above_entry = 1.10050  # 5 pips ABOVE entry — wrong side
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_above_entry,
+        )
+
+        # Bar 1: fill bar — high crosses entry (1.10000)
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+        assert bt._position is not None
+        assert bt._position.current_stop == pytest.approx(ema_above_entry, abs=1e-6)
+
+        # Bar 2: any bar whose low <= ema_above_entry (1.10050) triggers SL.
+        # Use a realistic next-bar candle straddling the EMA stop.
+        next_bar = _candle(o=1.10005, h=1.10060, low=1.10000, c=1.10040, ts=7200.0)
+        bt._manage_position(2, next_bar, atr_h1=[0.0010, 0.0010, 0.0010], trail_ema=None)
+
+        # Position must have stopped out
+        assert bt._position is None, "expected position to be closed by SL on bar 2"
+        assert len(bt._trades) == 1
+        trade = bt._trades[0]
+        assert trade.exit_reason == ExitReason.STOP_LOSS
+        # Exit price must be the EMA value used as cur_stop (Pine semantics)
+        assert trade.exit_price == pytest.approx(ema_above_entry, abs=1e-5)
+        # Sanity: this is a positive-pip outcome before spread costs — Pine
+        # v5 produces exactly this kind of "winning STOP_LOSS" when the EMA
+        # gaps wrong-sided at fill time. Don't assert sign of pnl_pips here
+        # because spread costs flip the sign at small magnitudes; the
+        # load-bearing assertion is the exit_price == EMA equality above.
+
+    def test_no_same_bar_exit_when_ema_above_bar_high_long(self):
+        """Pine semantics: strategy.exit evaluates next-tick. Even when the
+        EMA-initialized current_stop is ABOVE bar.high (a long can't have
+        traded that high yet), Python must NOT close the trade on the entry
+        bar — it must wait for the next bar.
+        """
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800
+        ema_above_bar_high = 1.10100  # ABOVE the fill bar's high
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_above_bar_high,
+        )
+        # Fill bar: range 1.09990-1.10010 — does NOT trade up to 1.10100
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+
+        # Mirror _process_bar's order: _check_pending_fill then _manage_position
+        # on the same bar. Pine's strategy.exit only triggers from the next bar.
+        bt._check_pending_fill(1, fill_bar)
+        bt._manage_position(1, fill_bar, [0.0010] * 5, [ema_above_bar_high] * 5)
+
+        # Position must still be open — Pine wouldn't fire strategy.exit on entry bar
+        assert bt._position is not None, (
+            "Position closed on entry bar — Pine wouldn't fire strategy.exit until next tick"
+        )
+        assert len(bt._trades) == 0
+
+        # Step to next bar: bar.low <= ema (1.10100) → exit fires at EMA
+        next_bar = _candle(o=1.10005, h=1.10110, low=1.10005, c=1.10100, ts=7200.0)
+        bt._manage_position(2, next_bar, [0.0010] * 5, [ema_above_bar_high] * 5)
+        assert bt._position is None
+        assert len(bt._trades) == 1
+        ct = bt._trades[0]
+        assert ct.exit_reason == ExitReason.STOP_LOSS
+        assert ct.exit_price == pytest.approx(ema_above_bar_high, abs=1e-5)
+
+    def test_no_same_bar_exit_when_ema_below_bar_low_short(self):
+        """Symmetric guard for SHORT side: EMA below bar.low must not fire on
+        the entry bar.
+        """
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.10200
+        ema_below_bar_low = 1.09900  # BELOW the fill bar's low
+        bt = self._setup_pending(
+            env,
+            TradeSide.SHORT,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_below_bar_low,
+        )
+        # Fill bar: range 1.09990-1.10010 — does NOT trade down to 1.09900
+        fill_bar = _candle(o=1.10010, h=1.10010, low=1.09990, c=1.09995, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+        bt._manage_position(1, fill_bar, [0.0010] * 5, [ema_below_bar_low] * 5)
+
+        assert bt._position is not None
+        assert len(bt._trades) == 0
+
+        # Next bar: bar.high reaches the EMA (1.09900); short stops out
+        next_bar = _candle(o=1.09895, h=1.09905, low=1.09890, c=1.09900, ts=7200.0)
+        bt._manage_position(2, next_bar, [0.0010] * 5, [ema_below_bar_low] * 5)
+        assert bt._position is None
+        assert len(bt._trades) == 1
+        ct = bt._trades[0]
+        assert ct.exit_reason == ExitReason.STOP_LOSS
+        assert ct.exit_price == pytest.approx(ema_below_bar_low, abs=1e-5)
+
+
+class TestPineAlignedParitySmoke:
+    """End-to-end smoke: Pine-aligned config + EMA-stop fix should produce
+    PF >= 1.0 on the 2022 EURUSD H1+H4 slice. Pine reports PF 2.06 / +$11k
+    for that year; PF >= 1.0 is a generous floor confirming the fix moves
+    the engine into Pine's profitable regime.
+
+    Data-availability gated: data/candles/EURUSD_H1_10yr.csv is in /data/
+    (gitignored), so this test is skipped in CI but runs locally for
+    developers and as a /finishing-a-development-branch gate.
+    """
+
+    DATA_PATH = Path("data/candles/EURUSD_H1_10yr.csv")
+    CFG_PATH = Path("configs/strategies/irb_v5_m5_pine_aligned.yaml")
+
+    @pytest.mark.skipif(
+        not DATA_PATH.exists() or not CFG_PATH.exists(),
+        reason="10yr historical CSV or pine-aligned config not available locally",
+    )
+    def test_pine_aligned_2022_pf_crosses_one(self):
+        from dataclasses import replace
+        from datetime import datetime, timezone
+
+        from novatrade.backtest.metrics import ExitReason
+        from novatrade.cli.commands.data import aggregate_h1_to_h4
+        from novatrade.cli.config_schema import StrategyConfig
+
+        # Load full H1 series, slice to 2022 with 30d warmup
+        warmup_start = datetime(2021, 12, 1, tzinfo=timezone.utc).timestamp()
+        end = datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp()
+        h1_all: list[Candle] = []
+        with self.DATA_PATH.open() as f:
+            import csv
+
+            for r in csv.DictReader(f):
+                ts_str = r["timestamp"].strip()
+                ts = (
+                    float(ts_str)
+                    if ts_str.replace(".", "").isdigit()
+                    else datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+                )
+                if not (warmup_start <= ts < end):
+                    continue
+                h1_all.append(
+                    Candle(
+                        timestamp=ts,
+                        open=float(r["open"]),
+                        high=float(r["high"]),
+                        low=float(r["low"]),
+                        close=float(r["close"]),
+                        volume=float(r.get("volume") or 0),
+                        symbol="EURUSD",
+                        timeframe="H1",
+                    )
+                )
+        h1 = sorted(h1_all, key=lambda c: c.timestamp)
+        h4 = aggregate_h1_to_h4(h1)
+        assert len(h1) > 6000, f"expected ~8800 H1 bars, got {len(h1)}"
+
+        cfg = StrategyConfig.from_yaml(self.CFG_PATH)
+        env_kwargs = cfg.to_environment_kwargs()
+        # The Pine source has the EMA-stack filter always-on; pine_aligned.yaml
+        # already sets use_ema_stack_filter: true. Belt-and-braces here.
+        env_kwargs["use_ema_stack_filter"] = True
+
+        base = BacktestEnvironment.for_v5_m5()
+        valid = {k: v for k, v in env_kwargs.items() if k in base.__dataclass_fields__}
+        env = replace(
+            base,
+            primary_timeframe="H1",
+            higher_timeframe="H4",
+            h1_to_h4_ratio=4,
+            h1_bars_per_day=24,
+            h4_bars_per_day=6,
+            min_volume=1.0,
+            max_volume=1.0,  # fixed-1-lot to match Pine sizing semantics
+            **valid,
+        )
+
+        bt = IRBBacktester(env=env)
+        res = bt.run(h1, h4)
+
+        # In-2022 trades only (filter on entry_bar timestamp)
+        jan22 = datetime(2022, 1, 1, tzinfo=timezone.utc).timestamp()
+        trades_2022 = [t for t in res.trades if 0 <= t.entry_bar < len(h1) and h1[t.entry_bar].timestamp >= jan22]
+        assert len(trades_2022) > 0, "no 2022 trades — config or data path broken"
+
+        wins = [t for t in trades_2022 if t.pnl_usd > 0]
+        losses = [t for t in trades_2022 if t.pnl_usd < 0]
+        gross_w = sum(t.pnl_usd for t in wins)
+        gross_l = -sum(t.pnl_usd for t in losses)
+        pf = gross_w / gross_l if gross_l > 0 else float("inf")
+
+        # Headline assertion: PF crosses 1.0 (Pine reports PF 2.06 for 2022)
+        assert pf >= 1.0, (
+            f"Pine-aligned 2022 PF={pf:.3f} < 1.0 — engine-stop-divergence fix "
+            f"did not close the parity gap. Pine baseline: PF 2.06."
+        )
+        # Sanity floor only — Pine's 108 baseline is on M5 cadence; this test
+        # runs H1+H4 because data/candles/EURUSD_H1_10yr.csv is the only local
+        # dataset (M5 not yet checked in). Trade count is expected to be lower
+        # than Pine's M5 figure due to coarser bars, not a strategy regression.
+        # Floor at 40 confirms the entry pipeline is firing meaningfully.
+        assert len(trades_2022) >= 40, (
+            f"Pine-aligned 2022 trade count {len(trades_2022)} below sanity floor of 40 — "
+            "entry pipeline may be over-filtering or data slice broken."
+        )
+        # Sanity: no SL trade lost more than 150 pips. Threshold is loose
+        # because this test runs H1 bars (M5 not available locally) — H1
+        # bar gaps can carry the close 50–100 pips beyond the trigger before
+        # the engine evaluates the exit, which Pine's M5 cadence avoids.
+        # 150 pips still catches genuine runaway-stop bugs while tolerating
+        # the cadence artifact.
+        for t in trades_2022:
+            if t.exit_reason == ExitReason.STOP_LOSS:
+                assert t.pnl_pips > -150, f"trade {t.trade_id}: SL hit at {t.pnl_pips:.1f} pips — runaway stop?"
