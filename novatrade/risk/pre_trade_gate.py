@@ -119,7 +119,7 @@ class PreTradeGate:
         # Reduces base risk_pct as total drawdown deepens, creating exponential
         # safety margin.
         self._proportional_risk = DrawdownProportionalRisk(
-            base_risk_pct=0.015,
+            base_risk_pct=0.0033,
             enabled=True,
         )
         # Profit cushion protocol (P2 priority from funded account survival research)

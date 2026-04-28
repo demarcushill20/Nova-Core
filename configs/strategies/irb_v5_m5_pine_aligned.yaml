@@ -1,0 +1,84 @@
+# IRB v5 - PINE-ALIGNED (parity-test config, NOT the live champion)
+# Source: configs/pinescript/irb_v5_stag.pine (NovaTrade IRB v5.0.0)
+#
+# This config mirrors the hard-coded constants in the Pine v5 source as
+# closely as the Python engine permits. It is used to evaluate whether the
+# Python `IRBBacktester` can converge to the certified Pine baseline
+# (1,204 trades, +$8,887 (+8.89%), PF 1.08 over 10yr EURUSD M5+H1).
+#
+# DO NOT promote without dual code review and walk-forward validation.
+# The live champion config remains `irb_v5_m5_champion.yaml`.
+strategy_type: irb
+name: irb_v5_m5_pine_aligned
+version: "5.0.0-pine-parity"
+description: "Pine-source-aligned config for parity testing only. Not the live champion."
+
+# Timeframes — the certified Pine v5 baseline runs on H1 chart with H4 MTF.
+# (Evidence: every Pine entry timestamp lands on HH:00, confirming H1
+# evaluation cadence; the YAML champion's M5 primary was a misconfiguration.)
+primary_timeframe: H1
+higher_timeframe: H4
+
+# --- IRB geometry (matches Pine IRB_PCT) ---
+irb_threshold: 0.45
+
+# --- Trend filter ---
+# Pine uses normalized-slope mode (NOT the v5 "simple" mode), with
+# EMA fast=10, slope lookback=20, slope thresh=0.4, plus 3-bar EMA-fast confirm.
+use_simple_trend_filter: false
+ema_period: 20                  # Pine EMA_PERIOD
+ema_fast_period: 10             # Pine EMA_FAST_PERIOD (yaml champion had 20 ✗)
+ema_slow_period: 50             # Pine EMA_SLOW_PERIOD
+ema_slope_lookback: 20          # Pine SLOPE_LOOKBACK (yaml champion had 5 ✗)
+trend_slope_threshold: 0.4      # Pine SLOPE_THRESH
+ema_confirm_bars: 3             # Pine EMA_CONFIRM_BARS (bypassed by simple mode in champion ✗)
+use_ema_stack_filter: true      # Pine v5 source line 399 — always-on, not optional
+
+# --- HTF (H1) trend confirmation ---
+# Pine MTF_H1_LOOKBACK=20 — H1 EMA must be moving in the trade direction
+# over the last 20 H1 bars (~20h), not the 1-bar slope the champion uses.
+mtf_lookback: 20                # Pine MTF_H1_LOOKBACK (yaml champion had 1 ✗)
+
+# --- Signal filters ---
+atr_period: 14
+adx_period: 14
+adx_threshold: 20.0             # Pine ADX_THRESH (yaml champion had 0 — sideways filter disabled ✗)
+overextension_threshold: 2.0    # Pine OE_THRESH (yaml champion had 2.5 ✗)
+min_signal_atr_mult: 0.0
+
+# --- Order management ---
+trigger_window_bars: 20         # Pine TRIGGER_WIN (yaml champion had 12 ✗)
+revalidate_pending: true
+
+# --- Trade management ---
+# Pine v5 trailing stop is EMA(40) only — no ATR trailing, no breakeven
+# (the EMA stop tightens monotonically and serves as both trail and BE).
+breakeven_r: 0.0                # Pine has no separate BE mechanism
+# Pine doesn't use ATR trail; the engine ignores it when trail_ema_period > 0.
+# We keep a non-zero value so config validation passes; it's unused.
+trail_atr_multiplier: 1.0
+trail_ema_period: 40            # Pine TRAIL_EMA_PERIOD
+time_stop_bars: 40              # Pine TIME_STOP
+trail_delay_bars: 0
+
+# --- Partial exit ---
+# Pine v5 has NO partial-exit logic (verified against irb_v5_stag.pine —
+# no `R_TARGET` / partial / TP code anywhere). Disabling matches Pine
+# output cardinality (one row per round-trip).
+partial_exit_enabled: false
+partial_exit_pct: 50.0
+partial_r_target: 1.0
+
+# --- v5 Stagnation Guard (Pine USE_STAG / STAG_BARS / STAG_ATR) ---
+use_stagnation_guard: true
+stag_bars: 12
+stag_atr_mult: 0.3
+
+# --- Risk controls (matches champion: caps off at strategy level) ---
+max_trades_per_day: 0
+cooldown_bars: 1
+max_consecutive_losses: 0
+
+# --- Disabled filters ---
+session_filter: null
+use_volatility_filter: false

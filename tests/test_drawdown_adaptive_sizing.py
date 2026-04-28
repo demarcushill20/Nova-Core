@@ -33,9 +33,9 @@ def base_request():
         symbol="EURUSD",
         side=OrderSide.BUY,
         order_type=OrderType.MARKET,
-        volume=1.0,
+        volume=0.5,
         price=1.10000,
-        stop_loss=1.09500,  # 50 pip stop
+        stop_loss=1.09500,  # 50 pip stop; 0.5 lots fits within 0.33% risk budget on healthy 100K account
     )
 
 

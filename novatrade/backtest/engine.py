@@ -81,6 +81,14 @@ class _OpenPosition:
     partial_taken: bool = False  # v5: tracks if partial profit was taken
     initial_stop: float = 0.0  # v5: original stop loss for R calculation
     initial_volume: float = 0.0  # v5: original volume before partial
+    # v5 partial bookkeeping: cash already realised from a partial exit, folded
+    # into the runner's CompletedTrade at _close_position time so each entry
+    # produces exactly one trade record (matches Pine v5 output cardinality).
+    partial_pnl_pips: float = 0.0
+    partial_pnl_usd: float = 0.0
+    # v5 stagnation guard: ATR at entry, peak favourable excursion in price units
+    entry_atr: float = 0.0
+    peak_fav: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +246,11 @@ class IRBBacktester:
         self._last_flat_bar = -999  # v5: bar index when last went flat
         self._current_day_key: int = -1  # v5: day boundary tracker
 
+        # Per-bar stash (set fresh by _process_bar each H1 bar). Initialised
+        # here to make the contract explicit; _check_pending_fill still uses
+        # getattr() defensively in case of future ordering changes.
+        self._cur_trail_ema: float = float("nan")
+
         # Result accumulators
         self._trades: list[CompletedTrade] = []
         self._pending_orders: list[PendingOrderRecord] = []
@@ -348,6 +361,19 @@ class IRBBacktester:
         atr_sma: list[float] | None = None,
     ) -> None:
         """Process a single H1 bar."""
+        # Stash current-bar indicators so _check_pending_fill can stamp them
+        # on the new position without changing the call signature.
+        self._cur_atr = atr_h1[i] if i < len(atr_h1) and not math.isnan(atr_h1[i]) else 0.0
+        self._cur_trail_ema = (
+            trail_ema[i]
+            if (
+                trail_ema is not None
+                and self.env.trail_ema_period > 0
+                and i < len(trail_ema)
+                and not math.isnan(trail_ema[i])
+            )
+            else float("nan")
+        )
         self._detect_day_boundary(i, bar)
 
         # v5: re-validate pending orders against current conditions (BEFORE fill check —
@@ -712,7 +738,25 @@ class IRBBacktester:
                 best_close=bar.close,
                 initial_stop=p.stop_loss,  # v5
                 initial_volume=p.volume,  # v5
+                entry_atr=getattr(self, "_cur_atr", 0.0),  # v5 stagnation guard
             )
+            # Pine v5 parity: when EMA-trail is the trail mode, the live
+            # trigger stop is initialized from trail_ema (Pine cur_stop), not
+            # the IRB wick. stop_loss/initial_stop stay at the wick because
+            # they drive sizing and R-multiple math (Pine f_qty(ep, sp)).
+            ema_stop = getattr(self, "_cur_trail_ema", float("nan"))
+            if not math.isnan(ema_stop):
+                self._position.current_stop = ema_stop
+                if (p.side == TradeSide.LONG and ema_stop >= fill_price) or (
+                    p.side == TradeSide.SHORT and ema_stop <= fill_price
+                ):
+                    log.debug(
+                        "bar %d: EMA wrong-sided at entry (%s fill=%.5f ema=%.5f) — instant SL likely",
+                        i,
+                        p.side.value,
+                        fill_price,
+                        ema_stop,
+                    )
             self._state = StrategyState.LONG if p.side == TradeSide.LONG else StrategyState.SHORT
             self._pending = None
             self._trades_today += 1
@@ -798,6 +842,15 @@ class IRBBacktester:
         if pos is None:
             return
 
+        # Pine fidelity: strategy.exit evaluates next-tick after order
+        # submission, so exit checks (and ratchet updates that could trigger
+        # same-bar closes) must NOT fire on the entry bar. The override in
+        # _check_pending_fill has already initialized current_stop to
+        # trail_ema[entry_bar]; subsequent bars will run normal exit/ratchet
+        # logic.
+        if i == pos.entry_bar:
+            return
+
         pos.bars_held = i - pos.entry_bar
 
         # --- Check stop-loss hit intra-bar ---
@@ -808,6 +861,25 @@ class IRBBacktester:
         else:
             if bar.high >= pos.current_stop:
                 self._close_position(i, pos.current_stop, ExitReason.STOP_LOSS)
+                return
+
+        # --- Track peak favourable excursion (for stagnation guard) ---
+        if pos.side == TradeSide.LONG:
+            fav = bar.high - pos.entry_price
+        else:
+            fav = pos.entry_price - bar.low
+        if fav > pos.peak_fav:
+            pos.peak_fav = fav
+
+        # --- Stagnation guard [v5 Pine] ---
+        # At exactly bars_held == stag_bars, if peak favourable excursion is
+        # below stag_atr_mult * entry_atr AND the close is still adverse to
+        # the entry, close at market with STAG_EXIT.
+        if self.env.use_stagnation_guard and pos.bars_held == self.env.stag_bars and pos.entry_atr > 0:
+            stag_threshold = self.env.stag_atr_mult * pos.entry_atr
+            adverse = bar.close < pos.entry_price if pos.side == TradeSide.LONG else bar.close > pos.entry_price
+            if pos.peak_fav < stag_threshold and adverse:
+                self._close_position(i, bar.close, ExitReason.STAG_EXIT)
                 return
 
         # --- Partial exit [v5] ---
@@ -908,7 +980,10 @@ class IRBBacktester:
                         return
 
     def _partial_close_position(self, bar_idx: int, exit_price: float) -> None:
-        """Close a portion of the position and record as a partial trade."""
+        """Realise a partial exit. Books the cash on equity and stashes the
+        leg pnl on the position; does NOT emit a separate CompletedTrade —
+        the runner's _close_position folds it in. This matches Pine v5
+        output cardinality (one row per round-trip)."""
         pos = self._position
         if pos is None or pos.partial_taken:
             return
@@ -931,25 +1006,9 @@ class IRBBacktester:
         pnl_usd = pnl_pips * partial_volume * lot_val
         pnl_usd -= self.env.spread.commission_per_lot_usd * partial_volume
 
-        stop_distance_pips = abs(pos.entry_price - pos.initial_stop) / pip
-        risk_r = pnl_pips / stop_distance_pips if stop_distance_pips > 0 else 0.0
-
-        self._trade_counter += 1
-        trade = CompletedTrade(
-            trade_id=self._trade_counter,
-            side=pos.side,
-            entry_bar=pos.entry_bar,
-            exit_bar=bar_idx,
-            entry_price=pos.entry_price,
-            exit_price=exit_price,
-            stop_loss=pos.initial_stop,
-            volume=partial_volume,
-            exit_reason=ExitReason.TRAILING_STOP,  # closest match for partial TP
-            pnl_pips=pnl_pips,
-            pnl_usd=pnl_usd,
-            risk_r=risk_r,
-        )
-        self._trades.append(trade)
+        # Stash the leg pnl for fold-in at _close_position
+        pos.partial_pnl_pips = pnl_pips
+        pos.partial_pnl_usd = pnl_usd
         self._equity += pnl_usd
 
         # Update position
@@ -983,20 +1042,28 @@ class IRBBacktester:
         lot_val = self.env.pip_value_per_standard_lot
 
         if pos.side == TradeSide.LONG:
-            pnl_pips = (exit_price - pos.entry_price) / pip
+            runner_pnl_pips = (exit_price - pos.entry_price) / pip
         else:
-            pnl_pips = (pos.entry_price - exit_price) / pip
+            runner_pnl_pips = (pos.entry_price - exit_price) / pip
 
         # Deduct transaction costs: spread + slippage (round-trip)
-        pnl_pips -= self.env.spread.total_cost_pips
+        runner_pnl_pips -= self.env.spread.total_cost_pips
 
-        pnl_usd = pnl_pips * pos.volume * lot_val
+        runner_pnl_usd = runner_pnl_pips * pos.volume * lot_val
 
         # Deduct commission (round-trip per lot)
-        pnl_usd -= self.env.spread.commission_per_lot_usd * pos.volume
+        runner_pnl_usd -= self.env.spread.commission_per_lot_usd * pos.volume
 
-        # Risk R-multiple
-        stop_distance_pips = abs(pos.entry_price - pos.stop_loss) / pip
+        # v5: fold any prior partial-leg pnl into the round-trip total so
+        # this CompletedTrade represents the full entry → all-out cash result
+        # (matches Pine v5 export cardinality: one row per round-trip).
+        pnl_pips = runner_pnl_pips + pos.partial_pnl_pips
+        pnl_usd = runner_pnl_usd + pos.partial_pnl_usd
+
+        # Risk R-multiple computed on initial stop (before partial moved BE),
+        # so a +1R partial / 0R runner combo nets ~+0.5R, not the truncated
+        # runner-only R that the prior code reported.
+        stop_distance_pips = abs(pos.entry_price - pos.initial_stop) / pip
         risk_r = pnl_pips / stop_distance_pips if stop_distance_pips > 0 else 0.0
 
         self._trade_counter += 1
@@ -1007,17 +1074,19 @@ class IRBBacktester:
             exit_bar=bar_idx,
             entry_price=pos.entry_price,
             exit_price=exit_price,
-            stop_loss=pos.stop_loss,
-            volume=pos.volume,
+            stop_loss=pos.initial_stop,
+            volume=pos.initial_volume or pos.volume,
             exit_reason=reason,
             pnl_pips=pnl_pips,
             pnl_usd=pnl_usd,
             risk_r=risk_r,
         )
         self._trades.append(trade)
-        self._equity += pnl_usd
+        # Only add the runner-leg pnl to equity here — the partial leg (if any)
+        # was already added to equity in _partial_close_position.
+        self._equity += runner_pnl_usd
 
-        # Update consecutive loss tracker for circuit breaker
+        # Update consecutive loss tracker for circuit breaker on round-trip pnl
         if pnl_pips > 0:
             self._consecutive_losses = 0
         else:

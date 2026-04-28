@@ -97,6 +97,18 @@ class StrategyConfig(BaseModel):
     cooldown_bars: int = Field(default=0, ge=0, le=50)
     revalidate_pending: bool = Field(default=False)
     min_signal_atr_mult: float = Field(default=0.0, ge=0.0, le=2.0)
+    # --- v5 Stagnation Guard (Pine USE_STAG / STAG_BARS / STAG_ATR) ---
+    use_stagnation_guard: bool = Field(default=False)
+    stag_bars: int = Field(default=12, ge=3, le=20)
+    stag_atr_mult: float = Field(default=0.3, ge=0.1, le=2.0)
+    # --- Stop-geometry overrides ----------------------------------------
+    # Surfaced from BacktestEnvironment defaults so per-strategy YAMLs can
+    # control stop placement. Pine v5 does NOT use either floor — set both to
+    # 0.0 in pine-aligned configs to match Pine stop geometry exactly. The
+    # current live champion keeps both at 1.0 to match historical engine
+    # behaviour; do not change live defaults without parity revalidation.
+    atr_sl_floor_multiplier: float = Field(default=1.0, ge=0.0, le=3.0)
+    sl_spread_buffer_pips: float = Field(default=1.0, ge=0.0, le=5.0)
 
     # --- Level 2: filter toggles ----------------------------------------
     filters_enabled: list[str] = Field(default_factory=list)
@@ -271,6 +283,11 @@ class StrategyConfig(BaseModel):
             "cooldown_bars": self.cooldown_bars,
             "revalidate_pending": self.revalidate_pending,
             "min_signal_atr_mult": self.min_signal_atr_mult,
+            "use_stagnation_guard": self.use_stagnation_guard,
+            "stag_bars": self.stag_bars,
+            "stag_atr_mult": self.stag_atr_mult,
+            "atr_sl_floor_multiplier": self.atr_sl_floor_multiplier,
+            "sl_spread_buffer_pips": self.sl_spread_buffer_pips,
         }
 
     def content_hash(self) -> str:

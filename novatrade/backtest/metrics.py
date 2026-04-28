@@ -48,6 +48,7 @@ class ExitReason(Enum):
     STOP_LOSS = "STOP_LOSS"
     TRAILING_STOP = "TRAILING_STOP"
     TIME_STOP = "TIME_STOP"
+    STAG_EXIT = "STAG_EXIT"  # v5: stagnation guard close at market
 
 
 class OrderCancelReason(Enum):
