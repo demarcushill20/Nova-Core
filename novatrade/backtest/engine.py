@@ -356,9 +356,19 @@ class IRBBacktester:
         atr_sma: list[float] | None = None,
     ) -> None:
         """Process a single H1 bar."""
-        # Stash current-bar ATR so _check_pending_fill can stamp entry_atr
+        # Stash current-bar indicators so _check_pending_fill can stamp them
         # on the new position without changing the call signature.
         self._cur_atr = atr_h1[i] if i < len(atr_h1) and not math.isnan(atr_h1[i]) else 0.0
+        self._cur_trail_ema = (
+            trail_ema[i]
+            if (
+                trail_ema is not None
+                and self.env.trail_ema_period > 0
+                and i < len(trail_ema)
+                and not math.isnan(trail_ema[i])
+            )
+            else float("nan")
+        )
         self._detect_day_boundary(i, bar)
 
         # v5: re-validate pending orders against current conditions (BEFORE fill check —
@@ -725,6 +735,23 @@ class IRBBacktester:
                 initial_volume=p.volume,  # v5
                 entry_atr=getattr(self, "_cur_atr", 0.0),  # v5 stagnation guard
             )
+            # Pine v5 parity: when EMA-trail is the trail mode, the live
+            # trigger stop is initialized from trail_ema (Pine cur_stop), not
+            # the IRB wick. stop_loss/initial_stop stay at the wick because
+            # they drive sizing and R-multiple math (Pine f_qty(ep, sp)).
+            ema_stop = getattr(self, "_cur_trail_ema", float("nan"))
+            if not math.isnan(ema_stop):
+                self._position.current_stop = ema_stop
+                if (p.side == TradeSide.LONG and ema_stop >= fill_price) or (
+                    p.side == TradeSide.SHORT and ema_stop <= fill_price
+                ):
+                    log.debug(
+                        "bar %d: EMA wrong-sided at entry (%s fill=%.5f ema=%.5f) — instant SL likely",
+                        i,
+                        p.side.value,
+                        fill_price,
+                        ema_stop,
+                    )
             self._state = StrategyState.LONG if p.side == TradeSide.LONG else StrategyState.SHORT
             self._pending = None
             self._trades_today += 1

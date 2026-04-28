@@ -818,3 +818,75 @@ class TestEngineATRFloorParity:
             big_dists = [abs(t.entry_price - t.stop_loss) for t in bt_big._trades]
             base_dists = [abs(t.entry_price - t.stop_loss) for t in bt_base._trades]
             assert sum(big_dists) / len(big_dists) >= sum(base_dists) / len(base_dists)
+
+
+class TestInitialStopFromEmaTrail:
+    """Pine v5 initializes the live trigger stop from EMA(40), not the IRB
+    wick. These tests guard that semantics in the Python engine.
+
+    Spec: docs/superpowers/specs/2026-04-27-engine-stop-divergence-fix-design.md
+    """
+
+    def _make_env(self, **overrides) -> BacktestEnvironment:
+        defaults = dict(
+            warmup_bars=5,
+            initial_equity=100_000.0,
+            trail_ema_period=40,
+            atr_sl_floor_multiplier=0.0,
+            sl_spread_buffer_pips=0.0,
+            partial_exit_enabled=False,
+            use_simple_trend_filter=True,
+        )
+        defaults.update(overrides)
+        return BacktestEnvironment(**defaults)  # type: ignore[arg-type]
+
+    def _setup_pending(
+        self,
+        env: BacktestEnvironment,
+        side: TradeSide,
+        entry_price: float,
+        wick_stop: float,
+        cur_trail_ema: float,
+    ) -> IRBBacktester:
+        """Create a backtester with a _PendingOrder injected and the
+        per-bar trail_ema stash set, ready for a _check_pending_fill call.
+        """
+        from novatrade.backtest.engine import _PendingOrder
+
+        bt = IRBBacktester(env=env)
+        bt._state = StrategyState.PENDING_LONG if side == TradeSide.LONG else StrategyState.PENDING_SHORT
+        bt._pending = _PendingOrder(
+            side=side,
+            entry_price=entry_price,
+            stop_loss=wick_stop,
+            volume=0.10,
+            bar_placed=0,
+            irb_bar=0,
+        )
+        bt._cur_atr = 0.0010  # arbitrary non-zero
+        bt._cur_trail_ema = cur_trail_ema
+        return bt
+
+    def test_initial_stop_uses_trail_ema_when_enabled(self):
+        """Long fill with trail_ema_period>0 → current_stop = trail_ema, not wick."""
+        env = self._make_env(trail_ema_period=40)
+        wick_stop = 1.09800  # 20 pips below entry
+        ema_at_entry = 1.09950  # 5 pips below entry — closer than wick
+        bt = self._setup_pending(
+            env,
+            TradeSide.LONG,
+            entry_price=1.10000,
+            wick_stop=wick_stop,
+            cur_trail_ema=ema_at_entry,
+        )
+
+        # Bar that triggers fill (high crosses entry_price)
+        fill_bar = _candle(o=1.09990, h=1.10010, low=1.09990, c=1.10005, ts=3600.0)
+        bt._check_pending_fill(1, fill_bar)
+
+        assert bt._position is not None
+        # Live trigger stop must be the EMA value (Pine cur_stop semantics)
+        assert bt._position.current_stop == pytest.approx(ema_at_entry, abs=1e-6)
+        # Sizing/R anchors must remain at the wick
+        assert bt._position.stop_loss == pytest.approx(wick_stop, abs=1e-6)
+        assert bt._position.initial_stop == pytest.approx(wick_stop, abs=1e-6)
