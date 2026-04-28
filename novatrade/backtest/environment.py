@@ -235,7 +235,7 @@ class BacktestEnvironment:
     # _close_position / cooldown enforcement, used by the Pine v5 exit-timing audit.
     # An empty set MUST produce bit-identical results to the current engine — enforced
     # by `tests/test_backtest_engine.py::TestParityAuditToggleNoOp`.
-    # Production configs reject this field via config_schema validation (TBD live loader).
+    # Production configs MUST omit this field; live-loader rejection of non-empty values is TBD.
     parity_audit_toggles: frozenset[str] = field(default_factory=frozenset)
 
     # --- Measurement vs inference ---

@@ -379,14 +379,17 @@ class TestParityAuditToggleNoOp(TestIRBBacktester):
         result_a = self._run(env_a)
         result_b = self._run(env_b)
 
+        # Vacuous-test guard: synthetic input must actually exercise trade logic.
+        # If this ever drops to zero, the regression no longer protects anything.
+        assert len(result_a.trades) > 0, "synthetic input produced no trades"
+
         assert result_a.final_equity == result_b.final_equity
         assert len(result_a.trades) == len(result_b.trades)
+        # Compare full CompletedTrade dataclass — catches any state-machine artifact
+        # (entry/exit timestamps, hold_bars, MFE/MAE, risk_r, volume, etc.) that a
+        # toggle leak might perturb, not just the headline price/reason/PnL fields.
         for ta, tb in zip(result_a.trades, result_b.trades, strict=True):
-            assert ta.entry_price == tb.entry_price
-            assert ta.exit_price == tb.exit_price
-            assert ta.exit_reason == tb.exit_reason
-            assert ta.pnl_pips == tb.pnl_pips
-            assert ta.pnl_usd == tb.pnl_usd
+            assert ta == tb
 
     def test_unknown_toggle_is_no_op(self):
         """An unknown toggle label must not change behavior — the engine should
@@ -401,14 +404,14 @@ class TestParityAuditToggleNoOp(TestIRBBacktester):
         result_default = self._run(env_default)
         result_unknown = self._run(env_unknown)
 
+        # Vacuous-test guard: synthetic input must actually exercise trade logic.
+        assert len(result_default.trades) > 0, "synthetic input produced no trades"
+
         assert result_default.final_equity == result_unknown.final_equity
         assert len(result_default.trades) == len(result_unknown.trades)
+        # Full dataclass equality — see test_empty_toggles_match_default for rationale.
         for td, tu in zip(result_default.trades, result_unknown.trades, strict=True):
-            assert td.entry_price == tu.entry_price
-            assert td.exit_price == tu.exit_price
-            assert td.exit_reason == tu.exit_reason
-            assert td.pnl_pips == tu.pnl_pips
-            assert td.pnl_usd == tu.pnl_usd
+            assert td == tu
 
 
 class TestStrategyState:

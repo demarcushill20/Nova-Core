@@ -103,7 +103,13 @@ class StrategyConfig(BaseModel):
         if v is None:
             return frozenset()
         if isinstance(v, (list, tuple, set, frozenset)):
-            return frozenset(str(x) for x in v)
+            # Strict element-type check: silently coercing non-strings would let a
+            # phantom toggle (e.g. an int 0 or a typo'd Enum) sneak through and
+            # match nothing while looking active.
+            for x in v:
+                if not isinstance(x, str):
+                    raise ValueError(f"parity_audit_toggles entries must be strings; got {type(x).__name__} ({x!r}).")
+            return frozenset(v)
         raise ValueError(
             "parity_audit_toggles must be a list/set of strings (or omitted). "
             "Live configs MUST leave this empty/omitted."
