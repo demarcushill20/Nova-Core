@@ -1060,16 +1060,32 @@ class WeekendAutoCloser:
 # News Calendar Blocker
 # ---------------------------------------------------------------------------
 
-# 2026 high-impact event calendar (MVP — hardcoded dates).
-# NFP: first Friday of each month, 13:30 UTC
-# FOMC: 8 meetings per year, 19:00 UTC (rate decision)
-# ECB: 6 meetings per year, 13:15 UTC (rate decision)
+# 2026 Tier-1 high-impact event calendar (MVP — hardcoded dates).
+#
+# Times are stored in the *source country* local timezone, NOT UTC, because
+# release schedules are fixed in local time and the corresponding UTC instant
+# shifts by 1 hour twice a year under DST. is_blocked() resolves each event's
+# UTC instant per-date via zoneinfo, so the filter stays correct year-round.
+#
+# Coverage scope: USD + EUR (sufficient for EURUSD, the active default symbol).
+# Before trading GBP/JPY/AUD/CAD/CHF/NZD pairs, add their Tier-1 events
+# (BoE/BoJ/RBA/BoC/SNB/RBNZ rate decisions, country-specific CPI/GDP).
+#
+# NFP:    first Friday of each month, 08:30 America/New_York
+# FOMC:   8 rate decisions per year, 14:00 America/New_York
+# ECB:    6 rate decisions per year, 14:15 Europe/Berlin (ECB is HQ'd in
+#         Frankfurt; Berlin is the same CET/CEST zone and is universally
+#         bundled in tzdata where Europe/Frankfurt sometimes is not).
+# US_CPI: monthly, 08:30 America/New_York
+# EUR_CPI flash: monthly, 11:00 Europe/Berlin (Eurostat)
 
 _HIGH_IMPACT_EVENTS: list[dict] = [
     {
         "name": "NFP",
-        "time_utc": "13:30",
+        "time_local": "08:30",
+        "tz": "America/New_York",
         "currency": "USD",
+        "tier": 1,
         "dates": [
             "2026-01-02",  # Jan
             "2026-02-06",  # Feb
@@ -1087,8 +1103,10 @@ _HIGH_IMPACT_EVENTS: list[dict] = [
     },
     {
         "name": "FOMC",
-        "time_utc": "19:00",
+        "time_local": "14:00",
+        "tz": "America/New_York",
         "currency": "USD",
+        "tier": 1,
         "dates": [
             "2026-01-28",
             "2026-03-18",
@@ -1102,8 +1120,10 @@ _HIGH_IMPACT_EVENTS: list[dict] = [
     },
     {
         "name": "ECB",
-        "time_utc": "13:15",
+        "time_local": "14:15",
+        "tz": "Europe/Berlin",
         "currency": "EUR",
+        "tier": 1,
         "dates": [
             "2026-01-22",
             "2026-03-05",
@@ -1115,8 +1135,10 @@ _HIGH_IMPACT_EVENTS: list[dict] = [
     },
     {
         "name": "US_CPI",
-        "time_utc": "13:30",
+        "time_local": "08:30",
+        "tz": "America/New_York",
         "currency": "USD",
+        "tier": 1,
         "dates": [
             "2026-01-14",  # Jan (released mid-Jan for Dec data)
             "2026-02-12",  # Feb (released mid-Feb for Jan data)
@@ -1134,8 +1156,10 @@ _HIGH_IMPACT_EVENTS: list[dict] = [
     },
     {
         "name": "EUR_CPI",
-        "time_utc": "10:00",
+        "time_local": "11:00",
+        "tz": "Europe/Berlin",
         "currency": "EUR",
+        "tier": 1,
         "dates": [
             "2026-01-31",  # Jan (released end-Jan for Dec data)
             "2026-02-28",  # Feb (released end-Feb for Jan data)
@@ -1158,15 +1182,22 @@ _HIGH_IMPACT_EVENTS: list[dict] = [
 class NewsCalendarBlocker:
     """Blocks trading around high-impact macroeconomic news events.
 
-    MVP implementation with a static 2026 calendar.  Checks whether the
-    current timestamp falls within the blackout window (default 15 min
-    before and after the scheduled event time) for any event whose
-    currency matches the trade symbol.
+    Primary purpose is FTMO funded-account compliance: FTMO prohibits opening
+    or closing a position within ±2 minutes of a Tier-1 news release for any
+    currency involved in the trade. Default operating window in this codebase
+    is ±3 minutes (2-min rule + 1-min clock-skew buffer) — see
+    RiskConfig.news_blackout_minutes in novatrade/config.py.
+
+    Static 2026 calendar (MVP) covers USD + EUR Tier-1 events. Event times are
+    stored in source-country local time + IANA timezone, then converted to UTC
+    per-event-date via zoneinfo so DST transitions are handled correctly
+    (without this, NFP/FOMC/CPI release times drift by an hour for half the
+    year and the filter silently fails).
 
     Usage::
 
         blocker = NewsCalendarBlocker()
-        blocked, reason = blocker.is_blocked(ts, "EURUSD", blackout_minutes=15)
+        blocked, reason = blocker.is_blocked(ts, "EURUSD", blackout_minutes=3)
         if blocked:
             log.warning("Trade blocked: %s", reason)
     """
@@ -1189,6 +1220,23 @@ class NewsCalendarBlocker:
         """
         symbol_upper = symbol.upper()
         return currency.upper() in symbol_upper
+
+    @staticmethod
+    def _event_utc_instant(event: dict, date_str: str) -> datetime:
+        """Resolve an event's UTC datetime for a given date, honoring DST.
+
+        Supports both the new schema (``time_local`` + ``tz``) and the legacy
+        ``time_utc`` schema for backward compatibility with any external
+        callers that build event dicts directly.
+        """
+        year, month, day = (int(x) for x in date_str.split("-"))
+        if "time_local" in event and "tz" in event:
+            hour, minute = (int(x) for x in event["time_local"].split(":"))
+            local_dt = datetime(year, month, day, hour, minute, tzinfo=ZoneInfo(event["tz"]))
+            return local_dt.astimezone(timezone.utc)
+        # Legacy fallback: treat time_utc as a literal UTC time-of-day
+        hour, minute = (int(x) for x in event["time_utc"].split(":"))
+        return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
 
     def is_blocked(
         self,
@@ -1216,9 +1264,7 @@ class NewsCalendarBlocker:
             if not self._symbol_has_currency(symbol, event["currency"]):
                 continue
 
-            # Parse event time
-            hour, minute = (int(x) for x in event["time_utc"].split(":"))
-            event_dt = datetime(dt.year, dt.month, dt.day, hour, minute, tzinfo=timezone.utc)
+            event_dt = self._event_utc_instant(event, date_str)
 
             diff_seconds = (dt - event_dt).total_seconds()
             diff_minutes = diff_seconds / 60.0

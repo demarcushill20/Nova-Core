@@ -166,14 +166,44 @@ class TestNewsCalendarBlocker:
         assert blocked is False
 
     def test_fomc_blocked(self):
-        """18:50 UTC on FOMC date — within 15-min blackout of 19:00."""
+        """18:50 UTC on Jan 28 FOMC — winter, 14:00 EST = 19:00 UTC."""
         blocker = NewsCalendarBlocker()
-        # 2026-03-18 is an FOMC date
-        ts = _ts(2026, 3, 18, 18, 50)
+        # 2026-01-28 is an FOMC date (winter — no DST). 14:00 EST = 19:00 UTC.
+        ts = _ts(2026, 1, 28, 18, 50)
         blocked, reason = blocker.is_blocked(ts, "EURUSD", blackout_minutes=15)
         assert blocked is True
         assert "FOMC" in reason
         assert "10 minutes" in reason
+
+    def test_nfp_dst_summer(self):
+        """DST regression: April NFP releases at 12:30 UTC (08:30 EDT), not 13:30."""
+        blocker = NewsCalendarBlocker()
+        # 2026-04-03 — DST is active (started March 8). NFP at 08:30 EDT = 12:30 UTC.
+        # 12:25 UTC is 5 minutes before; 13:25 UTC is well outside the window.
+        blocked_summer, reason = blocker.is_blocked(_ts(2026, 4, 3, 12, 25), "EURUSD", blackout_minutes=15)
+        assert blocked_summer is True, "NFP should fire at 12:30 UTC during DST, not 13:30"
+        assert "NFP" in reason
+
+        # 13:25 UTC is the *winter* NFP time, but in April that's an hour off
+        # the actual release. The filter must NOT fire here.
+        blocked_old_time, _ = blocker.is_blocked(_ts(2026, 4, 3, 13, 25), "EURUSD", blackout_minutes=15)
+        assert blocked_old_time is False, "DST bug regression — filter fired at winter UTC time"
+
+    def test_fomc_dst_summer(self):
+        """DST regression: March 18 FOMC releases at 18:00 UTC (14:00 EDT), not 19:00."""
+        blocker = NewsCalendarBlocker()
+        # DST started March 8, 2026. FOMC at 14:00 EDT = 18:00 UTC.
+        blocked_summer, reason = blocker.is_blocked(_ts(2026, 3, 18, 17, 55), "EURUSD", blackout_minutes=15)
+        assert blocked_summer is True, "FOMC should fire at 18:00 UTC during DST, not 19:00"
+        assert "FOMC" in reason
+
+    def test_ecb_dst_summer(self):
+        """DST regression: April ECB releases at 12:15 UTC (14:15 CEST), not 13:15."""
+        blocker = NewsCalendarBlocker()
+        # EU DST started March 29, 2026. ECB at 14:15 CEST = 12:15 UTC.
+        blocked_summer, reason = blocker.is_blocked(_ts(2026, 4, 16, 12, 10), "EURUSD", blackout_minutes=15)
+        assert blocked_summer is True, "ECB should fire at 12:15 UTC during CEST, not 13:15"
+        assert "ECB" in reason
 
     def test_non_event_day(self):
         """Random weekday with no events — not blocked."""

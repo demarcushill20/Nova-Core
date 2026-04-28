@@ -967,13 +967,19 @@ class PreTradeGate:
         )
 
     def _check_news(self, symbol: str, now: float) -> RiskCheckResult:
-        """Deny if a high-impact news event is within the blackout window."""
+        """Deny if a high-impact news event is within the FTMO compliance window.
+
+        Current scope is FTMO funded-account compliance (±2 min rule + buffer),
+        not strategy-quality filtering. Detail string is tagged with
+        FTMO_NEWS_COMPLIANCE so parity tools can classify these as
+        expected-divergence rather than real live-vs-backtest mismatches.
+        """
         blocked, reason = self._news_blocker.is_blocked(now, symbol, blackout_minutes=self._risk.news_blackout_minutes)
         if blocked:
             return RiskCheckResult(
                 name="news_blackout",
                 passed=False,
-                detail=reason,
+                detail=f"FTMO_NEWS_COMPLIANCE: {reason}",
             )
         return RiskCheckResult(
             name="news_blackout",

@@ -83,8 +83,13 @@ class RiskConfig:
     spread_vs_avg_multiplier: float = 0.0  # disabled (was 2.0)
     cooldown_seconds: int = 0  # disabled — not in backtest (was 60)
     max_trades_per_day: int = 10  # FTMO-safe: quality over quantity
-    # News blackout disabled — not in backtest pipeline. Re-enable after validation.
-    news_blackout_minutes: int = 0  # disabled (was 60)
+    # News blackout — FTMO funded-account compliance window.
+    # FTMO rule: cannot open/close a position within ±2 min of a Tier-1
+    # news release for any currency involved in the trade. We use ±3 min
+    # (2-min rule + 1-min clock-skew buffer). This is intentionally narrower
+    # than a strategy-quality filter — its job is FTMO compliance only, not
+    # avoiding the post-news volatility burst. Setting to 0 disables.
+    news_blackout_minutes: int = 3  # FTMO compliance (was 0/disabled, originally 60)
     require_stop_loss: bool = True
     max_drawdown_equity_pct: float = _DEFAULT_MAX_DAILY_DRAWDOWN_PCT
     check_forex_session: bool = False  # disabled — not in backtest (was True)
