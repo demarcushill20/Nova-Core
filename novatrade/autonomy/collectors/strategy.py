@@ -463,12 +463,15 @@ class StrategyCollector(BaseCollector):
         try:
             data = json.loads(path.read_text())
             snapshots = data if isinstance(data, list) else data.get("snapshots", [])
-            if len(snapshots) < 5:
-                return None  # not enough data
+            # Require 24+ snapshots (≈24h of hourly polls) for a meaningful
+            # Sharpe estimate.  Fewer points produce noise-dominated ratios
+            # that trigger false backtest-alignment regressions.
+            if len(snapshots) < 24:
+                return None
 
             equities = [s.get("equity", s) if isinstance(s, dict) else s for s in snapshots]
             equities = [float(e) for e in equities if e is not None]
-            if len(equities) < 5:
+            if len(equities) < 24:
                 return None
 
             # Filter outliers: remove values > 3× MAD from median.
@@ -484,7 +487,7 @@ class StrategyCollector(BaseCollector):
                 threshold = max(3.0 * mad, median * 0.01)
                 equities = [e for e in equities if abs(e - median) <= threshold]
 
-            if len(equities) < 5:
+            if len(equities) < 24:
                 return None
 
             # Simple Sharpe: mean(returns) / std(returns)
@@ -542,13 +545,12 @@ class StrategyCollector(BaseCollector):
             elif s.get("timestamp", 0) >= cutoff:
                 total += 1
 
-        # If signal_log.json has no recent entries, check signal_stats.json
-        # as a secondary source.  signal_log.json is a bounded ring buffer
-        # that can go stale while the runtime continues generating signals.
-        if total == 0:
-            stats_total = self._load_signal_stats_rate()
-            if stats_total > 0:
-                total = stats_total
+        # signal_stats.json (updated every tick by the runtime) may report a
+        # higher count than signal_log.json (bounded ring buffer that can
+        # undercount when filled with old entries).  Use whichever is higher.
+        stats_total = self._load_signal_stats_rate()
+        if stats_total > total:
+            total = stats_total
 
         rate = float(total)
         score = min(100.0, rate * 20.0)
