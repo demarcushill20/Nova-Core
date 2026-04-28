@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "20260428T172151Z",
+  "config_path": "/home/nova/nova-core/configs/strategies/irb_v5_m5_pine_aligned.yaml",
+  "pine_baseline_path": "/home/nova/nova-core/data/irb_novatrade_irb_v5_results_extracted.csv",
+  "h1_candles_path": "/home/nova/nova-core/data/candles/EURUSD_H1_10yr.csv",
+  "known_toggles": [
+    "d1_post_ratchet_stop_fill",
+    "d2_strategy_close_next_open",
+    "d3_zero_cooldown",
+    "d12_gap_fill_at_open"
+  ],
+  "runs": [
+    {
+      "label": "d2_strategy_close_next_open+d3_zero_cooldown",
+      "toggles": [
+        "d2_strategy_close_next_open",
+        "d3_zero_cooldown"
+      ],
+      "elapsed_s": 0.54,
+      "metrics": {
+        "trades": 1070,
+        "pf": 0.8871856905753885,
+        "net_pnl": -19337.602127933307,
+        "matched": 683,
+        "pine_only": 521,
+        "python_only": 387,
+        "coverage_pct": 56.72757475083057
+      },
+      "delta": null
+    }
+  ]
+}
