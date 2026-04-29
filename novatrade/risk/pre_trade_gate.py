@@ -752,8 +752,14 @@ class PreTradeGate:
         )
 
     def _check_daily_trade_count(self, now: float) -> RiskCheckResult:
-        """Deny if daily trade count has been reached."""
+        """Deny if daily trade count has been reached (0 = unlimited)."""
         limit = self._risk.max_trades_per_day
+        if limit <= 0:
+            return RiskCheckResult(
+                name="daily_trade_count",
+                passed=True,
+                detail="unlimited (limit=0)",
+            )
         day_start = self._day_start_prague_tz(now)
         today_count = sum(1 for ts, _, _ in self._trade_log if ts >= day_start)
         if today_count >= limit:

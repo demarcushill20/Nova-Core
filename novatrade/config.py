@@ -82,7 +82,7 @@ class RiskConfig:
     spread_ceiling_points: float = 999.0  # effectively disabled (was 30.0)
     spread_vs_avg_multiplier: float = 0.0  # disabled (was 2.0)
     cooldown_seconds: int = 0  # disabled — not in backtest (was 60)
-    max_trades_per_day: int = 10  # FTMO-safe: quality over quantity
+    max_trades_per_day: int = 0  # 0 = unlimited (trade count limit removed)
     # News blackout — FTMO funded-account compliance window.
     # FTMO rule: cannot open/close a position within ±2 min of a Tier-1
     # news release for any currency involved in the trade. We use ±3 min
@@ -139,8 +139,8 @@ class RiskConfig:
             errors.append("max_volume_per_trade must be positive")
         if self.min_volume_per_trade <= 0:
             errors.append("min_volume_per_trade must be positive")
-        if self.max_trades_per_day < 1:
-            errors.append("max_trades_per_day must be >= 1")
+        if self.max_trades_per_day < 0:
+            errors.append("max_trades_per_day must be >= 0 (0 = unlimited)")
         return errors
 
 

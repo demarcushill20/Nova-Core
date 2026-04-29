@@ -70,14 +70,14 @@ class HardLimits:
 
     # --- Equity protection ---
     equity_floor_usd: float = 8_500.0  # Below this: close all + halt
-    max_daily_loss_usd: float = 4_500.0  # Absolute daily loss cap ($)
-    max_total_loss_usd: float = 9_000.0  # Absolute total loss cap ($)
+    max_daily_loss_usd: float = 4_800.0  # Absolute daily loss cap ($)
+    max_total_loss_usd: float = 9_500.0  # Absolute total loss cap ($)
     max_loss_per_trade_usd: float = 1_500.0  # Max risk on a single trade ($)
 
     # --- Position limits ---
     max_lot_size: float = 50.0  # Max lots per order (absolute, supports $100K account)
     max_concurrent_positions: int = 1  # FTMO-safe: single position for IRB
-    max_trades_per_day: int = 10  # FTMO-safe: aligned with RiskConfig
+    max_trades_per_day: int = 0  # 0 = unlimited (trade count limit removed)
 
     # --- Rapid-loss circuit breaker ---
     consecutive_loss_limit: int = 5  # After N consecutive losses → cooldown
@@ -519,8 +519,8 @@ class HardRiskSupervisor:
                 ),
             )
 
-        # Rule 7: Daily trade count
-        if self._trades_today >= self._limits.max_trades_per_day:
+        # Rule 7: Daily trade count (0 = unlimited, skip check)
+        if self._limits.max_trades_per_day > 0 and self._trades_today >= self._limits.max_trades_per_day:
             log.warning(
                 "supervisor VETO [daily_trade_cap] %s %s — trades=%d max=%d",
                 symbol,

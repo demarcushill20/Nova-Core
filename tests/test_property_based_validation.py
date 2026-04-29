@@ -54,7 +54,7 @@ class TestStrategyParameterValidation:
     @given(
         trail_cooldown_bars=st.integers(min_value=1, max_value=20),
         time_stop_bars=st.integers(min_value=10, max_value=200),
-        max_trades_per_day=st.integers(min_value=1, max_value=50),
+        max_trades_per_day=st.integers(min_value=0, max_value=50),
     )
     def test_integer_parameter_consistency(self, trail_cooldown_bars, time_stop_bars, max_trades_per_day):
         """Test that integer parameters maintain type consistency."""
@@ -72,7 +72,7 @@ class TestStrategyParameterValidation:
         # Verify values are within expected ranges
         assert 1 <= env.trail_cooldown_bars <= 20
         assert 10 <= env.time_stop_bars <= 200
-        assert 1 <= env.max_trades_per_day <= 50
+        assert 0 <= env.max_trades_per_day <= 50
 
     @given(
         ema_confirm_bars=st.integers(min_value=0, max_value=10),

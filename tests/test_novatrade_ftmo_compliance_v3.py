@@ -371,7 +371,7 @@ class TestConfigAlignment:
 
     def test_risk_config_max_trades_per_day(self):
         cfg = RiskConfig()
-        assert cfg.max_trades_per_day == 10
+        assert cfg.max_trades_per_day == 0  # 0 = unlimited
 
     def test_risk_config_max_positions(self):
         cfg = RiskConfig()
@@ -383,7 +383,7 @@ class TestConfigAlignment:
 
     def test_hard_limits_max_trades_per_day(self):
         limits = HardLimits()
-        assert limits.max_trades_per_day == 10
+        assert limits.max_trades_per_day == 0  # 0 = unlimited
 
     def test_supervisor_vetoes_at_1_position(self, tmp_path):
         supervisor = HardRiskSupervisor(state_dir=str(tmp_path / "state"), kill_switch_dir=str(tmp_path / "kill"))
@@ -400,10 +400,13 @@ class TestConfigAlignment:
         assert decision.vetoed is True
         assert "max_concurrent_positions" in decision.rule or "symbol_concentration" in decision.rule
 
-    def test_supervisor_vetoes_at_10_daily_trades(self, tmp_path):
-        supervisor = HardRiskSupervisor(state_dir=str(tmp_path / "state"), kill_switch_dir=str(tmp_path / "kill"))
+    def test_supervisor_vetoes_at_daily_trade_cap_when_set(self, tmp_path):
+        supervisor = HardRiskSupervisor(
+            limits=HardLimits(max_trades_per_day=10),
+            state_dir=str(tmp_path / "state"),
+            kill_switch_dir=str(tmp_path / "kill"),
+        )
         supervisor.initialize(100_000.0)
-        # Record 10 distinct trades
         for i in range(10):
             supervisor.on_trade_opened(f"ftmo-pos-{i}", 0.10)
         decision = supervisor.veto(

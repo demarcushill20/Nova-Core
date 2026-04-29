@@ -109,7 +109,7 @@ class TestHardLimits:
         assert limits.max_total_loss_usd > limits.max_daily_loss_usd
         assert limits.max_lot_size > 0
         assert limits.max_concurrent_positions >= 1
-        assert limits.max_trades_per_day >= 1
+        assert limits.max_trades_per_day >= 0
 
     def test_custom_values(self) -> None:
         limits = HardLimits(equity_floor_usd=5000.0, max_lot_size=2.0)

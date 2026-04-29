@@ -122,7 +122,7 @@ class TestRiskConfig:
             max_positions=0,  # invalid
             max_volume_per_trade=-5.0,  # invalid
             min_volume_per_trade=0.0,  # invalid
-            max_trades_per_day=0,  # invalid
+            max_trades_per_day=-1,  # invalid
         )
         errors = config.validate()
         assert len(errors) == 6
@@ -131,7 +131,7 @@ class TestRiskConfig:
         assert "max_positions must be >= 1" in errors
         assert "max_volume_per_trade must be positive" in errors
         assert "min_volume_per_trade must be positive" in errors
-        assert "max_trades_per_day must be >= 1" in errors
+        assert "max_trades_per_day must be >= 0 (0 = unlimited)" in errors
 
 
 class TestFtmoProfile:
