@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0801_keep_a_small_buffer__say__4_800__9_500__and_still_remove_the_trade_count_limit__1777448986",
+  "workflow_id": "0801_keep_a_small_buffer__say__4_800__9_500__and_still_remove_the_trade_count_limit_",
+  "task_summary": "Raised daily loss cap to $4,800, total loss cap to $9,500, and removed trade count limit (0=unlimited) across HardRiskSupervisor, RiskConfig, and PreTradeGate",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Raised daily loss cap to $4,800, total loss cap to $9,500, and removed trade count limit (0=unlimited) across HardRiskSupervisor, RiskConfig, and PreTradeGate"
+  ],
+  "successful_patterns": [
+    "task_completed: 0801_keep_a_small_buffer__say__4_800__9_500__and_still_remove_the_trade_count_limit_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Raised daily loss cap to $4,800, total loss cap to $9,500, and removed trade count limit (0=unlimited) across HardRiskSupervisor, RiskConfig, and PreTradeGate",
+  "created_at": "2026-04-29T07:49:46Z",
+  "confidence": "low"
+}

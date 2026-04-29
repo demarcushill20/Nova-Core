@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0800_There_was_another_10_year_backtest_run_that_was_profitable_1777441825",
+  "workflow_id": "0800_There_was_another_10_year_backtest_run_that_was_profitable",
+  "task_summary": "Analyzed all four IRB TV Pine Script versions (v2\u2013v5) over 10 years \u2014 ALL are profitable ($3K\u2013$10.5K on fixed 1-lot), confirming robust strategy edge across parameter variations",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Analyzed all four IRB TV Pine Script versions (v2\u2013v5) over 10 years \u2014 ALL are profitable ($3K\u2013$10.5K on fixed 1-lot), confirming robust strategy edge across parameter variations"
+  ],
+  "successful_patterns": [
+    "task_completed: 0800_There_was_another_10_year_backtest_run_that_was_profitable"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Analyzed all four IRB TV Pine Script versions (v2\u2013v5) over 10 years \u2014 ALL are profitable ($3K\u2013$10.5K on fixed 1-lot), confirming robust strategy edge across parameter variations",
+  "created_at": "2026-04-29T05:50:25Z",
+  "confidence": "low"
+}
