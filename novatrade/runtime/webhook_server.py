@@ -132,12 +132,23 @@ def create_app(state: WebhookState | None = None) -> FastAPI:
         if ws.agent is None:
             raise HTTPException(status_code=503, detail="trading agent not initialized")
 
+        # Capture the load-bearing alert fields for downstream reconciliation
+        # (scripts/diff_pine_alerts_vs_metaapi.py pairs alerts to MetaApi deals
+        # by side/bar_close_time/volume/entry_price). Excludes webhook_secret.
         _record_event(
             ws,
             "WEBHOOK_RECEIVED",
             {
                 "action": payload.get("action", "unknown"),
                 "symbol": payload.get("symbol", "unknown"),
+                "broker_symbol": payload.get("broker_symbol", ""),
+                "side": payload.get("side", ""),
+                "entry_price": payload.get("entry_price"),
+                "stop_loss": payload.get("stop_loss"),
+                "volume": payload.get("volume"),
+                "bar_close_time": payload.get("bar_close_time"),
+                "campaign": payload.get("campaign", ""),
+                "strategy_version": payload.get("strategy_version", ""),
             },
         )
 
