@@ -1,0 +1,1441 @@
+// @version=5
+// =============================================================================
+// NovaTrade IRB v5 — M5 CHAMPION (config A faithful port from Python engine)
+// =============================================================================
+//
+// PURPOSE
+//   Validate the live champion config (configs/strategies/irb_v5_m5_champion.yaml)
+//   in Pine's authoritative execution environment. The Python IRBBacktester
+//   has known parity issues vs Pine (~57% trade match on the v5 baseline),
+//   so the only trustworthy verdict on whether config A is profitable is a
+//   direct Pine run with config A's parameters. This file exists for that.
+//
+// IMPORTANT
+//   This is NOT the locked Pine v5 baseline. The locked baseline lives at
+//   `configs/pinescript/irb_v5_stag.pine` (Rob Hoffman IRB v5 — Relaxed
+//   Reliable Build) and produced the validated +$11.91M / 24-year track
+//   record. The live champion config (`irb_v5_m5_champion.yaml`) has
+//   DIFFERENT parameters and has never been Pine-validated. This port is
+//   the validation experiment.
+//
+// PARAMETER SOURCE
+//   configs/strategies/irb_v5_m5_champion.yaml (in-tree at port time)
+//   Live since 2026-04-10 (commit 2967da4).
+//
+// CHART
+//   Set TradingView chart to **M5** before applying. HTF EMA is computed via
+//   `request.security(... "60" ...)` for H1.
+//
+// KEY DEPARTURES FROM `irb_v5_stag.pine`
+//   1.  Simple trend filter (ef > es AND ef > ef[5])   — replaces slope-norm
+//   2.  ADX filter DISABLED (champion adx_threshold=0)
+//   3.  EMA stack filter DISABLED
+//   4.  EMA10 close-confirm DISABLED
+//   5.  ATR-based trail (multiplier 2.0)               — replaces EMA(40)
+//   6.  Breakeven at +1R                               — added
+//   7.  Partial exit at +1R, 50%                       — added
+//   8.  Time stop = 20 bars                            — was 40
+//   9.  Trigger window = 12 bars                       — was 20
+//  10.  MTF lookback = 1 H1 bar                        — was 20 H1 bars
+//  11.  ATR SL floor: widen SL to ATR distance         — engine default
+//  12.  Stagnation guard DISABLED
+//  13.  Cooldown 1 bar after exit                      — engine default
+//  14.  EMA_FAST_PERIOD = 20 (was 10), SLOPE_LOOKBACK = 5 (was 20)
+//
+// UNKNOWNS / RISKS
+//   - Pine `strategy.exit` with qty_percent on `from_entry` issues a partial
+//     exit. The remaining position relies on a separate continuously-updated
+//     `strategy.exit` for stop management. Bar-level fill ordering between
+//     these two orders may diverge from the Python engine on bars where
+//     both partial-target and stop-loss are reachable intra-bar.
+//   - Pine `strategy.close` semantics for time-stop fill timing: per the
+//     parity audit (D2 falsified), Pine appears to fill same-bar despite
+//     docs. We rely on that empirical behavior here.
+// =============================================================================
+
+
+
+strategy(
+
+     "NovaTrade IRB v5 — M5 Champion",
+
+     overlay            = true,
+
+     default_qty_type   = strategy.fixed,
+
+     default_qty_value  = 10000,
+
+     initial_capital    = 100000,
+
+     currency           = currency.USD,
+
+     pyramiding         = 0,
+
+     process_orders_on_close = false,
+
+     calc_on_every_tick = false,
+
+     max_bars_back      = 500)
+
+
+
+// =============================================================================
+
+// SECTION 1: CONSTANTS / INPUTS  (sourced from irb_v5_m5_champion.yaml)
+
+// =============================================================================
+
+
+
+// --- IRB Geometry ---
+
+IRB_PCT            = 0.45                 // champion: irb_threshold
+
+
+
+// --- Indicator Periods ---
+
+EMA_FAST_PERIOD    = 20                   // champion: ema_fast_period
+
+EMA_PERIOD         = 20                   // champion: ema_period
+
+EMA_SLOW_PERIOD    = 50                   // champion: ema_slow_period
+
+ATR_PERIOD         = 14                   // champion: atr_period
+
+ADX_PERIOD         = 14                   // champion: adx_period
+
+
+
+// --- Trend filter (simple mode: ef > es AND ef > ef[N]) ---
+
+SLOPE_LOOKBACK     = 5                    // champion: ema_slope_lookback
+
+
+
+// --- MTF (H1 EMA on M5 chart) ---
+
+// champion: mtf_lookback=1 → compare H1 EMA to its [1] (1 H1 bar prior).
+
+MTF_LOOKBACK_H1    = 1
+
+
+
+// --- Sideways filter ---
+
+// champion adx_threshold=0 → effectively disabled (sw_pass always true).
+
+ADX_THRESH         = 0.0
+
+
+
+// --- Overextension filter ---
+
+OE_THRESH          = 2.5                  // champion: overextension_threshold
+
+
+
+// --- Entry / SL Buffer & ATR floor ---
+
+PIP_BUF            = 0.0001               // engine: pip_buffer
+
+ATR_SL_FLOOR_MULT  = 1.0                  // engine: atr_sl_floor_multiplier (default)
+
+SL_SPREAD_PIPS     = 1.0                  // engine: sl_spread_buffer_pips (default)
+
+
+
+// --- Trigger Window ---
+
+TRIGGER_WIN        = 12                   // champion: trigger_window_bars
+
+
+
+// --- Trade Management ---
+
+TIME_STOP          = 20                   // champion: time_stop_bars
+
+TRAIL_ATR_MULT     = 2.0                  // champion: trail_atr_multiplier
+
+BREAKEVEN_R        = 1.0                  // champion: breakeven_r
+
+
+
+// --- Partial Exit (v5) ---
+
+PARTIAL_PCT        = 50                   // champion: partial_exit_pct (qty_percent expects 0..100)
+
+PARTIAL_R          = 1.0                  // champion: partial_r_target
+
+
+
+// --- Cooldown ---
+
+COOLDOWN_BARS      = 1                    // champion: cooldown_bars
+
+
+
+// --- Position Sizing ---
+
+RISK_PCT           = 0.0033               // env default: risk_fraction (0.33%)
+
+MIN_LOTS           = 0.01
+
+MAX_LOTS           = 1.00
+
+PIP_VAL_LOT        = 10.0
+
+
+
+// --- Warmup ---
+
+WARMUP             = 60                   // env: warmup_bars (for_v5_m5)
+
+
+
+// --- Metadata ---
+
+STRAT_NAME         = "Rob Hoffman IRB"
+
+STRAT_VER          = "5.1.0"
+
+CAMPAIGN           = "ic-markets-demo-2026-q2"
+
+WH_SECRET          = "REPLACE_AT_DEPLOY"
+
+
+
+// --- Diagnostic Logging (parity audit) ---
+
+DIAG_LOG     = input.bool(false, "Diagnostic Logging (parity audit)", group = "Diagnostic")
+
+DIAG_PER_BAR = input.bool(false, "Diagnostic: Per-bar state (heavy)", group = "Diagnostic")
+
+
+
+// =============================================================================
+
+// SECTION 2: DERIVED CONSTANTS
+
+// =============================================================================
+
+
+
+pip_size       = syminfo.mintick * 10
+
+units_per_lot  = 100000
+
+partial_qty_pct = math.max(1, math.min(99, PARTIAL_PCT))   // qty_percent guard
+
+
+
+// =============================================================================
+
+// SECTION 3: INDICATORS
+
+// =============================================================================
+
+
+
+// Primary timeframe (M5 chart) EMAs
+
+ema_fast_m5 = ta.ema(close, EMA_FAST_PERIOD)
+
+ema_m5      = ta.ema(close, EMA_PERIOD)
+
+ema_slow_m5 = ta.ema(close, EMA_SLOW_PERIOD)
+
+
+
+atr_val = ta.atr(ATR_PERIOD)
+
+[dp, dm, adx_val] = ta.dmi(ADX_PERIOD, ADX_PERIOD)
+
+
+
+// Higher timeframe (H1) EMA via request.security; fetch [0] and [N] historical
+
+// bars on the H1 timeline so the lookback comparison is in H1 bars (matches
+
+// engine semantic: ema_h4[h4_idx - mtf_lookback]).
+
+ema_h1     = request.security(syminfo.tickerid, "60", ta.ema(close, EMA_PERIOD), lookahead = barmerge.lookahead_off)
+
+ema_h1_lb  = request.security(syminfo.tickerid, "60", ta.ema(close, EMA_PERIOD)[MTF_LOOKBACK_H1], lookahead = barmerge.lookahead_off)
+
+
+
+// Visual
+
+plot(ema_fast_m5, "EMA Fast (M5)", color.new(color.green, 0), 2)
+
+plot(ema_m5,      "EMA 20 (M5)",   color.new(color.blue, 0), 2)
+
+plot(ema_slow_m5, "EMA 50 (M5)",   color.new(color.purple, 0), 2)
+
+
+
+// =============================================================================
+
+// SECTION 4: HELPER FUNCTIONS
+
+// =============================================================================
+
+
+
+f_qty(float ep, float sp) =>
+
+    float sd  = math.abs(ep - sp) / pip_size
+
+    float rd  = strategy.equity * RISK_PCT
+
+    float raw = sd > 0 ? rd / (sd * PIP_VAL_LOT) : MIN_LOTS
+
+    float cl  = math.max(MIN_LOTS, math.min(MAX_LOTS, raw))
+
+    float rnd = math.round(cl * 100.0) / 100.0
+
+    rnd * units_per_lot
+
+
+
+// =============================================================================
+
+// SECTION 5: WARMUP GUARD
+
+// =============================================================================
+
+
+
+warmup_ok = bar_index >= math.max(WARMUP, math.max(EMA_SLOW_PERIOD, ATR_PERIOD))
+
+
+
+// =============================================================================
+
+// SECTION 6: IRB GEOMETRY DETECTION
+
+// =============================================================================
+
+
+
+bar_rng   = high - low
+
+valid_rng = bar_rng > 0
+
+
+
+up_thresh = high - IRB_PCT * bar_rng
+
+is_up_irb = valid_rng and (open <= up_thresh) and (close <= up_thresh)
+
+
+
+dn_thresh = low + IRB_PCT * bar_rng
+
+is_dn_irb = valid_rng and (open >= dn_thresh) and (close >= dn_thresh)
+
+
+
+// =============================================================================
+
+// SECTION 7: TREND FILTER  (SIMPLE MODE — KEY DEPARTURE FROM stag.pine)
+
+// =============================================================================
+
+// champion: use_simple_trend_filter=true →
+
+//   bull = ef > es AND ef > ef[SLOPE_LOOKBACK]
+
+//   bear = ef < es AND ef < ef[SLOPE_LOOKBACK]
+
+
+
+ef_prev   = nz(ema_fast_m5[SLOPE_LOOKBACK])
+
+bull_trend = ema_fast_m5 > ema_slow_m5 and ema_fast_m5 > ef_prev
+
+bear_trend = ema_fast_m5 < ema_slow_m5 and ema_fast_m5 < ef_prev
+
+
+
+// ema_slope (purely diagnostic, not used in champion gating)
+
+ema_slope_diag = nz(atr_val) > 0 ? (ema_m5 - nz(ema_m5[20])) / atr_val : 0.0
+
+
+
+// =============================================================================
+
+// SECTION 8: MTF ALIGNMENT (H1 EMA slope)
+
+// =============================================================================
+
+
+
+h1_up = not na(ema_h1) and not na(ema_h1_lb) and (ema_h1 > ema_h1_lb)
+
+h1_dn = not na(ema_h1) and not na(ema_h1_lb) and (ema_h1 < ema_h1_lb)
+
+
+
+// =============================================================================
+
+// SECTION 9: SIDEWAYS FILTER (DISABLED in champion: ADX_THRESH = 0)
+
+// =============================================================================
+
+
+
+sw_pass = adx_val >= ADX_THRESH    // always true when ADX_THRESH=0
+
+
+
+// =============================================================================
+
+// SECTION 10: OVEREXTENSION FILTER
+
+// =============================================================================
+
+
+
+oe_ratio = nz(atr_val) > 0 ? bar_rng / atr_val : 0.0
+
+oe_pass  = oe_ratio <= OE_THRESH
+
+
+
+// =============================================================================
+
+// SECTION 11: COMBINED SIGNAL
+
+// =============================================================================
+
+
+
+sig_long  = warmup_ok and is_up_irb and bull_trend and h1_up and sw_pass and oe_pass
+
+sig_short = warmup_ok and is_dn_irb and bear_trend and h1_dn and sw_pass and oe_pass
+
+
+
+// =============================================================================
+
+// SECTION 12: STATE MACHINE
+
+// =============================================================================
+
+
+
+int S_FLAT   = 0
+
+int S_PLONG  = 1
+
+int S_PSHORT = 2
+
+int S_LONG   = 3
+
+int S_SHORT  = 4
+
+
+
+var int   state         = S_FLAT
+
+var float irb_hi        = na
+
+var float irb_lo        = na
+
+var int   pend_bars     = 0
+
+var int   pos_bars      = 0
+
+var float best_cl       = na
+
+var float cur_stop      = na
+
+var float pend_qty      = na
+
+var float entry_atr     = na
+
+var float entry_stop    = na      // for R-distance math (BE / partial)
+
+var bool  breakeven_hit = false
+
+var bool  partial_taken = false
+
+var int   last_flat_bar = -999
+
+
+
+bool was_flat  = strategy.position_size[1] == 0
+
+bool now_long  = strategy.position_size > 0
+
+bool now_short = strategy.position_size < 0
+
+bool now_flat  = strategy.position_size == 0
+
+
+
+bool fill_long  = now_long and was_flat
+
+bool fill_short = now_short and was_flat
+
+bool pos_closed = now_flat and not was_flat
+
+
+
+bool evt_signal  = false
+
+bool evt_replace = false
+
+bool evt_cancel  = false
+
+bool evt_tstop   = false
+
+string evt_side  = ""
+
+
+
+// --- Position closed → FLAT + reset ---
+
+if pos_closed
+
+    state         := S_FLAT
+
+    irb_hi        := na
+
+    irb_lo        := na
+
+    pend_bars     := 0
+
+    pos_bars      := 0
+
+    best_cl       := na
+
+    cur_stop      := na
+
+    pend_qty      := na
+
+    entry_atr     := na
+
+    entry_stop    := na
+
+    breakeven_hit := false
+
+    partial_taken := false
+
+    last_flat_bar := bar_index
+
+
+
+// --- Fill detected → LONG ---
+
+// irb_lo / irb_hi were set in the arming block to the WIDENED stop level
+
+// (after f_widen_long / f_widen_short), so use them directly here as cur_stop.
+
+if fill_long and state == S_PLONG
+
+    state      := S_LONG
+
+    pos_bars   := 0
+
+    best_cl    := close
+
+    cur_stop   := nz(irb_lo)
+
+    entry_atr  := atr_val
+
+    entry_stop := cur_stop
+
+    breakeven_hit := false
+
+    partial_taken := false
+
+
+
+// --- Fill detected → SHORT ---
+
+if fill_short and state == S_PSHORT
+
+    state      := S_SHORT
+
+    pos_bars   := 0
+
+    best_cl    := close
+
+    cur_stop   := nz(irb_hi)
+
+    entry_atr  := atr_val
+
+    entry_stop := cur_stop
+
+    breakeven_hit := false
+
+    partial_taken := false
+
+
+
+// --- Increment counters ---
+
+if state == S_PLONG or state == S_PSHORT
+
+    pend_bars += 1
+
+if state == S_LONG or state == S_SHORT
+
+    pos_bars += 1
+
+
+
+// =============================================================================
+
+// SECTION 13: PENDING ORDER MANAGEMENT (TRIGGER_WIN = 12)
+
+// =============================================================================
+
+
+
+if state == S_PLONG and pend_bars >= TRIGGER_WIN
+
+    strategy.cancel("Long")
+
+    state      := S_FLAT
+
+    irb_hi     := na
+
+    irb_lo     := na
+
+    pend_bars  := 0
+
+    pend_qty   := na
+
+    evt_cancel := true
+
+    evt_side   := "BUY"
+
+
+
+if state == S_PSHORT and pend_bars >= TRIGGER_WIN
+
+    strategy.cancel("Short")
+
+    state      := S_FLAT
+
+    irb_hi     := na
+
+    irb_lo     := na
+
+    pend_bars  := 0
+
+    pend_qty   := na
+
+    evt_cancel := true
+
+    evt_side   := "SELL"
+
+
+
+// =============================================================================
+
+// SECTION 14: COOLDOWN (block entries within COOLDOWN_BARS of last exit)
+
+// =============================================================================
+
+
+
+cooldown_active = (bar_index - last_flat_bar) <= COOLDOWN_BARS
+
+
+
+// =============================================================================
+
+// SECTION 15: SIGNAL ARMING + REPLACEMENT
+
+// =============================================================================
+
+// SL widening (engine atr_sl_floor + spread cushion):
+
+//   spread_cushion = SL_SPREAD_PIPS * pip_size
+
+//   stop_loss = (raw wick stop) ± (PIP_BUF + spread_cushion)
+
+//   if |entry - stop| < ATR * ATR_SL_FLOOR_MULT → widen SL to ATR distance
+
+
+
+spread_cushion = SL_SPREAD_PIPS * pip_size
+
+
+
+f_widen_long(float ep, float sp_raw, float a) =>
+
+    float sp1 = sp_raw - spread_cushion
+
+    float min_dist = a * ATR_SL_FLOOR_MULT
+
+    float dist = ep - sp1
+
+    dist < min_dist ? ep - min_dist : sp1
+
+
+
+f_widen_short(float ep, float sp_raw, float a) =>
+
+    float sp1 = sp_raw + spread_cushion
+
+    float min_dist = a * ATR_SL_FLOOR_MULT
+
+    float dist = sp1 - ep
+
+    dist < min_dist ? ep + min_dist : sp1
+
+
+
+// --- New signal from FLAT (cooldown-aware) ---
+
+if state == S_FLAT and sig_long and not cooldown_active
+
+    float ep = high + PIP_BUF
+
+    float sp_raw = low - PIP_BUF
+
+    float sp = f_widen_long(ep, sp_raw, atr_val)
+
+    float qv = f_qty(ep, sp)
+
+    strategy.entry("Long", strategy.long, stop = ep, qty = qv)
+
+    irb_hi     := high
+
+    irb_lo     := sp        // store widened sp so fill logic uses it as initial stop
+
+    pend_qty   := qv
+
+    state      := S_PLONG
+
+    pend_bars  := 0
+
+    evt_signal := true
+
+    evt_side   := "BUY"
+
+
+
+else if state == S_FLAT and sig_short and not cooldown_active
+
+    float ep = low - PIP_BUF
+
+    float sp_raw = high + PIP_BUF
+
+    float sp = f_widen_short(ep, sp_raw, atr_val)
+
+    float qv = f_qty(ep, sp)
+
+    strategy.entry("Short", strategy.short, stop = ep, qty = qv)
+
+    irb_hi     := sp
+
+    irb_lo     := low
+
+    pend_qty   := qv
+
+    state      := S_PSHORT
+
+    pend_bars  := 0
+
+    evt_signal := true
+
+    evt_side   := "SELL"
+
+
+
+// --- Same-direction replacement while pending ---
+
+else if state == S_PLONG and sig_long
+
+    float ep = high + PIP_BUF
+
+    float sp_raw = low - PIP_BUF
+
+    float sp = f_widen_long(ep, sp_raw, atr_val)
+
+    float qv = f_qty(ep, sp)
+
+    strategy.entry("Long", strategy.long, stop = ep, qty = qv)
+
+    irb_hi      := high
+
+    irb_lo      := sp
+
+    pend_qty    := qv
+
+    pend_bars   := 0
+
+    evt_replace := true
+
+    evt_side    := "BUY"
+
+
+
+else if state == S_PSHORT and sig_short
+
+    float ep = low - PIP_BUF
+
+    float sp_raw = high + PIP_BUF
+
+    float sp = f_widen_short(ep, sp_raw, atr_val)
+
+    float qv = f_qty(ep, sp)
+
+    strategy.entry("Short", strategy.short, stop = ep, qty = qv)
+
+    irb_hi      := sp
+
+    irb_lo      := low
+
+    pend_qty    := qv
+
+    pend_bars   := 0
+
+    evt_replace := true
+
+    evt_side    := "SELL"
+
+
+
+// =============================================================================
+
+// SECTION 16: EXIT MANAGEMENT — ATR TRAIL + BE + PARTIAL + TIME-STOP
+
+// =============================================================================
+
+// Exit order architecture:
+
+//   - Entry bar (after fill): place "Trail" stop-only exit at initial stop on
+
+//     full position. Place "Partial" limit-stop exit on PARTIAL_PCT of
+
+//     position with the partial-target as limit and same initial stop.
+
+//   - Each subsequent bar: update "Trail" stop with new cur_stop.
+
+//   - Partial fires: Pine reduces position by PARTIAL_PCT; Trail covers
+
+//     remaining qty automatically.
+
+//   - Time-stop: strategy.close on TIME_STOP-th bar.
+
+
+
+// --- LONG management ---
+
+if state == S_LONG
+
+    // Engine.py:867-868 fidelity — trail/partial/BE updates SKIP on entry bar.
+
+    // We still RE-PLACE the protective stop every bar (including entry bar) so
+
+    // the position is always under a `strategy.exit` order — without it the
+
+    // position would have no Pine-side stop-loss between the fill and bar 1.
+
+    if pos_bars > 0
+
+        // Capture pre-update stop so the webhook fork can emit MODIFY_SL only
+        // when the trail or breakeven actually tightened cur_stop.
+        float prev_cs_long = nz(cur_stop, na)
+
+        best_cl := math.max(nz(best_cl, close), close)
+
+
+
+        // ATR trail (matches engine.py:1097-1105)
+
+        float atr_v = nz(atr_val, 0.0)
+
+        if atr_v > 0
+
+            float new_trail = best_cl - TRAIL_ATR_MULT * atr_v
+
+            if new_trail > nz(cur_stop, new_trail - 1.0)
+
+                cur_stop := new_trail
+
+
+
+        // Breakeven at +1R (matches engine.py:1041-1051)
+
+        if BREAKEVEN_R > 0 and not breakeven_hit and not na(entry_stop)
+
+            float r_dist = math.abs(strategy.position_avg_price - entry_stop)
+
+            if (close - strategy.position_avg_price) >= BREAKEVEN_R * r_dist
+
+                float be_stop = strategy.position_avg_price + pip_size
+
+                cur_stop := math.max(nz(cur_stop, be_stop), be_stop)
+
+                breakeven_hit := true
+
+
+
+        // Partial exit at +1R, PARTIAL_PCT (engine.py:1015-1024)
+
+        if not partial_taken and not na(entry_stop)
+
+            float r_dist = math.abs(strategy.position_avg_price - entry_stop)
+
+            float ptarget = strategy.position_avg_price + PARTIAL_R * r_dist
+
+            if high >= ptarget
+
+                strategy.exit("Long Partial", "Long", limit = ptarget, qty_percent = partial_qty_pct, comment_profit = "PARTIAL_TP")
+
+                partial_taken := true
+
+
+
+        // --- MODIFY_SL alert (webhook fork) ---
+        // Emit only when cur_stop tightened during this bar (trail or BE move).
+        // Hard SL hits remain broker-managed (no alert needed when SL fires).
+        // Suppress when this bar will fire TIME_STOP — avoids a wasted broker
+        // SL-modify on a position about to be closed at market this same bar.
+        // Suppress the cosmetic first-emit case (na prev) so old != new always.
+
+        if not na(cur_stop) and not na(prev_cs_long) and cur_stop != prev_cs_long and pos_bars < TIME_STOP
+
+            string sl_long = "{" +
+                 "\"webhook_secret\":\""      + WH_SECRET + "\"" +
+                 ",\"strategy_name\":\""      + STRAT_NAME + "\"" +
+                 ",\"strategy_version\":\""   + STRAT_VER + "\"" +
+                 ",\"action\":\"MODIFY_SL\"" +
+                 ",\"symbol\":\"EURUSD\"" +
+                 ",\"side\":\"BUY\"" +
+                 ",\"old_stop\":"             + str.tostring(nz(prev_cs_long, cur_stop), "#.#####") +
+                 ",\"new_stop\":"             + str.tostring(cur_stop, "#.#####") +
+                 ",\"best_close\":"           + str.tostring(nz(best_cl, close), "#.#####") +
+                 ",\"bars_since_entry\":"     + str.tostring(pos_bars) +
+                 ",\"trail_method\":\"ATR\"" +
+                 ",\"trail_atr_mult\":"       + str.tostring(TRAIL_ATR_MULT, "#.##") +
+                 ",\"campaign\":\""           + CAMPAIGN + "\"" +
+                 "}"
+
+            alert(sl_long, alert.freq_once_per_bar_close)
+
+            if DIAG_LOG
+
+                log.info(sl_long)
+
+
+
+    // Place / update trailing stop EVERY bar (entry bar included)
+
+    if not na(cur_stop)
+
+        strategy.exit("Long Stop", "Long", stop = cur_stop, comment_loss = "TRAIL_SL")
+
+
+
+    // Time stop (skip on entry bar — engine condition is bars_held >= TIME_STOP)
+
+    if pos_bars >= TIME_STOP
+
+        strategy.close("Long", comment = "TIME_STOP")
+
+        evt_tstop := true
+
+        evt_side  := "BUY"
+
+
+
+// --- SHORT management ---
+
+if state == S_SHORT
+
+    if pos_bars > 0
+
+        // Capture pre-update stop for the webhook fork's MODIFY_SL emit.
+        float prev_cs_short = nz(cur_stop, na)
+
+        best_cl := math.min(nz(best_cl, close), close)
+
+
+
+        float atr_v = nz(atr_val, 0.0)
+
+        if atr_v > 0
+
+            float new_trail = best_cl + TRAIL_ATR_MULT * atr_v
+
+            if new_trail < nz(cur_stop, new_trail + 1.0)
+
+                cur_stop := new_trail
+
+
+
+        if BREAKEVEN_R > 0 and not breakeven_hit and not na(entry_stop)
+
+            float r_dist = math.abs(entry_stop - strategy.position_avg_price)
+
+            if (strategy.position_avg_price - close) >= BREAKEVEN_R * r_dist
+
+                float be_stop = strategy.position_avg_price - pip_size
+
+                cur_stop := math.min(nz(cur_stop, be_stop), be_stop)
+
+                breakeven_hit := true
+
+
+
+        if not partial_taken and not na(entry_stop)
+
+            float r_dist = math.abs(entry_stop - strategy.position_avg_price)
+
+            float ptarget = strategy.position_avg_price - PARTIAL_R * r_dist
+
+            if low <= ptarget
+
+                strategy.exit("Short Partial", "Short", limit = ptarget, qty_percent = partial_qty_pct, comment_profit = "PARTIAL_TP")
+
+                partial_taken := true
+
+
+
+        // --- MODIFY_SL alert (webhook fork) ---
+        // Same guards as the long branch: real change, time-stop gate.
+
+        if not na(cur_stop) and not na(prev_cs_short) and cur_stop != prev_cs_short and pos_bars < TIME_STOP
+
+            string sl_short = "{" +
+                 "\"webhook_secret\":\""      + WH_SECRET + "\"" +
+                 ",\"strategy_name\":\""      + STRAT_NAME + "\"" +
+                 ",\"strategy_version\":\""   + STRAT_VER + "\"" +
+                 ",\"action\":\"MODIFY_SL\"" +
+                 ",\"symbol\":\"EURUSD\"" +
+                 ",\"side\":\"SELL\"" +
+                 ",\"old_stop\":"             + str.tostring(nz(prev_cs_short, cur_stop), "#.#####") +
+                 ",\"new_stop\":"             + str.tostring(cur_stop, "#.#####") +
+                 ",\"best_close\":"           + str.tostring(nz(best_cl, close), "#.#####") +
+                 ",\"bars_since_entry\":"     + str.tostring(pos_bars) +
+                 ",\"trail_method\":\"ATR\"" +
+                 ",\"trail_atr_mult\":"       + str.tostring(TRAIL_ATR_MULT, "#.##") +
+                 ",\"campaign\":\""           + CAMPAIGN + "\"" +
+                 "}"
+
+            alert(sl_short, alert.freq_once_per_bar_close)
+
+            if DIAG_LOG
+
+                log.info(sl_short)
+
+
+
+    if not na(cur_stop)
+
+        strategy.exit("Short Stop", "Short", stop = cur_stop, comment_loss = "TRAIL_SL")
+
+
+
+    if pos_bars >= TIME_STOP
+
+        strategy.close("Short", comment = "TIME_STOP")
+
+        evt_tstop := true
+
+        evt_side  := "SELL"
+
+
+
+// =============================================================================
+
+// SECTION 17: ALERT PAYLOADS (mirrors stag.pine schema, adapted for M5/H1)
+
+// =============================================================================
+
+
+
+// --- Signal / Replace alert ---
+
+if evt_signal or evt_replace
+
+    string at = evt_replace ? "REPLACE_STOP_ORDER" : "PLACE_STOP_ORDER"
+
+    string st = evt_side == "BUY" ? "LONG_IRB" : "SHORT_IRB"
+
+    string ot = evt_side == "BUY" ? "BUY_STOP" : "SELL_STOP"
+
+    float ep_raw = evt_side == "BUY" ? high + PIP_BUF : low - PIP_BUF
+
+    float sp_raw_a = evt_side == "BUY" ? low - PIP_BUF : high + PIP_BUF
+
+    float sp_a = evt_side == "BUY" ? f_widen_long(ep_raw, sp_raw_a, atr_val) : f_widen_short(ep_raw, sp_raw_a, atr_val)
+
+    float sd_a = math.abs(ep_raw - sp_a) / pip_size
+
+    float rd_a = strategy.equity * RISK_PCT
+
+    float vol_a = math.max(MIN_LOTS, math.min(MAX_LOTS, sd_a > 0 ? rd_a / (sd_a * PIP_VAL_LOT) : MIN_LOTS))
+
+    vol_a := math.round(vol_a * 100.0) / 100.0
+
+
+
+    string p = "{" +
+
+         "\"webhook_secret\":\""      + WH_SECRET + "\"" +
+
+         ",\"strategy_name\":\""      + STRAT_NAME + "\"" +
+
+         ",\"strategy_version\":\""   + STRAT_VER + "\"" +
+
+         ",\"action\":\""             + at + "\"" +
+
+         ",\"signal_type\":\""        + st + "\"" +
+
+         ",\"symbol\":\"EURUSD\"" +
+
+         ",\"broker_symbol\":\"EURUSD\"" +
+
+         ",\"timeframe\":\"M5\"" +
+
+         ",\"side\":\""               + evt_side + "\"" +
+
+         ",\"order_type\":\""         + ot + "\"" +
+
+         ",\"entry_price\":"          + str.tostring(ep_raw, "#.#####") +
+
+         ",\"stop_loss\":"            + str.tostring(sp_a, "#.#####") +
+
+         ",\"stop_distance_pips\":"   + str.tostring(sd_a, "#.#") +
+
+         ",\"volume\":"               + str.tostring(vol_a, "#.##") +
+
+         ",\"risk_dollars\":"         + str.tostring(rd_a, "#.##") +
+
+         ",\"bar_close_time\":"       + str.tostring(time_close) +
+
+         ",\"bar_o\":"                + str.tostring(open, "#.#####") +
+
+         ",\"bar_h\":"                + str.tostring(high, "#.#####") +
+
+         ",\"bar_l\":"                + str.tostring(low, "#.#####") +
+
+         ",\"bar_c\":"                + str.tostring(close, "#.#####") +
+
+         ",\"irb_range\":"            + str.tostring(bar_rng, "#.#####") +
+
+         ",\"ema_fast_m5\":"          + str.tostring(ema_fast_m5, "#.#####") +
+
+         ",\"ema_20_m5\":"            + str.tostring(ema_m5, "#.#####") +
+
+         ",\"ema_50_m5\":"            + str.tostring(ema_slow_m5, "#.#####") +
+
+         ",\"ema_h1\":"               + str.tostring(ema_h1, "#.#####") +
+
+         ",\"ema_h1_dir\":\""         + (h1_up ? "RISING" : h1_dn ? "FALLING" : "FLAT") + "\"" +
+
+         ",\"adx_14\":"               + str.tostring(adx_val, "#.##") +
+
+         ",\"atr_14\":"               + str.tostring(atr_val, "#.#####") +
+
+         ",\"oe_ratio\":"             + str.tostring(oe_ratio, "#.###") +
+
+         ",\"trigger_window_bars\":"  + str.tostring(TRIGGER_WIN) +
+
+         ",\"strategy_state\":\""     + (state == S_PLONG ? "PENDING_LONG" : "PENDING_SHORT") + "\"" +
+
+         ",\"campaign\":\""           + CAMPAIGN + "\"" +
+
+         "}"
+
+    alert(p, alert.freq_once_per_bar_close)
+
+    if DIAG_LOG
+
+        log.info(p)
+
+
+
+// --- Cancel alert ---
+
+if evt_cancel
+
+    string cp = "{" +
+
+         "\"webhook_secret\":\""      + WH_SECRET + "\"" +
+
+         ",\"strategy_name\":\""      + STRAT_NAME + "\"" +
+
+         ",\"strategy_version\":\""   + STRAT_VER + "\"" +
+
+         ",\"action\":\"CANCEL_ORDER\"" +
+
+         ",\"symbol\":\"EURUSD\"" +
+
+         ",\"side\":\""               + evt_side + "\"" +
+
+         ",\"cancel_reason\":\"TRIGGER_WINDOW_EXPIRED\"" +
+
+         ",\"bars_elapsed\":"         + str.tostring(TRIGGER_WIN) +
+
+         ",\"campaign\":\""           + CAMPAIGN + "\"" +
+
+         "}"
+
+    alert(cp, alert.freq_once_per_bar_close)
+
+    if DIAG_LOG
+
+        log.info(cp)
+
+
+
+// --- Time-stop alert ---
+
+if evt_tstop
+
+    string xp = "{" +
+
+         "\"webhook_secret\":\""      + WH_SECRET + "\"" +
+
+         ",\"strategy_name\":\""      + STRAT_NAME + "\"" +
+
+         ",\"strategy_version\":\""   + STRAT_VER + "\"" +
+
+         ",\"action\":\"CLOSE_POSITION\"" +
+
+         ",\"symbol\":\"EURUSD\"" +
+
+         ",\"side\":\""               + evt_side + "\"" +
+
+         ",\"close_reason\":\"TIME_STOP\"" +
+
+         ",\"bars_held\":"            + str.tostring(pos_bars) +
+
+         ",\"close_price\":"          + str.tostring(close, "#.#####") +
+
+         ",\"campaign\":\""           + CAMPAIGN + "\"" +
+
+         "}"
+
+    alert(xp, alert.freq_once_per_bar_close)
+
+    if DIAG_LOG
+
+        log.info(xp)
+
+
+
+// =============================================================================
+
+// SECTION 17b: DIAGNOSTIC PARITY EVENTS (FILL / EXIT / PER_BAR)
+
+// =============================================================================
+
+
+
+if DIAG_LOG and (fill_long or fill_short)
+
+    string flj = "{" +
+
+         "\"event\":\"FILL\"" +
+
+         ",\"bar_close_time\":"    + str.tostring(time_close) +
+
+         ",\"bar_index\":"         + str.tostring(bar_index) +
+
+         ",\"side\":\""            + (fill_long ? "BUY" : "SELL") + "\"" +
+
+         ",\"fill_price\":"        + str.tostring(strategy.position_avg_price, "#.#####") +
+
+         ",\"stop_loss\":"         + str.tostring(cur_stop, "#.#####") +
+
+         ",\"qty\":"               + str.tostring(math.abs(strategy.position_size), "#.##") +
+
+         ",\"bars_to_fill\":"      + str.tostring(pend_bars) +
+
+         ",\"bar_o\":"             + str.tostring(open, "#.#####") +
+
+         ",\"bar_h\":"             + str.tostring(high, "#.#####") +
+
+         ",\"bar_l\":"             + str.tostring(low, "#.#####") +
+
+         ",\"bar_c\":"             + str.tostring(close, "#.#####") +
+
+         ",\"campaign\":\""        + CAMPAIGN + "\"" +
+
+         "}"
+
+    log.info(flj)
+
+
+
+if DIAG_LOG and pos_closed and strategy.closedtrades > 0
+
+    int   _last_idx   = strategy.closedtrades - 1
+
+    string _ex_cmt    = strategy.closedtrades.exit_comment(_last_idx)
+
+    float _entry_p    = strategy.closedtrades.entry_price(_last_idx)
+
+    float _exit_p     = strategy.closedtrades.exit_price(_last_idx)
+
+    int   _eb_idx     = strategy.closedtrades.entry_bar_index(_last_idx)
+
+    int   _xb_idx     = strategy.closedtrades.exit_bar_index(_last_idx)
+
+    float _trade_size = strategy.closedtrades.size(_last_idx)
+
+    float _pnl        = strategy.closedtrades.profit(_last_idx)
+
+    string _xside     = _trade_size > 0 ? "BUY" : "SELL"
+
+    string ej = "{" +
+
+         "\"event\":\"EXIT\"" +
+
+         ",\"bar_close_time\":"    + str.tostring(time_close) +
+
+         ",\"bar_index\":"         + str.tostring(bar_index) +
+
+         ",\"side\":\""            + _xside + "\"" +
+
+         ",\"exit_price\":"        + str.tostring(_exit_p, "#.#####") +
+
+         ",\"entry_price\":"       + str.tostring(_entry_p, "#.#####") +
+
+         ",\"entry_bar_index\":"   + str.tostring(_eb_idx) +
+
+         ",\"exit_bar_index\":"    + str.tostring(_xb_idx) +
+
+         ",\"qty\":"               + str.tostring(math.abs(_trade_size), "#.##") +
+
+         ",\"exit_comment\":\""    + _ex_cmt + "\"" +
+
+         ",\"pnl\":"               + str.tostring(_pnl, "#.##") +
+
+         ",\"bar_o\":"             + str.tostring(open, "#.#####") +
+
+         ",\"bar_h\":"             + str.tostring(high, "#.#####") +
+
+         ",\"bar_l\":"             + str.tostring(low, "#.#####") +
+
+         ",\"bar_c\":"             + str.tostring(close, "#.#####") +
+
+         ",\"campaign\":\""        + CAMPAIGN + "\"" +
+
+         "}"
+
+    log.info(ej)
+
+
+
+if DIAG_PER_BAR
+
+    string state_str = state == S_FLAT ? "FLAT" :
+
+         state == S_PLONG ? "PENDING_LONG" :
+
+         state == S_PSHORT ? "PENDING_SHORT" :
+
+         state == S_LONG ? "LONG" : "SHORT"
+
+    string pbj = "{" +
+
+         "\"event\":\"PER_BAR\"" +
+
+         ",\"bar_close_time\":"   + str.tostring(time_close) +
+
+         ",\"bar_index\":"        + str.tostring(bar_index) +
+
+         ",\"state\":\""          + state_str + "\"" +
+
+         ",\"pos_bars\":"         + str.tostring(pos_bars) +
+
+         ",\"pend_bars\":"        + str.tostring(pend_bars) +
+
+         ",\"cur_stop\":"         + str.tostring(nz(cur_stop), "#.#####") +
+
+         ",\"best_cl\":"          + str.tostring(nz(best_cl), "#.#####") +
+
+         ",\"ema_fast_m5\":"      + str.tostring(ema_fast_m5, "#.#####") +
+
+         ",\"ema_20_m5\":"        + str.tostring(ema_m5, "#.#####") +
+
+         ",\"ema_50_m5\":"        + str.tostring(ema_slow_m5, "#.#####") +
+
+         ",\"ema_h1\":"           + str.tostring(ema_h1, "#.#####") +
+
+         ",\"atr\":"              + str.tostring(atr_val, "#.#####") +
+
+         ",\"adx\":"              + str.tostring(adx_val, "#.##") +
+
+         ",\"oe_ratio\":"         + str.tostring(oe_ratio, "#.###") +
+
+         ",\"is_up_irb\":"        + (is_up_irb ? "true" : "false") +
+
+         ",\"is_dn_irb\":"        + (is_dn_irb ? "true" : "false") +
+
+         ",\"bull_trend\":"       + (bull_trend ? "true" : "false") +
+
+         ",\"bear_trend\":"       + (bear_trend ? "true" : "false") +
+
+         ",\"h1_up\":"            + (h1_up ? "true" : "false") +
+
+         ",\"h1_dn\":"            + (h1_dn ? "true" : "false") +
+
+         ",\"sw_pass\":"          + (sw_pass ? "true" : "false") +
+
+         ",\"oe_pass\":"          + (oe_pass ? "true" : "false") +
+
+         ",\"sig_long\":"         + (sig_long ? "true" : "false") +
+
+         ",\"sig_short\":"        + (sig_short ? "true" : "false") +
+
+         ",\"breakeven_hit\":"    + (breakeven_hit ? "true" : "false") +
+
+         ",\"partial_taken\":"    + (partial_taken ? "true" : "false") +
+
+         ",\"bar_o\":"            + str.tostring(open, "#.#####") +
+
+         ",\"bar_h\":"            + str.tostring(high, "#.#####") +
+
+         ",\"bar_l\":"            + str.tostring(low, "#.#####") +
+
+         ",\"bar_c\":"            + str.tostring(close, "#.#####") +
+
+         "}"
+
+    log.info(pbj)
+
+
+
+// =============================================================================
+
+// SECTION 18: VISUAL ANNOTATIONS
+
+// =============================================================================
+
+
+
+plotshape(sig_long,  "LONG IRB",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small)
+
+plotshape(sig_short, "SHORT IRB", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small)
+
+
+
+plot(state == S_LONG or state == S_SHORT ? cur_stop : na, "Trail Stop", color.new(color.orange, 0), 1, plot.style_stepline)
+
+
+
+bgcolor(not warmup_ok ? color.new(color.gray, 90) : na, title = "Warmup Zone")
+
+
+
+// =============================================================================
+
+// END OF STRATEGY
+
+// =============================================================================
