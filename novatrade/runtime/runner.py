@@ -759,7 +759,11 @@ async def build_live_stack(
         log.info("build_live_stack: post-trade verifier enabled")
 
     # --- Live Trading Agent ---
-    live_agent = LiveTradingAgent(agent, strategy_engine, cfg, campaign="irb-live", verifier=verifier)
+    # Stamp alert payloads with the env-configured campaign label so they pass
+    # the new TradingAgent campaign-mismatch check (validate_alert plumbed via
+    # cfg.ftmo.campaign_label). Falls back to "irb-live" when no campaign is set.
+    live_campaign = cfg.ftmo.campaign_label or "irb-live"
+    live_agent = LiveTradingAgent(agent, strategy_engine, cfg, campaign=live_campaign, verifier=verifier)
 
     # --- Tick Pipeline ---
     poller = TickBatchPoller(adapter, cfg.symbols, interval=poll_interval, broker_map=broker_map)

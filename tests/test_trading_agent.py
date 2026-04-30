@@ -49,11 +49,17 @@ from novatrade.validation.evidence import EvidenceRecorder
 
 
 def _make_cfg(**overrides) -> NovaTradeCfg:
-    """Build a test NovaTradeCfg with FTMO symbol mapping."""
+    """Build a test NovaTradeCfg with FTMO symbol mapping.
+
+    Empty campaign_label means TradingAgent.process_alert skips the per-runner
+    campaign-match check (preserving pre-Phase-2 behavior for unrelated FSM
+    tests). The campaign-enforcement integration is covered separately in
+    TestCampaignEnforcement.
+    """
     ftmo = FtmoProfile(
         enabled=True,
         symbol_map={"EURUSD": "EURUSD.sim"},
-        campaign_label="test-campaign",
+        campaign_label="",
     )
     risk = RiskConfig(max_positions=1)
     return NovaTradeCfg(
@@ -281,6 +287,59 @@ class TestValidateAlert:
         err, _ = validate_alert(_trail_payload(new_stop=-1.0))
         assert err is not None
         assert "new_stop" in err
+
+    def test_validate_alert_accepts_v5_1_strategy_version(self):
+        err, _ = validate_alert(_signal_payload(strategy_version="5.1.0"))
+        assert err is None
+
+    def test_validate_alert_rejects_campaign_mismatch(self):
+        err, _ = validate_alert(
+            _signal_payload(campaign="wrong"),
+            expected_campaign="ic-markets-demo-2026-q2",
+        )
+        assert err is not None
+        assert "campaign" in err.lower()
+
+    def test_validate_alert_accepts_matching_campaign(self):
+        err, _ = validate_alert(
+            _signal_payload(campaign="ic-markets-demo-2026-q2"),
+            expected_campaign="ic-markets-demo-2026-q2",
+        )
+        assert err is None
+
+    def test_validate_alert_skips_campaign_check_when_no_expected(self):
+        err, _ = validate_alert(_signal_payload(campaign="any"))
+        assert err is None
+
+    def test_validate_alert_empty_string_expected_campaign_skips_check(self):
+        """Explicit empty-string expected_campaign behaves like None (falsy → skip)."""
+        err, _ = validate_alert(_signal_payload(campaign="anything"), expected_campaign="")
+        assert err is None
+
+
+class TestCampaignEnforcement:
+    """Integration: TradingAgent.process_alert plumbs campaign_label to validate_alert."""
+
+    @pytest.mark.asyncio
+    async def test_process_alert_rejects_payload_with_mismatched_campaign(self):
+        cfg = _make_cfg()
+        cfg.ftmo.campaign_label = "expected-campaign"
+        agent = _make_agent(cfg=cfg)
+        payload = _signal_payload(campaign="different-campaign")
+        result = await agent.process_alert(payload)
+        assert not result.success
+        assert result.rejected_reason and "campaign" in result.rejected_reason.lower()
+
+    @pytest.mark.asyncio
+    async def test_process_alert_accepts_payload_with_matching_campaign(self):
+        cfg = _make_cfg()
+        cfg.ftmo.campaign_label = "expected-campaign"
+        agent = _make_agent(cfg=cfg)
+        payload = _signal_payload(campaign="expected-campaign")
+        result = await agent.process_alert(payload)
+        # success path — no campaign-mismatch rejection (other guards may still fire,
+        # but the campaign check itself must pass).
+        assert not (result.rejected_reason and "campaign" in result.rejected_reason.lower())
 
 
 # ---------------------------------------------------------------------------

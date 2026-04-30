@@ -253,10 +253,20 @@ _VALID_ACTIONS = frozenset(
 )
 
 
-def validate_alert(payload: dict) -> tuple[str | None, str]:
-    """Validate an alert payload against the alerts_schema.json contract.
+def validate_alert(
+    payload: dict,
+    expected_campaign: str | None = None,
+) -> tuple[str | None, str]:
+    """Validate an alert payload against the IRB alert contract.
 
     Returns ``(error, action)``.  If *error* is ``None`` the alert is valid.
+
+    When ``expected_campaign`` is provided (non-empty), the payload's
+    ``campaign`` field must match it exactly. This lets a webhook runner
+    instance reject alerts intended for a different campaign (e.g. the
+    FTMO trial vs an IC Markets demo on a parallel runner).
+
+    Both v5.0.0 and v5.1.0 strategy versions are accepted.
     """
     action = payload.get("action")
     if not action or action not in _VALID_ACTIONS:
@@ -265,13 +275,11 @@ def validate_alert(payload: dict) -> tuple[str | None, str]:
     if payload.get("strategy_name") != "Rob Hoffman IRB":
         return f"unknown strategy: {payload.get('strategy_name')!r}", ""
 
-    # Enhanced version validation with debugging info
-    expected_version = "5.0.0"
     actual_version = payload.get("strategy_version")
-    if actual_version != expected_version:
+    if actual_version not in ("5.0.0", "5.1.0"):
         return (
             f"version mismatch: got {actual_version!r} (type {type(actual_version).__name__}), "
-            f"expected {expected_version!r} (type {type(expected_version).__name__})"
+            f"expected '5.0.0' or '5.1.0'"
         ), ""
 
     # Required-field check per action type
@@ -316,6 +324,11 @@ def validate_alert(payload: dict) -> tuple[str | None, str]:
         vol = payload.get("volume")
         if not isinstance(vol, (int, float)) or vol <= 0:
             return "PARTIAL_CLOSE volume must be a positive number", ""
+
+    if expected_campaign:
+        actual_campaign = payload.get("campaign", "")
+        if actual_campaign != expected_campaign:
+            return (f"campaign mismatch: got {actual_campaign!r}, expected {expected_campaign!r}"), ""
 
     return None, action
 
@@ -489,7 +502,10 @@ class TradingAgent:
             )
 
         # 1. Validate
-        error, action = validate_alert(payload)
+        error, action = validate_alert(
+            payload,
+            expected_campaign=self._cfg.ftmo.campaign_label or None,
+        )
         if error:
             elapsed = (time.monotonic() - t0) * 1000
 
