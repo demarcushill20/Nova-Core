@@ -159,17 +159,44 @@ class StrategyCollector(BaseCollector):
     # private helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _is_shadow_symbol(symbol: str) -> bool:
+    _override_env_cache: dict[str, str] | None = None
+
+    @classmethod
+    def _load_override_env(cls) -> dict[str, str]:
+        """Load key=value pairs from configs/novatrade.override.env (cached)."""
+        if cls._override_env_cache is not None:
+            return cls._override_env_cache
+        env: dict[str, str] = {}
+        path = Path(__file__).resolve().parents[3] / "configs" / "novatrade.override.env"
+        if path.exists():
+            try:
+                for line in path.read_text().splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        k, _, v = line.partition("=")
+                        env[k.strip()] = v.strip()
+            except OSError:
+                pass
+        cls._override_env_cache = env
+        return env
+
+    @classmethod
+    def _is_shadow_symbol(cls, symbol: str) -> bool:
         """Return True if symbol indicates shadow/dry-run mode.
 
         FTMO demo accounts use ".sim" as their real broker symbol suffix
         (configured via FTMO_SYMBOL_SUFFIX env var). When the suffix
         matches the configured broker suffix, the trade is real.
+        Falls back to configs/novatrade.override.env when the env var
+        is not set (e.g. heartbeat systemd unit).
         """
         if not symbol.endswith(".sim"):
             return False
         ftmo_suffix = os.environ.get("FTMO_SYMBOL_SUFFIX", "")
+        if not ftmo_suffix:
+            ftmo_suffix = cls._load_override_env().get("FTMO_SYMBOL_SUFFIX", "")
         return not (ftmo_suffix and symbol.endswith(ftmo_suffix))
 
     def _load_trade_log(self) -> list[dict]:
@@ -372,6 +399,9 @@ class StrategyCollector(BaseCollector):
 
         # Backtest exists but not enough live data → credit for having backtests
         if live_sharpe is None:
+            started = self._get_strategy_started_at()
+            if started is not None and (time.time() - started) < 24 * 3600:
+                return 70.0, -6.0
             return 60.0, -2.0
 
         # Pre-live check: if all equity snapshots are from backtest runs,
@@ -456,6 +486,8 @@ class StrategyCollector(BaseCollector):
 
         Filters outlier equity values (test artifacts, simulation spikes)
         using median-absolute-deviation before computing returns.
+        After a strategy transition, only uses post-transition snapshots
+        to avoid mixing performance from different strategy variants.
         """
         path = Path(self.base_path) / "STATE" / "novatrade" / "equity_history.json"
         if not path.exists():
@@ -463,6 +495,12 @@ class StrategyCollector(BaseCollector):
         try:
             data = json.loads(path.read_text())
             snapshots = data if isinstance(data, list) else data.get("snapshots", [])
+
+            # Filter to post-strategy-transition snapshots when available.
+            strategy_started = self._get_strategy_started_at()
+            if strategy_started is not None:
+                snapshots = [s for s in snapshots if self._snapshot_ts(s) >= strategy_started]
+
             # Require 24+ snapshots (≈24h of hourly polls) for a meaningful
             # Sharpe estimate.  Fewer points produce noise-dominated ratios
             # that trigger false backtest-alignment regressions.
@@ -502,6 +540,34 @@ class StrategyCollector(BaseCollector):
             return mean_r / std_r
         except (json.JSONDecodeError, OSError, ValueError, TypeError):
             return None
+
+    def _get_strategy_started_at(self) -> float | None:
+        """Read strategy started_at timestamp from strategy_config.json."""
+        path = Path(self.base_path) / "STATE" / "novatrade" / "strategy_config.json"
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text())
+            val = data.get("started_at")
+            return float(val) if val is not None else None
+        except (json.JSONDecodeError, OSError, ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _snapshot_ts(snapshot: dict) -> float:
+        """Extract a numeric timestamp from an equity snapshot."""
+        if isinstance(snapshot, dict):
+            ts = snapshot.get("timestamp", "")
+            if isinstance(ts, (int, float)):
+                return float(ts)
+            if isinstance(ts, str) and ts:
+                try:
+                    from datetime import datetime as _dt
+
+                    return _dt.fromisoformat(ts).timestamp()
+                except (ValueError, TypeError):
+                    return 0.0
+        return 0.0
 
     def _get_pipeline_mode(self) -> str:
         """Read pipeline mode from strategy_config.json. Defaults to 'unknown'."""
@@ -554,6 +620,11 @@ class StrategyCollector(BaseCollector):
 
         rate = float(total)
         score = min(100.0, rate * 20.0)
+
+        if score == 0:
+            live_metrics = self._load_live_metrics()
+            if live_metrics and live_metrics.get("ticks", 0) > 0:
+                score = 40.0
 
         return score, rate
 

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0811_Noble_Tree_seemed_like_it_stopped_Trading__Can_you_check_on_it_for_me__1777621781",
+  "workflow_id": "0811_Noble_Tree_seemed_like_it_stopped_Trading__Can_you_check_on_it_for_me_",
+  "task_summary": "Investigated \"Noble Tree\" trading status - system not found, but NovaTrade operational with MetaAPI connectivity issues",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Investigated \"Noble Tree\" trading status - system not found, but NovaTrade operational with MetaAPI connectivity issues"
+  ],
+  "successful_patterns": [
+    "task_completed: 0811_Noble_Tree_seemed_like_it_stopped_Trading__Can_you_check_on_it_for_me_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Investigated \"Noble Tree\" trading status - system not found, but NovaTrade operational with MetaAPI connectivity issues",
+  "created_at": "2026-05-01T07:49:41Z",
+  "confidence": "low"
+}

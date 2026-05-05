@@ -105,6 +105,9 @@ ignore = [
 "scripts/novatrade_ftmo.py" = ["C901", "S110"]  # complex FTMO review, try-except-pass
 "scripts/repair_vault_types.py" = ["C901"]  # complex vault repair
 "scripts/md_to_pdf_fpdf.py" = ["C901"]  # complex PDF rendering
+"scripts/irb_v5_backtesting_py.py" = ["C901"]  # complex backtest strategy loop
+"scripts/irb_v5_vault_reference.py" = ["C901", "B023"]  # complex backtest loop; nonlocal vars flagged as unbound
+"scripts/live_engine_replay.py" = ["C901"]  # complex replay main loop
 "docs/demo_test_run/*.py" = ["C901"]  # complex backtest code
 
 [tool.ruff.lint.mccabe]

@@ -260,6 +260,17 @@ class IRBBacktester:
         self._signals: list[SignalRecord] = []
         self._rejections = FilterRejection()
 
+        # Parity-audit instrumented mode (no-op when env.diagnostic_logging is False)
+        self._diag: DiagnosticEmitter | None = None
+        if self.env.diagnostic_logging:
+            from novatrade.backtest.diagnostic_emitter import DiagnosticEmitter
+
+            path = self.env.diagnostic_log_path or "OUTPUT/nova_events.jsonl"
+            self._diag = DiagnosticEmitter(path)
+        # Stash for end-of-bar PER_BAR emission (populated each bar in
+        # _process_bar; consumed at end of bar). Lives only in instrumented mode.
+        self._diag_per_bar_stash: dict[str, Any] = {}
+
     def run(
         self,
         h1_candles: list[Candle],
@@ -334,6 +345,10 @@ class IRBBacktester:
         if self._pending is not None:
             self._cancel_pending(n - 1, OrderCancelReason.TRIGGER_WINDOW_EXPIRED)
 
+        # Flush diagnostic event stream
+        if self._diag is not None:
+            self._diag.close()
+
         return BacktestResult(
             trades=self._trades,
             pending_orders=self._pending_orders,
@@ -378,6 +393,17 @@ class IRBBacktester:
             )
             else float("nan")
         )
+        if self._diag is not None:
+            # Stash bar metadata so EXIT/CANCEL events fired mid-bar can
+            # reference bar OHLC + timestamp without re-passing them through
+            # the call chain.
+            self._diag_per_bar_stash = {
+                "bar_timestamp": bar.timestamp,
+                "bar_o": bar.open,
+                "bar_h": bar.high,
+                "bar_l": bar.low,
+                "bar_c": bar.close,
+            }
         self._detect_day_boundary(i, bar)
 
         # v5: re-validate pending orders against current conditions (BEFORE fill check —
@@ -420,6 +446,132 @@ class IRBBacktester:
 
         # Evaluate IRB signal
         self._evaluate_signal(i, bar, all_bars, ema_h1, atr_h1, adx_h1, ema_h4, h4_map, ema_fast, ema_slow, atr_sma)
+
+        # End-of-bar diagnostic: PER_BAR state dump (heavy; gated separately)
+        if self._diag is not None and self.env.diagnostic_logging_per_bar:
+            self._emit_per_bar(i, bar, ema_h1, atr_h1, adx_h1, ema_h4, h4_map, ema_fast, ema_slow, all_bars)
+
+    def _emit_per_bar(
+        self,
+        i: int,
+        bar: Candle,
+        ema_h1: list[float],
+        atr_h1: list[float],
+        adx_h1: list[float],
+        ema_h4: list[float],
+        h4_map: list[int],
+        ema_fast: list[float] | None,
+        ema_slow: list[float] | None,
+        all_bars: list[Candle],
+    ) -> None:
+        """Emit a PER_BAR diagnostic event with all signal-input components."""
+        e = self.env
+        atr_v = atr_h1[i] if i < len(atr_h1) and not math.isnan(atr_h1[i]) else float("nan")
+        adx_v = adx_h1[i] if i < len(adx_h1) and not math.isnan(adx_h1[i]) else float("nan")
+        em_v = ema_h1[i] if i < len(ema_h1) and not math.isnan(ema_h1[i]) else float("nan")
+        ef_v = ema_fast[i] if (ema_fast is not None and i < len(ema_fast)) else float("nan")
+        es_v = ema_slow[i] if (ema_slow is not None and i < len(ema_slow)) else float("nan")
+
+        # IRB geometry
+        rng = bar.high - bar.low
+        is_up_irb = False
+        is_dn_irb = False
+        if rng > 0:
+            up_th = bar.high - e.irb_threshold * rng
+            dn_th = bar.low + e.irb_threshold * rng
+            is_up_irb = bar.open <= up_th and bar.close <= up_th
+            is_dn_irb = bar.open >= dn_th and bar.close >= dn_th
+
+        # Trend (slope-normalized — Pine v5 mode; matches non-simple_trend path)
+        if not math.isnan(atr_v) and atr_v > 0 and not math.isnan(em_v):
+            lb = min(20, i)
+            em_prev = ema_h1[i - lb] if lb > 0 and (i - lb) < len(ema_h1) else float("nan")
+            ema_slope = (em_v - em_prev) / atr_v if not math.isnan(em_prev) else 0.0
+        else:
+            ema_slope = 0.0
+        trend_up = ema_slope >= e.trend_slope_threshold
+        trend_dn = ema_slope <= -e.trend_slope_threshold
+
+        # H4 alignment
+        h4_idx = h4_map[i] if i < len(h4_map) else -1
+        h4_cur = ema_h4[h4_idx] if 0 <= h4_idx < len(ema_h4) else float("nan")
+        h4_lb = min(e.mtf_lookback, h4_idx) if h4_idx >= 0 else 0
+        h4_prev = ema_h4[h4_idx - h4_lb] if (h4_idx - h4_lb) >= 0 and (h4_idx - h4_lb) < len(ema_h4) else float("nan")
+        h4_up = not math.isnan(h4_cur) and not math.isnan(h4_prev) and h4_cur > h4_prev
+        h4_dn = not math.isnan(h4_cur) and not math.isnan(h4_prev) and h4_cur < h4_prev
+
+        sw_pass = not math.isnan(adx_v) and adx_v >= e.adx_threshold
+        oe_ratio = (rng / atr_v) if (not math.isnan(atr_v) and atr_v > 0) else 0.0
+        oe_pass = oe_ratio <= e.overextension_threshold
+
+        ema_stack_bull = not math.isnan(ef_v) and not math.isnan(es_v) and ef_v > em_v > es_v
+        ema_stack_bear = not math.isnan(ef_v) and not math.isnan(es_v) and ef_v < em_v < es_v
+
+        # EMA10 confirm — N consecutive closes above/below ema_fast
+        confirm_long = True
+        confirm_short = True
+        if ema_fast is not None and e.ema_confirm_bars > 0:
+            for j in range(e.ema_confirm_bars):
+                idx = i - j
+                if idx < 0 or idx >= len(ema_fast) or math.isnan(ema_fast[idx]):
+                    confirm_long = False
+                    confirm_short = False
+                    break
+                if all_bars[idx].close <= ema_fast[idx]:
+                    confirm_long = False
+                if all_bars[idx].close >= ema_fast[idx]:
+                    confirm_short = False
+
+        sig_long = is_up_irb and trend_up and h4_up and sw_pass and oe_pass and ema_stack_bull and confirm_long
+        sig_short = is_dn_irb and trend_dn and h4_dn and sw_pass and oe_pass and ema_stack_bear and confirm_short
+
+        state_str = self._state.value if hasattr(self._state, "value") else str(self._state)
+        pos = self._position
+        pend = self._pending
+        cur_stop = pos.current_stop if pos is not None else float("nan")
+        best_cl = pos.best_close if pos is not None else float("nan")
+        pos_bars = pos.bars_held if pos is not None else 0
+        pend_bars = (i - pend.bar_placed) if pend is not None else 0
+
+        diag = self._diag
+        if diag is None:
+            return
+        diag.emit_per_bar(
+            bar_close_time_seconds=bar.timestamp,
+            bar_index=i,
+            state=state_str,
+            pos_bars=pos_bars,
+            pend_bars=pend_bars,
+            cur_stop=cur_stop,
+            best_cl=best_cl,
+            trail_ema=self._cur_trail_ema,
+            ema_10=ef_v,
+            ema_20=em_v,
+            ema_50=es_v,
+            ema_h4=h4_cur,
+            ema_slope=ema_slope,
+            atr=atr_v,
+            adx=adx_v,
+            oe_ratio=oe_ratio,
+            is_up_irb=is_up_irb,
+            is_dn_irb=is_dn_irb,
+            trend_up=trend_up,
+            trend_dn=trend_dn,
+            h4_up=h4_up,
+            h4_dn=h4_dn,
+            sw_pass=sw_pass,
+            oe_pass=oe_pass,
+            ema_stack_bull=ema_stack_bull,
+            ema_stack_bear=ema_stack_bear,
+            ema10_confirm_long=confirm_long,
+            ema10_confirm_short=confirm_short,
+            sig_long=sig_long,
+            sig_short=sig_short,
+            bar_o=bar.open,
+            bar_h=bar.high,
+            bar_l=bar.low,
+            bar_c=bar.close,
+        )
 
     def _evaluate_signal(
         self,
@@ -669,9 +821,18 @@ class IRBBacktester:
         volume = max(e.min_volume, min(e.max_volume, round(volume, 2)))
 
         # --- Handle existing pending order ---
+        is_replacement = False
         if self._pending is not None:
             if self._pending.side == side:
                 # IRB replacement [A4]
+                is_replacement = True
+                self._cancel_pending(i, OrderCancelReason.IRB_REPLACEMENT)
+            elif "b3_pending_replace_any_side" in self.env.parity_audit_toggles:
+                # B3 probe: vault behavior — any new signal replaces pending,
+                # including direction reversal. Default nova rejects opposite-
+                # direction signals while pending alive (engine ledger shows
+                # this as `_rejections.existing_pending`).
+                is_replacement = True
                 self._cancel_pending(i, OrderCancelReason.IRB_REPLACEMENT)
             else:
                 # Opposite direction — ignore
@@ -706,6 +867,55 @@ class IRBBacktester:
             stop_loss,
             volume,
         )
+
+        # --- Parity-audit diagnostic emission ---
+        if self._diag is not None:
+            ef_v = ema_fast[i] if (ema_fast is not None and i < len(ema_fast)) else float("nan")
+            es_v = ema_slow[i] if (ema_slow is not None and i < len(ema_slow)) else float("nan")
+            em_v = ema_h1[i]
+            h4_idx_v = h4_map[i] if i < len(h4_map) else -1
+            h4_cur = ema_h4[h4_idx_v] if 0 <= h4_idx_v < len(ema_h4) else float("nan")
+            h4_lb = min(e.mtf_lookback, h4_idx_v) if h4_idx_v >= 0 else 0
+            h4_off = h4_idx_v - h4_lb
+            h4_prev = ema_h4[h4_off] if 0 <= h4_off < len(ema_h4) else float("nan")
+            t_ema_v = self._cur_trail_ema
+            self._diag.emit_signal(
+                is_replacement=is_replacement,
+                bar_close_time_seconds=bar.timestamp,
+                bar_index=i,
+                side="BUY" if side == TradeSide.LONG else "SELL",
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                volume=volume,
+                risk_dollars=risk_dollars,
+                bar_o=bar.open,
+                bar_h=bar.high,
+                bar_l=bar.low,
+                bar_c=bar.close,
+                irb_range=rng,
+                ema_10=ef_v,
+                ema_20=em_v,
+                ema_50=es_v,
+                ema_h4=h4_cur,
+                trail_ema=t_ema_v,
+                ema_slope=ema_slope,
+                adx=adx_val,
+                atr=atr_h1[i],
+                oe_ratio=overext_ratio,
+                is_up_irb=is_uptrend_irb,
+                is_dn_irb=is_downtrend_irb,
+                trend_up=(side == TradeSide.LONG),
+                trend_dn=(side == TradeSide.SHORT),
+                h4_up=(not math.isnan(h4_cur) and not math.isnan(h4_prev) and h4_cur > h4_prev),
+                h4_dn=(not math.isnan(h4_cur) and not math.isnan(h4_prev) and h4_cur < h4_prev),
+                sw_pass=(adx_val >= e.adx_threshold),
+                oe_pass=(overext_ratio <= e.overextension_threshold),
+                ema_stack_bull=(not math.isnan(ef_v) and not math.isnan(es_v) and ef_v > em_v > es_v),
+                ema_stack_bear=(not math.isnan(ef_v) and not math.isnan(es_v) and ef_v < em_v < es_v),
+                ema10_confirm_long=(side == TradeSide.LONG),
+                ema10_confirm_short=(side == TradeSide.SHORT),
+                strategy_state="PENDING_LONG" if side == TradeSide.LONG else "PENDING_SHORT",
+            )
 
     # ------------------------------------------------------------------
     # Pending order management
@@ -779,6 +989,21 @@ class IRBBacktester:
 
             log.debug("bar %d: %s fill at %.5f", i, p.side.value, fill_price)
 
+            if self._diag is not None:
+                self._diag.emit_fill(
+                    bar_close_time_seconds=bar.timestamp,
+                    bar_index=i,
+                    side="BUY" if p.side == TradeSide.LONG else "SELL",
+                    fill_price=fill_price,
+                    stop_loss=self._position.current_stop,
+                    qty=p.volume,
+                    bars_to_fill=i - p.bar_placed,
+                    bar_o=bar.open,
+                    bar_h=bar.high,
+                    bar_l=bar.low,
+                    bar_c=bar.close,
+                )
+
     def _cancel_pending(self, i: int, reason: OrderCancelReason) -> None:
         """Cancel the current pending order."""
         if self._pending is None:
@@ -790,9 +1015,20 @@ class IRBBacktester:
                 rec.bars_alive = i - self._pending.bar_placed
                 break
 
+        cancelled = self._pending
         self._pending = None
         self._state = StrategyState.FLAT
         log.debug("bar %d: pending cancelled — %s", i, reason.value)
+
+        if self._diag is not None:
+            ts = self._diag_per_bar_stash.get("bar_timestamp", 0.0)
+            self._diag.emit_cancel(
+                bar_close_time_seconds=ts,
+                bar_index=i,
+                side="BUY" if cancelled.side == TradeSide.LONG else "SELL",
+                reason=reason.value if hasattr(reason, "value") else str(reason),
+                bars_pending=i - cancelled.bar_placed,
+            )
 
     def _revalidate_pending(
         self,
@@ -956,15 +1192,21 @@ class IRBBacktester:
             pip = self.env.pip_value
             stop_distance = abs(pos.entry_price - pos.stop_loss)
             target_distance = stop_distance * self.env.breakeven_r
+            # B2 probe: BE trigger anchored on bar.high/bar.low (matches vault
+            # reference). Default nova anchors on bar.close, which fails to
+            # arm BE on bars that touch +1R intra-bar but close back below.
+            be_use_high = "b2_be_high_trigger" in self.env.parity_audit_toggles
 
             if pos.side == TradeSide.LONG:
-                unrealized = bar.close - pos.entry_price
+                anchor = bar.high if be_use_high else bar.close
+                unrealized = anchor - pos.entry_price
                 if unrealized >= target_distance:
                     pos.current_stop = max(pos.current_stop, pos.entry_price + pip)
                     pos.breakeven_hit = True
                     log.debug("bar %d: breakeven hit for LONG, stop → %.5f", i, pos.current_stop)
             else:
-                unrealized = pos.entry_price - bar.close
+                anchor = bar.low if be_use_high else bar.close
+                unrealized = pos.entry_price - anchor
                 if unrealized >= target_distance:
                     pos.current_stop = min(pos.current_stop, pos.entry_price - pip)
                     pos.breakeven_hit = True
@@ -990,6 +1232,7 @@ class IRBBacktester:
                 if new_trail > pos.current_stop:
                     old_stop = pos.current_stop
                     pos.current_stop = new_trail
+                    self._emit_trail(i, bar, pos, old_stop, ema_val)
                     if bar.low <= pos.current_stop and bar.low > old_stop:
                         self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
                         return
@@ -999,6 +1242,7 @@ class IRBBacktester:
                 if new_trail < pos.current_stop:
                     old_stop = pos.current_stop
                     pos.current_stop = new_trail
+                    self._emit_trail(i, bar, pos, old_stop, ema_val)
                     if bar.high >= pos.current_stop and bar.high < old_stop:
                         self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
                         return
@@ -1008,24 +1252,56 @@ class IRBBacktester:
             if atr_val <= 0:
                 return
 
+            # B1 probe: trail anchor uses bar.high/bar.low (matches vault
+            # reference's `highest_since_entry` / `lowest_since_entry`).
+            # Default nova anchors on bar.close — systematically lower for
+            # longs (higher for shorts), so trail bites earlier.
+            trail_use_high = "b1_trail_high_anchor" in self.env.parity_audit_toggles
+
             if pos.side == TradeSide.LONG:
-                pos.best_close = max(pos.best_close, bar.close)
+                anchor = bar.high if trail_use_high else bar.close
+                pos.best_close = max(pos.best_close, anchor)
                 new_trail = pos.best_close - self.env.trail_atr_multiplier * atr_val
                 if new_trail > pos.current_stop:
                     old_stop = pos.current_stop
                     pos.current_stop = new_trail
+                    self._emit_trail(i, bar, pos, old_stop, float("nan"))
                     if bar.low <= pos.current_stop and bar.low > old_stop:
                         self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
                         return
             else:
-                pos.best_close = min(pos.best_close, bar.close)
+                anchor = bar.low if trail_use_high else bar.close
+                pos.best_close = min(pos.best_close, anchor)
                 new_trail = pos.best_close + self.env.trail_atr_multiplier * atr_val
                 if new_trail < pos.current_stop:
                     old_stop = pos.current_stop
                     pos.current_stop = new_trail
+                    self._emit_trail(i, bar, pos, old_stop, float("nan"))
                     if bar.high >= pos.current_stop and bar.high < old_stop:
                         self._close_position(i, pos.current_stop, ExitReason.TRAILING_STOP)
                         return
+
+    def _emit_trail(
+        self,
+        i: int,
+        bar: Candle,
+        pos: _OpenPosition,
+        old_stop: float,
+        trail_ema_val: float,
+    ) -> None:
+        """Emit a TRAIL_UPDATE diagnostic event when pos.current_stop changes."""
+        if self._diag is None:
+            return
+        self._diag.emit_trail_update(
+            bar_close_time_seconds=bar.timestamp,
+            bar_index=i,
+            side="BUY" if pos.side == TradeSide.LONG else "SELL",
+            old_stop=old_stop,
+            new_stop=pos.current_stop,
+            trail_ema=trail_ema_val,
+            bars_since_entry=pos.bars_held,
+            best_close=pos.best_close,
+        )
 
     def _ratchet_trail_only(
         self,
@@ -1200,6 +1476,29 @@ class IRBBacktester:
             risk_r,
             self._equity,
         )
+
+        if self._diag is not None:
+            ts = self._diag_per_bar_stash.get("bar_timestamp", 0.0)
+            o_ = self._diag_per_bar_stash.get("bar_o", float("nan"))
+            h_ = self._diag_per_bar_stash.get("bar_h", float("nan"))
+            l_ = self._diag_per_bar_stash.get("bar_l", float("nan"))
+            c_ = self._diag_per_bar_stash.get("bar_c", float("nan"))
+            self._diag.emit_exit(
+                bar_close_time_seconds=ts,
+                bar_index=bar_idx,
+                side="BUY" if pos.side == TradeSide.LONG else "SELL",
+                exit_price=exit_price,
+                entry_price=pos.entry_price,
+                entry_bar_index=pos.entry_bar,
+                exit_bar_index=bar_idx,
+                qty=pos.initial_volume or pos.volume,
+                exit_comment=reason.value if hasattr(reason, "value") else str(reason),
+                pnl=pnl_usd,
+                bar_o=o_,
+                bar_h=h_,
+                bar_l=l_,
+                bar_c=c_,
+            )
 
         self._position = None
         self._state = StrategyState.FLAT

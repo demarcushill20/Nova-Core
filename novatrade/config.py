@@ -102,9 +102,9 @@ class RiskConfig:
     # Slippage control (Phase: Execution Gaps)
     max_slippage_pips: float = 3.0  # max acceptable slippage in pips (0 = disabled)
     # Rollover dead zone disabled — not in backtest pipeline. Re-enable after validation.
-    rollover_dead_zone_enabled: bool = False  # disabled (was True)
+    rollover_dead_zone_enabled: bool = True
     rollover_start_hour_utc: int = 21  # 21:00 UTC = daily FX rollover start (widened per microstructure research)
-    rollover_end_hour_utc: int = 0  # 00:00 UTC = rollover window end (midnight next day, covers full volatility window)
+    rollover_end_hour_utc: int = 22
     # Anti-EA-detection: entry timing jitter (randomizes order timing)
     entry_jitter_min_seconds: float = 1.0
     entry_jitter_max_seconds: float = 5.0
@@ -119,7 +119,7 @@ class RiskConfig:
     # by spread noise.  Lowered from 10.0→3.0→2.0: IRB strategy generates
     # stops from candle geometry; ATR-adaptive SL now handles volatility
     # gating, so this is a safety net only.
-    min_sl_distance_pips: float = 2.0
+    min_sl_distance_pips: float = 1.0
     # Spread cushion baked into SL at signal time (pips). Must match
     # BacktestEnvironment.sl_spread_buffer_pips for backtest/live parity.
     sl_spread_buffer_pips: float = 1.0
@@ -236,6 +236,8 @@ class NovaTradeCfg:
         symbols_raw = os.environ.get("NOVATRADE_SYMBOLS", "EURUSD")
         timeframes_raw = os.environ.get("NOVATRADE_TIMEFRAMES", "H1")
 
+        dry_run = os.environ.get("NOVATRADE_DRY_RUN", "false").lower() in ("true", "1", "yes")
+
         return cls(
             mode=mode,
             provider=os.environ.get("NOVATRADE_PROVIDER", "metaapi"),
@@ -248,6 +250,7 @@ class NovaTradeCfg:
                 ),
             ),
             ftmo=FtmoProfile.from_env(),
+            dry_run=dry_run,
         )
 
     def validate(self) -> list[str]:

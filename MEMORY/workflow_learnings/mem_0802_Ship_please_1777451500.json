@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0802_Ship_please_1777451500",
+  "workflow_id": "0802_Ship_please",
+  "task_summary": "Shipped 2 commits (risk cap widening + memory housekeeping) to origin/main \u2014 172 tests green",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Shipped 2 commits (risk cap widening + memory housekeeping) to origin/main \u2014 172 tests green"
+  ],
+  "successful_patterns": [
+    "task_completed: 0802_Ship_please"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Shipped 2 commits (risk cap widening + memory housekeeping) to origin/main \u2014 172 tests green",
+  "created_at": "2026-04-29T08:31:40Z",
+  "confidence": "low"
+}

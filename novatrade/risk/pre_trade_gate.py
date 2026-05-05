@@ -14,6 +14,7 @@ Design principles:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -61,9 +62,38 @@ log = logging.getLogger("novatrade.risk.pre_trade_gate")
 # Modes that the MVP is allowed to trade in.
 _MVP_ALLOWED_MODES = frozenset({AccountMode.DEMO, AccountMode.FUNDED_PRESERVATION})
 
-# Fixed base risk per trade — must match the backtest baseline exactly
+
+# Base risk per trade — must match the backtest baseline by default
 # (Pine f_qty() and the validated IRB v5 strategy). No adaptive scaling.
-BASE_RISK_PCT = 0.0033
+#
+# Throttle override (Stage 3a/3d): if NOVATRADE_RISK_FRACTION_OVERRIDE is set
+# in the process env at module load, BASE_RISK_PCT is reduced to that value.
+# This is the SAME env var the runner uses to throttle env.risk_fraction,
+# so the throttle stays consistent across the backtest engine, the live
+# strategy engine, and the pre-trade gate's volume cross-check. Bounds enforced
+# (0, 0.05] match the runner's bounds.
+def _load_base_risk_pct() -> float:
+    raw = os.environ.get("NOVATRADE_RISK_FRACTION_OVERRIDE")
+    default = 0.0033
+    if not raw:
+        return default
+    try:
+        v = float(raw)
+    except ValueError:
+        log.error("BASE_RISK_PCT: NOVATRADE_RISK_FRACTION_OVERRIDE='%s' not a float — using default", raw)
+        return default
+    if not (0.0 < v <= 0.05):
+        log.error("BASE_RISK_PCT: NOVATRADE_RISK_FRACTION_OVERRIDE=%.5f outside (0, 0.05] — using default", v)
+        return default
+    log.warning(
+        "pre_trade_gate: BASE_RISK_PCT throttled to %.5f (was default %.5f) via NOVATRADE_RISK_FRACTION_OVERRIDE",
+        v,
+        default,
+    )
+    return v
+
+
+BASE_RISK_PCT = _load_base_risk_pct()
 
 
 class PreTradeGate:

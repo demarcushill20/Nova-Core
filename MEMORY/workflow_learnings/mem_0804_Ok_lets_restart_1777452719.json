@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0804_Ok_lets_restart_1777452719",
+  "workflow_id": "0804_Ok_lets_restart",
+  "task_summary": "Restarted NovaTrade live service (PID 166155 \u2192 242346) to load new risk limits from task 0801 \u2014 daily_cap=$4,800, total_cap=$9,500, trade count unlimited",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Restarted NovaTrade live service (PID 166155 \u2192 242346) to load new risk limits from task 0801 \u2014 daily_cap=$4,800, total_cap=$9,500, trade count unlimited"
+  ],
+  "successful_patterns": [
+    "task_completed: 0804_Ok_lets_restart"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Restarted NovaTrade live service (PID 166155 \u2192 242346) to load new risk limits from task 0801 \u2014 daily_cap=$4,800, total_cap=$9,500, trade count unlimited",
+  "created_at": "2026-04-29T08:51:59Z",
+  "confidence": "low"
+}

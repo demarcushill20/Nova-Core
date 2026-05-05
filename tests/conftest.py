@@ -112,12 +112,18 @@ def _block_rejection_telegram():
     """Prevent tests from sending real Telegram rejection notifications.
 
     HardRiskSupervisor.veto() and strategy modules call rejection_telegram()
-    on every guard failure. Without this patch, running the test suite with
-    live TELEGRAM_BOT_TOKEN/ALLOWED_CHAT_ID env vars sends real messages
-    to the operator's Telegram — causing the "rejected trade spam when
-    market is closed" issue (task 0790).
+    on every guard failure.  Patching at the definition site alone does NOT
+    block calls from modules that used ``from novatrade.notify import
+    rejection_telegram`` — that creates a local name binding that the
+    definition-site patch never reaches.  We must also patch at every
+    import site.
     """
-    with patch("novatrade.notify.rejection_telegram"):
+    with (
+        patch("novatrade.notify.rejection_telegram"),
+        patch("novatrade.risk.hard_risk_supervisor.rejection_telegram"),
+        patch("novatrade.strategy.live_engine.rejection_telegram"),
+        patch("novatrade.strategies.irb.rejection_telegram"),
+    ):
         yield
 
 

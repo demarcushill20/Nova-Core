@@ -122,6 +122,17 @@ STAG_ATR   = input.float(0.3, "Stagnation ATR Threshold", minval = 0.1, maxval =
 
 
 
+// --- Diagnostic Logging (parity audit) ---
+// When enabled, mirrors live-trading alert payloads to TradingView Pine Logs
+// AND emits FILL/EXIT/PER_BAR events for bar-by-bar diff against the Python
+// IRBBacktester engine. No effect on live strategy behavior when disabled.
+
+DIAG_LOG     = input.bool(false, "Diagnostic Logging (parity audit)", group = "Diagnostic")
+
+DIAG_PER_BAR = input.bool(false, "Diagnostic: Per-bar state (heavy)", group = "Diagnostic")
+
+
+
 // --- Position Sizing ---
 
 RISK_PCT           = 0.01
@@ -920,6 +931,9 @@ if evt_signal or evt_replace
 
     alert(p, alert.freq_once_per_bar_close)
 
+    if DIAG_LOG
+        log.info(p)
+
 
 
 // --- Trail update alert ---
@@ -960,6 +974,9 @@ if (state == S_LONG or state == S_SHORT) and not na(cur_stop) and cur_stop != nz
 
     alert(tp, alert.freq_once_per_bar_close)
 
+    if DIAG_LOG
+        log.info(tp)
+
 
 
 prev_stop := cur_stop
@@ -994,6 +1011,9 @@ if evt_cancel
 
     alert(cp, alert.freq_once_per_bar_close)
 
+    if DIAG_LOG
+        log.info(cp)
+
 
 
 // --- Time stop alert ---
@@ -1025,6 +1045,9 @@ if evt_tstop
          "}"
 
     alert(xp, alert.freq_once_per_bar_close)
+
+    if DIAG_LOG
+        log.info(xp)
 
 
 
@@ -1061,6 +1084,224 @@ if evt_stag
          "}"
 
     alert(sgp, alert.freq_once_per_bar_close)
+
+    if DIAG_LOG
+        log.info(sgp)
+
+
+
+// =============================================================================
+
+// SECTION 17b: DIAGNOSTIC LOGGING — PARITY-AUDIT EVENTS
+
+// =============================================================================
+
+// Emits FILL, EXIT, and (optionally) per-bar PER_BAR_STATE events via
+// log.info() for bar-by-bar diff against the Python IRBBacktester engine.
+// These events are NOT mirrored to alert() — they're diagnostic-only and
+// not part of the live webhook contract. Toggle DIAG_LOG defaults to false.
+
+
+
+// --- FILL event (pending stop order filled → in position) ---
+
+if DIAG_LOG and (fill_long or fill_short)
+
+    string flj = "{" +
+
+         "\"event\":\"FILL\"" +
+
+         ",\"bar_close_time\":"   + str.tostring(time_close) +
+
+         ",\"bar_index\":"        + str.tostring(bar_index) +
+
+         ",\"side\":\""           + (fill_long ? "BUY" : "SELL") + "\"" +
+
+         ",\"fill_price\":"       + str.tostring(strategy.position_avg_price, "#.#####") +
+
+         ",\"stop_loss\":"        + str.tostring(cur_stop, "#.#####") +
+
+         ",\"qty\":"              + str.tostring(math.abs(strategy.position_size), "#.##") +
+
+         ",\"bars_to_fill\":"     + str.tostring(pend_bars) +
+
+         ",\"bar_o\":"            + str.tostring(open, "#.#####") +
+
+         ",\"bar_h\":"            + str.tostring(high, "#.#####") +
+
+         ",\"bar_l\":"            + str.tostring(low, "#.#####") +
+
+         ",\"bar_c\":"            + str.tostring(close, "#.#####") +
+
+         ",\"campaign\":\""       + CAMPAIGN + "\"" +
+
+         "}"
+
+    log.info(flj)
+
+
+
+// --- EXIT event (any close — stop-loss, time-stop, stagnation) ---
+
+// Pine's existing alerts cover STAG_EXIT and TIME_STOP via strategy.close,
+
+// but stop-loss exits via strategy.exit have NO alert. This event captures
+
+// every close uniformly, classified by exit_comment from strategy.closedtrades.
+
+if DIAG_LOG and pos_closed and strategy.closedtrades > 0
+
+    int   _last_idx   = strategy.closedtrades - 1
+
+    string _ex_cmt    = strategy.closedtrades.exit_comment(_last_idx)
+
+    float _entry_p    = strategy.closedtrades.entry_price(_last_idx)
+
+    float _exit_p     = strategy.closedtrades.exit_price(_last_idx)
+
+    int   _eb_idx     = strategy.closedtrades.entry_bar_index(_last_idx)
+
+    int   _xb_idx     = strategy.closedtrades.exit_bar_index(_last_idx)
+
+    float _trade_size = strategy.closedtrades.size(_last_idx)
+
+    float _pnl        = strategy.closedtrades.profit(_last_idx)
+
+    string _xside     = _trade_size > 0 ? "BUY" : "SELL"
+
+    string ej = "{" +
+
+         "\"event\":\"EXIT\"" +
+
+         ",\"bar_close_time\":"    + str.tostring(time_close) +
+
+         ",\"bar_index\":"         + str.tostring(bar_index) +
+
+         ",\"side\":\""            + _xside + "\"" +
+
+         ",\"exit_price\":"        + str.tostring(_exit_p, "#.#####") +
+
+         ",\"entry_price\":"       + str.tostring(_entry_p, "#.#####") +
+
+         ",\"entry_bar_index\":"   + str.tostring(_eb_idx) +
+
+         ",\"exit_bar_index\":"    + str.tostring(_xb_idx) +
+
+         ",\"qty\":"               + str.tostring(math.abs(_trade_size), "#.##") +
+
+         ",\"exit_comment\":\""    + _ex_cmt + "\"" +
+
+         ",\"pnl\":"               + str.tostring(_pnl, "#.##") +
+
+         ",\"bar_o\":"             + str.tostring(open, "#.#####") +
+
+         ",\"bar_h\":"             + str.tostring(high, "#.#####") +
+
+         ",\"bar_l\":"             + str.tostring(low, "#.#####") +
+
+         ",\"bar_c\":"             + str.tostring(close, "#.#####") +
+
+         ",\"campaign\":\""        + CAMPAIGN + "\"" +
+
+         "}"
+
+    log.info(ej)
+
+
+
+// --- PER_BAR_STATE event (full state dump every bar) ---
+
+// Heavy. Use only on tractable windows (e.g., 1 year) due to TV log buffer
+
+// limits. Captures all signal-input fields so missed-signal divergences can
+
+// be diagnosed bar-by-bar without re-running Pine.
+
+if DIAG_PER_BAR
+
+    string state_str = state == S_FLAT ? "FLAT" :
+
+         state == S_PLONG ? "PENDING_LONG" :
+
+         state == S_PSHORT ? "PENDING_SHORT" :
+
+         state == S_LONG ? "LONG" : "SHORT"
+
+    string pbj = "{" +
+
+         "\"event\":\"PER_BAR\"" +
+
+         ",\"bar_close_time\":"   + str.tostring(time_close) +
+
+         ",\"bar_index\":"        + str.tostring(bar_index) +
+
+         ",\"state\":\""          + state_str + "\"" +
+
+         ",\"pos_bars\":"         + str.tostring(pos_bars) +
+
+         ",\"pend_bars\":"        + str.tostring(pend_bars) +
+
+         ",\"cur_stop\":"         + str.tostring(nz(cur_stop), "#.#####") +
+
+         ",\"best_cl\":"          + str.tostring(nz(best_cl), "#.#####") +
+
+         ",\"trail_ema\":"        + str.tostring(trail_ema, "#.#####") +
+
+         ",\"ema_10\":"           + str.tostring(ema_10_h1, "#.#####") +
+
+         ",\"ema_20\":"           + str.tostring(ema_h1, "#.#####") +
+
+         ",\"ema_50\":"           + str.tostring(ema_50_h1, "#.#####") +
+
+         ",\"ema_h4\":"           + str.tostring(ema_h4, "#.#####") +
+
+         ",\"ema_slope\":"        + str.tostring(ema_slope, "#.###") +
+
+         ",\"atr\":"              + str.tostring(atr_val, "#.#####") +
+
+         ",\"adx\":"              + str.tostring(adx_val, "#.##") +
+
+         ",\"oe_ratio\":"         + str.tostring(oe_ratio, "#.###") +
+
+         ",\"is_up_irb\":"        + (is_up_irb ? "true" : "false") +
+
+         ",\"is_dn_irb\":"        + (is_dn_irb ? "true" : "false") +
+
+         ",\"trend_up\":"         + (trend_up ? "true" : "false") +
+
+         ",\"trend_dn\":"         + (trend_dn ? "true" : "false") +
+
+         ",\"h4_up\":"            + (h4_up ? "true" : "false") +
+
+         ",\"h4_dn\":"            + (h4_dn ? "true" : "false") +
+
+         ",\"sw_pass\":"          + (sw_pass ? "true" : "false") +
+
+         ",\"oe_pass\":"          + (oe_pass ? "true" : "false") +
+
+         ",\"ema_stack_bull\":"   + (ema_stack_bull ? "true" : "false") +
+
+         ",\"ema_stack_bear\":"   + (ema_stack_bear ? "true" : "false") +
+
+         ",\"ema10_confirm_long\":"  + (ema10_confirm_long ? "true" : "false") +
+
+         ",\"ema10_confirm_short\":" + (ema10_confirm_short ? "true" : "false") +
+
+         ",\"sig_long\":"         + (sig_long ? "true" : "false") +
+
+         ",\"sig_short\":"        + (sig_short ? "true" : "false") +
+
+         ",\"bar_o\":"            + str.tostring(open, "#.#####") +
+
+         ",\"bar_h\":"            + str.tostring(high, "#.#####") +
+
+         ",\"bar_l\":"            + str.tostring(low, "#.#####") +
+
+         ",\"bar_c\":"            + str.tostring(close, "#.#####") +
+
+         "}"
+
+    log.info(pbj)
 
 
 

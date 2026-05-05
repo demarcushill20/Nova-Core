@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0823_Look_deep_into_dry_run_mode_why_does_it_keep_switching_to_true__1777770119",
+  "workflow_id": "0823_Look_deep_into_dry_run_mode_why_does_it_keep_switching_to_true_",
+  "task_summary": "Diagnosed and fixed NOVATRADE_DRY_RUN env var never being wired into NovaTradeCfg.load(); added override to false",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed and fixed NOVATRADE_DRY_RUN env var never being wired into NovaTradeCfg.load(); added override to false"
+  ],
+  "successful_patterns": [
+    "task_completed: 0823_Look_deep_into_dry_run_mode_why_does_it_keep_switching_to_true_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed and fixed NOVATRADE_DRY_RUN env var never being wired into NovaTradeCfg.load(); added override to false",
+  "created_at": "2026-05-03T01:01:59Z",
+  "confidence": "low"
+}

@@ -267,26 +267,38 @@ class IRBStrategy(BaseStrategy):
             return None
 
         # --- Compute entry/stop levels ---
-        # Spread cushion: widen SL by the configured spread buffer so the
-        # broker's bid-side (long) / ask-side (short) trigger doesn't clip the
-        # stop inside the intended wick-plus-buffer distance.
-        spread_cushion = max(0.0, e.sl_spread_buffer_pips) * e.pip_value
-        if side == "LONG":
-            entry_price = bar.high + e.pip_buffer
-            stop_loss = bar.low - e.pip_buffer - spread_cushion
-            # ATR-adaptive SL floor: widen SL if candle geometry is too tight
-            if e.atr_sl_floor_multiplier > 0:
-                min_sl_dist = atr[i] * e.atr_sl_floor_multiplier
-                if (entry_price - stop_loss) < min_sl_dist:
-                    stop_loss = entry_price - min_sl_dist
+        # Vault-port (Stage 3a, 2026-04-29): when env.vault_entry_logic is True,
+        # use narrow tick-size buffers and skip the spread cushion + ATR SL
+        # floor — matches the validated vault Python reference. Default False
+        # preserves nova behaviour (bit-identical to pre-port).
+        if e.vault_entry_logic:
+            tick = 0.00001  # 0.1 pip — vault tick_size
+            if side == "LONG":
+                entry_price = bar.high + tick
+                stop_loss = bar.low - tick
+            else:
+                entry_price = bar.low - tick
+                stop_loss = bar.high + tick
         else:
-            entry_price = bar.low - e.pip_buffer
-            stop_loss = bar.high + e.pip_buffer + spread_cushion
-            # ATR-adaptive SL floor: widen SL if candle geometry is too tight
-            if e.atr_sl_floor_multiplier > 0:
-                min_sl_dist = atr[i] * e.atr_sl_floor_multiplier
-                if (stop_loss - entry_price) < min_sl_dist:
-                    stop_loss = entry_price + min_sl_dist
+            # Legacy nova path: 1-pip buffer + spread cushion + ATR floor.
+            # Spread cushion widens SL beyond the wick so the broker's
+            # bid-side (long) / ask-side (short) trigger doesn't clip
+            # the stop inside the intended wick-plus-buffer distance.
+            spread_cushion = max(0.0, e.sl_spread_buffer_pips) * e.pip_value
+            if side == "LONG":
+                entry_price = bar.high + e.pip_buffer
+                stop_loss = bar.low - e.pip_buffer - spread_cushion
+                if e.atr_sl_floor_multiplier > 0:
+                    min_sl_dist = atr[i] * e.atr_sl_floor_multiplier
+                    if (entry_price - stop_loss) < min_sl_dist:
+                        stop_loss = entry_price - min_sl_dist
+            else:
+                entry_price = bar.low - e.pip_buffer
+                stop_loss = bar.high + e.pip_buffer + spread_cushion
+                if e.atr_sl_floor_multiplier > 0:
+                    min_sl_dist = atr[i] * e.atr_sl_floor_multiplier
+                    if (stop_loss - entry_price) < min_sl_dist:
+                        stop_loss = entry_price + min_sl_dist
 
         # Record trade signal for monitoring
         record_signal("trade")

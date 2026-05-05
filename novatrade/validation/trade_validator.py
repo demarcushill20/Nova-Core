@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -47,7 +48,27 @@ DEFAULT_REPORTS_PATH = Path("OUTPUT/novatrade/validation_reports.jsonl")
 # IRB strategy defaults (from BacktestEnvironment)
 _DEFAULT_ADX_THRESHOLD = 20.0
 _DEFAULT_OVEREXTENSION_THRESHOLD = 2.0
-_DEFAULT_RISK_FRACTION = 0.01
+
+
+def _load_default_risk_fraction() -> float:
+    """Honor NOVATRADE_RISK_FRACTION_OVERRIDE so the post-trade validator
+    expects the same risk per trade that the gate sized at. Without this,
+    the validator computes expected volume at the hardcoded 1% rate and
+    flags every throttled trade as a position_sizing violation."""
+    raw = os.environ.get("NOVATRADE_RISK_FRACTION_OVERRIDE")
+    default = 0.01
+    if not raw:
+        return default
+    try:
+        v = float(raw)
+    except ValueError:
+        return default
+    if not (0.0 < v <= 0.05):
+        return default
+    return v
+
+
+_DEFAULT_RISK_FRACTION = _load_default_risk_fraction()
 _DEFAULT_RISK_TOLERANCE = 0.25  # 25% tolerance on position sizing
 _DEFAULT_MIN_VOLUME = 0.01
 _DEFAULT_MAX_VOLUME = 1.00

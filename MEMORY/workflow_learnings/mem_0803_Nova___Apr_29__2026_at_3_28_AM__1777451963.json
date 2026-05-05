@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0803_Nova___Apr_29__2026_at_3_28_AM__1777451963",
+  "workflow_id": "0803_Nova___Apr_29__2026_at_3_28_AM_",
+  "task_summary": "Diagnosed 11 guard-test rejection notifications \u2014 all guards functioning correctly; flagged that live NovaTrade service needs restart to pick up new risk limits from task 0801",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed 11 guard-test rejection notifications \u2014 all guards functioning correctly; flagged that live NovaTrade service needs restart to pick up new risk limits from task 0801"
+  ],
+  "successful_patterns": [
+    "task_completed: 0803_Nova___Apr_29__2026_at_3_28_AM_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed 11 guard-test rejection notifications \u2014 all guards functioning correctly; flagged that live NovaTrade service needs restart to pick up new risk limits from task 0801",
+  "created_at": "2026-04-29T08:39:23Z",
+  "confidence": "low"
+}

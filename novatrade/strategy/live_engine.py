@@ -633,6 +633,16 @@ class LiveStrategyEngine:
         if self._pending is not None:
             if self._pending.side == signal.side:
                 self._pending = None  # replace
+            elif getattr(self._env, "vault_pending_replace_any_side", False):
+                # Stage 3a port: vault behaviour — any new signal replaces the
+                # pending, including direction reversal. The replay (2026-04-29)
+                # showed the asymmetric reject costs ~21k entries vs vault.
+                log.info(
+                    "entry gate: pending_replace_any_side — replacing %s pending with %s signal",
+                    self._pending.side,
+                    signal.side,
+                )
+                self._pending = None
             else:
                 msg = f"pending={self._pending.side} signal={signal.side}"
                 log.info("entry gate: opposite_pending — %s (blocked)", msg)

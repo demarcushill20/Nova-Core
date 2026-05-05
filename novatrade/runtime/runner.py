@@ -463,6 +463,10 @@ async def build_live_stack(
     """
     cfg = cfg or NovaTradeCfg.load()
 
+    if cfg.dry_run and not shadow:
+        shadow = True
+        log.warning("build_live_stack: cfg.dry_run=True (NOVATRADE_DRY_RUN) — forcing shadow mode (DryRunAdapter)")
+
     # --- Preflight validation ---
     _validate_live_preflight(cfg, shadow=shadow)
 
@@ -581,9 +585,85 @@ async def build_live_stack(
         higher_timeframe=higher_tf,
     )
 
+    # --- Strategy-logic override (Stage 3a port flag) ---
+    # NOVATRADE_STRATEGY_LOGIC selects the strategy engine:
+    #   "nova"         — legacy IRBStrategy + LiveStrategyEngine (default, bit-identical)
+    #   "vault"        — Stage 3a retrofit: IRBStrategy with vault_entry_logic flag
+    #                    + LiveStrategyEngine. Closes ~30% of the per-trade gap.
+    #   "vault_native" — Stage 3c port: VaultLiveEngine driving IRBStrategyState
+    #                    (vault Python's validated +$45,310 strategy core, streaming).
+    #                    The clean-architecture replacement.
+    strategy_logic = (os.environ.get("NOVATRADE_STRATEGY_LOGIC") or "nova").strip().lower()
+    if strategy_logic not in ("nova", "vault", "vault_native"):
+        log.error(
+            "build_live_stack: NOVATRADE_STRATEGY_LOGIC='%s' not in {nova, vault, vault_native} — defaulting to nova",
+            strategy_logic,
+        )
+        strategy_logic = "nova"
+    if strategy_logic == "vault":
+        env_kwargs["vault_entry_logic"] = True
+        env_kwargs["vault_pending_replace_any_side"] = True
+        # Sizing parity with vault Python matched-risk (max_qty=100k units = 1 lot).
+        # Live engine default is max_volume=50 lots which 50× over-risks vs vault
+        # on cap-binding tight-stop trades. Cap to 1.0 lot unless YAML overrides.
+        if "max_volume" not in env_kwargs:
+            env_kwargs["max_volume"] = 1.0
+        log.warning(
+            "build_live_stack: STRATEGY LOGIC = VAULT (retrofit) — entry buffers narrowed, "
+            "pending replace bidirectional, max_volume=%.2f",
+            env_kwargs.get("max_volume", 50.0),
+        )
+    elif strategy_logic == "vault_native":
+        # Vault-native uses VaultLiveEngine (drives vault Python's IRBStrategyState).
+        # No retrofit flags needed on env (the engine doesn't read them).
+        # Sizing cap still applies — vault Python uses max_qty=100k units (1 lot).
+        if "max_volume" not in env_kwargs:
+            env_kwargs["max_volume"] = 1.0
+        log.warning(
+            "build_live_stack: STRATEGY LOGIC = VAULT_NATIVE — VaultLiveEngine driving "
+            "vault Python strategy core (validated +$45,310 / 11/11 yrs)"
+        )
+    else:
+        log.info("build_live_stack: strategy logic = nova (default)")
+
+    # --- Risk-fraction override (TEMPORARY, while vault-port lands) ---
+    # Reads NOVATRADE_RISK_FRACTION_OVERRIDE from env and forces env_kwargs.
+    # Logged loudly so it's obvious in startup logs that a non-default risk
+    # is active. REMOVE THIS BLOCK after Stage 3d ramps live to vault logic.
+    risk_override_raw = os.environ.get("NOVATRADE_RISK_FRACTION_OVERRIDE")
+    if risk_override_raw:
+        try:
+            risk_override = float(risk_override_raw)
+        except ValueError:
+            log.error(
+                "build_live_stack: NOVATRADE_RISK_FRACTION_OVERRIDE='%s' is not a float — ignoring",
+                risk_override_raw,
+            )
+        else:
+            if not (0.0 < risk_override <= 0.05):
+                log.error(
+                    "build_live_stack: NOVATRADE_RISK_FRACTION_OVERRIDE=%.5f outside (0, 0.05] — ignoring",
+                    risk_override,
+                )
+            else:
+                prior = env_kwargs.get("risk_fraction", 0.0033)
+                env_kwargs["risk_fraction"] = risk_override
+                log.warning(
+                    "build_live_stack: RISK OVERRIDE ACTIVE — risk_fraction %.5f → %.5f (env var)",
+                    prior,
+                    risk_override,
+                )
+
     env = BacktestEnvironment(**env_kwargs)
     strategy = IRBStrategy(env)
-    strategy_engine = LiveStrategyEngine(strategy, env, config=live_config)
+    strategy_engine: LiveStrategyEngine
+    if strategy_logic == "vault_native":
+        from novatrade.strategy.vault_engine import VaultLiveEngine
+
+        strategy_engine = VaultLiveEngine(env, config=live_config)  # type: ignore[assignment]
+        log.info("build_live_stack: instantiated VaultLiveEngine (vault_native)")
+    else:
+        strategy_engine = LiveStrategyEngine(strategy, env, config=live_config)
 
     # --- Broker symbol resolution ---
     # OANDA and some FTMO MT5 brokers use suffixed symbol names (e.g. "EURUSD.sim").

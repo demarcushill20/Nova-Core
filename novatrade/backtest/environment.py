@@ -238,6 +238,30 @@ class BacktestEnvironment:
     # Production configs MUST omit this field; live-loader rejection of non-empty values is TBD.
     parity_audit_toggles: frozenset[str] = field(default_factory=frozenset)
 
+    # --- Diagnostic logging (parity-audit instrumented mode) ---
+    # When True, the engine streams JSONL events to `diagnostic_log_path` at every
+    # decision point (signal/fill/exit/cancel/trail), schema-aligned with Pine's
+    # `irb_v5_stag.pine` DIAG_LOG output. Lets `scripts/diff_pine_vs_nova.py`
+    # localise the diffuse leak bar-by-bar. False by default — production runs
+    # incur zero overhead.
+    diagnostic_logging: bool = False
+    diagnostic_logging_per_bar: bool = False
+    diagnostic_log_path: str | None = None
+
+    # --- Vault-style entry logic (Stage 3a port flag) ---
+    # When True, IRBStrategy.check_entry uses vault-aligned narrow buffers
+    # (entry/stop offset = 1 tick = 0.00001 instead of 1 pip = 0.0001),
+    # disables sl_spread_buffer_pips, and disables the ATR SL floor — matching
+    # the validated vault Python reference (100-trading-strategies/Rob Hoffman
+    # IRB v5 - Relaxed Reliable Build (Python) 1.md). The replay (2026-04-29)
+    # showed the live engine bleeds a profitable strategy because of these
+    # nova-side buffers, even though _check_v5_exit is already vault-shaped.
+    # Default False = legacy nova behaviour (bit-identical to pre-port).
+    vault_entry_logic: bool = False
+    # When True, LiveStrategyEngine._check_entry replaces an opposite-direction
+    # pending order with the new signal (vault behaviour) instead of rejecting.
+    vault_pending_replace_any_side: bool = False
+
     # --- Measurement vs inference ---
     directly_measured: tuple[str, ...] = (
         "Pine syntax/compile readiness (Phase 3 static analysis, 45 checks)",
