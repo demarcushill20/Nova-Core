@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0831_Lets_restart_1777946231",
+  "workflow_id": "0831_Lets_restart",
+  "task_summary": "Restarted NovaTrade service \u2014 now running vault_native strategy logic (VaultLiveEngine) instead of stale nova default",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Restarted NovaTrade service \u2014 now running vault_native strategy logic (VaultLiveEngine) instead of stale nova default"
+  ],
+  "successful_patterns": [
+    "task_completed: 0831_Lets_restart"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Restarted NovaTrade service \u2014 now running vault_native strategy logic (VaultLiveEngine) instead of stale nova default",
+  "created_at": "2026-05-05T01:57:11Z",
+  "confidence": "low"
+}

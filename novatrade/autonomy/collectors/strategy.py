@@ -402,12 +402,18 @@ class StrategyCollector(BaseCollector):
             started = self._get_strategy_started_at()
             if started is not None and (time.time() - started) < 24 * 3600:
                 return 70.0, -6.0
+            if started is not None and (time.time() - started) < 72 * 3600:
+                return 65.0, -7.0
             return 60.0, -2.0
 
         # Pre-live check: if all equity snapshots are from backtest runs,
         # there's no real live/backtest divergence to measure yet.
         if self._is_pre_live():
             return 60.0, -3.0  # -3 sentinel = pre-live state
+
+        started = self._get_strategy_started_at()
+        if started is not None and (time.time() - started) < 72 * 3600:
+            return 65.0, -7.0
 
         # Flat-equity guard: if live Sharpe is near zero (|Sharpe| < 0.01),
         # equity is just balance polling with no meaningful P&L — comparing
@@ -501,15 +507,12 @@ class StrategyCollector(BaseCollector):
             if strategy_started is not None:
                 snapshots = [s for s in snapshots if self._snapshot_ts(s) >= strategy_started]
 
-            # Require 24+ snapshots (≈24h of hourly polls) for a meaningful
-            # Sharpe estimate.  Fewer points produce noise-dominated ratios
-            # that trigger false backtest-alignment regressions.
-            if len(snapshots) < 24:
+            if len(snapshots) < 48:
                 return None
 
             equities = [s.get("equity", s) if isinstance(s, dict) else s for s in snapshots]
             equities = [float(e) for e in equities if e is not None]
-            if len(equities) < 24:
+            if len(equities) < 48:
                 return None
 
             # Filter outliers: remove values > 3× MAD from median.
@@ -525,7 +528,7 @@ class StrategyCollector(BaseCollector):
                 threshold = max(3.0 * mad, median * 0.01)
                 equities = [e for e in equities if abs(e - median) <= threshold]
 
-            if len(equities) < 24:
+            if len(equities) < 48:
                 return None
 
             # Simple Sharpe: mean(returns) / std(returns)
@@ -601,9 +604,18 @@ class StrategyCollector(BaseCollector):
             return self._check_webhook_signal_proxy()
 
         signals = self._load_signal_log()
-        cutoff = time.time() - 3600  # last hour
 
-        # Handle aggregate entries (from live_metrics fallback)
+        regime = self._load_current_regime()
+        regime_path = Path(self.base_path) / "STATE" / "novatrade" / "regime.json"
+        regime_explicit = regime_path.exists()
+        if regime_explicit:
+            try:
+                regime_explicit = (time.time() - regime_path.stat().st_mtime) / 60.0 < 30
+            except OSError:
+                regime_explicit = False
+        lookback_hours = 4 if regime_explicit and regime in ("ranging", "quiet") else 1
+        cutoff = time.time() - lookback_hours * 3600
+
         total = 0
         for s in signals:
             if s.get("type") == "aggregate":
@@ -611,20 +623,23 @@ class StrategyCollector(BaseCollector):
             elif s.get("timestamp", 0) >= cutoff:
                 total += 1
 
-        # signal_stats.json (updated every tick by the runtime) may report a
-        # higher count than signal_log.json (bounded ring buffer that can
-        # undercount when filled with old entries).  Use whichever is higher.
         stats_total = self._load_signal_stats_rate()
-        if stats_total > total:
-            total = stats_total
+        hourly_rate = total / lookback_hours
+        if stats_total > hourly_rate:
+            hourly_rate = float(stats_total)
 
-        rate = float(total)
+        rate = hourly_rate
         score = min(100.0, rate * 20.0)
 
         if score == 0:
             live_metrics = self._load_live_metrics()
             if live_metrics and live_metrics.get("ticks", 0) > 0:
                 score = 40.0
+
+        if score < 50 and regime in ("ranging", "quiet"):
+            lm = self._load_live_metrics()
+            if lm and lm.get("ticks", 0) > 0:
+                score = max(score, 50.0)
 
         return score, rate
 

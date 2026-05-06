@@ -629,7 +629,8 @@ async def test_strategy_backtest_alignment_close(strat_collector, tmp_path):
     (bt_dir / "irb_v2_baseline.json").write_text(json.dumps({"sharpe_ratio": 1.0}))
 
     # Live equity: steady rise → Sharpe ≈ 1.0 (source="live" to bypass pre-live check)
-    equities = [{"equity": 10000 + i * 100, "source": "live"} for i in range(30)]
+    # 50 snapshots to pass the 48-minimum filter for live Sharpe calculation
+    equities = [{"equity": 10000 + i * 100, "source": "live"} for i in range(50)]
     (state_dir / "equity_history.json").write_text(json.dumps({"snapshots": equities}))
 
     market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
@@ -654,8 +655,8 @@ async def test_strategy_backtest_alignment_pre_live(strat_collector, tmp_path):
     # Backtest Sharpe = 0.15
     (bt_dir / "irb_v2_baseline.json").write_text(json.dumps({"sharpe_ratio": 0.15}))
 
-    # Equity history from backtest only (pre-live state)
-    equities = [{"equity": 100000 + i * 10, "source": "backtest"} for i in range(30)]
+    # Equity history from backtest only (pre-live state) — 50 snapshots to pass 48-min filter
+    equities = [{"equity": 100000 + i * 10, "source": "backtest"} for i in range(50)]
     (state_dir / "equity_history.json").write_text(json.dumps({"snapshots": equities}))
 
     market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)

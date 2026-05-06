@@ -128,10 +128,33 @@ class TestBacktestAlignmentTransitionGrace:
         assert score == 70.0
         assert delta == -6.0
 
-    def test_no_grace_after_24h(self, tmp_path):
+    def test_warmup_65_during_24_to_72h(self, tmp_path):
+        """Phase 1 (0835): 24-72h warmup returns 65 — Sharpe unreliable."""
         c, state, bt_dir = self._make_collector(tmp_path)
         (bt_dir / "test.json").write_text(json.dumps({"sharpe": 0.15}))
         (state / "strategy_config.json").write_text(json.dumps({"started_at": time.time() - 48 * 3600}))
+
+        with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+            mock_now = type(
+                "MockNow",
+                (),
+                {
+                    "weekday": lambda self: 2,
+                    "hour": 14,
+                },
+            )()
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *a, **kw: __import__("datetime").datetime(*a, **kw)
+
+            score, delta = c._check_backtest_alignment()
+        assert score == 65.0
+        assert delta == -7.0
+
+    def test_no_grace_after_72h(self, tmp_path):
+        """After 72h warmup, normal scoring resumes."""
+        c, state, bt_dir = self._make_collector(tmp_path)
+        (bt_dir / "test.json").write_text(json.dumps({"sharpe": 0.15}))
+        (state / "strategy_config.json").write_text(json.dumps({"started_at": time.time() - 96 * 3600}))
 
         with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
             mock_now = type(
