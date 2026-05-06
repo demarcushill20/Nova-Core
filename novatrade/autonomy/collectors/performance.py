@@ -30,7 +30,11 @@ class PerformanceCollector(BaseCollector):
     # The sparse-data floor ramp endpoint.  Must exceed _MIN_SHARPE_RETURNS
     # so the floor is still partially active when Sharpe first becomes
     # computable — prevents a single-heartbeat cliff from floored → raw score.
-    _STABLE_RETURNS = 65
+    # Set to 150: Sharpe and variance estimates need 100-150+ returns for
+    # statistically reliable scoring (SE(Sharpe) ≈ 1/√N; at N=53 the 95% CI
+    # spans ~4 Sharpe units).  Quadratic ramp (see collect()) keeps the floor
+    # active longer in the early phase where precision is lowest.
+    _STABLE_RETURNS = 150
 
     async def collect(self) -> DimensionScore:
         warnings: list[str] = []
@@ -158,15 +162,18 @@ class PerformanceCollector(BaseCollector):
 
         # Sparse-data floor: prevents noise-driven regressions while data
         # matures.  Ramps from hard floor → raw average over
-        # _MIN_TRADES_PARTIAL → _STABLE_RETURNS.  Using _STABLE_RETURNS
-        # (not _MIN_TRADES_FULL) ensures the floor is still partially
-        # active when Sharpe first becomes computable at _MIN_SHARPE_RETURNS,
-        # avoiding a single-heartbeat cliff transition.
-        _FLOOR = 72.0
+        # _MIN_TRADES_PARTIAL → _STABLE_RETURNS.  Quadratic ramp: statistical
+        # precision improves with √N, so a linear ramp releases the floor
+        # faster than precision actually improves.  Squaring the ramp keeps
+        # more protection during the mid-accumulation phase (50-100 returns)
+        # where Sharpe and variance estimates are still very unreliable.
+        _FLOOR = 73.0
         if meaningful_returns < self._MIN_TRADES_PARTIAL:
             avg = max(avg, _FLOOR)
         elif meaningful_returns < self._STABLE_RETURNS:
-            ramp = (meaningful_returns - self._MIN_TRADES_PARTIAL) / (self._STABLE_RETURNS - self._MIN_TRADES_PARTIAL)
+            span = self._STABLE_RETURNS - self._MIN_TRADES_PARTIAL
+            ramp_linear = (meaningful_returns - self._MIN_TRADES_PARTIAL) / span
+            ramp = ramp_linear**2
             blended_floor = _FLOOR * (1.0 - ramp) + avg * ramp
             avg = max(avg, blended_floor)
 
@@ -341,6 +348,8 @@ class PerformanceCollector(BaseCollector):
             score = 70.0
         elif sharpe > 0:
             score = 50.0
+        elif sharpe > -1.0:
+            score = 35.0
         else:
             score = 20.0
 
@@ -372,6 +381,8 @@ class PerformanceCollector(BaseCollector):
             score = 100.0
         elif dd_pct < 6:
             score = 70.0
+        elif dd_pct < 8:
+            score = 55.0
         elif dd_pct < 10:
             score = 40.0
         else:
@@ -427,8 +438,10 @@ class PerformanceCollector(BaseCollector):
             score = 100.0
         elif variance < 0.05:
             score = 70.0
+        elif variance < 0.08:
+            score = 55.0
         elif variance < 0.1:
-            score = 50.0
+            score = 45.0
         else:
             score = 30.0
 
