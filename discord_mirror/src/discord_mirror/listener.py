@@ -13,7 +13,7 @@ from .storage import Storage
 log = logging.getLogger(__name__)
 
 
-class _Executor(Protocol):
+class Executor(Protocol):
     async def execute(self, signal_id: int, signal: ParsedSignal) -> int: ...
 
 
@@ -24,7 +24,7 @@ class SignalListener(discord.Client):
         channel_id: int,
         storage: Storage,
         parser: SignalParser | None = None,
-        executor: _Executor | None = None,
+        executor: Executor | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)

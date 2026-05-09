@@ -8,8 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .config import load_config
-from .executor_paper import PaperExecutor
-from .listener import SignalListener
+from .listener import Executor, SignalListener
 from .parser import SignalParser
 from .storage import Storage
 
@@ -24,7 +23,25 @@ async def amain() -> None:
     storage = Storage(cfg.storage.db_path)
     await storage.init()
     parser = SignalParser(api_key=os.environ["ANTHROPIC_API_KEY"])
-    executor = PaperExecutor(storage=storage, cfg=cfg)
+
+    mode = os.environ.get("EXECUTION_MODE", "paper")
+    adapter = None
+    executor: Executor
+    if mode == "live":
+        from .executor_metaapi import MetaApiAdapter, MetaApiExecutor
+
+        adapter = MetaApiAdapter(
+            token=os.environ["METAAPI_TOKEN"],
+            account_id=os.environ["METAAPI_ACCOUNT_ID"],
+            region=os.environ.get("METAAPI_REGION", "new-york"),
+        )
+        await adapter.connect()
+        executor = MetaApiExecutor(adapter=adapter, storage=storage, cfg=cfg)
+    else:
+        from .executor_paper import PaperExecutor
+
+        executor = PaperExecutor(storage=storage, cfg=cfg)
+
     client = SignalListener(
         channel_id=cfg.discord.channel_id,
         storage=storage,
@@ -34,6 +51,8 @@ async def amain() -> None:
     try:
         await client.start(os.environ["DISCORD_USER_TOKEN"])
     finally:
+        if adapter:
+            await adapter.close()
         await storage.close()
 
 
