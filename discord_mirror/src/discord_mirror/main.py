@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .config import load_config
+from .executor_paper import PaperExecutor
 from .listener import SignalListener
 from .parser import SignalParser
 from .storage import Storage
@@ -23,10 +24,12 @@ async def amain() -> None:
     storage = Storage(cfg.storage.db_path)
     await storage.init()
     parser = SignalParser(api_key=os.environ["ANTHROPIC_API_KEY"])
+    executor = PaperExecutor(storage=storage, cfg=cfg)
     client = SignalListener(
         channel_id=cfg.discord.channel_id,
         storage=storage,
         parser=parser,
+        executor=executor,
     )
     try:
         await client.start(os.environ["DISCORD_USER_TOKEN"])

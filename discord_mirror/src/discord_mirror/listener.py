@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import logging
 from datetime import timezone
+from typing import Protocol
 
 import discord
 
+from .models import ParsedSignal
 from .parser import SignalParser
 from .storage import Storage
 
 log = logging.getLogger(__name__)
+
+
+class _Executor(Protocol):
+    async def execute(self, signal_id: int, signal: ParsedSignal) -> int: ...
 
 
 class SignalListener(discord.Client):
@@ -18,12 +24,14 @@ class SignalListener(discord.Client):
         channel_id: int,
         storage: Storage,
         parser: SignalParser | None = None,
+        executor: _Executor | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.channel_id = channel_id
         self.storage = storage
         self.parser = parser
+        self.executor = executor
 
     async def on_ready(self):
         log.info("Listener ready as %s — channel %s", self.user, self.channel_id)
@@ -63,5 +71,10 @@ class SignalListener(discord.Client):
                 result.signal.sl,
                 result.signal.tps,
             )
+            if self.executor and result.signal.action.value == "OPEN":
+                try:
+                    await self.executor.execute(sid, result.signal)
+                except Exception:
+                    log.exception("Executor failed on signal %s", sid)
         if result.status is not None:
             log.info("Status: %s tp_index=%s", result.status.kind, result.status.tp_index)
