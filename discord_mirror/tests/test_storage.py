@@ -24,3 +24,28 @@ async def test_log_raw_message_round_trips(store):
     rows = await store.list_recent_raw_messages(limit=10)
     assert len(rows) == 1
     assert rows[0]["content"].startswith("BUY GOLD")
+
+
+async def test_log_parsed_signal(store):
+    raw_id = await store.log_raw_message(
+        discord_message_id="333",
+        channel_id="222",
+        author="J",
+        content="BUY GOLD\nSL 4535\nTP1 4546",
+        ts=datetime.now(timezone.utc),
+    )
+    sid = await store.log_parsed_signal(
+        raw_id,
+        {
+            "action": "OPEN",
+            "direction": "BUY",
+            "symbol": "GOLD",
+            "sl": 4535.0,
+            "tps": [4546.0],
+            "confidence": 0.9,
+        },
+    )
+    assert sid > 0
+    rows = await store.list_open_signals()
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "GOLD"

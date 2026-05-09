@@ -5,19 +5,28 @@ from datetime import timezone
 
 import discord
 
+from .parser import SignalParser
 from .storage import Storage
 
 log = logging.getLogger(__name__)
 
 
 class SignalListener(discord.Client):
-    def __init__(self, *, channel_id: int, storage: Storage, **kwargs):
+    def __init__(
+        self,
+        *,
+        channel_id: int,
+        storage: Storage,
+        parser: SignalParser | None = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.channel_id = channel_id
         self.storage = storage
+        self.parser = parser
 
     async def on_ready(self):
-        log.info("Listener ready as %s — watching channel %s", self.user, self.channel_id)
+        log.info("Listener ready as %s — channel %s", self.user, self.channel_id)
 
     async def on_message(self, message: discord.Message):
         if message.channel.id != self.channel_id:
@@ -26,18 +35,33 @@ class SignalListener(discord.Client):
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
         try:
-            await self.storage.log_raw_message(
+            raw_id = await self.storage.log_raw_message(
                 discord_message_id=str(message.id),
                 channel_id=str(message.channel.id),
                 author=str(message.author),
                 content=message.content,
                 ts=ts,
             )
-            log.info(
-                "Logged message %s from %s (%d chars)",
-                message.id,
-                message.author,
-                len(message.content),
-            )
         except Exception:
-            log.exception("Failed to log message %s", message.id)
+            log.exception("Failed to log raw message %s", message.id)
+            return
+        log.info("Logged raw message %s from %s", message.id, message.author)
+        if not self.parser:
+            return
+        try:
+            result = await self.parser.parse(message.content)
+        except Exception:
+            log.exception("Parser failed on message %s", message.id)
+            return
+        if result.signal is not None:
+            sid = await self.storage.log_parsed_signal(raw_id, result.signal.model_dump())
+            log.info(
+                "Signal id=%s %s %s SL=%s TPs=%s",
+                sid,
+                result.signal.direction,
+                result.signal.symbol,
+                result.signal.sl,
+                result.signal.tps,
+            )
+        if result.status is not None:
+            log.info("Status: %s tp_index=%s", result.status.kind, result.status.tp_index)

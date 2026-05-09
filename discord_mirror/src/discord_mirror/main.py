@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from .config import load_config
 from .listener import SignalListener
+from .parser import SignalParser
 from .storage import Storage
 
 
@@ -21,7 +22,12 @@ async def amain() -> None:
     )
     storage = Storage(cfg.storage.db_path)
     await storage.init()
-    client = SignalListener(channel_id=cfg.discord.channel_id, storage=storage)
+    parser = SignalParser(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = SignalListener(
+        channel_id=cfg.discord.channel_id,
+        storage=storage,
+        parser=parser,
+    )
     try:
         await client.start(os.environ["DISCORD_USER_TOKEN"])
     finally:
