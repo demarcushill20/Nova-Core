@@ -145,3 +145,43 @@ class Storage:
         if cur.lastrowid is None:
             raise RuntimeError("INSERT did not produce a lastrowid")
         return cur.lastrowid
+
+    async def log_metaapi_fill(
+        self,
+        *,
+        signal_id: int,
+        broker_order_id: str,
+        direction: str,
+        symbol: str,
+        entry: float,
+        sl: float,
+        tp: float,
+        lot: float,
+    ) -> int:
+        cur = await self._conn.execute(
+            "INSERT INTO trades "
+            "(signal_id, mode, broker_order_id, direction, symbol, entry, sl, tp, lot) "
+            "VALUES (?, 'metaapi', ?, ?, ?, ?, ?, ?, ?)",
+            (signal_id, broker_order_id, direction, symbol, entry, sl, tp, lot),
+        )
+        await self._conn.commit()
+        if cur.lastrowid is None:
+            raise RuntimeError("INSERT did not produce a lastrowid")
+        return cur.lastrowid
+
+    async def list_open_trades_for_signal(self, signal_id: int) -> list[dict]:
+        cur = await self._conn.execute(
+            "SELECT * FROM trades WHERE signal_id = ? AND state = 'OPEN'",
+            (signal_id,),
+        )
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def update_trade_state(self, trade_id: int, *, state: str, sl: float | None = None) -> None:
+        if sl is not None:
+            await self._conn.execute(
+                "UPDATE trades SET state = ?, sl = ? WHERE id = ?",
+                (state, sl, trade_id),
+            )
+        else:
+            await self._conn.execute("UPDATE trades SET state = ? WHERE id = ?", (state, trade_id))
+        await self._conn.commit()
