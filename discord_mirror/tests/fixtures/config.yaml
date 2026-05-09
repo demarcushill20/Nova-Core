@@ -1,0 +1,16 @@
+discord:
+  channel_id: 999888777
+risk:
+  account_risk_pct: 0.01
+  min_lot: 0.01
+  lot_step: 0.01
+symbol_map:
+  GOLD: XAUUSD
+  US30: US30
+state:
+  move_sl_to_be_after: TP1
+storage:
+  db_path: data/signals.db
+logging:
+  level: INFO
+  path: logs/discord_mirror.log
