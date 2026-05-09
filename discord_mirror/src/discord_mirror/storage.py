@@ -32,6 +32,23 @@ CREATE TABLE IF NOT EXISTS signals (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_signals_state ON signals(state);
+
+CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER NOT NULL REFERENCES signals(id),
+    mode TEXT NOT NULL,
+    broker_order_id TEXT,
+    direction TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    entry REAL NOT NULL,
+    sl REAL NOT NULL,
+    tp REAL NOT NULL,
+    lot REAL NOT NULL,
+    state TEXT NOT NULL DEFAULT 'OPEN',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_trades_signal ON trades(signal_id);
 """
 
 
@@ -107,3 +124,24 @@ class Storage:
     async def update_signal_state(self, signal_id: int, state: str) -> None:
         await self._conn.execute("UPDATE signals SET state = ? WHERE id = ?", (state, signal_id))
         await self._conn.commit()
+
+    async def log_paper_fill(
+        self,
+        *,
+        signal_id: int,
+        direction: str,
+        symbol: str,
+        entry: float,
+        sl: float,
+        tp: float,
+        lot: float,
+    ) -> int:
+        cur = await self._conn.execute(
+            "INSERT INTO trades (signal_id, mode, direction, symbol, entry, sl, tp, lot) "
+            "VALUES (?, 'paper', ?, ?, ?, ?, ?, ?)",
+            (signal_id, direction, symbol, entry, sl, tp, lot),
+        )
+        await self._conn.commit()
+        if cur.lastrowid is None:
+            raise RuntimeError("INSERT did not produce a lastrowid")
+        return cur.lastrowid
