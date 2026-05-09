@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from .config import load_config
 from .listener import Executor, SignalListener
 from .parser import SignalParser
+from .status_handler import StatusHandler
 from .storage import Storage
 
 
@@ -42,11 +43,13 @@ async def amain() -> None:
 
         executor = PaperExecutor(storage=storage, cfg=cfg)
 
+    status_handler = StatusHandler(storage=storage, adapter=adapter)
     client = SignalListener(
         channel_id=cfg.discord.channel_id,
         storage=storage,
         parser=parser,
         executor=executor,
+        status_handler=status_handler,
     )
     try:
         await client.start(os.environ["DISCORD_USER_TOKEN"])

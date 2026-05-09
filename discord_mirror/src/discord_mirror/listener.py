@@ -8,6 +8,8 @@ import discord
 
 from .models import ParsedSignal
 from .parser import SignalParser
+from .state import SignalStateMachine
+from .status_handler import StatusHandler
 from .storage import Storage
 
 log = logging.getLogger(__name__)
@@ -25,6 +27,7 @@ class SignalListener(discord.Client):
         storage: Storage,
         parser: SignalParser | None = None,
         executor: Executor | None = None,
+        status_handler: StatusHandler | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -32,6 +35,9 @@ class SignalListener(discord.Client):
         self.storage = storage
         self.parser = parser
         self.executor = executor
+        self.status_handler = status_handler
+        self._state_machines: dict[int, SignalStateMachine] = {}
+        self._latest_signal_id: int | None = None
 
     async def on_ready(self):
         log.info("Listener ready as %s — channel %s", self.user, self.channel_id)
@@ -63,6 +69,8 @@ class SignalListener(discord.Client):
             return
         if result.signal is not None:
             sid = await self.storage.log_parsed_signal(raw_id, result.signal.model_dump())
+            self._state_machines[sid] = SignalStateMachine(tp_count=len(result.signal.tps))
+            self._latest_signal_id = sid
             log.info(
                 "Signal id=%s %s %s SL=%s TPs=%s",
                 sid,
@@ -76,5 +84,15 @@ class SignalListener(discord.Client):
                     await self.executor.execute(sid, result.signal)
                 except Exception:
                     log.exception("Executor failed on signal %s", sid)
-        if result.status is not None:
+        if result.status is not None and self.status_handler is not None and self._latest_signal_id is not None:
+            sm = self._state_machines.get(self._latest_signal_id)
+            if sm:
+                try:
+                    await self.status_handler.handle(
+                        signal_id=self._latest_signal_id,
+                        sm=sm,
+                        update=result.status,
+                    )
+                except Exception:
+                    log.exception("StatusHandler failed on signal %s", self._latest_signal_id)
             log.info("Status: %s tp_index=%s", result.status.kind, result.status.tp_index)
