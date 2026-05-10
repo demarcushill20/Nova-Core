@@ -1,0 +1,28 @@
+[
+  {
+    "id": "msg1",
+    "content": "BUY GOLD\nSL 4535\nTP1 4546, TP2 4550, TP3 4555, TP4 4560, TP5 4565, TP6 4570, TP7 4580, TP9 4600",
+    "expected_kind": "open"
+  },
+  {
+    "id": "msg2",
+    "content": "@everyone BUY GOLD\nSL 4606\nTP1 4622, TP2 4625, TP3 4630, TP4 4635, TP5 4640, TP6 4650",
+    "expected_kind": "open"
+  },
+  {
+    "id": "msg3",
+    "content": "TP1 SMACKED!!! @everyone",
+    "expected_kind": "tp_hit",
+    "expected_tp_index": 1
+  },
+  {
+    "id": "msg4",
+    "content": "ALL TPs SMASHED!!! @everyone",
+    "expected_kind": "all_tps_hit"
+  },
+  {
+    "id": "msg5",
+    "content": "GM team!",
+    "expected_kind": "none"
+  }
+]
