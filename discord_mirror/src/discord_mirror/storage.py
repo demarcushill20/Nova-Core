@@ -49,6 +49,18 @@ CREATE TABLE IF NOT EXISTS trades (
     closed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_trades_signal ON trades(signal_id);
+
+CREATE TABLE IF NOT EXISTS status_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    raw_message_id INTEGER NOT NULL REFERENCES raw_messages(id),
+    kind TEXT NOT NULL,
+    tp_index INTEGER,
+    signal_id INTEGER REFERENCES signals(id),
+    ts TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_status_events_ts ON status_events(ts);
+CREATE INDEX IF NOT EXISTS idx_status_events_signal ON status_events(signal_id);
 """
 
 
@@ -185,3 +197,28 @@ class Storage:
         else:
             await self._conn.execute("UPDATE trades SET state = ? WHERE id = ?", (state, trade_id))
         await self._conn.commit()
+
+    async def log_status_event(
+        self,
+        *,
+        raw_message_id: int,
+        kind: str,
+        tp_index: int | None,
+        ts: datetime,
+        signal_id: int | None = None,
+    ) -> int:
+        cur = await self._conn.execute(
+            "INSERT INTO status_events (raw_message_id, kind, tp_index, signal_id, ts) VALUES (?, ?, ?, ?, ?)",
+            (raw_message_id, kind, tp_index, signal_id, ts.isoformat()),
+        )
+        await self._conn.commit()
+        if cur.lastrowid is None:
+            raise RuntimeError("INSERT did not produce a lastrowid")
+        return cur.lastrowid
+
+    async def raw_message_exists(self, discord_message_id: str) -> bool:
+        cur = await self._conn.execute(
+            "SELECT 1 FROM raw_messages WHERE discord_message_id = ? LIMIT 1",
+            (discord_message_id,),
+        )
+        return (await cur.fetchone()) is not None
