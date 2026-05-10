@@ -23,7 +23,7 @@ async def amain() -> None:
     )
     storage = Storage(cfg.storage.db_path)
     await storage.init()
-    parser = SignalParser(api_key=os.environ["ANTHROPIC_API_KEY"])
+    parser = SignalParser()  # auto-picks SDK if ANTHROPIC_API_KEY set, else CLI
 
     mode = os.environ.get("EXECUTION_MODE", "paper")
     adapter = None

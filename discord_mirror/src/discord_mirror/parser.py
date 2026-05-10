@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import os
 from dataclasses import dataclass
-
-from anthropic import AsyncAnthropic
+from typing import Protocol
 
 from .models import ParsedSignal, StatusUpdate
+
+log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You parse forex/commodity trade signal messages from a Discord channel.
 
@@ -50,25 +54,102 @@ class ParseResult:
     status: StatusUpdate | None
 
 
-class SignalParser:
+class _Backend(Protocol):
+    async def complete(self, system: str, user: str) -> str: ...
+
+
+class AnthropicSDKBackend:
+    """Calls Anthropic's API directly. Requires ANTHROPIC_API_KEY."""
+
     def __init__(self, *, api_key: str, model: str = "claude-sonnet-4-6"):
+        from anthropic import AsyncAnthropic
+
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = model
 
-    async def parse(self, content: str) -> ParseResult:
+    async def complete(self, system: str, user: str) -> str:
         resp = await self.client.messages.create(
             model=self.model,
             max_tokens=512,
             system=[
                 {
                     "type": "text",
-                    "text": SYSTEM_PROMPT,
+                    "text": system,
                     "cache_control": {"type": "ephemeral"},
                 },
             ],
-            messages=[{"role": "user", "content": content}],
+            messages=[{"role": "user", "content": user}],
         )
-        text = resp.content[0].text.strip()
+        return resp.content[0].text
+
+
+class ClaudeCLIBackend:
+    """Subprocess-invokes the `claude` CLI — uses the CC subscription's auth.
+
+    No ANTHROPIC_API_KEY required. Spawns one subprocess per parse.
+    """
+
+    def __init__(self, *, model: str = "sonnet", binary: str = "claude"):
+        self.model = model
+        self.binary = binary
+
+    async def complete(self, system: str, user: str) -> str:
+        proc = await asyncio.create_subprocess_exec(
+            self.binary,
+            "--print",
+            "--model",
+            self.model,
+            "--append-system-prompt",
+            system,
+            user,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"claude CLI failed (exit {proc.returncode}): {stderr.decode().strip()}")
+        return stdout.decode()
+
+
+def _make_default_backend(model: str | None) -> _Backend:
+    """Pick a backend based on environment.
+
+    - LLM_BACKEND=cli → ClaudeCLIBackend
+    - LLM_BACKEND=sdk → AnthropicSDKBackend (requires ANTHROPIC_API_KEY)
+    - unset → CLI if `claude` is on PATH and no API key set, else SDK
+    """
+    explicit = os.environ.get("LLM_BACKEND", "").lower()
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+    if explicit == "sdk":
+        if not api_key:
+            raise RuntimeError("LLM_BACKEND=sdk requires ANTHROPIC_API_KEY")
+        return AnthropicSDKBackend(api_key=api_key, model=model or "claude-sonnet-4-6")
+    if explicit == "cli":
+        return ClaudeCLIBackend(model=model or "sonnet")
+
+    if api_key:
+        return AnthropicSDKBackend(api_key=api_key, model=model or "claude-sonnet-4-6")
+    return ClaudeCLIBackend(model=model or "sonnet")
+
+
+class SignalParser:
+    def __init__(
+        self,
+        *,
+        backend: _Backend | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+    ):
+        if backend is not None:
+            self.backend = backend
+        elif api_key is not None:
+            self.backend = AnthropicSDKBackend(api_key=api_key, model=model or "claude-sonnet-4-6")
+        else:
+            self.backend = _make_default_backend(model)
+
+    async def parse(self, content: str) -> ParseResult:
+        text = (await self.backend.complete(SYSTEM_PROMPT, content)).strip()
         if text.startswith("```"):
             text = text.split("```", 2)[1].lstrip("json").strip()
         data = json.loads(text)
