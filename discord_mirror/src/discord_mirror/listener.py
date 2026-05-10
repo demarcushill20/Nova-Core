@@ -6,6 +6,7 @@ from typing import Protocol
 
 import discord
 
+from .coalescer import CoalescedMessage, LiveCoalescer, RawMsg
 from .models import ParsedSignal
 from .parser import SignalParser
 from .state import SignalStateMachine
@@ -38,9 +39,17 @@ class SignalListener(discord.Client):
         self.status_handler = status_handler
         self._state_machines: dict[int, SignalStateMachine] = {}
         self._latest_signal_id: int | None = None
+        self._coalescer = LiveCoalescer(on_emit=self._on_coalesced_group)
 
     async def on_ready(self):
         log.info("Listener ready as %s — channel %s", self.user, self.channel_id)
+        await self._coalescer.start()
+
+    async def close(self):
+        try:
+            await self._coalescer.stop()
+        finally:
+            await super().close()
 
     async def on_message(self, message: discord.Message):
         if message.channel.id != self.channel_id:
@@ -59,16 +68,33 @@ class SignalListener(discord.Client):
         except Exception:
             log.exception("Failed to log raw message %s", message.id)
             return
-        log.info("Logged raw message %s from %s", message.id, message.author)
+        log.info("Logged raw message %s from %s: %s", message.id, message.author, message.content[:80])
         if not self.parser:
             return
-        try:
-            result = await self.parser.parse(message.content)
-        except Exception:
-            log.exception("Parser failed on message %s", message.id)
+        await self._coalescer.add(
+            RawMsg(
+                raw_id=raw_id,
+                author=str(message.author),
+                content=message.content or "",
+                ts=ts,
+            )
+        )
+
+    async def _on_coalesced_group(self, group: CoalescedMessage) -> None:
+        """Called by the coalescer when a group is ready to parse."""
+        if self.parser is None:
             return
+        try:
+            result = await self.parser.parse(group.combined_content)
+        except Exception:
+            log.exception("Parser failed on group %s", group.raw_ids)
+            return
+        if result.signal is None and result.status is None:
+            return
+
+        anchor_raw_id = group.raw_ids[0]
         if result.signal is not None:
-            sid = await self.storage.log_parsed_signal(raw_id, result.signal.model_dump())
+            sid = await self.storage.log_parsed_signal(anchor_raw_id, result.signal.model_dump())
             self._state_machines[sid] = SignalStateMachine(tp_count=len(result.signal.tps))
             self._latest_signal_id = sid
             log.info(
