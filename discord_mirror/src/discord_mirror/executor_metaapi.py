@@ -33,7 +33,9 @@ class MetaApiAdapter:
         log.info("MetaApi connected; state=%s", self._account.state)
 
     async def balance(self) -> float:
-        info = await self._account.get_account_information()
+        info = self._connection.terminal_state.account_information
+        if info is None:
+            raise RuntimeError("account_information not available; connection not synchronized")
         return float(info["balance"])
 
     async def get_price(self, symbol: str) -> tuple[float, float]:
