@@ -3,19 +3,26 @@
 Default: pulls newest-first (so --limit gives you the most recent N).
 With no limit, pulls full channel history.
 
-Two-pass design:
-  1. Sequentially fetch + log raw messages from Discord
-  2. Concurrently parse candidate messages (regex-prefiltered) via the
-     LLM backend, then write signals + status_events to SQLite
+Pipeline:
+  1. (Unless --reprocess) Fetch from Discord, write to raw_messages.
+  2. Coalesce same-author messages around BUY/SELL triggers — signals span
+     multiple messages: "BUY GOLD" / "SL 4700" / "TP1 4715, ...".
+  3. Concurrently parse coalesced groups via the LLM backend, then write
+     signals + status_events to SQLite. Each coalesced group's raw_ids map
+     back to the first raw_message_id in the group.
 
-Idempotent: existing discord_message_id rows are skipped, so re-running
-catches only new messages.
+Idempotent: existing discord_message_id rows are skipped on Discord fetch.
+--reprocess wipes signals + status_events first, then re-parses everything
+in raw_messages.
 
 Usage:
-    python scripts/backfill_history.py                       # all history
+    python scripts/backfill_history.py                       # fetch + parse all
     python scripts/backfill_history.py --limit 500           # newest 500
     python scripts/backfill_history.py --concurrency 8       # 8 parallel parses
     python scripts/backfill_history.py --skip-parse          # raw log only
+    python scripts/backfill_history.py --reprocess           # skip Discord;
+                                                              # rebuild signals+
+                                                              # status_events
 """
 
 from __future__ import annotations
@@ -24,11 +31,11 @@ import argparse
 import asyncio
 import logging
 import os
-import re
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import discord
+from discord_mirror.coalescer import CoalescedMessage, RawMsg, coalesce
 from discord_mirror.config import load_config
 from discord_mirror.parser import SignalParser
 from discord_mirror.storage import Storage
@@ -36,22 +43,13 @@ from dotenv import load_dotenv
 
 log = logging.getLogger("backfill")
 
-_LOOKS_LIKE_SIGNAL = re.compile(
-    r"\b(BUY|SELL|TP\d|SL\b|SMACK|SMASH|HIT|STOP|CLOS|TARGET|ENTRY)\b",
-    re.IGNORECASE,
-)
 
-
-async def _ingest_raw(
-    client: discord.Client, channel_id: int, storage: Storage, limit: int | None
-) -> list[tuple[int, str, str]]:
-    """Pass 1: pull raw messages, write to raw_messages, return parse candidates."""
+async def _ingest_raw(client: discord.Client, channel_id: int, storage: Storage, limit: int | None) -> int:
+    """Pull raw messages from Discord; idempotent. Returns count of new rows."""
     channel = client.get_channel(channel_id) or await client.fetch_channel(channel_id)
     log.info("ingesting channel %s (%s)", channel_id, getattr(channel, "name", "?"))
-
-    candidates: list[tuple[int, str, str]] = []  # (raw_id, content, ts_iso)
     n_total = n_new = 0
-    async for message in channel.history(limit=limit):  # newest-first by default
+    async for message in channel.history(limit=limit):  # newest-first
         n_total += 1
         if n_total % 100 == 0:
             log.info("  ingest progress: %d processed, %d new", n_total, n_new)
@@ -60,7 +58,7 @@ async def _ingest_raw(
         ts = message.created_at
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        raw_id = await storage.log_raw_message(
+        await storage.log_raw_message(
             discord_message_id=str(message.id),
             channel_id=str(message.channel.id),
             author=str(message.author),
@@ -68,49 +66,101 @@ async def _ingest_raw(
             ts=ts,
         )
         n_new += 1
-        if message.content and _LOOKS_LIKE_SIGNAL.search(message.content):
-            candidates.append((raw_id, message.content, ts.isoformat()))
-    log.info("ingest done: %d total, %d new, %d parse candidates", n_total, n_new, len(candidates))
-    return candidates
+    log.info("ingest done: %d total, %d new", n_total, n_new)
+    return n_new
 
 
-async def _parse_concurrent(
-    parser: SignalParser, storage: Storage, candidates: list[tuple[int, str, str]], concurrency: int
-) -> tuple[int, int]:
-    from datetime import datetime
+async def _load_raw_chronological(storage: Storage) -> list[RawMsg]:
+    cur = await storage._conn.execute("SELECT id, author, content, ts FROM raw_messages ORDER BY ts ASC")
+    rows = await cur.fetchall()
+    return [
+        RawMsg(
+            raw_id=row[0],
+            author=row[1],
+            content=row[2] or "",
+            ts=datetime.fromisoformat(row[3]),
+        )
+        for row in rows
+    ]
 
+
+async def _wipe_parsed(storage: Storage) -> None:
+    await storage._conn.execute("DELETE FROM status_events")
+    await storage._conn.execute("DELETE FROM signals")
+    await storage._conn.commit()
+
+
+async def _parse_groups(
+    parser: SignalParser,
+    storage: Storage,
+    groups: list[CoalescedMessage],
+    concurrency: int,
+) -> tuple[int, int, int]:
     sem = asyncio.Semaphore(concurrency)
     lock = asyncio.Lock()
-    counters = {"signals": 0, "status": 0, "done": 0}
+    counters = {"signals": 0, "status": 0, "skipped": 0, "done": 0}
 
-    async def _one(raw_id: int, content: str, ts_iso: str) -> None:
+    async def _one(group: CoalescedMessage) -> None:
         async with sem:
             try:
-                result = await parser.parse(content)
+                result = await parser.parse(group.combined_content)
             except Exception:
-                log.exception("parser failed on raw_id %s", raw_id)
+                log.exception("parser raised on raw_ids %s", group.raw_ids)
                 async with lock:
                     counters["done"] += 1
                 return
+        if result.signal is None and result.status is None:
+            async with lock:
+                counters["skipped"] += 1
+                counters["done"] += 1
+                if counters["done"] % 25 == 0:
+                    log.info("  parse progress: %d/%d", counters["done"], len(groups))
+            return
         async with lock:
-            ts = datetime.fromisoformat(ts_iso)
+            anchor_raw_id = group.raw_ids[0]
             if result.signal is not None:
-                await storage.log_parsed_signal(raw_id, result.signal.model_dump())
+                await storage.log_parsed_signal(anchor_raw_id, result.signal.model_dump())
                 counters["signals"] += 1
             if result.status is not None:
                 await storage.log_status_event(
-                    raw_message_id=raw_id,
+                    raw_message_id=anchor_raw_id,
                     kind=result.status.kind,
                     tp_index=result.status.tp_index,
-                    ts=ts,
+                    ts=group.earliest_ts,
                 )
                 counters["status"] += 1
             counters["done"] += 1
             if counters["done"] % 25 == 0:
-                log.info("  parse progress: %d/%d", counters["done"], len(candidates))
+                log.info("  parse progress: %d/%d", counters["done"], len(groups))
 
-    await asyncio.gather(*[_one(r, c, t) for (r, c, t) in candidates])
-    return counters["signals"], counters["status"]
+    await asyncio.gather(*[_one(g) for g in groups])
+    return counters["signals"], counters["status"], counters["skipped"]
+
+
+async def _coalesce_and_parse(storage: Storage, parser: SignalParser | None, concurrency: int) -> None:
+    raws = await _load_raw_chronological(storage)
+    log.info("loaded %d raw_messages from DB", len(raws))
+    groups = list(coalesce(raws))
+    log.info(
+        "coalesced into %d groups (%d are multi-message signal groups)",
+        len(groups),
+        sum(1 for g in groups if g.is_group),
+    )
+
+    # Pre-filter: skip groups that obviously have nothing for the parser.
+    # A group is parseable if it's multi-message (signal candidate) OR contains
+    # numeric content typical of a status update.
+    import re
+
+    _STATUS_HINT = re.compile(r"SMACK|SMASH|STOPPED|SL\s*HIT|TP\d|HIT", re.IGNORECASE)
+    candidates = [g for g in groups if g.is_group or _STATUS_HINT.search(g.combined_content)]
+    log.info("parser candidates: %d (skipped %d non-candidates)", len(candidates), len(groups) - len(candidates))
+
+    if parser is None or not candidates:
+        return
+    log.info("parsing %d candidates with concurrency=%d", len(candidates), concurrency)
+    sig, stat, skipped = await _parse_groups(parser, storage, candidates, concurrency)
+    log.info("parse done: signals=%d  status_events=%d  null/skipped=%d", sig, stat, skipped)
 
 
 class BackfillClient(discord.Client):
@@ -125,30 +175,29 @@ class BackfillClient(discord.Client):
     async def on_ready(self):
         log.info("logged in as %s", self.user)
         try:
-            candidates = await _ingest_raw(self, self.channel_id, self.storage, self.limit)
-            if self.parser and candidates:
-                log.info("parsing %d candidates with concurrency=%d", len(candidates), self.concurrency)
-                sig, stat = await _parse_concurrent(
-                    self.parser,
-                    self.storage,
-                    candidates,
-                    self.concurrency,
-                )
-                log.info("parse done: signals=%d status_events=%d", sig, stat)
+            await _ingest_raw(self, self.channel_id, self.storage, self.limit)
+            await _coalesce_and_parse(self.storage, self.parser, self.concurrency)
         finally:
             await self.close()
 
 
-async def amain(limit: int | None, skip_parse: bool, concurrency: int) -> None:
+async def amain(limit: int | None, skip_parse: bool, concurrency: int, reprocess: bool) -> None:
     load_dotenv()
     cfg = load_config(Path("config.yaml"))
-    logging.basicConfig(
-        level="INFO",
-        format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-    )
+    logging.basicConfig(level="INFO", format="%(asctime)s %(levelname)s %(name)s — %(message)s")
     storage = Storage(cfg.storage.db_path)
     await storage.init()
     parser = None if skip_parse else SignalParser()
+
+    if reprocess:
+        log.info("--reprocess: wiping signals + status_events, re-parsing raw_messages")
+        await _wipe_parsed(storage)
+        try:
+            await _coalesce_and_parse(storage, parser, concurrency)
+        finally:
+            await storage.close()
+        return
+
     client = BackfillClient(
         channel_id=cfg.discord.channel_id,
         storage=storage,
@@ -167,8 +216,13 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=None, help="max messages to pull (default: all history)")
     p.add_argument("--skip-parse", action="store_true", help="store raw messages only; don't run LLM parser")
     p.add_argument("--concurrency", type=int, default=5, help="parallel parse workers (default 5)")
+    p.add_argument(
+        "--reprocess",
+        action="store_true",
+        help="skip Discord fetch; wipe signals + status_events and re-parse raw_messages",
+    )
     args = p.parse_args()
-    asyncio.run(amain(args.limit, args.skip_parse, args.concurrency))
+    asyncio.run(amain(args.limit, args.skip_parse, args.concurrency, args.reprocess))
 
 
 if __name__ == "__main__":

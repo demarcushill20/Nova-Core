@@ -4,12 +4,17 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Protocol
+
+from pydantic import ValidationError
 
 from .models import ParsedSignal, StatusUpdate
 
 log = logging.getLogger(__name__)
+
+_TP_INDEX = re.compile(r"TP\s*(\d+)", re.IGNORECASE)
 
 SYSTEM_PROMPT = """You parse forex/commodity trade signal messages from a Discord channel.
 
@@ -152,9 +157,37 @@ class SignalParser:
         text = (await self.backend.complete(SYSTEM_PROMPT, content)).strip()
         if text.startswith("```"):
             text = text.split("```", 2)[1].lstrip("json").strip()
-        data = json.loads(text)
-        sig_data = data.get("signal")
-        signal = ParsedSignal(**sig_data) if sig_data and sig_data.get("action") != "NONE" else None
-        st_data = data.get("status")
-        status = StatusUpdate(**st_data) if st_data and st_data.get("kind") != "NONE" else None
-        return ParseResult(signal=signal, status=status)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            log.warning("parser got non-JSON output (first 80 chars): %r", text[:80])
+            return ParseResult(signal=None, status=None)
+        return ParseResult(
+            signal=_build_signal(data.get("signal")),
+            status=_build_status(data.get("status"), content),
+        )
+
+
+def _build_signal(sig_data: dict | None) -> ParsedSignal | None:
+    if not sig_data or sig_data.get("action") == "NONE":
+        return None
+    try:
+        return ParsedSignal(**sig_data)
+    except ValidationError as e:
+        log.warning("invalid signal payload: %s", e.errors()[0]["msg"])
+        return None
+
+
+def _build_status(st_data: dict | None, raw_content: str) -> StatusUpdate | None:
+    if not st_data or st_data.get("kind") == "NONE":
+        return None
+    # Regex-recover tp_index if the model returned null for a TP_HIT
+    if st_data.get("kind") == "TP_HIT" and st_data.get("tp_index") is None:
+        m = _TP_INDEX.search(st_data.get("raw_text") or raw_content)
+        if m:
+            st_data["tp_index"] = int(m.group(1))
+    try:
+        return StatusUpdate(**st_data)
+    except ValidationError as e:
+        log.warning("invalid status payload: %s", e.errors()[0]["msg"])
+        return None
