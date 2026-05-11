@@ -92,28 +92,55 @@ class ClaudeCLIBackend:
     """Subprocess-invokes the `claude` CLI — uses the CC subscription's auth.
 
     No ANTHROPIC_API_KEY required. Spawns one subprocess per parse.
+
+    Retries on transient failures (CLI exit != 0). Claude Code rate-limit
+    windows can produce sporadic exit-1 with empty stderr for a few minutes.
     """
 
-    def __init__(self, *, model: str = "sonnet", binary: str = "claude"):
+    def __init__(
+        self,
+        *,
+        model: str = "sonnet",
+        binary: str = "claude",
+        max_retries: int = 4,
+        retry_base_seconds: float = 5.0,
+    ):
         self.model = model
         self.binary = binary
+        self.max_retries = max_retries
+        self.retry_base_seconds = retry_base_seconds
 
     async def complete(self, system: str, user: str) -> str:
-        proc = await asyncio.create_subprocess_exec(
-            self.binary,
-            "--print",
-            "--model",
-            self.model,
-            "--append-system-prompt",
-            system,
-            user,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"claude CLI failed (exit {proc.returncode}): {stderr.decode().strip()}")
-        return stdout.decode()
+        last_err = ""
+        for attempt in range(self.max_retries + 1):
+            proc = await asyncio.create_subprocess_exec(
+                self.binary,
+                "--print",
+                "--model",
+                self.model,
+                "--append-system-prompt",
+                system,
+                user,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                return stdout.decode()
+            # Capture both streams; CLI sometimes prints errors to stdout
+            err_msg = stderr.decode().strip() or stdout.decode().strip() or "<empty>"
+            last_err = f"exit {proc.returncode}: {err_msg[:200]}"
+            if attempt < self.max_retries:
+                delay = self.retry_base_seconds * (2**attempt)
+                log.warning(
+                    "claude CLI attempt %d/%d failed (%s); retrying in %.0fs",
+                    attempt + 1,
+                    self.max_retries + 1,
+                    last_err,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+        raise RuntimeError(f"claude CLI failed after {self.max_retries + 1} attempts: {last_err}")
 
 
 def _make_default_backend(model: str | None) -> _Backend:
