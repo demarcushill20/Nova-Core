@@ -53,7 +53,7 @@ def test_followup_outside_window_flushes():
         coalesce(
             [
                 msg(1, "@everyone BUY GOLD", offset_s=0),
-                msg(2, "SL 4700", offset_s=70),  # outside 60s window
+                msg(2, "SL 4700", offset_s=200),  # outside 180s window
             ]
         )
     )
