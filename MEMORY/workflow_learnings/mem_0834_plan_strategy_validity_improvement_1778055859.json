@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0834_plan_strategy_validity_improvement_1778055859",
+  "workflow_id": "0834_plan_strategy_validity_improvement",
+  "task_summary": "5-phase plan to raise strategy_validity from 66 to >=83; root causes are noisy 30-point Sharpe (backtest_live_alignment=10) and missing regime awareness (signal_generation_rate=20); Phase 1 alone meets >=70 target; plan fully executed via task 0835",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "5-phase plan to raise strategy_validity from 66 to >=83; root causes are noisy 30-point Sharpe (backtest_live_alignment=10) and missing regime awareness (signal_generation_rate=20); Phase 1 alone meets >=70 target; plan fully executed via task 0835"
+  ],
+  "successful_patterns": [
+    "task_failed: 0834_plan_strategy_validity_improvement"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "5-phase plan to raise strategy_validity from 66 to >=83; root causes are noisy 30-point Sharpe (backtest_live_alignment=10) and missing regime awareness (signal_generation_rate=20); Phase 1 alone meets >=70 target; plan fully executed via task 0835",
+  "created_at": "2026-05-06T08:24:19Z",
+  "confidence": "high"
+}

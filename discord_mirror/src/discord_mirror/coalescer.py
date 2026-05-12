@@ -52,7 +52,7 @@ class CoalescedMessage:
 def coalesce(
     messages: Iterable[RawMsg],
     *,
-    window_seconds: int = 60,
+    window_seconds: int = 180,
     max_followups: int = 5,
 ) -> Iterator[CoalescedMessage]:
     """Yield coalesced groups in input order.
@@ -142,7 +142,7 @@ class LiveCoalescer:
         self,
         on_emit,
         *,
-        window_seconds: int = 60,
+        window_seconds: int = 180,
         max_followups: int = 5,
         flush_interval_seconds: int = 5,
     ):

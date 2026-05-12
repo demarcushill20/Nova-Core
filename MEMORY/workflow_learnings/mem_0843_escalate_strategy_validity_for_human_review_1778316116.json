@@ -1,0 +1,24 @@
+{
+  "task_id": "0843",
+  "task_name": "escalate_strategy_validity_for_human_review",
+  "timestamp": "2026-05-07T22:21:56Z",
+  "outcome": "completed",
+  "verdict": "FALSE_POSITIVE_ESCALATION",
+  "steps_succeeded": 3,
+  "steps_total": 3,
+  "contracts_valid": 3,
+  "key_findings": [
+    "strategy_validity is 90/100 GREEN at time of escalation — false positive",
+    "Root cause: futility detector bug in decision_engine.py:316 (outcome window overflow + missing dimension tagging on validate decisions)",
+    "MetaAPI subscription timeouts caused 6-hour zero-trade period; REPAIR #4 was effective",
+    "All 3 prior strategy_validity escalations were false positives at escalation time",
+    "Recommended fix: score-gate (suppress escalation if dim >= 70) in _detect_repair_futility()"
+  ],
+  "files_changed": [
+    "OUTPUT/0843_escalate_strategy_validity_research__20260507-221603.md",
+    "OUTPUT/0843_escalate_strategy_validity_synthesis__20260507-221603.md"
+  ],
+  "duration_minutes": 6,
+  "category": "escalate",
+  "target_dimension": "strategy_validity"
+}

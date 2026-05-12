@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0849_validate_recent_improvements_1778464661",
+  "workflow_id": "0849_validate_recent_improvements",
+  "task_summary": "All 5 autonomy dimensions GREEN (overall 91.5/100), 33/34 heartbeat checks pass, core imports 8/8 OK, live runner active \u2014 recent discord_mirror work fully isolated from core novatrade system",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "All 5 autonomy dimensions GREEN (overall 91.5/100), 33/34 heartbeat checks pass, core imports 8/8 OK, live runner active \u2014 recent discord_mirror work fully isolated from core novatrade system"
+  ],
+  "successful_patterns": [
+    "task_failed: 0849_validate_recent_improvements"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "All 5 autonomy dimensions GREEN (overall 91.5/100), 33/34 heartbeat checks pass, core imports 8/8 OK, live runner active \u2014 recent discord_mirror work fully isolated from core novatrade system",
+  "created_at": "2026-05-11T01:57:41Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0849_validate_recent_improvements_1778468443"
+}
