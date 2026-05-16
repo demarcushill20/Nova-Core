@@ -1,0 +1,25 @@
+discord:
+  channel_id: 1369384944383819817
+
+risk:
+  account_risk_pct: 0.01   # 1% per signal
+  min_lot: 0.01
+  lot_step: 0.01
+
+symbol_map:
+  GOLD: XAUUSD
+  SILVER: XAGUSD
+  US30: US30
+  NAS100: NAS100
+  EURUSD: EURUSD
+  GBPUSD: GBPUSD
+
+state:
+  move_sl_to_be_after: TP1   # SL → entry once TP1 hits
+
+storage:
+  db_path: data/signals.db
+
+logging:
+  level: INFO
+  path: logs/discord_mirror.log

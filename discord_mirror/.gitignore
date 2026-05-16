@@ -3,6 +3,7 @@
 *.db-journal
 data/
 logs/
+.metaapi/
 __pycache__/
 *.pyc
 .pytest_cache/
