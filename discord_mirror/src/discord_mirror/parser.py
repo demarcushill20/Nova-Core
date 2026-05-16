@@ -110,6 +110,15 @@ class ClaudeCLIBackend:
         self.max_retries = max_retries
         self.retry_base_seconds = retry_base_seconds
 
+    @staticmethod
+    def _child_env() -> dict[str, str]:
+        # The `claude` CLI refuses to launch when it detects a parent Claude Code
+        # session via these env vars. If this bot is itself started from inside a
+        # CC session, the vars are inherited and every parse subprocess fails with
+        # "Claude Code cannot be launched inside another Claude Code session".
+        # Strip them so the non-interactive `--print` invocation always runs.
+        return {k: v for k, v in os.environ.items() if k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE")}
+
     async def complete(self, system: str, user: str) -> str:
         last_err = ""
         for attempt in range(self.max_retries + 1):
@@ -123,6 +132,7 @@ class ClaudeCLIBackend:
                 user,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=self._child_env(),
             )
             stdout, stderr = await proc.communicate()
             if proc.returncode == 0:
