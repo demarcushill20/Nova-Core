@@ -1,0 +1,21 @@
+# systemd unit for the TIMBOT webhook bridge.
+# Install:  sudo cp timbot-bridge.service /etc/systemd/system/
+#           sudo systemctl daemon-reload
+#           sudo systemctl enable --now timbot-bridge
+# Logs:     journalctl -u timbot-bridge -f
+
+[Unit]
+Description=TIMBOT TradingView -> MetaApi webhook bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nova
+WorkingDirectory=/home/nova/nova-core/clients/timbot/bridge
+ExecStart=/home/nova/nova-core/clients/timbot/bridge/.venv/bin/python timbot_bridge.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

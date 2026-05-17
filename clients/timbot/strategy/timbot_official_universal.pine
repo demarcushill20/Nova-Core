@@ -1,0 +1,952 @@
+//@version=6
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║   🎯 TIMBOT OFFICIAL ENGINE — Universal                                     ║
+// ║   Entries : Original ELITE logic — untouched                               ║
+// ║   Exits   : 50% partial @ 2R → BE shift → Runner to next HTF 78.6%        ║
+// ║   Visuals : Entry signals + Institutional R/R Trade Layout                 ║
+// ║   v2.0    : HTF Liquidity Sweep + Displacement Filter integrated           ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+strategy("TIMBOT OFFICIAL — Universal",
+     overlay             = true,
+     initial_capital     = 10000,
+     pyramiding          = 0,
+     commission_type     = strategy.commission.percent,
+     commission_value    = 0.01,
+     default_qty_type    = strategy.percent_of_equity,
+     default_qty_value   = 1,
+     calc_on_order_fills = false,
+     calc_on_every_tick  = false,
+     max_labels_count    = 500,
+     max_lines_count     = 500,
+     max_boxes_count     = 500)
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  INPUTS — ALL DECLARED BEFORE USE
+// ══════════════════════════════════════════════════════════════════════════════
+
+// 🌐 ICT Daily Bias
+useDailyBias = input.bool(false, "Use Daily Bias Filter", group="🌐 ICT Daily Bias")
+
+// 🎯 Signal Quality
+minQualityScore    = input.int(5,      "Minimum Quality Score (0-10)", minval=0, maxval=10,  group="🎯 Signal Quality")
+minSignalSpacing   = input.int(8,      "Minimum Bars Between Signals", minval=1, maxval=50,  group="🎯 Signal Quality")
+requireDivergence  = input.bool(false, "Require MACD Divergence",                            group="🎯 Signal Quality")
+requireVolumeSpike = input.bool(false, "Require Volume Spike",                               group="🎯 Signal Quality")
+
+// 🎯 FROTE & Liquidity
+requireReactionBar = input.bool(true, "Require Reaction Bar After Sweep", group="🎯 FROTE & Liquidity")
+
+// 🎯 Bias Flip Control
+signalOnFlipOnly      = input.bool(true,  "🔥 Signal Only On Bias Flip",           group="🎯 Bias Flip Control")
+allowSignalsAfterFlip = input.bool(false, "Allow First Valid Signal After Flip",   group="🎯 Bias Flip Control")
+flipCooldownBars      = input.int(0,      "Cooldown Bars After Flip (0=disabled)", minval=0, maxval=100, group="🎯 Bias Flip Control")
+
+// 🧹 Sweep Displacement Filter
+dispMultiplier = input.float(1.8, "Displacement Body Multiplier",
+     minval=1.0, maxval=5.0, step=0.1,
+     group="🧹 Sweep Displacement Filter",
+     tooltip="Minimum candle body vs 20-bar average body. Higher = stricter.")
+
+// 📊 Indicators
+emaLength             = input.int(14,    "EMA Length",               minval=1,            group="📊 Indicators")
+ema200Length          = input.int(200,   "EMA 200 Length",            minval=1,            group="📊 Indicators")
+macdFast              = input.int(12,    "MACD Fast",                                      group="📊 Indicators")
+macdSlow              = input.int(26,    "MACD Slow",                                      group="📊 Indicators")
+macdSig               = input.int(9,     "MACD Signal",                                    group="📊 Indicators")
+pivotLookback         = input.int(5,     "Pivot Lookback",            minval=3, maxval=20,  group="📊 Indicators")
+volumeSpikeMultiplier = input.float(1.3, "Volume Spike Multiplier",   minval=1.0,maxval=3.0,group="📊 Indicators")
+divergenceLookback    = input.int(10,    "Divergence Lookback",       minval=5, maxval=30,  group="📊 Indicators")
+useRsiDivFilter       = input.bool(true, "Use 5m RSI Divergence Filter",                   group="📊 Indicators")
+rsiLen                = input.int(14,    "RSI Length (5m)",           minval=2,            group="📊 Indicators")
+rsiPivotLB            = input.int(5,     "RSI Pivot Lookback (5m)",   minval=2, maxval=20,  group="📊 Indicators")
+rsiTrendEmaLen        = input.int(200,   "5m Trend EMA Length",       minval=20,           group="📊 Indicators")
+
+// 💰 Risk
+atrStopMult        = input.float(1.5, "ATR Stop Multiplier (fallback)", minval=0.1,             group="💰 Risk")
+structureBufferATR = input.float(0.2, "Structure Stop Buffer (ATR ×)",  minval=0.0, maxval=2.0, group="💰 Risk")
+
+// 👁️ Display
+debugMode = input.bool(false, "Debug Mode", group="👁️ Display")
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  TIMEFRAME AUTO-DETECTION
+// ══════════════════════════════════════════════════════════════════════════════
+tfMins = timeframe.in_seconds() / 60
+
+froteTier =
+     tfMins <= 5    ? 1 :
+     tfMins <= 15   ? 2 :
+     tfMins <= 60   ? 3 :
+     tfMins <= 240  ? 4 :
+     tfMins <= 1440 ? 5 : 6
+
+nextTier =
+     froteTier == 1 ? 2 :
+     froteTier == 2 ? 3 :
+     froteTier == 3 ? 4 :
+     froteTier == 4 ? 5 :
+     5
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ICT DAILY BIAS ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
+dHigh  = request.security(syminfo.tickerid, "D", high,  barmerge.gaps_off, barmerge.lookahead_on)
+dLow   = request.security(syminfo.tickerid, "D", low,   barmerge.gaps_off, barmerge.lookahead_on)
+dClose = request.security(syminfo.tickerid, "D", close, barmerge.gaps_off, barmerge.lookahead_on)
+
+bullStructure = dClose > dHigh[1]
+bearStructure = dClose < dLow[1]
+liqDrawUp     = math.abs(dClose - dHigh[1]) < math.abs(dClose - dLow[1])
+liqDrawDown   = math.abs(dClose - dLow[1])  < math.abs(dClose - dHigh[1])
+
+var int dailyBias = 0
+if bullStructure and liqDrawUp
+    dailyBias := 1
+else if bearStructure and liqDrawDown
+    dailyBias := -1
+else
+    dailyBias := 0
+
+dailyBull = dailyBias ==  1
+dailyBear = dailyBias == -1
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  RISK — ATR
+// ══════════════════════════════════════════════════════════════════════════════
+riskATR        = ta.atr(14)
+longStopPrice  = close - riskATR * atrStopMult
+shortStopPrice = close + riskATR * atrStopMult
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  FROTE RANGE TIERS — all lookahead_off (non-repainting)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Tier 1: Session (live tracked on chart TF — intrabar accumulation, no security call)
+gmtHour  = hour(time, "Etc/UTC")
+inSessT1 = (gmtHour >= 6 and gmtHour < 10) or (gmtHour >= 12 and gmtHour < 16) or (gmtHour >= 1 and gmtHour < 5)
+
+var float t1High = na
+var float t1Low  = na
+var bool  t1Open = false
+
+if inSessT1 and not inSessT1[1]
+    t1High := high
+    t1Low  := low
+    t1Open := true
+
+if inSessT1 and t1Open
+    t1High := math.max(t1High, high)
+    t1Low  := math.min(t1Low,  low)
+
+if not inSessT1 and inSessT1[1]
+    t1Open := false
+
+// Tier 2: Daily — previous completed bar, no lookahead
+t2High = request.security(syminfo.tickerid, "D", high[1], barmerge.gaps_off, barmerge.lookahead_off)
+t2Low  = request.security(syminfo.tickerid, "D", low[1],  barmerge.gaps_off, barmerge.lookahead_off)
+
+// Tier 3: Weekly
+t3High = request.security(syminfo.tickerid, "W", high[1], barmerge.gaps_off, barmerge.lookahead_off)
+t3Low  = request.security(syminfo.tickerid, "W", low[1],  barmerge.gaps_off, barmerge.lookahead_off)
+
+// Tier 4: Monthly
+t4High = request.security(syminfo.tickerid, "M", high[1], barmerge.gaps_off, barmerge.lookahead_off)
+t4Low  = request.security(syminfo.tickerid, "M", low[1],  barmerge.gaps_off, barmerge.lookahead_off)
+
+// Tier 5: Quarterly (~63 trading days)
+t5High = request.security(syminfo.tickerid, "D", ta.highest(high, 63)[1], barmerge.gaps_off, barmerge.lookahead_off)
+t5Low  = request.security(syminfo.tickerid, "D", ta.lowest(low,  63)[1],  barmerge.gaps_off, barmerge.lookahead_off)
+
+// Tier 6: Yearly (~252 trading days)
+t6High = request.security(syminfo.tickerid, "D", ta.highest(high, 252)[1], barmerge.gaps_off, barmerge.lookahead_off)
+t6Low  = request.security(syminfo.tickerid, "D", ta.lowest(low,  252)[1],  barmerge.gaps_off, barmerge.lookahead_off)
+
+// ── Next-tier runner targets ──────────────────────────────────────────────────
+nextHigh =
+     nextTier == 2 ? t2High :
+     nextTier == 3 ? t3High :
+     nextTier == 4 ? t4High :
+     nextTier == 5 ? t5High :
+     t6High
+
+nextLow =
+     nextTier == 2 ? t2Low :
+     nextTier == 3 ? t3Low :
+     nextTier == 4 ? t4Low :
+     nextTier == 5 ? t5Low :
+     t6Low
+
+nextRange  = nextHigh - nextLow
+next786Top = nextHigh - nextRange * 0.786   // HTF supply — long runner target
+next786Bot = nextLow  + nextRange * 0.786   // HTF demand — short runner target
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SIGNAL TRACKING
+// ══════════════════════════════════════════════════════════════════════════════
+var int        lastSignalBar = na
+// Array capped at 500 to respect TradingView memory limits
+var array<int> signalBars    = array.new<int>()
+
+pip = syminfo.mintick * (syminfo.type == "forex" ? 10 : 1)
+
+hasReactionBar(isLong) =>
+    if requireReactionBar
+        isLong ? low[1] < low[2] and close > close[1] : high[1] > high[2] and close < close[1]
+    else
+        true
+
+checkSignalSpacing() =>
+    na(lastSignalBar) ? true : (bar_index - lastSignalBar) >= minSignalSpacing
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  5M RSI DIVERGENCE FILTER
+// ══════════════════════════════════════════════════════════════════════════════
+f_rsi5m_divFilter() =>
+    emaT = ta.ema(close, rsiTrendEmaLen)
+    upT  = close > emaT and emaT > emaT[1]
+    dnT  = close < emaT and emaT < emaT[1]
+    r    = ta.rsi(close, rsiLen)
+    pl   = ta.pivotlow (r, rsiPivotLB, rsiPivotLB)
+    ph   = ta.pivothigh(r, rsiPivotLB, rsiPivotLB)
+    var float rsiLastLow  = na
+    var float rsiPrevLow  = na
+    var float rsiLastHigh = na
+    var float rsiPrevHigh = na
+    if not na(pl)
+        rsiPrevLow  := rsiLastLow
+        rsiLastLow  := pl
+    if not na(ph)
+        rsiPrevHigh := rsiLastHigh
+        rsiLastHigh := ph
+    rsiHL = not na(rsiLastLow)  and not na(rsiPrevLow)  and rsiLastLow  > rsiPrevLow
+    rsiLH = not na(rsiLastHigh) and not na(rsiPrevHigh) and rsiLastHigh < rsiPrevHigh
+    [upT, dnT, rsiHL, rsiLH]
+
+[upTrend5, downTrend5, rsiHL5, rsiLH5] = request.security(
+     syminfo.tickerid, "5", f_rsi5m_divFilter(),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+
+rsiLongOK  = not useRsiDivFilter ? true : (not upTrend5   or rsiHL5)
+rsiShortOK = not useRsiDivFilter ? true : (not downTrend5 or rsiLH5)
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  4H BIAS ENGINE + FLIP DETECTION
+// ══════════════════════════════════════════════════════════════════════════════
+htfClose = request.security(syminfo.tickerid, "240", close, barmerge.gaps_off, barmerge.lookahead_on)
+htfOpen  = request.security(syminfo.tickerid, "240", open,  barmerge.gaps_off, barmerge.lookahead_on)
+htfEma   = request.security(syminfo.tickerid, "240",
+     ta.ema(close, emaLength), barmerge.gaps_off, barmerge.lookahead_on)
+
+var int biasState     = 0
+var int prevBiasState = 0
+
+prevBiasState := biasState
+
+if biasState == 0
+    if htfClose > htfEma and htfOpen > htfEma
+        biasState := 1
+    else if htfClose < htfEma and htfOpen < htfEma
+        biasState := -1
+
+if biasState == 1
+    if htfClose < htfEma
+        biasState := -1
+else if biasState == -1
+    if htfClose > htfEma
+        biasState := 1
+
+biasFlippedBull = prevBiasState != 1  and biasState ==  1
+biasFlippedBear = prevBiasState != -1 and biasState == -1
+biasBull        = biasState ==  1
+biasBear        = biasState == -1
+
+var bool bullSignalArmed = false
+var bool bearSignalArmed = false
+var int  lastFlipBar     = na
+
+if biasFlippedBull
+    bullSignalArmed := true
+    bearSignalArmed := false
+    lastFlipBar     := bar_index
+
+if biasFlippedBear
+    bearSignalArmed := true
+    bullSignalArmed := false
+    lastFlipBar     := bar_index
+
+inCooldown = flipCooldownBars > 0 and not na(lastFlipBar) and
+     (bar_index - lastFlipBar) < flipCooldownBars
+
+dailyBiasAllowsLong  = not useDailyBias or dailyBull
+dailyBiasAllowsShort = not useDailyBias or dailyBear
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SESSION & VOLUME GATE
+// ══════════════════════════════════════════════════════════════════════════════
+inSession = (gmtHour >= 6 and gmtHour < 10) or (gmtHour >= 12 and gmtHour < 16)
+
+htf4HTime    = request.security(syminfo.tickerid, "240", time, barmerge.gaps_off, barmerge.lookahead_on)
+htf4HHourGMT = hour(htf4HTime, "Etc/UTC")
+htf4HPol     = request.security(syminfo.tickerid, "240",
+     close > open ? 1 : close < open ? -1 : 0,
+     barmerge.gaps_off, barmerge.lookahead_on)
+
+var int volPol02 = na
+var int volPol22 = na
+
+if barstate.isconfirmed
+    if htf4HHourGMT == 2
+        volPol02 := htf4HPol
+    if htf4HHourGMT == 22
+        volPol22 := htf4HPol
+
+volGateOK = not na(volPol02) and not na(volPol22) and
+     volPol02 != 0 and volPol22 != 0 and volPol02 == volPol22
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  15M & 1H MACD FILTERS
+// ══════════════════════════════════════════════════════════════════════════════
+[macd15, sig15, _]  = request.security(syminfo.tickerid, "15",
+     ta.macd(close, macdFast, macdSlow, macdSig),
+     barmerge.gaps_off, barmerge.lookahead_on)
+
+[macd60, sig60, _] = request.security(syminfo.tickerid, "60",
+     ta.macd(close, macdFast, macdSlow, macdSig),
+     barmerge.gaps_off, barmerge.lookahead_on)
+
+bypassLong15  = biasBull and macd60 > sig60 and macd60 > 0 and sig60 > 0 and macd15 > 0 and sig15 > 0
+bypassShort15 = biasBear and macd60 < sig60 and macd60 < 0 and sig60 < 0 and macd15 < 0 and sig15 < 0
+allowLong15   = macd15 <= 0 or bypassLong15
+allowShort15  = macd15 >= 0 or bypassShort15
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  MAIN INDICATORS
+// ══════════════════════════════════════════════════════════════════════════════
+[macdLine, signalLine, _] = ta.macd(close, macdFast, macdSlow, macdSig)
+
+atr         = ta.atr(14)
+ema14Close  = ta.ema(close, emaLength)
+ema14Low    = ta.ema(low,   emaLength)
+ema200Close = ta.ema(close, ema200Length)
+avgVolume   = ta.sma(volume, 20)
+volumeSpike = volume > avgVolume * volumeSpikeMultiplier
+pivotHigh   = ta.pivothigh(high, pivotLookback, pivotLookback)
+pivotLow    = ta.pivotlow (low,  pivotLookback, pivotLookback)
+isSwingHigh = not na(pivotHigh)
+isSwingLow  = not na(pivotLow)
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  STRUCTURE-BASED STOPS
+// ══════════════════════════════════════════════════════════════════════════════
+var float lastMajorHigh = na
+var float lastMajorLow  = na
+
+if not na(pivotHigh)
+    lastMajorHigh := high[pivotLookback]
+if not na(pivotLow)
+    lastMajorLow  := low[pivotLookback]
+
+longStructureStop  = not na(lastMajorLow)  ?
+     lastMajorLow  - riskATR * structureBufferATR : longStopPrice
+shortStructureStop = not na(lastMajorHigh) ?
+     lastMajorHigh + riskATR * structureBufferATR : shortStopPrice
+
+validLongStop  = not na(lastMajorLow)  and lastMajorLow  < close
+validShortStop = not na(lastMajorHigh) and lastMajorHigh > close
+
+finalLongStop  = validLongStop  ? longStructureStop  : longStopPrice
+finalShortStop = validShortStop ? shortStructureStop : shortStopPrice
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  HTF LIQUIDITY SWEEP DETECTION
+//  Sweep TF is always one step above the current chart TF.
+//  All HTF data uses [1]/[2] with lookahead_on — the canonical Pine v6
+//  non-repainting pattern for confirmed closed HTF bars.
+//  newHTFSweepBar gates the signal to exactly one chart bar per HTF close.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Map chart TF → one-above sweep TF ────────────────────────────────────────
+sweepTF =
+     tfMins <= 1   ? "5"   :
+     tfMins <= 5   ? "15"  :
+     tfMins <= 15  ? "60"  :
+     tfMins <= 60  ? "240" :
+     tfMins <= 240 ? "D"   :
+     "W"
+
+// ── Confirmed HTF candle data — [1]/[2] + lookahead_on = zero repaint ─────────
+htfSwH1      = request.security(syminfo.tickerid, sweepTF, high[1],  barmerge.gaps_off, barmerge.lookahead_on)
+htfSwL1      = request.security(syminfo.tickerid, sweepTF, low[1],   barmerge.gaps_off, barmerge.lookahead_on)
+htfSwC1      = request.security(syminfo.tickerid, sweepTF, close[1], barmerge.gaps_off, barmerge.lookahead_on)
+htfSwH2      = request.security(syminfo.tickerid, sweepTF, high[2],  barmerge.gaps_off, barmerge.lookahead_on)
+htfSwL2      = request.security(syminfo.tickerid, sweepTF, low[2],   barmerge.gaps_off, barmerge.lookahead_on)
+htfSwBarTime = request.security(syminfo.tickerid, sweepTF, time[1],  barmerge.gaps_off, barmerge.lookahead_on)
+
+// Single-fire gate: true only on the first chart bar after an HTF bar closes
+newHTFSweepBar = ta.change(htfSwBarTime) != 0
+
+// ── Raw sweep conditions ──────────────────────────────────────────────────────
+// Bearish: HTF wicked above prior high, closed back below it (stop hunt + rejection)
+bearSweepRaw = htfSwH1 > htfSwH2 and htfSwC1 < htfSwH2
+// Bullish: HTF wicked below prior low, closed back above it (stop hunt + reversal)
+bullSweepRaw = htfSwL1 < htfSwL2 and htfSwC1 > htfSwL2
+
+// ── FROTE / Liquidity-pool origin filter ─────────────────────────────────────
+//  A sweep is only valid when price arrived FROM a FROTE tier boundary or a
+//  structural pivot pool. na-guarded to handle early bars where tier values
+//  may not yet be populated (Tier 1 session, first few bars of history).
+sweepLookback = 15
+froteProx     = atr * 1.5
+
+curTierHigh =
+     froteTier == 1 ? t1High :
+     froteTier == 2 ? t2High :
+     froteTier == 3 ? t3High :
+     froteTier == 4 ? t4High :
+     froteTier == 5 ? t5High :
+     t6High
+
+curTierLow =
+     froteTier == 1 ? t1Low :
+     froteTier == 2 ? t2Low :
+     froteTier == 3 ? t3Low :
+     froteTier == 4 ? t4Low :
+     froteTier == 5 ? t5Low :
+     t6Low
+
+// na-guards prevent false triggers when tier levels haven't formed yet
+bullFroteOK =
+     (not na(curTierLow)   and ta.lowest(low,  sweepLookback) <= curTierLow   + froteProx) or
+     (not na(lastMajorLow) and ta.lowest(low,  sweepLookback) <= lastMajorLow + froteProx)
+
+bearFroteOK =
+     (not na(curTierHigh)   and ta.highest(high, sweepLookback) >= curTierHigh   - froteProx) or
+     (not na(lastMajorHigh) and ta.highest(high, sweepLookback) >= lastMajorHigh - froteProx)
+
+// ── Raw sweep signals (before displacement filter) ────────────────────────────
+//  barstate.isconfirmed prevents any intra-bar flicker.
+//  newHTFSweepBar prevents the emoji repeating across every chart bar
+//  that maps to the same HTF period.
+bullSweepSignal = bullSweepRaw and bullFroteOK and newHTFSweepBar and barstate.isconfirmed
+bearSweepSignal = bearSweepRaw and bearFroteOK and newHTFSweepBar and barstate.isconfirmed
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DISPLACEMENT FILTER
+//  Require strong expansion candle after the sweep — confirms institutional
+//  delivery, filters out weak liquidity taps with no follow-through.
+//  Logic: body must exceed dispMultiplier × 20-bar average body AND the
+//  close must break through the prior chart bar's high (bull) or low (bear).
+// ══════════════════════════════════════════════════════════════════════════════
+bodySize = math.abs(close - open)
+avgBody  = ta.sma(math.abs(close[1] - open[1]), 20)   // uses confirmed prior bars only
+
+// Body expansion requirement
+dispStrong = not na(avgBody) and bodySize > avgBody * dispMultiplier
+
+// Directional momentum: close must breach the prior bar's extreme
+bullDisp = dispStrong and close > high[1]   // bullish displacement close above prior high
+bearDisp = dispStrong and close < low[1]    // bearish displacement close below prior low
+
+// Final filtered signals: sweep + displacement both required
+bullSweepDisp = bullSweepSignal and bullDisp
+bearSweepDisp = bearSweepSignal and bearDisp
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  HTF FRACTAL EXIT ENGINE
+//  Leg 1 (50%) exits at 2R — locks half profit
+//  Leg 2 (runner) exits at next HTF 78.6% level
+//  Break-even shift fires once when Leg 1 is hit
+// ══════════════════════════════════════════════════════════════════════════════
+longRisk       = close - finalLongStop
+shortRisk      = finalShortStop - close
+longPartialTP  = close + longRisk  * 2.0
+shortPartialTP = close - shortRisk * 2.0
+
+finalLongTarget  = next786Top > close ? next786Top : nextHigh
+finalShortTarget = next786Bot < close ? next786Bot : nextLow
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  MACD DIVERGENCE ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
+var array<float> priceHighs = array.new<float>()
+var array<float> priceLows  = array.new<float>()
+var array<float> macdHighs  = array.new<float>()
+var array<float> macdLows   = array.new<float>()
+var array<int>   highBars   = array.new<int>()
+var array<int>   lowBars    = array.new<int>()
+
+if isSwingHigh
+    array.push(priceHighs, high[pivotLookback])
+    array.push(macdHighs,  macdLine[pivotLookback])
+    array.push(highBars,   bar_index - pivotLookback)
+    if array.size(priceHighs) > 5
+        array.shift(priceHighs)
+        array.shift(macdHighs)
+        array.shift(highBars)
+
+if isSwingLow
+    array.push(priceLows, low[pivotLookback])
+    array.push(macdLows,  macdLine[pivotLookback])
+    array.push(lowBars,   bar_index - pivotLookback)
+    if array.size(priceLows) > 5
+        array.shift(priceLows)
+        array.shift(macdLows)
+        array.shift(lowBars)
+
+bullishDivergence = false
+bearishDivergence = false
+
+if array.size(priceLows) >= 2
+    for i = array.size(priceLows) - 1 to 1
+        curPL = array.get(priceLows, i)
+        curML = array.get(macdLows,  i)
+        curB  = array.get(lowBars,   i)
+        if (bar_index - curB) <= divergenceLookback
+            for j = i - 1 to 0
+                if curPL < array.get(priceLows, j) and curML > array.get(macdLows, j)
+                    bullishDivergence := true
+                    break
+        if bullishDivergence
+            break
+
+if array.size(priceHighs) >= 2
+    for i = array.size(priceHighs) - 1 to 1
+        curPH = array.get(priceHighs, i)
+        curMH = array.get(macdHighs,  i)
+        curB  = array.get(highBars,   i)
+        if (bar_index - curB) <= divergenceLookback
+            for j = i - 1 to 0
+                if curPH > array.get(priceHighs, j) and curMH < array.get(macdHighs, j)
+                    bearishDivergence := true
+                    break
+        if bearishDivergence
+            break
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  BASE SIGNAL LOGIC
+// ══════════════════════════════════════════════════════════════════════════════
+macdCrossUp   = ta.crossover (macdLine, signalLine) and macdLine < 0
+macdCrossDown = ta.crossunder(macdLine, signalLine) and macdLine > 0
+
+bodyAboveEma14Close     = close    > ema14Close + pip
+bodyAboveEma14ClosePrev = close[1] > ema14Close[1] + pip
+longEmaRule = bodyAboveEma14Close and not bodyAboveEma14ClosePrev and macdLine < 0
+
+isBearCandle         = close < open
+closeBelowOrangeNow  = close    < ema14Low   - pip
+closeBelowOrangePrev = close[1] < ema14Low[1]- pip
+shortEmaRule = isBearCandle and closeBelowOrangeNow and not closeBelowOrangePrev and macdLine > 0
+
+longCloseOk  = close > ema14Close + pip
+shortCloseOk = isBearCandle and close < ema14Low - pip
+
+confirmed = barstate.isconfirmed
+
+calcQualityScore(isLong) =>
+    float score = 5.0
+    if isLong and isSwingLow
+        score += 1.5
+    if not isLong and isSwingHigh
+        score += 1.5
+    if isLong and bullishDivergence
+        score += 1.5
+    if not isLong and bearishDivergence
+        score += 1.5
+    if volumeSpike
+        score += 1.0
+    if math.abs(close - ema200Close) / atr > 2.5
+        score += 0.5
+    math.min(score, 10.0)
+
+passesHardRequirements(isLong) =>
+    bool pass = true
+    if requireDivergence
+        pass := pass and (isLong ? bullishDivergence : bearishDivergence)
+    if requireVolumeSpike
+        pass := pass and volumeSpike
+    pass := pass and hasReactionBar(isLong) and checkSignalSpacing()
+    pass
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SIGNAL GENERATION
+// ══════════════════════════════════════════════════════════════════════════════
+preQualLongBody  = longEmaRule   and biasBull and inSession and allowLong15  and volGateOK and confirmed and rsiLongOK  and dailyBiasAllowsLong
+preQualShortBody = shortEmaRule  and biasBear and inSession and allowShort15 and volGateOK and confirmed and rsiShortOK and dailyBiasAllowsShort
+preQualLongMACD  = macdCrossUp   and biasBull and inSession and longCloseOk  and allowLong15  and volGateOK and confirmed and rsiLongOK  and dailyBiasAllowsLong
+preQualShortMACD = macdCrossDown and biasBear and inSession and shortCloseOk and allowShort15 and volGateOK and confirmed and rsiShortOK and dailyBiasAllowsShort
+
+qualityScoreLong  = preQualLongBody  or preQualLongMACD  ? calcQualityScore(true)  : 0
+qualityScoreShort = preQualShortBody or preQualShortMACD ? calcQualityScore(false) : 0
+
+bool finalLongSignal  = false
+bool finalShortSignal = false
+
+if signalOnFlipOnly
+    finalLongSignal  := biasFlippedBull and not inCooldown and dailyBiasAllowsLong
+    finalShortSignal := biasFlippedBear and not inCooldown and dailyBiasAllowsShort
+else if allowSignalsAfterFlip
+    longValid  = (preQualLongBody  or preQualLongMACD)  and qualityScoreLong  >= minQualityScore and passesHardRequirements(true)
+    shortValid = (preQualShortBody or preQualShortMACD) and qualityScoreShort >= minQualityScore and passesHardRequirements(false)
+    if longValid  and bullSignalArmed and not inCooldown
+        finalLongSignal  := true
+        bullSignalArmed  := false
+    if shortValid and bearSignalArmed and not inCooldown
+        finalShortSignal := true
+        bearSignalArmed  := false
+else
+    finalLongSignal  := (preQualLongBody  or preQualLongMACD)  and qualityScoreLong  >= minQualityScore and passesHardRequirements(true)
+    finalShortSignal := (preQualShortBody or preQualShortMACD) and qualityScoreShort >= minQualityScore and passesHardRequirements(false)
+
+// Track signal bars — capped at 500 to prevent array overflow
+if finalLongSignal
+    lastSignalBar := bar_index
+    if array.size(signalBars) >= 500
+        array.shift(signalBars)
+    array.push(signalBars, bar_index)
+
+if finalShortSignal
+    lastSignalBar := bar_index
+    if array.size(signalBars) >= 500
+        array.shift(signalBars)
+    array.push(signalBars, bar_index)
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  BREAK-EVEN TRACKING
+//  When price hits the 2R partial TP → runner stop shifts to entry price.
+//  beLongArmed / beShortArmed flags ensure the BE strategy.exit fires
+//  exactly once per trade, preventing redundant order submissions.
+// ══════════════════════════════════════════════════════════════════════════════
+var float entryPriceLong   = na
+var float entryPriceShort  = na
+var float beStopLong       = na
+var float beStopShort      = na
+var bool  partialHitLong   = false
+var bool  partialHitShort  = false
+var float runnerStopLong   = na
+var float runnerStopShort  = na
+var bool  beLongArmed      = false   // one-shot flag: BE exit submitted for long
+var bool  beShortArmed     = false   // one-shot flag: BE exit submitted for short
+
+// Reset all trade state on new entry
+if finalLongSignal
+    entryPriceLong  := close
+    beStopLong      := finalLongStop
+    partialHitLong  := false
+    runnerStopLong  := finalLongStop
+    beLongArmed     := false
+
+if finalShortSignal
+    entryPriceShort := close
+    beStopShort     := finalShortStop
+    partialHitShort := false
+    runnerStopShort := finalShortStop
+    beShortArmed    := false
+
+// Detect 2R partial hit — shift runner stop to break-even
+if strategy.position_size > 0 and not partialHitLong and not na(entryPriceLong)
+    if high >= entryPriceLong + (entryPriceLong - beStopLong) * 2.0
+        partialHitLong := true
+        runnerStopLong := entryPriceLong
+
+if strategy.position_size < 0 and not partialHitShort and not na(entryPriceShort)
+    if low <= entryPriceShort - (beStopShort - entryPriceShort) * 2.0
+        partialHitShort := true
+        runnerStopShort := entryPriceShort
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  EXECUTION — TWO-LEGGED EXIT
+//  Leg 1 (P1): 50% quantity exits at 2R limit (or initial stop)
+//  Leg 2 (P2): remaining 50% runs to HTF 78.6% target (or initial stop)
+//  After P1 hits, "LONG BE" / "SHORT BE" replaces the runner stop with
+//  break-even — submitted exactly once via the beLongArmed / beShortArmed flag.
+// ══════════════════════════════════════════════════════════════════════════════
+if finalLongSignal
+    strategy.entry("LONG", strategy.long, comment="L")
+    strategy.exit("LONG P1", from_entry="LONG",
+         qty_percent = 50,
+         stop        = finalLongStop,
+         limit       = longPartialTP,
+         comment     = "2R partial")
+    strategy.exit("LONG P2", from_entry="LONG",
+         qty_percent = 100,
+         stop        = finalLongStop,
+         limit       = finalLongTarget,
+         comment     = "HTF runner")
+
+if finalShortSignal
+    strategy.entry("SHORT", strategy.short, comment="S")
+    strategy.exit("SHORT P1", from_entry="SHORT",
+         qty_percent = 50,
+         stop        = finalShortStop,
+         limit       = shortPartialTP,
+         comment     = "2R partial")
+    strategy.exit("SHORT P2", from_entry="SHORT",
+         qty_percent = 100,
+         stop        = finalShortStop,
+         limit       = finalShortTarget,
+         comment     = "HTF runner")
+
+// Break-even runner exit — submitted once after P1 is confirmed hit
+if partialHitLong and strategy.position_size > 0 and not beLongArmed
+    strategy.exit("LONG BE", from_entry="LONG",
+         qty_percent = 100,
+         stop        = runnerStopLong,
+         limit       = finalLongTarget,
+         comment     = "BE runner")
+    beLongArmed := true
+
+if partialHitShort and strategy.position_size < 0 and not beShortArmed
+    strategy.exit("SHORT BE", from_entry="SHORT",
+         qty_percent = 100,
+         stop        = runnerStopShort,
+         limit       = finalShortTarget,
+         comment     = "BE runner")
+    beShortArmed := true
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  VISUALS — ENTRY SIGNALS
+// ══════════════════════════════════════════════════════════════════════════════
+plotshape(finalLongSignal,  "Long Entry",
+     shape.triangleup,   location.belowbar, color.new(color.lime, 0), size=size.small)
+plotshape(finalShortSignal, "Short Entry",
+     shape.triangledown, location.abovebar, color.new(color.red,  0), size=size.small)
+
+// ── HTF Sweep + Displacement Emoji Signals ────────────────────────────────────
+plotshape(bullSweepDisp, title="Bull Sweep 🧹",
+     style    = shape.labelup,
+     location = location.belowbar,
+     color    = color.new(color.aqua, 0),
+     text     = "🧹",
+     textcolor= color.white,
+     size     = size.small)
+
+plotshape(bearSweepDisp, title="Bear Sweep 🧹",
+     style    = shape.labeldown,
+     location = location.abovebar,
+     color    = color.new(color.orange, 0),
+     text     = "🧹",
+     textcolor= color.white,
+     size     = size.small)
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ALERTS
+// ══════════════════════════════════════════════════════════════════════════════
+alertcondition(biasFlippedBull, "Bias Flip BULL",    "4H Bias flipped BULLISH")
+alertcondition(biasFlippedBear, "Bias Flip BEAR",    "4H Bias flipped BEARISH")
+alertcondition(finalLongSignal, "Long Entry",        "ELITE Long — 50% @ 2R, runner to HTF 78.6%")
+alertcondition(finalShortSignal,"Short Entry",       "ELITE Short — 50% @ 2R, runner to HTF 78.6%")
+alertcondition(bullSweepDisp,   "HTF Bull Sweep 🧹", "HTF Bullish Sweep + Displacement — institutional long context")
+alertcondition(bearSweepDisp,   "HTF Bear Sweep 🧹", "HTF Bearish Sweep + Displacement — institutional short context")
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DEBUG TABLE (visible only when Debug Mode = true)
+// ══════════════════════════════════════════════════════════════════════════════
+if debugMode
+    var table dt = table.new(position.top_right, 2, 20,
+         bgcolor=color.new(color.black, 80), border_width=1)
+    if barstate.islast
+        tierLabel =
+             froteTier == 1 ? "SESSION→DAILY"    :
+             froteTier == 2 ? "DAILY→WEEKLY"      :
+             froteTier == 3 ? "WEEKLY→MONTHLY"    :
+             froteTier == 4 ? "MONTHLY→QUARTERLY" :
+             froteTier == 5 ? "QUARTERLY→YEARLY"  :
+             "YEARLY"
+        table.cell(dt, 0, 0,  "FROTE Chain",       text_color=color.white,  bgcolor=color.new(color.navy,50))
+        table.cell(dt, 1, 0,  tierLabel,            text_color=color.yellow, bgcolor=color.new(color.navy,50))
+        table.cell(dt, 0, 1,  "HTF Range H",        text_color=color.white)
+        table.cell(dt, 1, 1,  str.tostring(nextHigh,         "#.#####"), text_color=color.white)
+        table.cell(dt, 0, 2,  "HTF Range L",        text_color=color.white)
+        table.cell(dt, 1, 2,  str.tostring(nextLow,          "#.#####"), text_color=color.white)
+        table.cell(dt, 0, 3,  "HTF 78.6% Top",      text_color=color.white)
+        table.cell(dt, 1, 3,  str.tostring(next786Top,       "#.#####"), text_color=color.aqua)
+        table.cell(dt, 0, 4,  "HTF 78.6% Bot",      text_color=color.white)
+        table.cell(dt, 1, 4,  str.tostring(next786Bot,       "#.#####"), text_color=color.orange)
+        table.cell(dt, 0, 5,  "Long 2R TP",         text_color=color.white)
+        table.cell(dt, 1, 5,  str.tostring(longPartialTP,    "#.#####"), text_color=color.lime)
+        table.cell(dt, 0, 6,  "Short 2R TP",        text_color=color.white)
+        table.cell(dt, 1, 6,  str.tostring(shortPartialTP,   "#.#####"), text_color=color.red)
+        table.cell(dt, 0, 7,  "Long Runner Tgt",    text_color=color.white)
+        table.cell(dt, 1, 7,  str.tostring(finalLongTarget,  "#.#####"), text_color=color.aqua)
+        table.cell(dt, 0, 8,  "Short Runner Tgt",   text_color=color.white)
+        table.cell(dt, 1, 8,  str.tostring(finalShortTarget, "#.#####"), text_color=color.orange)
+        table.cell(dt, 0, 9,  "Partial Hit Long",   text_color=color.white)
+        table.cell(dt, 1, 9,  partialHitLong  ? "✓ BE ACTIVE" : "waiting",
+             text_color=partialHitLong  ? color.lime : color.gray)
+        table.cell(dt, 0, 10, "Partial Hit Short",  text_color=color.white)
+        table.cell(dt, 1, 10, partialHitShort ? "✓ BE ACTIVE" : "waiting",
+             text_color=partialHitShort ? color.lime : color.gray)
+        table.cell(dt, 0, 11, "4H Bias",            text_color=color.white)
+        table.cell(dt, 1, 11, biasBull ? "BULL" : biasBear ? "BEAR" : "NONE",
+             text_color=biasBull ? color.lime : biasBear ? color.red : color.gray)
+        table.cell(dt, 0, 12, "Daily Bias",         text_color=color.white)
+        table.cell(dt, 1, 12, dailyBull ? "BULL" : dailyBear ? "BEAR" : "NEUTRAL",
+             text_color=dailyBull ? color.lime : dailyBear ? color.red : color.gray)
+        table.cell(dt, 0, 13, "Vol Gate",           text_color=color.white)
+        table.cell(dt, 1, 13, volGateOK ? "✓" : "✗", text_color=volGateOK ? color.lime : color.red)
+        table.cell(dt, 0, 14, "Long Stop",          text_color=color.white)
+        table.cell(dt, 1, 14, validLongStop  ?
+             str.tostring(finalLongStop,  "#.#####") : "ATR fallback",
+             text_color=validLongStop  ? color.lime : color.orange)
+        table.cell(dt, 0, 15, "Short Stop",         text_color=color.white)
+        table.cell(dt, 1, 15, validShortStop ?
+             str.tostring(finalShortStop, "#.#####") : "ATR fallback",
+             text_color=validShortStop ? color.lime : color.orange)
+        table.cell(dt, 0, 16, "Sweep TF",           text_color=color.white)
+        table.cell(dt, 1, 16, sweepTF,              text_color=color.yellow)
+        table.cell(dt, 0, 17, "Disp Multiplier",    text_color=color.white)
+        table.cell(dt, 1, 17, str.tostring(dispMultiplier, "#.#") + "×", text_color=color.yellow)
+        table.cell(dt, 0, 18, "Bull Sweep Raw",     text_color=color.white)
+        table.cell(dt, 1, 18, bullSweepSignal ? "✓" : "—",
+             text_color=bullSweepSignal ? color.aqua : color.gray)
+        table.cell(dt, 0, 19, "Bear Sweep Raw",     text_color=color.white)
+        table.cell(dt, 1, 19, bearSweepSignal ? "✓" : "—",
+             text_color=bearSweepSignal ? color.orange : color.gray)
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  INSTITUTIONAL TRADE LAYOUT SYSTEM
+//  Boxes and lines spawn on each new trade signal, extend while in position,
+//  and are replaced by the next trade. Object counts are bounded by the
+//  strategy max_boxes_count / max_lines_count / max_labels_count = 500 above.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Utility: format price to tick precision
+pStr(float p) =>
+    str.tostring(p, format.mintick)
+
+// Utility: compute R-multiple label (retained for optional display use)
+rMult(float entryP, float stopP, float tgtP, bool isLong) =>
+    float risk   = math.abs(entryP - stopP)
+    float reward = isLong ? (tgtP - entryP) : (entryP - tgtP)
+    risk > 0.0 ? str.tostring(math.round(reward / risk, 1)) + "R" : "?"
+
+// Persistent drawing objects — one set active at a time
+var box   vRiskBox   = na
+var box   vRwdBox    = na
+var line  vEntryLine = na
+var line  vStopLine  = na
+var line  vTp1Line   = na
+var line  vTp2Line   = na
+var label vEntryLbl  = na
+var label vStopLbl   = na
+var label vTp1Lbl    = na
+var label vTp2Lbl    = na
+
+// Trade direction tracker (retained as architecture state)
+var float vE   = na
+var bool  vLng = false
+
+// ── Helper: clear all active drawing objects ──────────────────────────────────
+clearDrawings() =>
+    if not na(vRiskBox)
+        box.delete(vRiskBox)
+
+    if not na(vRwdBox)
+        box.delete(vRwdBox)
+
+    if not na(vEntryLine)
+        line.delete(vEntryLine)
+
+    if not na(vStopLine)
+        line.delete(vStopLine)
+
+    if not na(vTp1Line)
+        line.delete(vTp1Line)
+
+    if not na(vTp2Line)
+        line.delete(vTp2Line)
+
+    if not na(vEntryLbl)
+        label.delete(vEntryLbl)
+
+    if not na(vStopLbl)
+        label.delete(vStopLbl)
+
+    if not na(vTp1Lbl)
+        label.delete(vTp1Lbl)
+
+    if not na(vTp2Lbl)
+        label.delete(vTp2Lbl)
+// ── Spawn LONG trade layout ───────────────────────────────────────────────────
+if finalLongSignal
+    clearDrawings()
+
+    vE   := close
+    vLng := true
+
+    float lSL = finalLongStop
+    float lT1 = longPartialTP
+    float lT2 = finalLongTarget
+    int   lB  = bar_index
+
+    vRiskBox   := box.new(lB, vE,  lB + 1, lSL, bgcolor=color.new(color.red,  85))
+    vRwdBox    := box.new(lB, lT1, lB + 1, vE,  bgcolor=color.new(color.lime, 85))
+    vEntryLine := line.new(lB, vE,  lB + 1, vE,  color=color.white, style=line.style_dashed)
+    vStopLine  := line.new(lB, lSL, lB + 1, lSL, color=color.red,   style=line.style_dashed)
+    vTp1Line   := line.new(lB, lT1, lB + 1, lT1, color=color.lime,  style=line.style_dashed)
+    vTp2Line   := line.new(lB, lT2, lB + 1, lT2, color=color.aqua,  style=line.style_dashed)
+    vEntryLbl  := label.new(lB + 1, vE,  "ENTRY "  + pStr(vE))
+    vStopLbl   := label.new(lB + 1, lSL, "SL "     + pStr(lSL))
+    vTp1Lbl    := label.new(lB + 1, lT1, "TP1 "    + pStr(lT1))
+    vTp2Lbl    := label.new(lB + 1, lT2, "RUNNER " + pStr(lT2))
+
+// ── Spawn SHORT trade layout ──────────────────────────────────────────────────
+if finalShortSignal
+    clearDrawings()
+
+    vE   := close
+    vLng := false
+
+    float sSL = finalShortStop
+    float sT1 = shortPartialTP
+    float sT2 = finalShortTarget
+    int   sB  = bar_index
+
+    vRiskBox   := box.new(sB, sSL, sB + 1, vE,  bgcolor=color.new(color.red,  85))
+    vRwdBox    := box.new(sB, vE,  sB + 1, sT1, bgcolor=color.new(color.lime, 85))
+    vEntryLine := line.new(sB, vE,  sB + 1, vE,  color=color.white, style=line.style_dashed)
+    vStopLine  := line.new(sB, sSL, sB + 1, sSL, color=color.red,   style=line.style_dashed)
+    vTp1Line   := line.new(sB, sT1, sB + 1, sT1, color=color.lime,  style=line.style_dashed)
+    vTp2Line   := line.new(sB, sT2, sB + 1, sT2, color=color.aqua,  style=line.style_dashed)
+    vEntryLbl  := label.new(sB + 1, vE,  "ENTRY "  + pStr(vE))
+    vStopLbl   := label.new(sB + 1, sSL, "SL "     + pStr(sSL))
+    vTp1Lbl    := label.new(sB + 1, sT1, "TP1 "    + pStr(sT1))
+    vTp2Lbl    := label.new(sB + 1, sT2, "RUNNER " + pStr(sT2))
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  EXTEND DRAWINGS WHILE IN TRADE
+// ══════════════════════════════════════════════════════════════════════════════
+bool vTradeActive = strategy.position_size != 0 and not na(vE)
+
+if vTradeActive
+    int rEdge = bar_index + 1
+
+    if not na(vRiskBox)
+        box.set_right(vRiskBox, rEdge)
+
+    if not na(vRwdBox)
+        box.set_right(vRwdBox, rEdge)
+
+    if not na(vEntryLine)
+        line.set_x2(vEntryLine, rEdge)
+
+    if not na(vStopLine)
+        line.set_x2(vStopLine, rEdge)
+
+    if not na(vTp1Line)
+        line.set_x2(vTp1Line, rEdge)
+
+    if not na(vTp2Line)
+        line.set_x2(vTp2Line, rEdge)
+
+    if not na(vEntryLbl)
+        label.set_x(vEntryLbl, rEdge)
+
+    if not na(vStopLbl)
+        label.set_x(vStopLbl, rEdge)
+
+    if not na(vTp1Lbl)
+        label.set_x(vTp1Lbl, rEdge)
+
+    if not na(vTp2Lbl)
+        label.set_x(vTp2Lbl, rEdge)
