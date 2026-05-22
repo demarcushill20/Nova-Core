@@ -30,6 +30,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from novatrade.data.bar_aggregator import BarAggregator
@@ -153,6 +154,10 @@ class LiveLoop:
         self._running = False
         self._stop_event: asyncio.Event | None = None
         self._health_cycle_count = 0
+        # Tracks the (yyyy, mm, dd, rollover_hour) key of the most recent
+        # pre-rollover sweep so we cancel pending orders at most once per
+        # UTC rollover boundary.
+        self._last_rollover_sweep_key: tuple[int, int, int, int] | None = None
 
     # -- Public API --------------------------------------------------------
 
@@ -661,6 +666,15 @@ class LiveLoop:
                                         dt_ms,
                                     )
 
+                    # Pre-rollover sweep: cancel pending stop/limit orders in
+                    # the 5 minutes before the rollover dead zone starts so
+                    # they cannot fill during the rollover spread spike.
+                    # See _pre_rollover_sweep_if_due() for the why.
+                    try:
+                        await self._pre_rollover_sweep_if_due()
+                    except Exception:
+                        log.exception("pre_rollover_sweep error — continuing")
+
                     # Broker ↔ Agent state reconciliation + supervisor check.
                     # When the agent has no open or pending position, these
                     # broker polls produce no useful work but still burn
@@ -894,6 +908,89 @@ class LiveLoop:
         if self._state_store and hasattr(self._state_store, "base_dir"):
             return str(self._state_store.base_dir.parent.parent)
         return "/home/nova/nova-core"
+
+    async def _pre_rollover_sweep_if_due(self) -> None:
+        """Cancel all pending orders 5 minutes before the rollover dead zone.
+
+        The PreTradeGate's rollover dead zone (default 21:00-22:00 UTC) only
+        blocks NEW order placement during the window. Pending stop/limit
+        orders placed earlier in the session sit at the broker through the
+        rollover spread spike and fill at heavy slippage (see incident
+        2026-05-19: -$3,688 on a 5.9-pip-stop trade due to ~10 pip fill
+        slippage during the spike). This sweep cancels resting orders before
+        they get caught.
+
+        Runs at most once per UTC date per rollover boundary, when the wall
+        clock is in [rollover_start - 5min, rollover_start). Skips when
+        the rollover dead zone is disabled, the adapter is missing, or the
+        risk engine isn't wired up.
+        """
+        if (
+            self._risk_engine is None
+            or self._adapter is None
+            or not getattr(self._risk_engine, "_risk", None)
+            or not self._risk_engine._risk.rollover_dead_zone_enabled
+        ):
+            return
+
+        start_hour = self._risk_engine._risk.rollover_start_hour_utc
+        sweep_hour = (start_hour - 1) % 24  # hour preceding rollover start
+
+        now = datetime.now(timezone.utc)
+        if now.hour != sweep_hour or now.minute < 55:
+            return
+
+        today_key = (now.year, now.month, now.day, start_hour)
+        if self._last_rollover_sweep_key == today_key:
+            return
+        self._last_rollover_sweep_key = today_key
+
+        try:
+            orders = await self._adapter.get_orders()
+        except Exception:
+            log.warning("pre_rollover_sweep: get_orders failed", exc_info=True)
+            return
+
+        if not orders:
+            log.info(
+                "pre_rollover_sweep: no pending orders to cancel before %02d:00 UTC dead zone",
+                start_hour,
+            )
+            return
+
+        cancelled = 0
+        failed = 0
+        for order in orders:
+            try:
+                await self._adapter.cancel_order(order.order_id)
+                cancelled += 1
+            except Exception:
+                failed += 1
+                log.warning(
+                    "pre_rollover_sweep: cancel failed for order=%s",
+                    getattr(order, "order_id", "?"),
+                    exc_info=True,
+                )
+
+        log.warning(
+            "PRE_ROLLOVER_SWEEP: cancelled %d pending orders before %02d:00 UTC dead zone (failed=%d)",
+            cancelled,
+            start_hour,
+            failed,
+        )
+
+        # Reset agent + strategy if they thought they had a resting order at
+        # the broker — otherwise reconciliation will keep waiting on a ghost.
+        try:
+            agent = self._live_agent.trading_agent
+            if agent.state in (AgentState.PENDING_LONG, AgentState.PENDING_SHORT):
+                agent.force_flat(reason="pre_rollover_sweep")
+        except Exception:
+            log.warning("pre_rollover_sweep: agent reset failed", exc_info=True)
+        try:
+            self._live_agent.strategy_engine.cancel_pending()
+        except Exception:
+            log.debug("pre_rollover_sweep: strategy_engine.cancel_pending() failed", exc_info=True)
 
     async def _check_hard_risk_supervisor(self) -> None:
         """Check HardRiskSupervisor for emergency actions and execute them.
