@@ -58,6 +58,11 @@ class GuardConfig:
     caution_calls_15m: int = 10
     protection_calls_15m: int = 20
 
+    # Minimum absolute calls required before burn-rate multiplier can trigger escalation
+    burn_rate_min_calls_60m_caution: int = 8
+    burn_rate_min_calls_60m_protection: int = 10
+    burn_rate_min_calls_60m_critical: int = 15
+
     # Runaway detection
     same_caller_threshold_60m: int = 25
     same_task_threshold_60m: int = 10
@@ -363,7 +368,7 @@ def compute_burn_rate() -> BurnRateMetrics:
 
     # Burn rate: current 60m rate vs baseline
     current_rate = len(last_60m)  # calls in last hour
-    burn_mult = current_rate / max(baseline_per_hour, 0.5)  # floor at 0.5 to avoid div-by-zero spike
+    burn_mult = current_rate / max(baseline_per_hour, 3.0)  # floor at 3.0 to prevent low-baseline false positives
 
     # Caller analysis (60m window)
     caller_counts: dict[str, int] = {}
@@ -579,7 +584,10 @@ def evaluate_protection_mode(
         new_mode = max(new_mode, ProtectionMode.CAUTION)
 
     # Critical lockdown triggers
-    if burn.burn_rate_multiplier >= cfg.critical_burn_multiplier:
+    if (
+        burn.burn_rate_multiplier >= cfg.critical_burn_multiplier
+        and burn.claude_calls_last_60m >= cfg.burn_rate_min_calls_60m_critical
+    ):
         reasons.append(f"burn_rate_critical: {burn.burn_rate_multiplier}x")
         new_mode = max(new_mode, ProtectionMode.CRITICAL_LOCKDOWN)
     if burn.claude_calls_last_60m >= cfg.critical_calls_60m:
@@ -590,7 +598,10 @@ def evaluate_protection_mode(
         new_mode = max(new_mode, ProtectionMode.CRITICAL_LOCKDOWN)
 
     # Protection triggers
-    if burn.burn_rate_multiplier >= cfg.protection_burn_multiplier:
+    if (
+        burn.burn_rate_multiplier >= cfg.protection_burn_multiplier
+        and burn.claude_calls_last_60m >= cfg.burn_rate_min_calls_60m_protection
+    ):
         reasons.append(f"burn_rate_high: {burn.burn_rate_multiplier}x")
         new_mode = max(new_mode, ProtectionMode.PROTECTION)
     if burn.claude_calls_last_60m >= cfg.protection_calls_60m:
@@ -601,7 +612,10 @@ def evaluate_protection_mode(
         new_mode = max(new_mode, ProtectionMode.PROTECTION)
 
     # Caution triggers
-    if burn.burn_rate_multiplier >= cfg.caution_burn_multiplier:
+    if (
+        burn.burn_rate_multiplier >= cfg.caution_burn_multiplier
+        and burn.claude_calls_last_60m >= cfg.burn_rate_min_calls_60m_caution
+    ):
         reasons.append(f"burn_rate_elevated: {burn.burn_rate_multiplier}x")
         new_mode = max(new_mode, ProtectionMode.CAUTION)
     if burn.claude_calls_last_60m >= cfg.caution_calls_60m:

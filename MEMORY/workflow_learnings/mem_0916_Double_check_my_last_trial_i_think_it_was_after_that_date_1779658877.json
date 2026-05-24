@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0916_Double_check_my_last_trial_i_think_it_was_after_that_date_1779658877",
+  "workflow_id": "0916_Double_check_my_last_trial_i_think_it_was_after_that_date",
+  "task_summary": "Verified last FTMO trial started May 16, 2026 (day 8/14), account 2a8ad741 active but experiencing subscription timeouts",
+  "task_class": "simple",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Verified last FTMO trial started May 16, 2026 (day 8/14), account 2a8ad741 active but experiencing subscription timeouts"
+  ],
+  "successful_patterns": [
+    "task_completed: 0916_Double_check_my_last_trial_i_think_it_was_after_that_date"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Verified last FTMO trial started May 16, 2026 (day 8/14), account 2a8ad741 active but experiencing subscription timeouts",
+  "created_at": "2026-05-24T21:41:17Z",
+  "confidence": "low"
+}

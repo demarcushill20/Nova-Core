@@ -1,6 +1,6 @@
 {
-  "artifact_id": "mem_0877_escalate_strategy_validity_for_human_review_1778880272",
-  "workflow_id": "0877_escalate_strategy_validity_for_human_review",
+  "artifact_id": "mem_0893_research_execution_pipeline_gaps_1779236665",
+  "workflow_id": "0893_research_execution_pipeline_gaps",
   "task_summary": "0/1 steps succeeded, 0/1 contracts valid, aggregate F (0.00)",
   "task_class": "unknown",
   "roles_involved": [
@@ -10,11 +10,13 @@
     "0/1 steps succeeded, 0/1 contracts valid, aggregate F (0.00)"
   ],
   "successful_patterns": [
-    "plan_revised: plan plan_0877_escalate_strategy_validity_for_human_review_1778880238 (failed)"
+    "plan_revised: plan plan_0893_research_execution_pipeline_gaps_1779236648 (failed)"
   ],
   "failure_patterns": [],
   "verification_outcome": "not_verified",
   "reusable_guidance": "0/1 steps succeeded, 0/1 contracts valid, aggregate F (0.00)",
-  "created_at": "2026-05-15T21:24:32Z",
-  "confidence": "medium"
+  "created_at": "2026-05-20T00:24:25Z",
+  "confidence": "medium",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0898_escalate_strategy_validity_for_human_review_1779312608"
 }

@@ -80,10 +80,12 @@ Cross-session memory lives in Fusion Memory (Pinecone + Neo4j + Redis). The `mem
 
 ## Skill Creation Policy
 
-- **Never auto-create skills during autonomous workflows.** Skills should only be created when the operator explicitly requests it (e.g., "turn this into a skill", "create a skill for X").
-- Do not capture patterns, workflow learnings, or debugging techniques as new skills unless asked.
-- Store reusable patterns in Fusion Memory or Obsidian vault notes instead — skills are heavyweight and add per-message token overhead.
-- If a pattern seems genuinely worth promoting to a skill, note it in the session checkpoint for the operator to decide later.
+- **Agents may autonomously create and update skills** when a reusable workflow, debugging pattern, tool protocol, project convention, or operator preference would materially improve future work.
+- Prefer skills for procedural knowledge: multi-step workflows, tool-use recipes, verification checklists, recurring pitfalls, and cross-agent operating protocols.
+- Keep skills high-signal and scoped. Do not create skills for one-off task progress, stale metrics, raw file summaries, PR/issue numbers, commit SHAs, or facts likely to expire within a week.
+- Use Fusion Memory or Obsidian vault notes for declarative project facts, decisions, research findings, and human-readable context; use skills for repeatable procedures.
+- When creating or updating skills, include clear trigger conditions, exact commands/tool calls where useful, pitfalls, and verification steps. Patch stale skills immediately when discovered.
+- Mention any newly created or significantly updated skill in the end-of-turn summary so the operator can prune or redirect it if desired.
 
 ## Runbook
 

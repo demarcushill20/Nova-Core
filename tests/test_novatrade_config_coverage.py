@@ -365,7 +365,7 @@ class TestAntiEADetectionConfig:
         assert config.london_fix_start_minute_utc == 45
         assert config.london_fix_end_hour_utc == 16
         assert config.london_fix_end_minute_utc == 15
-        assert config.min_sl_distance_pips == 2.0
+        assert config.min_sl_distance_pips == 1.0
 
     def test_anti_ea_custom_values(self):
         """Test anti-EA-detection with custom values."""

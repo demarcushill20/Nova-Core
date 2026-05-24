@@ -735,25 +735,25 @@ class TestSLDistance:
         assert "must be above" in sl.detail
 
     def test_micro_stop_denied(self):
-        """SL distance < 2 pips (default min) → denied."""
+        """SL distance < 1 pip (default min) → denied."""
         gate = PreTradeGate(_cfg())
-        # Entry 1.1000, SL 1.09990 → 1 pip (< 2 min)
+        # Entry 1.1000, SL 1.09995 → 0.5 pips (< 1.0 min)
         decision = gate.evaluate(
-            _order(side=OrderSide.BUY, price=1.1000, stop_loss=1.09990),
+            _order(side=OrderSide.BUY, price=1.1000, stop_loss=1.09995),
             _account(),
             [],
         )
         sl = next(c for c in decision.checks if c.name == "sl_distance")
         assert not sl.passed
-        assert "1.0 pips" in sl.detail
-        assert "minimum 2" in sl.detail
+        assert "0.5 pips" in sl.detail
+        assert "minimum 1" in sl.detail
 
     def test_at_minimum_passes(self):
-        """SL distance >= 2 pips (default min) → passes."""
+        """SL distance >= 1 pip (default min) → passes."""
         gate = PreTradeGate(_cfg())
-        # Entry 1.1000, SL 1.09970 → 3 pips (>= 2 min)
+        # Entry 1.1000, SL 1.09980 → 2 pips (>= 1 min)
         decision = gate.evaluate(
-            _order(side=OrderSide.BUY, price=1.1000, stop_loss=1.09970),
+            _order(side=OrderSide.BUY, price=1.1000, stop_loss=1.09980),
             _account(),
             [],
         )
