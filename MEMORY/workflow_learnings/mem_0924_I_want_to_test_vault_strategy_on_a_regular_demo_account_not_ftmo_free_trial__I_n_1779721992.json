@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0924_I_want_to_test_vault_strategy_on_a_regular_demo_account_not_ftmo_free_trial__I_n_1779721992",
+  "workflow_id": "0924_I_want_to_test_vault_strategy_on_a_regular_demo_account_not_ftmo_free_trial__I_n",
+  "task_summary": "Switched vault strategy from OANDA FTMO trial to permanent MetaQuotes demo account (e7953280), verified connection, restarted service",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Switched vault strategy from OANDA FTMO trial to permanent MetaQuotes demo account (e7953280), verified connection, restarted service"
+  ],
+  "successful_patterns": [
+    "task_completed: 0924_I_want_to_test_vault_strategy_on_a_regular_demo_account_not_ftmo_free_trial__I_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Switched vault strategy from OANDA FTMO trial to permanent MetaQuotes demo account (e7953280), verified connection, restarted service",
+  "created_at": "2026-05-25T15:13:12Z",
+  "confidence": "low"
+}

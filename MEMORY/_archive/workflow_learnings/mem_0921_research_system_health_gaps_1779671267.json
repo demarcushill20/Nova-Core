@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0921_research_system_health_gaps_1779671267",
+  "workflow_id": "0921_research_system_health_gaps",
+  "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0921_research_system_health_gaps_1779670729 (done)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-05-25T01:07:47Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0923_research_strategy_validity_gaps_1779695184"
+}

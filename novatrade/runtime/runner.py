@@ -1128,17 +1128,39 @@ def main() -> None:
     if pipeline == "live":
         log.info("selected pipeline: LIVE (full-Python)")
 
+        _CONNECT_BACKOFF_BASE = 10
+        _CONNECT_BACKOFF_MAX = 300
+
         async def _start_live() -> None:
-            try:
-                live_loop = await build_live_stack()
-            except RuntimeError as exc:
-                log_crash(type(exc), exc, exc.__traceback__, "live_stack_build")
-                log.error("LIVE STARTUP FAILED: %s", exc)
-                sys.exit(1)
-            except Exception as exc:
-                log_crash(type(exc), exc, exc.__traceback__, "live_stack_build_unexpected")
-                log.error("LIVE STARTUP FAILED with unexpected error: %s", exc)
-                sys.exit(1)
+            attempt = 0
+            while True:
+                try:
+                    live_loop = await build_live_stack()
+                    break
+                except RuntimeError as exc:
+                    attempt += 1
+                    delay = min(_CONNECT_BACKOFF_BASE * (2 ** min(attempt - 1, 5)), _CONNECT_BACKOFF_MAX)
+                    if attempt == 1:
+                        log_crash(type(exc), exc, exc.__traceback__, "live_stack_build")
+                    log.error(
+                        "LIVE STARTUP FAILED (attempt %d, retry in %ds): %s",
+                        attempt,
+                        delay,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
+                except Exception as exc:
+                    attempt += 1
+                    delay = min(_CONNECT_BACKOFF_BASE * (2 ** min(attempt - 1, 5)), _CONNECT_BACKOFF_MAX)
+                    if attempt == 1:
+                        log_crash(type(exc), exc, exc.__traceback__, "live_stack_build_unexpected")
+                    log.error(
+                        "LIVE STARTUP FAILED with unexpected error (attempt %d, retry in %ds): %s",
+                        attempt,
+                        delay,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
 
             try:
                 await run_live(live_loop, host=host, port=port)

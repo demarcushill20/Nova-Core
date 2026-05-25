@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0920_repair_strategy_validity_regression_1779669527",
+  "workflow_id": "0920_repair_strategy_validity_regression",
+  "task_summary": "Diagnosed MetaApi account credential failure (UNDEPLOYED + HTTP 400), restarted service to confirm, sent Telegram escalation \u2014 requires operator intervention to rotate OANDA Demo-1 trial",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed MetaApi account credential failure (UNDEPLOYED + HTTP 400), restarted service to confirm, sent Telegram escalation \u2014 requires operator intervention to rotate OANDA Demo-1 trial"
+  ],
+  "successful_patterns": [
+    "task_completed: 0920_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed MetaApi account credential failure (UNDEPLOYED + HTTP 400), restarted service to confirm, sent Telegram escalation \u2014 requires operator intervention to rotate OANDA Demo-1 trial",
+  "created_at": "2026-05-25T00:38:47Z",
+  "confidence": "low"
+}
