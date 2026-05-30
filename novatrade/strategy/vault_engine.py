@@ -527,6 +527,11 @@ class VaultLiveEngine:
                                 "engine": "vault",
                                 "pnl": ev.pnl,
                                 "raw_units": ev.qty,
+                                # Size the live partial off the REAL (auto-sized)
+                                # broker position, not the 1-lot-capped vault
+                                # state. qty_lots above reflects the capped state
+                                # and would close a trivial slice.
+                                "partial_fraction": self._irb_cfg.partial_exit_pct / 100.0,
                             },
                         )
                     )

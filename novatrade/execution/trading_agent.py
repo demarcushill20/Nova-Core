@@ -1235,7 +1235,55 @@ class TradingAgent:
                 elapsed_ms=elapsed,
             )
 
-        partial_volume = float(payload.get("volume", 0.0))
+        # Reconcile tracked volume to broker reality before sizing. Entries are
+        # placed VOLUME_AUTO_SIZE and risk-resized at the broker, but the fill
+        # notification only carries the pre-size signal volume — so
+        # self._position_volume can badly understate the real position. Sizing a
+        # partial off the stale value closes a near-trivial slice (the
+        # 2026-05-30 "0.5-lot partial on a 15-lot position" bug).
+        real_volume = await self._actual_position_volume()
+        if real_volume > 0:
+            self._position_volume = real_volume
+
+        # Prefer a fractional intent ("take 50% at 1R") sized off the real
+        # position; fall back to the legacy absolute volume for callers that
+        # still send one.
+        partial_fraction = payload.get("partial_fraction")
+        if partial_fraction is not None:
+            try:
+                frac = float(partial_fraction)
+            except (TypeError, ValueError):
+                frac = 0.0
+            if not (0.0 < frac < 1.0):
+                elapsed = (time.monotonic() - t0) * 1000
+                return AgentResult(
+                    success=False,
+                    state_after=self._state,
+                    rejected_reason=f"PARTIAL_CLOSE partial_fraction must be in (0,1), got {partial_fraction!r}",
+                    elapsed_ms=elapsed,
+                )
+            if real_volume <= 0:
+                # Could not confirm the real broker position volume (query failed
+                # or position not found). Sizing a fraction off the stale
+                # notify_fill volume would reproduce the partial-sizing bug
+                # (close a trivial slice), so skip the partial entirely — the
+                # runner keeps its full stop and exits normally. Better to bank
+                # no profit this bar than to mis-size against the broker.
+                elapsed = (time.monotonic() - t0) * 1000
+                log.warning(
+                    "PARTIAL_CLOSE skipped: could not confirm broker volume for %s — runner left intact",
+                    self._position_id,
+                )
+                return AgentResult(
+                    success=False,
+                    state_after=self._state,
+                    rejected_reason="PARTIAL_CLOSE could not confirm broker position volume — skipped",
+                    elapsed_ms=elapsed,
+                )
+            partial_volume = round(frac * real_volume, 2)
+        else:
+            partial_volume = float(payload.get("volume", 0.0))
+
         if partial_volume <= 0:
             elapsed = (time.monotonic() - t0) * 1000
             return AgentResult(
@@ -1325,6 +1373,26 @@ class TradingAgent:
             order_result=order_result,
             elapsed_ms=elapsed,
         )
+
+    async def _actual_position_volume(self) -> float:
+        """Return the broker's reported volume for the tracked position.
+
+        Authoritative source for sizing partial closes: the entry is auto-sized
+        at placement, so the broker's open volume can far exceed the signal
+        volume recorded by notify_fill. Returns 0.0 if the position can't be
+        found or the query fails (caller falls back to the tracked volume).
+        """
+        if not self._position_id:
+            return 0.0
+        try:
+            positions = await self._adapter.get_positions()
+        except Exception:
+            log.warning("could not fetch positions to size partial close — using tracked volume", exc_info=True)
+            return 0.0
+        for p in positions:
+            if getattr(p, "position_id", None) == self._position_id:
+                return float(p.volume)
+        return 0.0
 
     # -- External notifications --------------------------------------------
 

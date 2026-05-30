@@ -60,8 +60,28 @@ fi
 LIVE_CSV="$(ls -t OUTPUT/parity/live_trades_*.csv | head -1)"
 echo "[parity] live trades: $LIVE_CSV"
 
+# Select the backtest engine to match what the live runtime is actually
+# running. NOVATRADE_STRATEGY_LOGIC=vault_native => VaultLiveEngine (vault core);
+# diffing that against the nova IRBBacktester (which carries the documented
+# sign-flipping bug) would flag false "strategy drift" on every trade.
+# Resolution order: explicit env var > $ENVFILE > canonical live unit env >
+# default vault_native (the current live runtime, 2026-05). Override by exporting
+# NOVATRADE_STRATEGY_LOGIC=nova if comparing against the legacy engine.
+STRATEGY_LOGIC="${NOVATRADE_STRATEGY_LOGIC:-}"
+if [[ -z "$STRATEGY_LOGIC" ]]; then
+    STRATEGY_LOGIC="$(grep -hE '^NOVATRADE_STRATEGY_LOGIC=' "$ENVFILE" /etc/novacore/novatrade.env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' ')"
+fi
+STRATEGY_LOGIC="${STRATEGY_LOGIC:-vault_native}"
+if [[ "$STRATEGY_LOGIC" == "vault_native" ]]; then
+    BT_SCRIPT="scripts/backtest_window_vault_parity.py"
+    echo "[parity] strategy logic = vault_native → using vault-native backtest ($BT_SCRIPT)"
+else
+    BT_SCRIPT="scripts/backtest_window_for_parity.py"
+    echo "[parity] strategy logic = ${STRATEGY_LOGIC:-nova} → using nova backtest ($BT_SCRIPT)"
+fi
+
 echo "[parity] step 2/3: running backtest for the same window…"
-if ! python3 scripts/backtest_window_for_parity.py \
+if ! python3 "$BT_SCRIPT" \
         --start "$START" --end "$END" \
         --warmup-days "$WARMUP" \
         --env-file "$ENVFILE" > /tmp/parity_bt.log 2>&1; then

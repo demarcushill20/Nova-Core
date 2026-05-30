@@ -38,6 +38,7 @@ from novatrade.models import (
     OrderSide,
     OrderStatus,
     OrderType,
+    Position,
     SymbolPrice,
 )
 from novatrade.risk.risk_engine import RiskEngine
@@ -1147,3 +1148,105 @@ class TestDynamicSpreadAdjustment:
         )
         result = await agent._adjust_sl_for_live_spread(order, OrderSide.BUY, "EURUSD.sim")
         assert result.stop_loss is None
+
+
+# ---------------------------------------------------------------------------
+# Regression: partial-exit volume sizing (project_partial_exit_sizing_bug)
+# ---------------------------------------------------------------------------
+
+
+def _partial_payload(fraction: float = 0.5, **overrides) -> dict:
+    """Build a PARTIAL_CLOSE payload expressing the v5 'take 50% at 1R' intent.
+
+    The strategy intent is a FRACTION of the open position; the legacy absolute
+    `volume` is carried for back-compat but must not be trusted for sizing.
+    """
+    base = {
+        "strategy_name": "Rob Hoffman IRB",
+        "strategy_version": "5.0.0",
+        "action": "PARTIAL_CLOSE",
+        "symbol": "EURUSD",
+        "side": "BUY",
+        "partial_fraction": fraction,
+        # Legacy absolute volume from the (capped) vault-state signal — the
+        # value that caused the bug. Present so the unfixed path produces a
+        # clearly-wrong size rather than a >0 rejection.
+        "volume": 0.5,
+        "close_reason": "partial_tp",
+        "campaign": "",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestPartialCloseSizing:
+    """A partial-TP must close a fraction of the REAL broker position, not the
+    stale 1-lot signal volume.
+
+    Live regression (2026-05-30): entries are placed VOLUME_AUTO_SIZE and
+    risk-resized to ~15 lots at the broker, but the partial closed a fixed
+    ~0.5 lot (50% of the capped 1-lot signal), disabling the strategy's edge.
+    """
+
+    @pytest.mark.asyncio
+    async def test_partial_close_sizes_off_real_broker_position(self):
+        adapter = _make_adapter()
+        agent = _make_agent(adapter=adapter)
+
+        # At entry the position does not exist yet (no open positions).
+        await agent.process_alert(_signal_payload())
+        # Agent seeds its model with the stale 1.0-lot signal volume (bug seed).
+        agent.notify_fill("POS-001", fill_price=1.08765, volume=1.0)
+
+        # After fill, the broker holds the risk-resized 15-lot position.
+        real_pos = Position(
+            position_id="POS-001",
+            symbol="EURUSD.sim",
+            side=OrderSide.BUY,
+            volume=15.0,
+            open_price=1.08765,
+        )
+        adapter.get_positions = AsyncMock(return_value=[real_pos])
+
+        result = await agent.process_alert(_partial_payload(fraction=0.5))
+
+        assert result.success, getattr(result, "rejected_reason", None)
+        called_vol = adapter.close_position.call_args.kwargs.get("volume")
+        if called_vol is None and adapter.close_position.call_args.args:
+            # volume may be passed positionally
+            called_vol = adapter.close_position.call_args.args[-1]
+        # 50% of the REAL 15-lot position = 7.5 lots, NOT 50% of the 1-lot signal.
+        assert called_vol == pytest.approx(7.5, abs=0.01), (
+            f"partial closed {called_vol} lots; expected 7.5 (50% of real 15-lot position)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_partial_close_skipped_when_broker_volume_unconfirmed(self):
+        """If the real broker volume can't be confirmed (query fails / position
+        not found), a fractional partial is skipped rather than sized off the
+        stale signal volume — otherwise the 0.5-lot bug returns on any transient
+        broker desync."""
+        adapter = _make_adapter()
+        agent = _make_agent(adapter=adapter)
+
+        await agent.process_alert(_signal_payload())
+        agent.notify_fill("POS-001", fill_price=1.08765, volume=1.0)
+
+        # Broker reports no matching position (transient desync / lookup miss).
+        adapter.get_positions = AsyncMock(return_value=[])
+
+        result = await agent.process_alert(_partial_payload(fraction=0.5))
+
+        assert not result.success
+        assert "confirm broker position volume" in (result.rejected_reason or "")
+        adapter.close_position.assert_not_called()
+
+    def test_partial_idempotency_key_is_deterministic_per_bar(self):
+        """PARTIAL_CLOSE payloads must carry bar_close_time so the idempotency
+        key is stable per (action, bar, side). Without it the key falls back to
+        wall-clock and a retried same-bar partial could double-close."""
+        p1 = {"action": "PARTIAL_CLOSE", "side": "BUY", "bar_close_time": 1710003600}
+        p2 = {"action": "PARTIAL_CLOSE", "side": "BUY", "bar_close_time": 1710003600}
+        p3 = {"action": "PARTIAL_CLOSE", "side": "BUY", "bar_close_time": 1710007200}
+        assert make_idempotency_key(p1) == make_idempotency_key(p2)
+        assert make_idempotency_key(p1) != make_idempotency_key(p3)

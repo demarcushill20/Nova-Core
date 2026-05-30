@@ -461,7 +461,7 @@ class LiveTradingAgent:
         if signal.volume <= 0:
             log.error("PARTIAL_EXIT signal has volume <= 0 — skipping")
             return None
-        return {
+        payload = {
             "strategy_name": _STRATEGY_NAME,
             "strategy_version": _STRATEGY_VERSION,
             "action": "PARTIAL_CLOSE",
@@ -471,6 +471,21 @@ class LiveTradingAgent:
             "close_reason": signal.exit_reason or "partial_tp",
             "campaign": self._campaign,
         }
+        # Prefer fractional sizing ("take N% at 1R") so the agent closes a
+        # fraction of the REAL auto-sized broker position rather than the
+        # capped-state signal volume. See project_partial_exit_sizing_bug.
+        partial_fraction = signal.metadata.get("partial_fraction") if signal.metadata else None
+        if partial_fraction is not None:
+            payload["partial_fraction"] = partial_fraction
+        # Carry the bar timestamp so the idempotency key is deterministic per
+        # (action, bar, side); without it make_idempotency_key falls back to
+        # wall-clock and a retried partial for the same bar could double-close.
+        bar_close_time = signal.metadata.get("bar_close_time") if signal.metadata else None
+        if bar_close_time is None:
+            bar_close_time = signal.timestamp
+        if bar_close_time is not None:
+            payload["bar_close_time"] = int(bar_close_time)
+        return payload
 
     def _build_entry_payload(self, signal: LiveSignal) -> dict[str, Any] | None:
         """Build PLACE_STOP_ORDER or REPLACE_STOP_ORDER payload.
