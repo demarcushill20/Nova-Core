@@ -1128,16 +1128,25 @@ class LiveLoop:
             from novatrade.models import OrderSide
 
             pos = positions[0]
-            broker_side = "LONG" if getattr(pos, "type", "BUY") in ("BUY", "buy", "POSITION_TYPE_BUY") else "SHORT"
+            # Position.side is an OrderSide enum (".value" == "BUY"/"SELL");
+            # tolerate raw strings too. The old code read getattr(pos, "type")
+            # which never exists on Position, so EVERY adopted position defaulted
+            # to LONG — a short would be managed as a long (stop on the wrong side).
+            _raw_side = getattr(pos, "side", "BUY")
+            _side_str = str(getattr(_raw_side, "value", _raw_side)).upper()
+            broker_side = "LONG" if _side_str in ("BUY", "LONG", "POSITION_TYPE_BUY") else "SHORT"
             order_side = OrderSide.BUY if broker_side == "LONG" else OrderSide.SELL
 
-            # Volume sanity gate — refuse to adopt absurdly large positions.
-            # A $100K FTMO account should never exceed ~5 lots on a single pair.
-            _raw_max_vol = os.environ.get("NOVATRADE_MAX_ADOPT_VOLUME", "5.0")
+            # Volume sanity gate — refuse to adopt absurdly large orphans, but
+            # allow risk-sized positions. At 0.33% risk on a 100K account with
+            # tight (~1-3 pip) IRB stops, one position is legitimately 15-30 lots,
+            # so the old 5-lot cap wrongly refused real positions (left unmanaged).
+            # Override with NOVATRADE_MAX_ADOPT_VOLUME if sizing changes.
+            _raw_max_vol = os.environ.get("NOVATRADE_MAX_ADOPT_VOLUME", "50.0")
             try:
                 max_adopt_volume = float(_raw_max_vol)
             except (ValueError, TypeError):
-                max_adopt_volume = 5.0
+                max_adopt_volume = 50.0
                 log.error(
                     "RECONCILE: invalid NOVATRADE_MAX_ADOPT_VOLUME=%r, defaulting to %.1f",
                     _raw_max_vol,
@@ -1145,9 +1154,9 @@ class LiveLoop:
                 )
             if max_adopt_volume <= 0:
                 log.error(
-                    "RECONCILE: NOVATRADE_MAX_ADOPT_VOLUME=%.2f is non-positive, clamping to 5.0", max_adopt_volume
+                    "RECONCILE: NOVATRADE_MAX_ADOPT_VOLUME=%.2f is non-positive, clamping to 50.0", max_adopt_volume
                 )
-                max_adopt_volume = 5.0
+                max_adopt_volume = 50.0
             if pos.volume > max_adopt_volume:
                 log.critical(
                     "RECONCILE: REFUSING orphan adoption — volume %.2f lots exceeds "

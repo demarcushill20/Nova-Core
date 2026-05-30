@@ -248,3 +248,46 @@ class TestReconcileBrokerState:
         )
         await loop._reconcile_broker_state()
         live_agent.strategy_engine.cancel_pending.assert_called_once()
+
+    # -- Case 4: orphan adoption (restart while holding a position) ------------
+
+    @pytest.mark.asyncio
+    async def test_orphan_adoption_preserves_short_side(self, monkeypatch):
+        """A SHORT orphan must be adopted as SHORT, not LONG. Regression: the
+        adoption read getattr(pos, 'type') which never exists on Position, so
+        every orphan defaulted to LONG (a short would get a stop on the wrong
+        side)."""
+        from novatrade.models import OrderSide
+
+        monkeypatch.delenv("NOVATRADE_MAX_ADOPT_VOLUME", raising=False)
+        pos = FakePosition(position_id="orph_short", volume=2.0, side="SELL")
+        loop, live_agent, trading_agent = _make_live_loop(AgentState.FLAT, positions=[pos])
+
+        await loop._reconcile_broker_state()
+
+        trading_agent.recover_position.assert_called_once()
+        assert trading_agent.recover_position.call_args.kwargs["side"] == OrderSide.SELL
+        assert live_agent.strategy_engine.recover_position_state.call_args.kwargs["side"] == "SHORT"
+
+    @pytest.mark.asyncio
+    async def test_orphan_adoption_allows_risk_sized_volume(self, monkeypatch):
+        """A risk-sized ~15-lot orphan must be adopted, not refused. The old
+        5-lot cap left real positions unmanaged after a restart."""
+        monkeypatch.delenv("NOVATRADE_MAX_ADOPT_VOLUME", raising=False)
+        pos = FakePosition(position_id="orph_big", volume=15.0, side="BUY")
+        loop, live_agent, trading_agent = _make_live_loop(AgentState.FLAT, positions=[pos])
+
+        await loop._reconcile_broker_state()
+
+        trading_agent.recover_position.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_orphan_adoption_refuses_absurd_volume(self, monkeypatch):
+        """An orphan above the cap is still refused (manual review)."""
+        monkeypatch.setenv("NOVATRADE_MAX_ADOPT_VOLUME", "50.0")
+        pos = FakePosition(position_id="orph_huge", volume=200.0, side="BUY")
+        loop, live_agent, trading_agent = _make_live_loop(AgentState.FLAT, positions=[pos])
+
+        await loop._reconcile_broker_state()
+
+        trading_agent.recover_position.assert_not_called()
