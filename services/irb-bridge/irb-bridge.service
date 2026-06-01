@@ -1,0 +1,24 @@
+# systemd unit for the IRB baseline webhook bridge.
+# Install:  sudo cp irb-bridge.service /etc/systemd/system/
+#           sudo systemctl daemon-reload
+#           sudo systemctl enable --now irb-bridge
+# Logs:     journalctl -u irb-bridge -f
+
+[Unit]
+Description=IRB baseline TradingView -> MetaApi webhook bridge (EURUSD)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nova
+WorkingDirectory=/home/nova/nova-core/services/irb-bridge
+# Risk-based sizing — pinned explicitly so prod does not rely on code defaults.
+Environment=IRB_RISK_PCT=1.0
+Environment=IRB_MAX_LOT=50.0
+ExecStart=/home/nova/nova-core/services/irb-bridge/.venv/bin/python irb_bridge.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
