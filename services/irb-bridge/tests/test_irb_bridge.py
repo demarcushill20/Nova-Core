@@ -1,7 +1,10 @@
 # Tests for the IRB bridge sizing + reconcile state machine.
+import asyncio
+
+import pytest
 
 # Pure functions must import without MetaApi/env side effects.
-from irb_bridge import SizingCfg, _round_step, compute_desired_lot, risk_based_lot
+from irb_bridge import SizingCfg, _round_step, compute_desired_lot, reconcile, risk_based_lot
 
 CFG = SizingCfg(risk_pct=1.0, contract_size=100_000, min_lot=0.01, max_lot=50.0, lot_step=0.01, base_lot=0.10)
 
@@ -97,3 +100,70 @@ def test_new_entry_resets_state():
 def test_exit_with_no_open_trade_is_flat():
     lot, st = compute_desired_lot(EMPTY, 5_000_000, "exit_long_tp1", None, None, 100_000, CFG)
     assert lot == 0.0
+
+
+# --- Reconcile serialization ------------------------------------------------
+
+
+class FakeConn:
+    """Minimal MetaApi RPC stand-in with realistic async settle delay."""
+
+    def __init__(self):
+        self.positions = []
+        self._id = 0
+
+    async def get_positions(self):
+        await asyncio.sleep(0)
+        return [dict(p) for p in self.positions]
+
+    async def create_market_buy_order(self, sym, vol):
+        await asyncio.sleep(0.01)  # settle delay where races happen
+        self._id += 1
+        self.positions.append({"id": str(self._id), "symbol": sym, "type": "POSITION_TYPE_BUY", "volume": vol})
+
+    async def create_market_sell_order(self, sym, vol):
+        await asyncio.sleep(0.01)
+        self._id += 1
+        self.positions.append({"id": str(self._id), "symbol": sym, "type": "POSITION_TYPE_SELL", "volume": vol})
+
+    async def close_position(self, pid):
+        await asyncio.sleep(0.01)
+        self.positions = [p for p in self.positions if p["id"] != pid]
+
+    async def close_position_partially(self, pid, vol):
+        await asyncio.sleep(0.01)
+        for p in self.positions:
+            if p["id"] == pid:
+                p["volume"] = round(p["volume"] - vol, 2)
+
+
+def _net(conn):
+    return sum(p["volume"] if p["type"] == "POSITION_TYPE_BUY" else -p["volume"] for p in conn.positions)
+
+
+def test_concurrent_reconciles_serialize():
+    async def run():
+        conn = FakeConn()
+        lock = asyncio.Lock()
+        # entry to 0.10 then partial to 0.05 fire almost simultaneously;
+        # last-submitted target (0.05) must win once serialized.
+        await asyncio.gather(
+            reconcile(conn, 0.10, "EURUSD", 0.005, lock),
+            reconcile(conn, 0.05, "EURUSD", 0.005, lock),
+        )
+        return conn
+
+    conn = asyncio.run(run())
+    assert _net(conn) == pytest.approx(0.05, abs=0.005)
+
+
+def test_sign_flip_closes_then_opens():
+    async def run():
+        conn = FakeConn()
+        lock = asyncio.Lock()
+        await reconcile(conn, 0.10, "EURUSD", 0.005, lock)
+        await reconcile(conn, -0.10, "EURUSD", 0.005, lock)
+        return conn
+
+    conn = asyncio.run(run())
+    assert _net(conn) == pytest.approx(-0.10, abs=0.005)

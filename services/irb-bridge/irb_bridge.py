@@ -149,16 +149,64 @@ def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
+async def reconcile(conn, desired: float, symbol: str, epsilon: float, lock):
+    """Drive the broker net position for `symbol` to `desired` lots.
+
+    Serialized by `lock` so concurrent alerts never act on stale state: each
+    invocation re-reads positions only after the previous one has fully
+    completed (orders acked)."""
+    async with lock:
+        positions = await conn.get_positions()
+        sym = [p for p in positions if p["symbol"] == symbol]
+        current = sum((p["volume"] if p["type"] == "POSITION_TYPE_BUY" else -p["volume"]) for p in sym)
+        log.info("reconcile %s: current %+.2f -> desired %+.2f", symbol, current, desired)
+
+        same_sign = (current >= 0) == (desired >= 0)
+        if not same_sign or abs(desired) < epsilon:
+            for p in sym:
+                await conn.close_position(p["id"])
+            if abs(desired) < epsilon:
+                return
+            current = 0.0
+            sym = []
+
+        delta = desired - current
+        if abs(delta) < epsilon:
+            log.info("already in line — no order")
+            return
+        if delta > 0 and desired > 0:
+            await conn.create_market_buy_order(symbol, round(delta, 2))
+        elif delta < 0 and desired < 0:
+            await conn.create_market_sell_order(symbol, round(-delta, 2))
+        else:
+            await _reduce(conn, sym, abs(delta), epsilon)
+
+
+async def _reduce(conn, sym_positions, volume_to_close: float, epsilon: float) -> None:
+    remaining = volume_to_close
+    for p in sym_positions:
+        if remaining < epsilon:
+            break
+        chunk = min(p["volume"], remaining)
+        if chunk >= p["volume"] - epsilon:
+            await conn.close_position(p["id"])
+        else:
+            await conn.close_position_partially(p["id"], round(chunk, 2))
+        remaining -= chunk
+
+
 class Broker:
     def __init__(self) -> None:
         self.loop = asyncio.new_event_loop()
         self._connection = None
+        self._lock: asyncio.Lock | None = None  # created on the broker's own loop
         self._ready = threading.Event()
         t = threading.Thread(target=self._run_loop, daemon=True)
         t.start()
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self.loop)
+        self._lock = asyncio.Lock()
         if not DRY_RUN:
             self.loop.run_until_complete(self._connect())
         else:
@@ -207,50 +255,12 @@ class Broker:
             if DRY_RUN:
                 log.info("[DRY_RUN] would reconcile %s to %+.2f lots", SYMBOL, desired)
                 return
-
-            conn = self._connection
-            if conn is None:
+            if self._connection is None:
                 log.error("MetaApi not connected — dropping reconcile %s", desired)
                 return
-            positions = await conn.get_positions()
-            sym = [p for p in positions if p["symbol"] == SYMBOL]
-            current = sum((p["volume"] if p["type"] == "POSITION_TYPE_BUY" else -p["volume"]) for p in sym)
-            log.info("reconcile %s: current %+.2f -> desired %+.2f", SYMBOL, current, desired)
-
-            same_sign = (current >= 0) == (desired >= 0)
-
-            if not same_sign or abs(desired) < LOT_EPSILON:
-                for p in sym:
-                    await conn.close_position(p["id"])
-                if abs(desired) < LOT_EPSILON:
-                    return
-                current = 0.0
-
-            delta = desired - current
-            if abs(delta) < LOT_EPSILON:
-                log.info("already in line — no order")
-                return
-
-            if delta > 0 and desired > 0:
-                await conn.create_market_buy_order(SYMBOL, round(delta, 2))
-            elif delta < 0 and desired < 0:
-                await conn.create_market_sell_order(SYMBOL, round(-delta, 2))
-            else:
-                await self._reduce(conn, sym, abs(delta))
+            await reconcile(self._connection, desired, SYMBOL, LOT_EPSILON, self._lock)
         except Exception:
             log.exception("reconcile failed for desired=%s", desired)
-
-    async def _reduce(self, conn, sym_positions, volume_to_close: float) -> None:
-        remaining = volume_to_close
-        for p in sym_positions:
-            if remaining < LOT_EPSILON:
-                break
-            chunk = min(p["volume"], remaining)
-            if chunk >= p["volume"] - LOT_EPSILON:
-                await conn.close_position(p["id"])
-            else:
-                await conn.close_position_partially(p["id"], round(chunk, 2))
-            remaining -= chunk
 
 
 broker = Broker()
