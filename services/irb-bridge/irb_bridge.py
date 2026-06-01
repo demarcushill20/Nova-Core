@@ -183,6 +183,25 @@ class Broker:
     def submit_target(self, desired_lot: float) -> None:
         asyncio.run_coroutine_threadsafe(self._reconcile(desired_lot), self.loop)
 
+    def get_equity(self):
+        """Live account equity in USD, or None if unavailable (caller falls
+        back to base lot). In DRY_RUN, returns IRB_DRY_EQUITY (default 100k)."""
+        if DRY_RUN:
+            return float(os.environ.get("IRB_DRY_EQUITY", "100000"))
+        if self._connection is None:
+            log.error("get_equity: MetaApi not connected")
+            return None
+        fut = asyncio.run_coroutine_threadsafe(self._get_equity(), self.loop)
+        try:
+            return fut.result(timeout=10)
+        except Exception:
+            log.exception("get_equity failed")
+            return None
+
+    async def _get_equity(self):
+        info = await self._connection.get_account_information()
+        return float(info["equity"])
+
     async def _reconcile(self, desired: float) -> None:
         try:
             if DRY_RUN:
