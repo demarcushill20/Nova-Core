@@ -122,15 +122,32 @@ def compute_desired_lot(state: dict, position_size: float, comment: str, entry, 
     return desired, new_state
 
 
-SECRET = os.environ["IRB_WEBHOOK_SECRET"]
-METAAPI_TOKEN = os.environ["METAAPI_TOKEN"]
-METAAPI_ACCOUNT_ID = os.environ["METAAPI_ACCOUNT_ID"]
+# Env reads use .get() so the module imports cleanly under pytest (no secrets
+# required); live runs supply real values via .env / systemd.
+SECRET = os.environ.get("IRB_WEBHOOK_SECRET", "")
+METAAPI_TOKEN = os.environ.get("METAAPI_TOKEN", "")
+METAAPI_ACCOUNT_ID = os.environ.get("METAAPI_ACCOUNT_ID", "")
 METAAPI_REGION = os.environ.get("METAAPI_REGION", "london")
 SYMBOL = os.environ.get("IRB_SYMBOL", "EURUSD")
 BASE_LOT = float(os.environ.get("IRB_BASE_LOT", "0.10"))
 BIND_HOST = os.environ.get("IRB_BIND_HOST", "127.0.0.1")
 BIND_PORT = int(os.environ.get("IRB_BIND_PORT", "8081"))
 DRY_RUN = os.environ.get("IRB_DRY_RUN", "false").lower() == "true"
+
+RISK_PCT = float(os.environ.get("IRB_RISK_PCT", "1.0"))
+CONTRACT_SIZE = float(os.environ.get("IRB_CONTRACT_SIZE", "100000"))
+MIN_LOT = float(os.environ.get("IRB_MIN_LOT", "0.01"))
+MAX_LOT = float(os.environ.get("IRB_MAX_LOT", "50.0"))
+LOT_STEP = float(os.environ.get("IRB_LOT_STEP", "0.01"))
+
+SIZING = SizingCfg(
+    risk_pct=RISK_PCT,
+    contract_size=CONTRACT_SIZE,
+    min_lot=MIN_LOT,
+    max_lot=MAX_LOT,
+    lot_step=LOT_STEP,
+    base_lot=BASE_LOT,
+)
 
 STATE_FILE = BASE / "bridge_state.json"
 LOT_EPSILON = 0.005
@@ -142,7 +159,7 @@ def load_state() -> dict:
             return json.loads(STATE_FILE.read_text())
         except json.JSONDecodeError:
             log.warning("bridge_state.json corrupt — resetting")
-    return {"reference_size": None}
+    return {"side": 0, "entry_units": 0.0, "full_lot": 0.0, "last_fraction": 0.0}
 
 
 def save_state(state: dict) -> None:
@@ -263,36 +280,9 @@ class Broker:
             log.exception("reconcile failed for desired=%s", desired)
 
 
-broker = Broker()
-
-
-def map_to_lot(position_size: float) -> float:
-    """Map the strategy's net position to a demo lot.
-
-    First entry (flat -> position, or sign flip) sets the reference 'full
-    position'. Partial exits scale BASE_LOT by the surviving fraction.
-    Derived purely from position_size, so the TradingView alert only needs
-    that one placeholder."""
-    state = load_state()
-    ref = state.get("reference_size")
-    last = float(state.get("last_size", 0.0) or 0.0)
-
-    cur_sign = 1 if position_size > 0 else -1 if position_size < 0 else 0
-    last_sign = 1 if last > 0 else -1 if last < 0 else 0
-
-    new_entry = cur_sign != 0 and (last_sign == 0 or cur_sign != last_sign)
-    if new_entry or ref is None:
-        ref = abs(position_size) or None
-    elif cur_sign != 0 and ref and abs(position_size) > ref:
-        ref = abs(position_size)
-
-    state["reference_size"] = ref
-    state["last_size"] = position_size
-    save_state(state)
-
-    if not ref or cur_sign == 0:
-        return 0.0
-    return cur_sign * BASE_LOT * (abs(position_size) / ref)
+# Created in __main__ only — instantiating Broker() spawns a thread (and a live
+# MetaApi connection), which must not happen at import time under pytest.
+broker: Broker | None = None
 
 
 app = Flask(__name__)
@@ -304,7 +294,9 @@ def health():
         status="ok",
         dry_run=DRY_RUN,
         symbol=SYMBOL,
+        risk_pct=RISK_PCT,
         base_lot=BASE_LOT,
+        max_lot=MAX_LOT,
         account=METAAPI_ACCOUNT_ID,
         region=METAAPI_REGION,
     )
@@ -331,19 +323,39 @@ def webhook():
     if math.isnan(position_size):
         return jsonify(error="missing position_size"), 400
 
-    desired = map_to_lot(position_size)
+    comment = str(payload.get("comment", ""))
+
+    def _opt_float(key):
+        try:
+            return float(payload[key])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    entry = _opt_float("entry")
+    stop = _opt_float("stop")
+
+    equity = broker.get_equity() if broker is not None else None
+    state = load_state()
+    desired, new_state = compute_desired_lot(state, position_size, comment, entry, stop, equity, SIZING)
+    save_state(new_state)
+
     log.info(
-        "webhook ok: pos_size=%s comment=%r action=%r -> target %+.2f lots",
+        "webhook ok: pos_size=%s comment=%r action=%r entry=%s stop=%s equity=%s -> target %+.2f lots",
         position_size,
-        payload.get("comment"),
+        comment,
         payload.get("action"),
+        entry,
+        stop,
+        equity,
         desired,
     )
 
-    broker.submit_target(desired)
+    if broker is not None:
+        broker.submit_target(desired)
     return jsonify(status="accepted", target_lot=round(desired, 2)), 200
 
 
 if __name__ == "__main__":
+    broker = Broker()
     log.info("IRB bridge starting on %s:%s (dry_run=%s, symbol=%s)", BIND_HOST, BIND_PORT, DRY_RUN, SYMBOL)
     app.run(host=BIND_HOST, port=BIND_PORT)

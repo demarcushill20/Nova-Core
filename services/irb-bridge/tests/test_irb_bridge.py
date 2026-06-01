@@ -167,3 +167,47 @@ def test_sign_flip_closes_then_opens():
 
     conn = asyncio.run(run())
     assert _net(conn) == pytest.approx(-0.10, abs=0.005)
+
+
+# --- Webhook end-to-end (DRY, no broker) ------------------------------------
+
+
+def test_webhook_end_to_end_sizes_and_scales(tmp_path, monkeypatch):
+    import json as _json
+
+    import irb_bridge as ib
+
+    monkeypatch.setattr(ib, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(ib, "SECRET", "sek")
+    monkeypatch.setattr(ib, "broker", None)  # no real broker; equity -> None -> base_lot
+    monkeypatch.setattr(ib, "SIZING", ib.SizingCfg(1.0, 100_000, 0.01, 50.0, 0.01, 0.10))
+    client = ib.app.test_client()
+
+    def post(body):
+        return client.post("/irb/webhook", data=_json.dumps(body), content_type="application/json")
+
+    # entry with no broker -> equity None -> base_lot 0.10 full
+    r = post(
+        {
+            "secret": "sek",
+            "position_size": "10000000",
+            "comment": "entry_long",
+            "action": "buy",
+            "entry": "1.08500",
+            "stop": "1.08472",
+        }
+    )
+    assert r.status_code == 200
+    assert r.get_json()["target_lot"] == 0.10
+
+    # tp1 -> half of base_lot
+    r = post({"secret": "sek", "position_size": "5000000", "comment": "exit_long_tp1", "action": "sell"})
+    assert r.get_json()["target_lot"] == 0.05
+
+    # out-of-order: runner already flat, late tp1 cannot reopen
+    post({"secret": "sek", "position_size": "0", "comment": "exit_long_runner", "action": "sell"})
+    r = post({"secret": "sek", "position_size": "5000000", "comment": "exit_long_tp1", "action": "sell"})
+    assert r.get_json()["target_lot"] == 0.0
+
+    # bad secret rejected
+    assert post({"secret": "nope", "position_size": "0", "comment": "x"}).status_code == 401
