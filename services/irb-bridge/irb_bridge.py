@@ -104,13 +104,27 @@ def compute_desired_lot(state: dict, position_size: float, comment: str, entry, 
         return round(cur_sign * full_lot, 2), new_state
 
     # Exit / partial / time-stop alert.
+    flat = {"side": 0, "entry_units": 0.0, "full_lot": 0.0, "last_fraction": 0.0}
     side = state.get("side", 0)
-    entry_units = state.get("entry_units", 0.0) or 0.0
     full_lot = state.get("full_lot", 0.0) or 0.0
-    if side == 0 or entry_units <= 0 or full_lot <= 0:
-        return 0.0, {"side": 0, "entry_units": 0.0, "full_lot": 0.0, "last_fraction": 0.0}
+    if side == 0 or full_lot <= 0:
+        return 0.0, flat  # genuinely flat — nothing to manage
 
-    frac = 0.0 if position_size == 0 else abs(position_size) / entry_units
+    # A full close (position_size == 0) always flattens — even for a trade whose
+    # entry reference was rebuilt from the live broker position after a restart.
+    if position_size == 0:
+        return 0.0, flat
+
+    entry_units = state.get("entry_units", 0.0) or 0.0
+    if entry_units <= 0:
+        # Reference units unknown (state was adopted from the live broker
+        # position after a restart). We cannot size a partial safely, so HOLD
+        # the current position rather than risk an erroneous close or re-open.
+        # The eventual full-close alert (position_size == 0) still flattens.
+        held = round(side * _round_step(full_lot * (state.get("last_fraction", 1.0) or 1.0), cfg.lot_step), 2)
+        return held, state
+
+    frac = abs(position_size) / entry_units
     frac = min(frac, state.get("last_fraction", 1.0))  # monotonic non-increasing
     frac = max(0.0, min(frac, 1.0))
 
@@ -242,10 +256,41 @@ class Broker:
         await conn.connect()
         await conn.wait_synchronized()
         self._connection = conn
-        self._ready.set()
         log.info("MetaApi connected and synchronized")
+        await self._adopt_existing_position(conn)
+        self._ready.set()
+
+    async def _adopt_existing_position(self, conn) -> None:
+        """If the broker already holds a position at startup but our persisted
+        state is flat (e.g. after a restart mid-trade), rebuild state from the
+        live position so subsequent exit alerts manage it correctly instead of
+        treating it as 'no trade' and liquidating on the next partial."""
+        try:
+            state = load_state()
+            if state.get("side", 0) != 0:
+                return  # state already tracks an open trade
+            positions = await conn.get_positions()
+            sym = [p for p in positions if p["symbol"] == SYMBOL]
+            net = sum((p["volume"] if p["type"] == "POSITION_TYPE_BUY" else -p["volume"]) for p in sym)
+            if abs(net) < LOT_EPSILON:
+                return
+            side = 1 if net > 0 else -1
+            # entry_units left at 0.0 -> compute_desired_lot HOLDS on partials
+            # (reference unknown) and flattens only on a full-close alert.
+            save_state({"side": side, "entry_units": 0.0, "full_lot": abs(net), "last_fraction": 1.0})
+            log.warning(
+                "adopted existing %s position %+.2f lots at startup — entry reference unknown; "
+                "partials will hold, a full-close alert will flatten",
+                SYMBOL,
+                net,
+            )
+        except Exception:
+            log.exception("startup position adoption failed")
 
     def submit_target(self, desired_lot: float) -> None:
+        if not self._ready.wait(timeout=30):
+            log.error("broker not ready after 30s — dropping target %+.2f lots", desired_lot)
+            return
         asyncio.run_coroutine_threadsafe(self._reconcile(desired_lot), self.loop)
 
     def get_equity(self):
@@ -283,6 +328,11 @@ class Broker:
 # Created in __main__ only — instantiating Broker() spawns a thread (and a live
 # MetaApi connection), which must not happen at import time under pytest.
 broker: Broker | None = None
+
+# Serializes the state read-modify-write + target submit. Flask's dev server is
+# threaded, so concurrent (e.g. same-bar TP1 + runner) webhooks would otherwise
+# interleave load_state/save_state and defeat the monotonic exit guard.
+_webhook_lock = threading.Lock()
 
 
 app = Flask(__name__)
@@ -334,24 +384,31 @@ def webhook():
     entry = _opt_float("entry")
     stop = _opt_float("stop")
 
-    equity = broker.get_equity() if broker is not None else None
-    state = load_state()
-    desired, new_state = compute_desired_lot(state, position_size, comment, entry, stop, equity, SIZING)
-    save_state(new_state)
+    with _webhook_lock:
+        equity = broker.get_equity() if broker is not None else None
+        if comment.startswith("entry") and equity is None:
+            log.warning(
+                "entry alert but equity unavailable — sizing at base_lot %.2f, NOT risk-based "
+                "(intended risk %% will not be applied this trade)",
+                BASE_LOT,
+            )
+        state = load_state()
+        desired, new_state = compute_desired_lot(state, position_size, comment, entry, stop, equity, SIZING)
+        save_state(new_state)
 
-    log.info(
-        "webhook ok: pos_size=%s comment=%r action=%r entry=%s stop=%s equity=%s -> target %+.2f lots",
-        position_size,
-        comment,
-        payload.get("action"),
-        entry,
-        stop,
-        equity,
-        desired,
-    )
+        log.info(
+            "webhook ok: pos_size=%s comment=%r action=%r entry=%s stop=%s equity=%s -> target %+.2f lots",
+            position_size,
+            comment,
+            payload.get("action"),
+            entry,
+            stop,
+            equity,
+            desired,
+        )
 
-    if broker is not None:
-        broker.submit_target(desired)
+        if broker is not None:
+            broker.submit_target(desired)
     return jsonify(status="accepted", target_lot=round(desired, 2)), 200
 
 

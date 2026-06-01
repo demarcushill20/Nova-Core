@@ -102,6 +102,22 @@ def test_exit_with_no_open_trade_is_flat():
     assert lot == 0.0
 
 
+def test_recovered_state_partial_holds():
+    # State rebuilt from the live broker position after a restart: entry_units
+    # unknown. An unsized partial must HOLD, not close the whole position (C1).
+    st = {"side": 1, "entry_units": 0.0, "full_lot": 35.71, "last_fraction": 1.0}
+    lot, st2 = compute_desired_lot(st, 5_000_000, "exit_long_tp1", None, None, 100_000, CFG)
+    assert lot == 35.71
+    assert st2["side"] == 1
+
+
+def test_recovered_state_final_exit_flattens():
+    st = {"side": 1, "entry_units": 0.0, "full_lot": 35.71, "last_fraction": 1.0}
+    lot, st2 = compute_desired_lot(st, 0, "exit_long_runner", None, None, 100_000, CFG)
+    assert lot == 0.0
+    assert st2["side"] == 0
+
+
 # --- Reconcile serialization ------------------------------------------------
 
 
