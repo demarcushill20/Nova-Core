@@ -1,0 +1,395 @@
+//@version=5
+// =============================================================================
+// Rob Hoffman IRB v5 — Relaxed Reliable Build (5min Champion) + WEBHOOK FORK
+// =============================================================================
+//
+// Source: vault note `100-trading-strategies/Rob Hoffman IRB v5 - Relaxed
+// Reliable Build(5min Champion) 1.md` — verbatim strategy logic.
+// Only addition: a single `alert()` call on every order-fill event that emits
+// JSON matching the irb-bridge webhook contract.
+//
+// Bridge: services/irb-bridge/irb_bridge.py
+// Route:  POST https://nova-link.duckdns.org/irb/webhook
+// Contract: {"secret": "...", "position_size": "{{strategy.position_size}}",
+//            "comment": "...", "action": "..."}
+//
+// TradingView alert setup:
+//   1. Apply this strategy to EURUSD 5m
+//   2. Right-click chart -> Add Alert
+//   3. Condition: this strategy, "alert() function calls only"
+//   4. Webhook URL: https://nova-link.duckdns.org/irb/webhook
+//   5. Message: {{strategy.order.alert_message}}
+//   6. Expiration: open-ended
+// =============================================================================
+
+strategy("Rob Hoffman IRB v5 - Relaxed Reliable Build", overlay=true, pyramiding=0, calc_on_order_fills=true, default_qty_type=strategy.fixed, default_qty_value=1)
+
+//====================================================
+// WEBHOOK
+//====================================================
+
+groupWebhook = "Webhook"
+webhookSecret = input.string("e278f96dd9b455755b3fbba90edcd018fce76fa9176796a0", "Webhook Secret", group=groupWebhook, tooltip="Must match IRB_WEBHOOK_SECRET in services/irb-bridge/.env")
+
+//====================================================
+// INPUTS
+//====================================================
+
+//--------------------
+// Direction
+//--------------------
+groupDir = "Direction"
+enableLongs  = input.bool(true, "Enable Longs", group=groupDir)
+enableShorts = input.bool(true, "Enable Shorts", group=groupDir)
+
+//--------------------
+// Risk / Position Sizing
+//--------------------
+groupRisk = "Risk / Position Sizing"
+riskPct = input.float(1.0, "Risk % of Equity Per Trade", minval=0.1, maxval=10.0, step=0.1, group=groupRisk)
+qtyStep = input.float(1.0, "Qty Step", minval=0.0001, step=0.0001, group=groupRisk)
+minQty = input.float(1000.0, "Min Qty", minval=0.0, step=1.0, group=groupRisk)
+maxQty = input.float(10000000.0, "Max Qty", minval=1.0, step=1.0, group=groupRisk)
+
+//--------------------
+// Local Trend Filter
+//--------------------
+groupTrend = "Local Trend Filter"
+ema20Len = input.int(20, "EMA 20 Length", minval=1, group=groupTrend)
+ema50Len = input.int(50, "EMA 50 Length", minval=1, group=groupTrend)
+ema20SlopeLookback = input.int(5, "EMA20 Slope Lookback", minval=1, group=groupTrend)
+
+//--------------------
+// Higher Timeframe Filter
+//--------------------
+groupHTF = "Higher Timeframe Filter"
+useHTFFilter = input.bool(true, "Use HTF EMA Slope Filter", group=groupHTF)
+htfTf = input.timeframe("240", "HTF Timeframe", group=groupHTF)
+htfEmaLen = input.int(20, "HTF EMA Length", minval=1, group=groupHTF)
+requireHTFPriceSide = input.bool(false, "Require HTF Price On Correct Side", group=groupHTF)
+
+//--------------------
+// IRB Signal
+//--------------------
+groupSignal = "IRB Signal"
+irbPercent = input.float(45.0, "IRB Threshold %", minval=1.0, maxval=99.0, step=0.1, group=groupSignal)
+entryBufferTicks = input.int(1, "Entry Buffer (ticks)", minval=0, group=groupSignal)
+stopBufferTicks = input.int(1, "Stop Buffer (ticks)", minval=0, group=groupSignal)
+signalExpiryBars = input.int(12, "Signal Expiry Bars", minval=1, group=groupSignal)
+replacePendingSignal = input.bool(true, "Replace Older Pending Signal", group=groupSignal)
+
+useBodyFilter = input.bool(false, "Use Max Body % Filter", group=groupSignal)
+maxBodyPercent = input.float(45.0, "Max Body % Of Candle Range", minval=1.0, maxval=100.0, step=0.1, group=groupSignal)
+
+useSignalAtrRangeFilter = input.bool(true, "Use Signal ATR Range Filter", group=groupSignal)
+signalAtrLen = input.int(14, "Signal ATR Length", minval=1, group=groupSignal)
+minSignalAtrMult = input.float(0.0, "Min Signal Range / ATR", minval=0.0, step=0.1, group=groupSignal)
+maxSignalAtrMult = input.float(2.5, "Max Signal Range / ATR", minval=0.1, step=0.1, group=groupSignal)
+
+usePullbackFilter = input.bool(false, "Require Signal To Touch 20 or 50 EMA", group=groupSignal)
+
+//--------------------
+// Reliability Filters
+//--------------------
+groupRel = "Reliability Filters"
+useSessionFilter = input.bool(false, "Use Session Filter", group=groupRel)
+tradeSession = input.session("0700-1600", "Trading Session", group=groupRel)
+maxTradesPerDay = input.int(3, "Max Trades Per Day", minval=1, group=groupRel)
+cooldownBars = input.int(1, "Cooldown Bars After Flat", minval=0, group=groupRel)
+
+//--------------------
+// Trade Management
+//--------------------
+groupMgmt = "Trade Management"
+takePartial = input.bool(true, "Take Partial Profit", group=groupMgmt)
+partialExitPct = input.float(50.0, "Partial Exit %", minval=0.0, maxval=100.0, step=1.0, group=groupMgmt)
+partialRR = input.float(1.0, "Partial Profit At R", minval=0.1, step=0.1, group=groupMgmt)
+moveToBEatRR = input.float(1.0, "Move Runner To Breakeven At R", minval=0.1, step=0.1, group=groupMgmt)
+runnerAtrLen = input.int(14, "Runner ATR Length", minval=1, group=groupMgmt)
+runnerAtrMult = input.float(2.0, "Runner ATR Multiplier", minval=0.1, step=0.1, group=groupMgmt)
+useTimeStop = input.bool(true, "Use Time Stop", group=groupMgmt)
+maxBarsInTrade = input.int(20, "Max Bars In Trade", minval=1, group=groupMgmt)
+
+//--------------------
+// Visuals
+//--------------------
+groupVisual = "Visuals"
+showEMAs = input.bool(true, "Show EMAs", group=groupVisual)
+showHTFEMA = input.bool(false, "Show HTF EMA", group=groupVisual)
+showPendingLevels = input.bool(true, "Show Pending Levels", group=groupVisual)
+showActiveStop = input.bool(true, "Show Active Stop", group=groupVisual)
+showMarkers = input.bool(true, "Show Signal Markers", group=groupVisual)
+
+//====================================================
+// HELPERS
+//====================================================
+
+f_round_down(_value, _step) =>
+    _step > 0 ? math.floor(_value / _step) * _step : _value
+
+f_calc_qty(_entryPrice, _stopPrice) =>
+    _riskCash = strategy.equity * (riskPct / 100.0)
+    _stopDist = math.abs(_entryPrice - _stopPrice)
+    _rawQty = _stopDist > 0 ? (_riskCash / _stopDist) : 0.0
+    _roundedQty = f_round_down(_rawQty, qtyStep)
+    _finalQty = _roundedQty < minQty ? 0.0 : math.min(_roundedQty, maxQty)
+    _finalQty
+
+//====================================================
+// CORE CALCULATIONS
+//====================================================
+
+entryBuffer = syminfo.mintick * entryBufferTicks
+stopBuffer = syminfo.mintick * stopBufferTicks
+irbPct = irbPercent / 100.0
+maxBodyPct = maxBodyPercent / 100.0
+
+ema20 = ta.ema(close, ema20Len)
+ema50 = ta.ema(close, ema50Len)
+
+htfClose = request.security(syminfo.tickerid, htfTf, close, lookahead=barmerge.lookahead_off)
+htfEma = request.security(syminfo.tickerid, htfTf, ta.ema(close, htfEmaLen), lookahead=barmerge.lookahead_off)
+htfEmaPrev = request.security(syminfo.tickerid, htfTf, ta.ema(close, htfEmaLen)[1], lookahead=barmerge.lookahead_off)
+
+bullTrend = ema20 > ema50 and ema20 > ema20[ema20SlopeLookback]
+bearTrend = ema20 < ema50 and ema20 < ema20[ema20SlopeLookback]
+
+htfSlopeUp = htfEma > htfEmaPrev
+htfSlopeDown = htfEma < htfEmaPrev
+htfPriceLongOk = htfClose > htfEma
+htfPriceShortOk = htfClose < htfEma
+
+htfLongOk = not useHTFFilter or (htfSlopeUp and (not requireHTFPriceSide or htfPriceLongOk))
+htfShortOk = not useHTFFilter or (htfSlopeDown and (not requireHTFPriceSide or htfPriceShortOk))
+
+inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
+
+barRange = high - low
+bodySize = math.abs(close - open)
+
+upThreshold = high - (barRange * irbPct)
+downThreshold = low + (barRange * irbPct)
+
+bullIRB = barRange > 0 and open <= upThreshold and close <= upThreshold
+bearIRB = barRange > 0 and open >= downThreshold and close >= downThreshold
+
+bodyOk = barRange > 0 and (not useBodyFilter or bodySize <= barRange * maxBodyPct)
+
+signalATR = ta.atr(signalAtrLen)
+signalRangeOk = not useSignalAtrRangeFilter or (barRange >= signalATR * minSignalAtrMult and barRange <= signalATR * maxSignalAtrMult)
+
+pullbackLongOk = not usePullbackFilter or (low <= ema20 or low <= ema50)
+pullbackShortOk = not usePullbackFilter or (high >= ema20 or high >= ema50)
+
+longSetup = enableLongs and bullTrend and htfLongOk and bullIRB and bodyOk and signalRangeOk and pullbackLongOk
+shortSetup = enableShorts and bearTrend and htfShortOk and bearIRB and bodyOk and signalRangeOk and pullbackShortOk
+
+//====================================================
+// DAILY LIMIT / COOLDOWN
+//====================================================
+
+var int tradesToday = 0
+var int lastFlatBar = na
+
+newDay = ta.change(time("D")) != 0
+if newDay
+    tradesToday := 0
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    lastFlatBar := bar_index
+
+cooldownOk = na(lastFlatBar) or (bar_index - lastFlatBar > cooldownBars)
+tradeBudgetOk = tradesToday < maxTradesPerDay
+entryContextOk = strategy.position_size == 0 and inSession and cooldownOk and tradeBudgetOk
+
+//====================================================
+// PENDING SIGNAL STORAGE
+//====================================================
+
+var float pendingLongEntry = na
+var float pendingLongStop = na
+var float pendingLongQty = na
+var int pendingLongBar = na
+
+var float pendingShortEntry = na
+var float pendingShortStop = na
+var float pendingShortQty = na
+var int pendingShortBar = na
+
+if longSetup and entryContextOk and (na(pendingLongEntry) or replacePendingSignal)
+    longEntryPrice = high + entryBuffer
+    longStopPrice = low - stopBuffer
+    longQty = f_calc_qty(longEntryPrice, longStopPrice)
+    pendingLongEntry := longEntryPrice
+    pendingLongStop := longStopPrice
+    pendingLongQty := longQty
+    pendingLongBar := bar_index
+    pendingShortEntry := na
+    pendingShortStop := na
+    pendingShortQty := na
+    pendingShortBar := na
+    strategy.cancel("Short")
+
+if shortSetup and entryContextOk and (na(pendingShortEntry) or replacePendingSignal)
+    shortEntryPrice = low - entryBuffer
+    shortStopPrice = high + stopBuffer
+    shortQty = f_calc_qty(shortEntryPrice, shortStopPrice)
+    pendingShortEntry := shortEntryPrice
+    pendingShortStop := shortStopPrice
+    pendingShortQty := shortQty
+    pendingShortBar := bar_index
+    pendingLongEntry := na
+    pendingLongStop := na
+    pendingLongQty := na
+    pendingLongBar := na
+    strategy.cancel("Long")
+
+longPendingValid = not na(pendingLongEntry) and not na(pendingLongStop) and not na(pendingLongQty) and not na(pendingLongBar) and pendingLongQty > 0 and strategy.position_size == 0 and inSession and cooldownOk and tradeBudgetOk and bullTrend and htfLongOk and (bar_index - pendingLongBar <= signalExpiryBars)
+shortPendingValid = not na(pendingShortEntry) and not na(pendingShortStop) and not na(pendingShortQty) and not na(pendingShortBar) and pendingShortQty > 0 and strategy.position_size == 0 and inSession and cooldownOk and tradeBudgetOk and bearTrend and htfShortOk and (bar_index - pendingShortBar <= signalExpiryBars)
+
+// --- WEBHOOK MESSAGE BUILDER ---
+// Emitted on every order fill via alert_message. The bridge only reads
+// `secret` and `position_size`; `comment` + `action` are diagnostic.
+f_alert_msg(_comment) =>
+    '{"secret":"' + webhookSecret + '","position_size":"{{strategy.position_size}}","comment":"' + _comment + '","action":"{{strategy.order.action}}"}'
+
+// Entry alerts additionally carry the fill price and initial stop so the
+// bridge can size the position to a fixed % of account equity.
+f_alert_entry(_comment, _entry, _stop) =>
+    '{"secret":"' + webhookSecret + '","position_size":"{{strategy.position_size}}","comment":"' + _comment + '","action":"{{strategy.order.action}}","entry":"' + str.tostring(_entry, format.mintick) + '","stop":"' + str.tostring(_stop, format.mintick) + '"}'
+
+if longPendingValid
+    strategy.entry("Long", strategy.long, qty=pendingLongQty, stop=pendingLongEntry, alert_message=f_alert_entry("entry_long", pendingLongEntry, pendingLongStop))
+else
+    strategy.cancel("Long")
+    if strategy.position_size == 0
+        pendingLongEntry := na
+        pendingLongStop := na
+        pendingLongQty := na
+        pendingLongBar := na
+
+if shortPendingValid
+    strategy.entry("Short", strategy.short, qty=pendingShortQty, stop=pendingShortEntry, alert_message=f_alert_entry("entry_short", pendingShortEntry, pendingShortStop))
+else
+    strategy.cancel("Short")
+    if strategy.position_size == 0
+        pendingShortEntry := na
+        pendingShortStop := na
+        pendingShortQty := na
+        pendingShortBar := na
+
+//====================================================
+// ACTIVE TRADE STATE
+//====================================================
+
+var float activeInitialStop = na
+var float highestSinceEntry = na
+var float lowestSinceEntry = na
+var int entryBarIndex = na
+var float activeStopPlot = na
+
+newLongPos = strategy.position_size > 0 and strategy.position_size[1] <= 0
+newShortPos = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if newLongPos
+    activeInitialStop := nz(pendingLongStop, low - stopBuffer)
+    highestSinceEntry := high
+    lowestSinceEntry := na
+    entryBarIndex := bar_index
+    tradesToday += 1
+    pendingLongEntry := na
+    pendingLongStop := na
+    pendingLongQty := na
+    pendingLongBar := na
+    pendingShortEntry := na
+    pendingShortStop := na
+    pendingShortQty := na
+    pendingShortBar := na
+    strategy.cancel("Short")
+
+if newShortPos
+    activeInitialStop := nz(pendingShortStop, high + stopBuffer)
+    lowestSinceEntry := low
+    highestSinceEntry := na
+    entryBarIndex := bar_index
+    tradesToday += 1
+    pendingLongEntry := na
+    pendingLongStop := na
+    pendingLongQty := na
+    pendingLongBar := na
+    pendingShortEntry := na
+    pendingShortStop := na
+    pendingShortQty := na
+    pendingShortBar := na
+    strategy.cancel("Long")
+
+runnerATR = ta.atr(runnerAtrLen)
+
+//====================================================
+// EXIT MANAGEMENT
+//====================================================
+
+if strategy.position_size > 0
+    highestSinceEntry := na(highestSinceEntry) ? high : math.max(highestSinceEntry, high)
+    entryPrice = strategy.position_avg_price
+    riskUnit = math.max(entryPrice - activeInitialStop, syminfo.mintick)
+    partialPrice = entryPrice + (riskUnit * partialRR)
+    beTriggerPrice = entryPrice + (riskUnit * moveToBEatRR)
+    beActive = highestSinceEntry >= beTriggerPrice
+    atrRunnerStop = highestSinceEntry - (runnerATR * runnerAtrMult)
+    runnerStop = beActive ? math.max(entryPrice, atrRunnerStop) : activeInitialStop
+    activeStopPlot := runnerStop
+
+    if takePartial and partialExitPct > 0 and partialExitPct < 100
+        strategy.exit("L-TP1", "Long", qty_percent=partialExitPct, limit=partialPrice, stop=activeInitialStop, alert_message=f_alert_msg("exit_long_tp1"))
+        strategy.exit("L-Runner", "Long", qty_percent=100 - partialExitPct, stop=runnerStop, alert_message=f_alert_msg("exit_long_runner"))
+    else
+        strategy.exit("L-Runner", "Long", stop=runnerStop, alert_message=f_alert_msg("exit_long_runner"))
+
+    if useTimeStop and not na(entryBarIndex) and (bar_index - entryBarIndex >= maxBarsInTrade)
+        strategy.close("Long", alert_message=f_alert_msg("time_stop_long"))
+
+else if strategy.position_size < 0
+    lowestSinceEntry := na(lowestSinceEntry) ? low : math.min(lowestSinceEntry, low)
+    entryPrice = strategy.position_avg_price
+    riskUnit = math.max(activeInitialStop - entryPrice, syminfo.mintick)
+    partialPrice = entryPrice - (riskUnit * partialRR)
+    beTriggerPrice = entryPrice - (riskUnit * moveToBEatRR)
+    beActive = lowestSinceEntry <= beTriggerPrice
+    atrRunnerStop = lowestSinceEntry + (runnerATR * runnerAtrMult)
+    runnerStop = beActive ? math.min(entryPrice, atrRunnerStop) : activeInitialStop
+    activeStopPlot := runnerStop
+
+    if takePartial and partialExitPct > 0 and partialExitPct < 100
+        strategy.exit("S-TP1", "Short", qty_percent=partialExitPct, limit=partialPrice, stop=activeInitialStop, alert_message=f_alert_msg("exit_short_tp1"))
+        strategy.exit("S-Runner", "Short", qty_percent=100 - partialExitPct, stop=runnerStop, alert_message=f_alert_msg("exit_short_runner"))
+    else
+        strategy.exit("S-Runner", "Short", stop=runnerStop, alert_message=f_alert_msg("exit_short_runner"))
+
+    if useTimeStop and not na(entryBarIndex) and (bar_index - entryBarIndex >= maxBarsInTrade)
+        strategy.close("Short", alert_message=f_alert_msg("time_stop_short"))
+
+else
+    activeInitialStop := na
+    highestSinceEntry := na
+    lowestSinceEntry := na
+    entryBarIndex := na
+    activeStopPlot := na
+
+//====================================================
+// VISUALS
+//====================================================
+
+plot(showEMAs ? ema20 : na, "EMA 20", color=color.red, linewidth=2)
+plot(showEMAs ? ema50 : na, "EMA 50", color=color.orange, linewidth=2)
+plot(showHTFEMA ? htfEma : na, "HTF EMA", color=color.fuchsia, linewidth=2)
+
+plot(showPendingLevels and longPendingValid ? pendingLongEntry : na, "Pending Long Entry", color=color.new(color.lime, 0), linewidth=2, style=plot.style_linebr)
+plot(showPendingLevels and longPendingValid ? pendingLongStop : na, "Pending Long Stop", color=color.new(color.red, 40), linewidth=1, style=plot.style_linebr)
+plot(showPendingLevels and shortPendingValid ? pendingShortEntry : na, "Pending Short Entry", color=color.new(color.red, 0), linewidth=2, style=plot.style_linebr)
+plot(showPendingLevels and shortPendingValid ? pendingShortStop : na, "Pending Short Stop", color=color.new(color.lime, 40), linewidth=1, style=plot.style_linebr)
+
+plot(showActiveStop ? activeStopPlot : na, "Active Stop", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_linebr)
+
+plotshape(showMarkers and longSetup, title="Bull IRB", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.tiny, text="L")
+plotshape(showMarkers and shortSetup, title="Bear IRB", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.tiny, text="S")
