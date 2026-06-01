@@ -82,6 +82,46 @@ def risk_based_lot(entry, stop, equity, cfg: SizingCfg) -> float:
     return round(max(cfg.min_lot, min(lot, cfg.max_lot)), 2)
 
 
+def compute_desired_lot(state: dict, position_size: float, comment: str, entry, stop, equity, cfg: SizingCfg):
+    """Return (signed_desired_lot, new_state).
+
+    Entry alerts (comment startswith 'entry') are the ONLY events that set the
+    reference position and the risk-based full lot. Exit alerts merely scale the
+    stored full lot by the surviving fraction, and that fraction is monotonically
+    non-increasing within a trade — so an out-of-order or duplicate exit alert can
+    never re-open or grow a position."""
+    comment = comment or ""
+    cur_sign = 1 if position_size > 0 else -1 if position_size < 0 else 0
+
+    if comment.startswith("entry") and cur_sign != 0:
+        full_lot = risk_based_lot(entry, stop, equity, cfg)
+        new_state = {
+            "side": cur_sign,
+            "entry_units": abs(position_size),
+            "full_lot": full_lot,
+            "last_fraction": 1.0,
+        }
+        return round(cur_sign * full_lot, 2), new_state
+
+    # Exit / partial / time-stop alert.
+    side = state.get("side", 0)
+    entry_units = state.get("entry_units", 0.0) or 0.0
+    full_lot = state.get("full_lot", 0.0) or 0.0
+    if side == 0 or entry_units <= 0 or full_lot <= 0:
+        return 0.0, {"side": 0, "entry_units": 0.0, "full_lot": 0.0, "last_fraction": 0.0}
+
+    frac = 0.0 if position_size == 0 else abs(position_size) / entry_units
+    frac = min(frac, state.get("last_fraction", 1.0))  # monotonic non-increasing
+    frac = max(0.0, min(frac, 1.0))
+
+    new_state = dict(state)
+    new_state["last_fraction"] = frac
+    if frac <= 0.0:
+        new_state["side"] = 0
+    desired = round(side * _round_step(full_lot * frac, cfg.lot_step), 2)
+    return desired, new_state
+
+
 SECRET = os.environ["IRB_WEBHOOK_SECRET"]
 METAAPI_TOKEN = os.environ["METAAPI_TOKEN"]
 METAAPI_ACCOUNT_ID = os.environ["METAAPI_ACCOUNT_ID"]
