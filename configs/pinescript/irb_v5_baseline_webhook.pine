@@ -29,7 +29,7 @@ strategy("Rob Hoffman IRB v5 - Relaxed Reliable Build", overlay=true, pyramiding
 //====================================================
 
 groupWebhook = "Webhook"
-webhookSecret = input.string("e278f96dd9b455755b3fbba90edcd018fce76fa9176796a0", "Webhook Secret", group=groupWebhook, tooltip="Must match IRB_WEBHOOK_SECRET in services/irb-bridge/.env")
+webhookSecret = input.string("", "Webhook Secret", group=groupWebhook, tooltip="Set to IRB_WEBHOOK_SECRET from services/irb-bridge/.env — do NOT hardcode/commit the value here")
 
 //====================================================
 // INPUTS
