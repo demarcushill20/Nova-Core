@@ -225,6 +225,25 @@ _EXT_STATUS = [
 # --- Helpers (preserved from original) ---
 
 
+def _is_llm_error_response(response: str) -> bool:
+    """Return True for deterministic fallback/error strings from telegram.llm.
+
+    Keeping this centralized prevents queued-task acknowledgments from being
+    replaced by the generic "snag" message when the background task was actually
+    accepted successfully but the conversational Claude CLI wrapper failed.
+    """
+    prefixes = (
+        "Sorry,",
+        "Something went wrong",
+        "Budget limit reached:",
+        "Hmm, I didn't get a response back",
+        "That took too long",
+        "Claude auth failed",
+        "Claude usage limit reached",
+    )
+    return response.startswith(prefixes)
+
+
 def slugify(text: str, max_len: int = 50) -> str:
     s = re.sub(r"[^a-zA-Z0-9]+", "_", text.strip()).strip("_").lower()
     return s[:max_len] or "task"
@@ -941,7 +960,7 @@ async def handle_conversation(chat_id: str, text: str) -> str:
     )
 
     # Track success/failure for circuit breaker
-    is_error = response.startswith("Sorry,") or response.startswith("Something went wrong")
+    is_error = _is_llm_error_response(response)
     if is_error:
         _circuit_breaker.record_failure()
         _metrics.record_error()
@@ -1002,6 +1021,13 @@ async def handle_delegation_ack(chat_id: str, text: str, task_reply: str, ack_pr
         system_prompt=SYSTEM_PROMPT,
         conversation_context=context_str,
     )
+    if _is_llm_error_response(response):
+        _log.warning("DELEGATION_ACK_LLM_FALLBACK chat=%s response=%r", chat_id, response[:120])
+        response = (
+            f"{task_reply}\n\n"
+            "I queued the task successfully, but the conversational Claude wrapper hit a transient issue "
+            "while wording the acknowledgment. The watcher will still process it."
+        )
 
     _conversations.add_assistant_message(chat_id, response)
 

@@ -102,6 +102,26 @@ verification: checked it
 confidence: high
 """
 
+# Mirrors a real watcher failure: the agent emitted a complete, honest contract
+# but used the synonym ``files_modified`` for the canonical ``files_changed`` key.
+SYNONYM_FILES_MODIFIED = """\
+## CONTRACT
+summary: Validated 348 tests pass with no regressions
+files_modified: OUTPUT/0957_validate.md
+verification: ran pytest, 348 passed
+confidence: high
+"""
+
+# If the agent emits both the canonical key and an alias, the canonical value wins.
+SYNONYM_DOES_NOT_CLOBBER = """\
+## CONTRACT
+summary: Did work
+files_changed: real.py
+files_modified: bogus.py
+verification: ran tests
+confidence: high
+"""
+
 
 # --- Tests -------------------------------------------------------------------
 
@@ -129,6 +149,22 @@ def test_valid_with_git_commands():
     assert result["valid"] is True
     assert result["contract"]["confidence"] == "medium"
     assert "git_commands_executed" in result["contract"]
+
+
+def test_files_modified_synonym_accepted():
+    # An agent that writes files_modified instead of files_changed should pass,
+    # not be rejected and retried for hours.
+    result = validate_contract(SYNONYM_FILES_MODIFIED)
+    assert result["valid"] is True
+    assert result["errors"] == []
+    assert result["contract"]["files_changed"] == "OUTPUT/0957_validate.md"
+    assert "files_modified" not in result["contract"]
+
+
+def test_alias_does_not_clobber_canonical():
+    result = validate_contract(SYNONYM_DOES_NOT_CLOBBER)
+    assert result["valid"] is True
+    assert result["contract"]["files_changed"] == "real.py"
 
 
 def test_missing_header():

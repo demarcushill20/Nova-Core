@@ -28,8 +28,15 @@ except ImportError:
 _log = logging.getLogger("telegram_bot.llm")
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude")
-CONVERSATION_TIMEOUT = 14400  # seconds (4 hours) — long-running research/planning needs extended window
-MODEL = "claude-opus-4-6"
+# Conversational replies must stay fast. Heavy research/coding is delegated to the
+# watcher task queue (Bash/Write/Edit are disallowed on this path), so a chat reply
+# only ever does a few MCP read calls. The old 4h ceiling meant a wedged `claude -p`
+# subprocess would hang a Telegram reply for hours — cap it tight instead.
+CONVERSATION_TIMEOUT = int(os.environ.get("TELEGRAM_LLM_TIMEOUT", "120"))  # seconds
+# Bound a wedged subprocess by turns as well as wall-clock: a tool-call loop then
+# terminates deterministically instead of spinning until the wall-clock timeout.
+CONVERSATION_MAX_TURNS = int(os.environ.get("TELEGRAM_LLM_MAX_TURNS", "12"))
+MODEL = "claude-opus-4-8"
 
 # Telegram-specific MCP config: only servers the bot needs
 # (nova-memory, nova-vault, brave-search, tavily, fetch)
@@ -85,6 +92,8 @@ async def generate_response(
         "-p",
         "--model",
         MODEL,
+        "--max-turns",
+        str(CONVERSATION_MAX_TURNS),
         "--dangerously-skip-permissions",
         "--mcp-config",
         _TELEGRAM_MCP_CONFIG,
@@ -156,6 +165,7 @@ async def generate_response(
                 err_stderr = stderr.decode("utf-8", errors="replace").strip()
                 # Claude CLI sometimes puts error details in stdout
                 err_stdout = response if response and len(response) < 500 else ""
+                err_combined = f"{err_stderr}\n{err_stdout}".strip()
                 _log.error(
                     "Claude CLI error (rc=%d, attempt %d/%d) stderr=%s stdout_hint=%s",
                     proc.returncode,
@@ -167,6 +177,16 @@ async def generate_response(
                 if attempt < MAX_RETRIES:
                     await asyncio.sleep(3)  # brief pause before retry
                     continue
+                lowered = err_combined.lower()
+                if "401 invalid authentication credentials" in lowered or "failed to authenticate" in lowered:
+                    return (
+                        "Claude auth failed for the Telegram bot. Re-authenticate Claude Code on the VPS, then retry."
+                    )
+                if "usage limit" in lowered or "rate_limit" in lowered:
+                    return (
+                        "Claude usage limit reached for the Telegram bot. "
+                        "I queued what I could; retry after the limit resets."
+                    )
                 return "Sorry, I hit a snag processing that. Want to try again?"
             if not response:
                 _log.warning("Claude CLI returned empty response (attempt %d/%d)", attempt, MAX_RETRIES)

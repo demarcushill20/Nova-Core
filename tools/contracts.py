@@ -14,6 +14,22 @@ import typing
 
 _REQUIRED_FIELDS = ("summary", "files_changed", "verification", "confidence")
 
+# Agents (LLMs) reliably emit the right *value* but frequently choose a synonym
+# for the *key* — e.g. ``files_modified`` instead of ``files_changed``. Exact-key
+# matching then rejects an otherwise-complete contract, which sends the watcher
+# into a multi-hour retry loop. Map well-known synonyms onto the canonical field
+# name during parsing so honest output is not thrown away over a label mismatch.
+_KEY_ALIASES = {
+    "files_modified": "files_changed",
+    "files_created": "files_changed",
+    "files_edited": "files_changed",
+    "modified_files": "files_changed",
+    "changed_files": "files_changed",
+    "files": "files_changed",
+    "verified": "verification",
+    "verification_method": "verification",
+}
+
 _ACTION_DETAIL_FIELDS = frozenset(
     (
         "commands_executed",
@@ -125,7 +141,12 @@ def _parse_kv(lines: list[str]) -> dict:
         if m:
             key = m.group(1).lower()
             value = m.group(2).strip()
-            result[key] = value
+            # Normalise synonym keys onto their canonical field name, but never
+            # let an alias clobber a canonical key the agent already emitted.
+            canonical = _KEY_ALIASES.get(key, key)
+            if canonical in result and key != canonical:
+                continue
+            result[canonical] = value
 
     return result
 

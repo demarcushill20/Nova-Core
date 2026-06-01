@@ -443,6 +443,8 @@ REQUIRED STEPS — complete every one, in order:
    Rules:
    - The ## CONTRACT heading must appear at the END of your output report.
    - Every field above is REQUIRED. Never omit a field.
+   - Use these EXACT field names. Do NOT rename `files_changed` to
+     `files_modified`/`files_created` or `verification` to `verified`.
    - If no files were changed, write: files_changed: none
    - If verification was not possible, write: verification: not run
    - Do not fabricate data. Use honest values.
