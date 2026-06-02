@@ -285,6 +285,40 @@ def chunk_text(text: str, chunk_size: int = 3500) -> list[str]:
     return chunks
 
 
+# Plain-prose sentinels that generate_response (telegram/llm.py) returns to
+# signal an LLM failure — it returns these instead of raising. When a completion
+# summary comes back as one of these, we fall back to a deterministic summary.
+_LLM_ERROR_PREFIXES = (
+    "Claude auth failed for the Telegram bot",
+    "Claude usage limit reached for the Telegram bot",
+    "Sorry, I hit a snag processing that. Want to try again?",
+    "Hmm, I didn't get a response back",
+    "That took too long — let me try a simpler approach",
+    "Something went wrong on my end",
+    "Budget limit reached:",
+)
+
+
+def _is_llm_error_response(text: str) -> bool:
+    """True if text is one of generate_response's failure sentinels."""
+    if not text:
+        return False
+    stripped = text.strip()
+    return stripped.startswith(_LLM_ERROR_PREFIXES)
+
+
+def _fallback_completion_summary(output_content: str) -> str:
+    """Deterministic completion summary when the LLM summary is unavailable.
+
+    Prefer the first line starting with "summary" (case-insensitive); otherwise
+    a generic message. Truncated to 1000 chars.
+    """
+    for line in (output_content or "").splitlines():
+        if line.strip().lower().startswith("summary"):
+            return line.strip()[:1000]
+    return "Task completed; see output for details."[:1000]
+
+
 LAST_TASK_FILE = STATE / "last_task_id.txt"
 
 
@@ -436,6 +470,34 @@ def _task_number(name: str) -> str:
     return m.group(1) if m else stem
 
 
+# TTL cache for the Claude Code health probe so repeated /status calls don't
+# each spawn a billable `claude -p` subprocess. (monotonic_ts, result_string)
+_CLAUDE_HEALTH_TTL_S = 60.0
+_claude_health_cache: tuple[float, str] | None = None
+
+
+def _format_claude_health() -> str:
+    """Return a one-line Claude Code health status for /status output.
+
+    Result is cached for ``_CLAUDE_HEALTH_TTL_S`` seconds to avoid spawning a
+    billable subprocess on every /status.
+    """
+    global _claude_health_cache
+    from utils.claude_health import check_claude_health
+
+    now = time.monotonic()
+    if _claude_health_cache is not None and (now - _claude_health_cache[0]) < _CLAUDE_HEALTH_TTL_S:
+        return _claude_health_cache[1]
+
+    health = check_claude_health(os.environ.get("CLAUDE_BIN", "/home/nova/.local/bin/claude"), timeout_s=5)
+    if health.ok:
+        result = "Claude Code: healthy"
+    else:
+        result = f"Claude Code: degraded ({health.reason})"
+    _claude_health_cache = (now, result)
+    return result
+
+
 def handle_status(chat_id: str) -> str:
     """Build the /status response by scanning TASKS/."""
     if not TASKS.exists():
@@ -463,6 +525,13 @@ def handle_status(chat_id: str) -> str:
         if len(title_part) > 40:
             title_part = title_part[:37] + "..."
         lines.append(f"{icon} #{display_id} {title_part}  [{status}] {ts_str}")
+
+    # Surface Claude Code CLI health so degraded auth/usage shows up in /status.
+    try:
+        lines.append("")
+        lines.append(_format_claude_health())
+    except Exception:
+        pass
 
     return "\n".join(lines)
 
@@ -1254,6 +1323,12 @@ async def _check_completions(app) -> None:
                         system_prompt=SYSTEM_PROMPT,
                     )
 
+                    # If Claude CLI was unhealthy, generate_response returns a
+                    # plain-prose error sentinel rather than a real summary.
+                    # Fall back to a deterministic summary from the output.
+                    if _is_llm_error_response(summary):
+                        summary = _fallback_completion_summary(output_content)
+
                     # Record in conversation buffer for continuity
                     _conversations.add_assistant_message(chat_id, summary)
 
@@ -1396,7 +1471,9 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         elif action_type == "show_help":
             reply = handle_help()
         elif action_type == "get_status":
-            reply = handle_status(chat_id)
+            # handle_status runs a synchronous Claude health subprocess; offload
+            # it to a worker thread so it can't stall the event loop.
+            reply = await asyncio.to_thread(handle_status, chat_id)
         elif action_type == "run_task":
             # Delegate to task queue, then generate natural acknowledgment
             _metrics.record_delegation()

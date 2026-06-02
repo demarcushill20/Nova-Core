@@ -449,6 +449,12 @@ REQUIRED STEPS — complete every one, in order:
    - If verification was not possible, write: verification: not run
    - Do not fabricate data. Use honest values.
 
+CHUNKING CONTRACT:
+- Treat this execution as one bounded chunk, not an indefinite autonomous session.
+- If the full task cannot be completed within this chunk, write an OUTPUT file with status=partial and next_actions.
+- Never rely on staying alive for hours. Persist progress to OUTPUT/ and STATE/.
+- Prefer small verified steps over broad unverified work.
+
 Begin immediately. Do not ask questions or wait for prompts."""
 
 # --- Ensure directories exist ---
@@ -2026,6 +2032,8 @@ async def _dispatch_inner(task_path: Path):
         "json",
         "--verbose",
         "--dangerously-skip-permissions",
+        "--max-budget-usd",
+        os.environ.get("NOVA_CLAUDE_MAX_BUDGET_USD", "2.00"),
         "--model",
         routed_model,
     ]
@@ -2167,6 +2175,8 @@ async def _dispatch_inner(task_path: Path):
                 "json",
                 "--verbose",
                 "--dangerously-skip-permissions",
+                "--max-budget-usd",
+                os.environ.get("NOVA_CLAUDE_RETRY_BUDGET_USD", "1.00"),
                 "--model",
                 "claude-opus-4-6",
             ]
