@@ -1675,6 +1675,54 @@ async def test_perf_drawdown_above_ftmo(perf_collector, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_perf_drawdown_30d_window(perf_collector, tmp_path):
+    """Old drawdown outside the 30-day window should not affect the score."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+
+    data = [
+        {"equity": 100000, "timestamp": "2026-04-01T00:00:00+00:00"},
+        {"equity": 88000, "timestamp": "2026-04-02T00:00:00+00:00"},  # 12% DD
+        {"equity": 89000, "timestamp": "2026-04-03T00:00:00+00:00"},
+    ]
+    for i in range(30):
+        data.append(
+            {
+                "equity": 100000 + i * 10,
+                "timestamp": f"2026-05-{5 + i:02d}T00:00:00+00:00",
+            }
+        )
+    (state_dir / "equity_history.json").write_text(json.dumps(data))
+
+    result = await perf_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "max_drawdown_30d")
+    assert dd.value == 100.0, f"Expected 100 (no DD in window), got {dd.value}"
+    assert dd.raw_value < 1.0
+
+
+@pytest.mark.asyncio
+async def test_perf_drawdown_no_timestamps_fallback(perf_collector, tmp_path):
+    """Entries without timestamps fall back to all-data drawdown."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+
+    data = [
+        {"equity": 10000},
+        {"equity": 9800},
+        {"equity": 9600},
+        {"equity": 9400},
+        {"equity": 9200},
+        {"equity": 9000},
+        {"equity": 8900},
+    ]
+    (state_dir / "equity_history.json").write_text(json.dumps(data))
+
+    result = await perf_collector.collect()
+    dd = next(m for m in result.sub_metrics if m.name == "max_drawdown_30d")
+    assert dd.value == 0.0  # >10% DD, same as all-time
+
+
+@pytest.mark.asyncio
 async def test_perf_win_rate_stable(perf_collector, tmp_path):
     """Consistent wins = high stability score."""
     state_dir = tmp_path / "STATE" / "novatrade"

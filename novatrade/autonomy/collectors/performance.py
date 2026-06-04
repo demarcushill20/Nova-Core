@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from novatrade.autonomy.collectors.base import BaseCollector
@@ -356,11 +357,15 @@ class PerformanceCollector(BaseCollector):
         return score, round(sharpe, 3)
 
     def _compute_max_drawdown(self, equity_data: list[dict]) -> tuple[float, float]:
-        """Compute max drawdown as percentage."""
+        """Compute max drawdown as percentage over a 30-day window."""
         if len(equity_data) < 2:
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
-        values = [e.get("equity", e.get("value", 0)) for e in equity_data]
+        windowed = self._window_last_n_days(equity_data, 30)
+        if len(windowed) < 2:
+            windowed = equity_data
+
+        values = [e.get("equity", e.get("value", 0)) for e in windowed]
         if not values or max(values) == 0:
             return self._NO_DATA_SCORE, self._NO_DATA_RAW
 
@@ -389,6 +394,47 @@ class PerformanceCollector(BaseCollector):
             score = 0.0
 
         return score, round(dd_pct, 2)
+
+    @classmethod
+    def _window_last_n_days(cls, entries: list[dict], days: int) -> list[dict]:
+        """Return entries whose timestamps fall within the last *days* days."""
+        if not entries:
+            return entries
+
+        latest_dt = None
+        for entry in reversed(entries):
+            raw_ts = entry.get("timestamp", "")
+            if raw_ts:
+                dt = cls._parse_timestamp(raw_ts)
+                if dt is not None:
+                    latest_dt = dt
+                    break
+
+        if latest_dt is None:
+            return entries
+
+        cutoff = latest_dt - timedelta(days=days)
+        windowed = []
+        for entry in entries:
+            raw_ts = entry.get("timestamp", "")
+            if not raw_ts:
+                continue
+            dt = cls._parse_timestamp(raw_ts)
+            if dt is not None and dt >= cutoff:
+                windowed.append(entry)
+        return windowed
+
+    @staticmethod
+    def _parse_timestamp(raw_ts: str) -> datetime | None:
+        """Parse an ISO timestamp to a timezone-aware datetime."""
+        try:
+            normalized = raw_ts.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except (ValueError, TypeError):
+            return None
 
     # Minimum absolute return to count as a real trade movement.
     # Returns below this are flat-market noise (weekends, holidays).
