@@ -1835,6 +1835,110 @@ async def test_perf_all_nodata_returns_neutral(perf_collector):
     assert result.score == 75.0
 
 
+@pytest.mark.asyncio
+async def test_perf_sharpe_linear_interpolation(perf_collector, tmp_path):
+    """Sharpe scoring uses linear interpolation, not step-function bands."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+
+    # Create equity data with enough returns for Sharpe computation.
+    # Gently declining equity -> negative Sharpe around -0.3 to -0.5.
+    import random
+
+    random.seed(42)
+    data = []
+    val = 100000.0
+    for _i in range(200):
+        # Small negative drift with noise -> moderate negative Sharpe
+        val += random.gauss(-5, 50)
+        data.append({"equity": val})
+    (state_dir / "equity_history.json").write_text(json.dumps(data))
+
+    result = await perf_collector.collect()
+    sharpe = next(m for m in result.sub_metrics if m.name == "sharpe_ratio_30d")
+
+    # With interpolation, Sharpe in (-1, 0) should produce scores between 20 and 50
+    # (not exactly 35 as old step function would give for any value in this range)
+    assert 20.0 <= sharpe.value <= 50.0
+    # The score should NOT be exactly 35 (old step function value for sharpe in (-1,0))
+    # unless Sharpe happens to land exactly at -0.5
+    if sharpe.raw_value != -0.5:
+        assert sharpe.value != 35.0, "Expected interpolated value, got old step-function band"
+
+
+# =====================================================================
+# Sub-metric trend tests
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_sub_metric_trends_computed(tmp_path):
+    """Sub-metric 6h deltas appear in ScoreTrend.subs when history exists."""
+    scorer = ProgressScorer(base_path=str(tmp_path))
+    state_dir = tmp_path / "STATE"
+    state_dir.mkdir(parents=True)
+
+    # Seed history with sub-metric data from 3h ago
+    past = datetime.now(timezone.utc) - timedelta(hours=3)
+    history_entry = {
+        "generated_at": past.isoformat(),
+        "overall_score": 60.0,
+        "dimensions": {
+            "system_health": {"score": 80.0, "subs": {"service_status": 75.0, "error_rate": 90.0}},
+            "execution_pipeline": {"score": 60.0, "subs": {}},
+            "strategy_validity": {"score": 60.0, "subs": {}},
+            "risk_engine": {"score": 60.0, "subs": {}},
+            "performance_stability": {"score": 60.0, "subs": {}},
+        },
+    }
+    (state_dir / "progress_history.json").write_text(json.dumps([history_entry]))
+
+    # Collectors return scores with sub-metrics
+    async def sys_health():
+        return DimensionScore(
+            name="System Health",
+            score=90.0,
+            sub_metrics=[
+                SubMetric(name="service_status", value=100.0),
+                SubMetric(name="error_rate", value=80.0),
+            ],
+        )
+
+    async def stub():
+        return DimensionScore(name="test", score=60.0)
+
+    scorer._collectors["system_health"].collect = sys_health
+    for name in ["execution_pipeline", "strategy_validity", "risk_engine", "performance_stability"]:
+        scorer._collectors[name].collect = stub
+
+    report = await scorer.score()
+
+    trend = report.trends["system_health"]
+    assert trend.subs is not None
+    assert trend.subs["service_status"] == 25.0  # 100 - 75
+    assert trend.subs["error_rate"] == -10.0  # 80 - 90
+
+
+@pytest.mark.asyncio
+async def test_sub_metric_trends_none_without_history(tmp_path):
+    """Sub-metric trends are None when no history exists."""
+    scorer = ProgressScorer(base_path=str(tmp_path))
+
+    async def stub():
+        return DimensionScore(
+            name="test",
+            score=60.0,
+            sub_metrics=[SubMetric(name="metric_a", value=70.0)],
+        )
+
+    for coll in scorer._collectors.values():
+        coll.collect = stub
+
+    report = await scorer.score()
+    for trend in report.trends.values():
+        assert trend.subs is None
+
+
 # =====================================================================
 # ProgressScorer engine tests
 # =====================================================================

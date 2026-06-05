@@ -343,14 +343,20 @@ class PerformanceCollector(BaseCollector):
         # Annualized Sharpe (assuming daily data, 252 trading days)
         sharpe = (mean_r / std_r) * (252**0.5)
 
-        if sharpe > 1.0:
+        # Linear interpolation between scoring bands instead of step-function.
+        # Smooths transitions and prevents single-day swings from cliff edges.
+        if sharpe >= 2.0:
             score = 100.0
-        elif sharpe > 0.5:
-            score = 70.0
-        elif sharpe > 0:
-            score = 50.0
-        elif sharpe > -1.0:
-            score = 35.0
+        elif sharpe >= 1.0:
+            score = 85.0 + (sharpe - 1.0) * 15.0  # 85→100
+        elif sharpe >= 0.5:
+            score = 70.0 + (sharpe - 0.5) * 30.0  # 70→85
+        elif sharpe >= 0.0:
+            score = 50.0 + (sharpe - 0.0) * 40.0  # 50→70
+        elif sharpe >= -0.5:
+            score = 35.0 + (sharpe + 0.5) * 30.0  # 35→50
+        elif sharpe >= -1.0:
+            score = 20.0 + (sharpe + 1.0) * 30.0  # 20→35
         else:
             score = 20.0
 

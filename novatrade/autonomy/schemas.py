@@ -56,6 +56,7 @@ class ScoreTrend(BaseModel):
     avg_6h: float | None = None
     avg_24h: float | None = None
     direction: str = "stable"  # "improving", "stable", "degrading"
+    subs: dict[str, float] | None = None  # per-sub-metric 6h delta
 
 
 class ProgressReport(BaseModel):

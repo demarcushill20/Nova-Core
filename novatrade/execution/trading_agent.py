@@ -1349,6 +1349,19 @@ class TradingAgent:
         self._position_volume = max(0.0, old_volume - partial_volume)
         self._persist()
 
+        # S7: Record partial exit for v5 performance metrics
+        try:
+            from novatrade.monitor.v5_metrics_collector import get_metrics_collector
+
+            mc = get_metrics_collector()
+            mc.record_partial_exit(
+                trade_id=self._position_id or "",
+                partial_profit=0.0,  # P&L not available at partial close time
+                remaining_position=self._position_volume > 0,
+            )
+        except Exception:  # noqa: S110
+            pass
+
         log.info(
             "PARTIAL_CLOSE: %s vol %.2f -> remaining %.2f (state stays %s)",
             self._position_id,

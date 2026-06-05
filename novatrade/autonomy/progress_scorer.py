@@ -211,15 +211,45 @@ class ProgressScorer:
             else:
                 direction = "stable"
 
+            # Per-sub-metric 6h deltas
+            sub_deltas = self._compute_sub_metric_deltas(name, dim, history, now)
+
             trends[name] = ScoreTrend(
                 current=dim.score,
                 avg_1h=avg_1h,
                 avg_6h=avg_6h,
                 avg_24h=avg_24h,
                 direction=direction,
+                subs=sub_deltas if sub_deltas else None,
             )
 
         return trends
+
+    def _compute_sub_metric_deltas(
+        self,
+        dim_name: str,
+        dim: DimensionScore,
+        history: list[dict],
+        now: datetime,
+    ) -> dict[str, float]:
+        """Compute 6h delta for each sub-metric in a dimension."""
+        if not dim.sub_metrics:
+            return {}
+
+        sub_history: dict[str, list[tuple[str, float]]] = {}
+        for entry in history:
+            ts = entry.get("generated_at", "")
+            subs = entry.get("dimensions", {}).get(dim_name, {}).get("subs", {})
+            for sub_name, sub_val in subs.items():
+                sub_history.setdefault(sub_name, []).append((ts, sub_val))
+
+        deltas: dict[str, float] = {}
+        for sm in dim.sub_metrics:
+            past = sub_history.get(sm.name, [])
+            avg_6h = self._avg_in_window(past, now, hours=6)
+            if avg_6h is not None:
+                deltas[sm.name] = round(sm.value - avg_6h, 1)
+        return deltas
 
     @staticmethod
     def _avg_in_window(scores: list[tuple[str, float]], now: datetime, hours: int) -> float | None:

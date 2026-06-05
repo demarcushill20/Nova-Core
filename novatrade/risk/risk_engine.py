@@ -146,6 +146,7 @@ class PositionRiskState:
     unrealized_pnl: float = 0.0
     max_favorable_excursion: float = 0.0
     max_adverse_excursion: float = 0.0
+    fill_time: float = 0.0
 
 
 @dataclass
@@ -524,6 +525,7 @@ class RiskEngine:
             entry_price=fill_price,
             current_stop=stop_loss,
             best_close=fill_price,
+            fill_time=time.time(),
         )
         log.info(
             "Trade fill: %s %s %s vol=%.2f at %.5f sl=%.5f",
@@ -547,6 +549,15 @@ class RiskEngine:
                 stop_loss=stop_loss,
             )
         except Exception:  # noqa: S110 — journal is best-effort, must not block trading
+            pass
+
+        # S7: Record volume execution for v5 performance metrics
+        try:
+            from novatrade.monitor.v5_metrics_collector import get_metrics_collector
+
+            mc = get_metrics_collector()
+            mc.record_volume_execution(target_volume=volume, actual_volume=volume)
+        except Exception:  # noqa: S110
             pass
 
     def on_trade_close(
@@ -590,6 +601,23 @@ class RiskEngine:
                 exit_reason=exit_reason,
             )
         except Exception:  # noqa: S110 — journal is best-effort, must not block trading
+            pass
+
+        # S7: Record trade completion for v5 performance metrics
+        try:
+            from novatrade.monitor.v5_metrics_collector import get_metrics_collector
+
+            mc = get_metrics_collector()
+            had_partial = exit_reason == "partial_tp" or "partial" in exit_reason.lower()
+            prs = self._position_risks.get(position_id)
+            duration_h = (time.time() - prs.fill_time) / 3600.0 if prs and prs.fill_time > 0 else 0.0
+            mc.record_trade_completion(
+                trade_id=position_id,
+                had_partial_exit=had_partial,
+                total_profit=pnl_usd,
+                duration_hours=duration_h,
+            )
+        except Exception:  # noqa: S110
             pass
 
         # Update drawdowns

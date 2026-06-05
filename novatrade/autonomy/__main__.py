@@ -83,9 +83,16 @@ def print_scores(report) -> None:
         alert = _alert_badge(dim.score)
         print(f"  {_pad(name, 24)} {dim.score:5.1f}  {_bar(dim.score)}  {_pad(alert, 7)} {trend_str}")
 
-        # Sub-metrics (compact)
+        # Sub-metrics with 6h delta
         if dim.sub_metrics:
-            parts = [f"{sm.name}={sm.value:.0f}" for sm in dim.sub_metrics]
+            sub_deltas = trend.subs if trend and trend.subs else {}
+            parts = []
+            for sm in dim.sub_metrics:
+                d = sub_deltas.get(sm.name)
+                if d is not None and d != 0:
+                    parts.append(f"{sm.name}={sm.value:.0f}({d:+.0f})")
+                else:
+                    parts.append(f"{sm.name}={sm.value:.0f}")
             line = "    " + ", ".join(parts)
             if len(line) > 78:
                 line = line[:75] + "..."
