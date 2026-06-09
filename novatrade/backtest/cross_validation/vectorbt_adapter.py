@@ -273,39 +273,56 @@ class VectorbtAdapter(BaseEngineAdapter):
                 entry_prices[i] = entry
                 stop_losses[i] = sl
 
-            # Apply Nova-like pending-stop execution cadence before handing fill bars to vectorbt.
-            long_entries, short_entries = self._apply_execution_filter(
+            # Simulate Nova's pending-stop cadence AND its position release (stop / time
+            # stop), then drive vectorbt with explicit entry + exit signals and the exact
+            # fill prices. This replaces the old single global sl_pct trailing stop, whose
+            # independent exit model disagreed with the entry filter and silently dropped
+            # ~19 entries while "in position" under its own unrelated stop.
+            sim = self._simulate_execution(
                 long_entries,
                 short_entries,
                 h1_candles,
                 env,
                 entry_prices,
                 stop_losses,
+                atr=atr,
             )
+            long_entries = sim["long_entries"]
+            short_entries = sim["short_entries"]
 
             close_series = pd.Series(closes, index=df.index)
-            atr_arr = np.array(atr)
-            valid_atr = atr_arr[~np.isnan(atr_arr)]
-            sl_pct = (
-                float(np.mean(valid_atr)) / float(np.mean(closes)) * env.trail_atr_multiplier
-                if len(valid_atr)
-                else 0.02
-            )
+            price_series = pd.Series(sim["price"], index=df.index)
+            size_arr = sim["size"]
+            price_arr = sim["price"]
+
+            # vectorbt OSS (0.28) has no leverage, so a cash-secured account cannot
+            # hold a risk-sized FX position. Fund it large enough to afford the
+            # biggest single position; absolute PnL is leverage-invariant, and
+            # drawdown %/return are recomputed against initial_equity in metrics.
+            max_notional = float((size_arr * price_arr).max()) if size_arr.size else 0.0
+            init_cash = max(env.initial_equity, max_notional * 2.0)
 
             pf = vbt.Portfolio.from_signals(
                 close=close_series,
-                entries=pd.Series(long_entries, index=df.index),
-                short_entries=pd.Series(short_entries, index=df.index),
-                init_cash=env.initial_equity,
-                sl_stop=sl_pct,
-                sl_trail=True,
+                entries=pd.Series(sim["long_entries"], index=df.index),
+                exits=pd.Series(sim["long_exits"], index=df.index),
+                short_entries=pd.Series(sim["short_entries"], index=df.index),
+                short_exits=pd.Series(sim["short_exits"], index=df.index),
+                price=price_series,
+                size=pd.Series(size_arr, index=df.index),
+                size_type="amount",
+                init_cash=init_cash,
+                accumulate=False,
                 freq="1h",
             )
+            self._init_cash = init_cash
+            self._initial_equity = env.initial_equity
 
             stats = pf.stats()
             trade_records = pf.trades.records_readable if hasattr(pf.trades, "records_readable") else None
 
-            trades = self._normalize_trades(trade_records)
+            ts_to_bar = {ts: i for i, ts in enumerate(df.index)}
+            trades = self._normalize_trades(trade_records, ts_to_bar)
             metrics = self._extract_metrics(stats, pf)
 
             return EngineResult(
@@ -318,9 +335,9 @@ class VectorbtAdapter(BaseEngineAdapter):
                 config_notes=[
                     "signals pre-computed using full Nova filter chain"
                     " (range-zone IRB, EMA trend, H4 MTF, ADX, overextension)",
-                    "vectorbt fills at next-bar close, not at stop-order price",
-                    "trailing stop uses vectorbt sl_trail parameter",
-                    f"sl_pct={sl_pct:.6f}",
+                    "explicit entry+exit signals replay Nova's pending-stop cadence",
+                    "fills at exact pending-stop / stop-loss prices via price= (not bar close)",
+                    "single exit model (no global sl_pct); occupancy = one position at a time",
                 ],
             )
         except ImportError:
@@ -395,14 +412,88 @@ class VectorbtAdapter(BaseEngineAdapter):
                     trades_today += 1
             return filtered_long, filtered_short
 
+        sim = VectorbtAdapter._simulate_execution(long_entries, short_entries, candles, env, entry_prices, stop_losses)
+        return sim["long_entries"], sim["short_entries"]
+
+    @staticmethod
+    def _simulate_execution(
+        long_entries,
+        short_entries,
+        candles: list[Candle],
+        env: BacktestEnvironment,
+        entry_prices,
+        stop_losses,
+        atr=None,
+    ) -> dict:
+        """Full one-position-at-a-time pending-stop simulation.
+
+        Mirrors Nova's execution state machine closely enough to drive vectorbt
+        with EXPLICIT entry + exit signals (no global sl_pct). Returns boolean
+        entry/exit arrays per side plus a per-bar fill-price array:
+
+        * entries fill at the pending-stop ``entry_price`` on the first bar (within
+          ``trigger_window_bars``) whose high/low crosses it; a same-side signal
+          re-arms the pending order, an opposite-side signal is ignored while armed.
+        * a position releases on the first of: stop-loss crossing (fill at the stop)
+          or the ``time_stop_bars`` ceiling (fill at close).
+        * ``price[i]`` carries the exact fill price for whichever event fired on bar
+          ``i`` (entry or exit); other bars keep the close so vectorbt values them.
+
+        The entry arrays are identical to the legacy ``_apply_execution_filter``
+        prices-path; this method additionally surfaces the exit timing/price the
+        filter was already computing internally but discarding.
+        """
+        import math
+
+        import numpy as np
+
+        n = len(candles)
+        f_long = np.zeros(n, dtype=bool)
+        f_short = np.zeros(n, dtype=bool)
+        x_long = np.zeros(n, dtype=bool)
+        x_short = np.zeros(n, dtype=bool)
+        price = np.array([c.close for c in candles], dtype=float)
+        size = np.zeros(n, dtype=float)  # units at each entry bar (volume * 100k)
+
+        # Cost model — replicate Nova exactly so vectorbt's portfolio reproduces
+        # net USD. Spread+slippage is a per-trade pip cost; the $/lot commission
+        # is ALSO a constant per-trade pip cost (commission_per_lot / lot_val),
+        # independent of volume. Both fold into one exit-price haircut.
+        pip = env.pip_value
+        lot_val = env.pip_value_per_standard_lot
+        cost_pips = env.spread.total_cost_pips + (env.spread.commission_per_lot_usd / lot_val if lot_val else 0.0)
+
+        equity = env.initial_equity  # compounding base for risk-fraction sizing
+        position_volume = 0.0
+
         in_position = False
         position_entry_bar = -1
+        position_side: str | None = None
+        position_stop = 0.0
+        position_entry_price = 0.0
+        position_initial_stop = 0.0
+        position_best = 0.0
+        breakeven_hit = False
         last_flat_bar = -9999
         trades_today = 0
         last_day_ord = -1
         pending_side: str | None = None
         pending_entry = 0.0
+        pending_stop = 0.0
         pending_bar = -1
+
+        def _emit_exit(bar_i, exit_price, is_long, entry_price, volume):
+            # Bake the full per-trade cost (spread + slippage + commission) into the
+            # fill price as a pip haircut so vectorbt's portfolio PnL == Nova's net;
+            # return the realised USD so the caller can compound it into equity for
+            # the next trade's risk-fraction size.
+            gross_pips = (exit_price - entry_price) / pip if is_long else (entry_price - exit_price) / pip
+            if is_long:
+                x_long[bar_i] = True
+            else:
+                x_short[bar_i] = True
+            price[bar_i] = exit_price - cost_pips * pip if is_long else exit_price + cost_pips * pip
+            return (gross_pips - cost_pips) * volume * lot_val
 
         for i, candle in enumerate(candles):
             if env.max_trades_per_day > 0:
@@ -418,9 +509,71 @@ class VectorbtAdapter(BaseEngineAdapter):
                     trades_today = 0
 
             if in_position:
-                if i - position_entry_bar >= env.time_stop_bars:
+                # Replicate Nova _manage_position intra-bar order so the slot
+                # frees on the SAME bar Nova would close: (1) stop-loss against
+                # the stop carried from the prior bar, (2) time-stop ceiling,
+                # (3) breakeven ratchet, (4) ATR trailing ratchet. Steps 3-4 only
+                # move the stop for subsequent bars unless the trail jumps past an
+                # intra-bar wick. With ``atr=None`` only the fixed stop / time-stop
+                # fire (legacy behaviour, used by unit tests).
+                bars_held = i - position_entry_bar
+                is_long = position_side == "LONG"
+
+                # (1) stop-loss — stop value as of the previous bar's ratchet
+                if (is_long and candle.low <= position_stop) or (not is_long and candle.high >= position_stop):
+                    equity += _emit_exit(i, position_stop, is_long, position_entry_price, position_volume)
                     in_position = False
                     last_flat_bar = i
+                    continue
+
+                # (2) time stop — fill at close
+                if bars_held >= env.time_stop_bars:
+                    equity += _emit_exit(i, candle.close, is_long, position_entry_price, position_volume)
+                    in_position = False
+                    last_flat_bar = i
+                    continue
+
+                if atr is not None:
+                    # (3) breakeven: move stop to entry+/-pip after breakeven_r * R
+                    if env.breakeven_r > 0 and not breakeven_hit:
+                        sd = abs(position_entry_price - position_initial_stop)
+                        target = sd * env.breakeven_r
+                        if is_long and (candle.close - position_entry_price) >= target:
+                            position_stop = max(position_stop, position_entry_price + env.pip_value)
+                            breakeven_hit = True
+                        elif not is_long and (position_entry_price - candle.close) >= target:
+                            position_stop = min(position_stop, position_entry_price - env.pip_value)
+                            breakeven_hit = True
+
+                    # (4) ATR trailing (close anchor); trail_delay default 0
+                    a = atr[i] if i < len(atr) and not math.isnan(atr[i]) else 0.0
+                    if a > 0 and (env.trail_delay_bars <= 0 or bars_held >= env.trail_delay_bars):
+                        if is_long:
+                            position_best = max(position_best, candle.close)
+                            new_trail = position_best - env.trail_atr_multiplier * a
+                            if new_trail > position_stop:
+                                old_stop = position_stop
+                                position_stop = new_trail
+                                if candle.low <= position_stop and candle.low > old_stop:
+                                    equity += _emit_exit(
+                                        i, position_stop, is_long, position_entry_price, position_volume
+                                    )
+                                    in_position = False
+                                    last_flat_bar = i
+                                    continue
+                        else:
+                            position_best = min(position_best, candle.close)
+                            new_trail = position_best + env.trail_atr_multiplier * a
+                            if new_trail < position_stop:
+                                old_stop = position_stop
+                                position_stop = new_trail
+                                if candle.high >= position_stop and candle.high < old_stop:
+                                    equity += _emit_exit(
+                                        i, position_stop, is_long, position_entry_price, position_volume
+                                    )
+                                    in_position = False
+                                    last_flat_bar = i
+                                    continue
                 continue
 
             if pending_side is not None:
@@ -429,12 +582,36 @@ class VectorbtAdapter(BaseEngineAdapter):
                 )
                 if filled:
                     if env.max_trades_per_day <= 0 or trades_today < env.max_trades_per_day:
+                        # Gap fill: if the bar opens through the pending stop, Nova
+                        # fills at bar.open, not the stop level (engine.py _check_pending_fill).
                         if pending_side == "LONG":
-                            filtered_long[i] = True
+                            f_long[i] = True
+                            fill_px = candle.open if candle.open >= pending_entry else pending_entry
                         else:
-                            filtered_short[i] = True
+                            f_short[i] = True
+                            fill_px = candle.open if candle.open <= pending_entry else pending_entry
+                        price[i] = fill_px
                         in_position = True
                         position_entry_bar = i
+                        position_side = pending_side
+                        position_stop = pending_stop
+                        # entry_price tracks the actual fill; the initial stop stays
+                        # anchored at the IRB wick (used for the breakeven R unit).
+                        position_entry_price = fill_px
+                        position_initial_stop = pending_stop
+                        position_best = candle.close
+                        breakeven_hit = False
+                        # Risk-fraction position sizing (Nova engine.py:816-821):
+                        # volume = equity*risk_fraction / (stop_pips * lot_val),
+                        # sized off the signal-time stop distance, clamped + rounded.
+                        stop_dist_pips = abs(pending_entry - pending_stop) / pip
+                        if stop_dist_pips > 0:
+                            volume = (equity * env.risk_fraction) / (stop_dist_pips * lot_val)
+                            volume = max(env.min_volume, min(env.max_volume, round(volume, 2)))
+                        else:
+                            volume = env.min_volume
+                        position_volume = volume
+                        size[i] = volume * 100_000.0
                         trades_today += 1
                     pending_side = None
                     continue
@@ -453,11 +630,33 @@ class VectorbtAdapter(BaseEngineAdapter):
                 continue
             pending_side = signal_side
             pending_entry = float(entry_prices[i])
+            pending_stop = float(stop_losses[i])
             pending_bar = i
 
-        return filtered_long, filtered_short
+        # End-of-data: force-close any still-open position at the final bar, the
+        # way Nova's run() closes the trailing position at the last close. Without
+        # this, vectorbt auto-closes the dangling position at the raw close with no
+        # cost haircut — the source of a small terminal PnL/sign discrepancy.
+        if in_position and n > 0:
+            last = n - 1
+            equity += _emit_exit(
+                last,
+                candles[last].close,
+                position_side == "LONG",
+                position_entry_price,
+                position_volume,
+            )
 
-    def _normalize_trades(self, trade_records) -> list[NormalizedTrade]:
+        return {
+            "long_entries": f_long,
+            "short_entries": f_short,
+            "long_exits": x_long,
+            "short_exits": x_short,
+            "price": price,
+            "size": size,
+        }
+
+    def _normalize_trades(self, trade_records, ts_to_bar=None) -> list[NormalizedTrade]:
         if trade_records is None:
             return []
         trades: list[NormalizedTrade] = []
@@ -467,8 +666,13 @@ class VectorbtAdapter(BaseEngineAdapter):
                 direction = row.get("Direction", "Long")
                 entry_ts = row.get("Entry Timestamp", 0)
                 exit_ts = row.get("Exit Timestamp", 0)
-                entry_idx = int(entry_ts) if not hasattr(entry_ts, "timestamp") else 0
-                exit_idx = int(exit_ts) if not hasattr(exit_ts, "timestamp") else 0
+                if ts_to_bar is not None:
+                    # records carry pandas Timestamps; map back to integer bar index
+                    entry_idx = int(ts_to_bar.get(entry_ts, 0))
+                    exit_idx = int(ts_to_bar.get(exit_ts, 0))
+                else:
+                    entry_idx = int(entry_ts) if not hasattr(entry_ts, "timestamp") else 0
+                    exit_idx = int(exit_ts) if not hasattr(exit_ts, "timestamp") else 0
                 trades.append(
                     NormalizedTrade(
                         trade_id=i + 1,
@@ -510,12 +714,30 @@ class VectorbtAdapter(BaseEngineAdapter):
             "net_pnl_pips": MetricAvailability.NOT_COMPUTED,
         }
 
+        # vectorbt computes Max Drawdown % against init_cash, which we inflate to
+        # fund unleveraged FX positions. Recompute against initial_equity by
+        # rebasing the equity curve (absolute $ drawdown is leverage-invariant) so
+        # the % is comparable to Nova's compounding-equity drawdown.
+        max_dd_pct = abs(float(_get("Max Drawdown [%]", 0) or 0))
+        init_cash = getattr(self, "_init_cash", None)
+        base = getattr(self, "_initial_equity", None)
+        if pf is not None and init_cash and base:
+            try:
+                import numpy as np
+
+                eq = np.asarray(pf.value().values, dtype=float) - float(init_cash) + float(base)
+                peak = np.maximum.accumulate(eq)
+                dd = np.where(peak > 0, (peak - eq) / peak, 0.0)
+                max_dd_pct = float(np.max(dd) * 100.0)
+            except Exception:  # noqa: S110
+                pass
+
         return NormalizedMetrics(
             total_trades=int(_get("Total Trades", 0) or 0),
             win_rate=float(_get("Win Rate [%]", 0) or 0) / 100.0,  # Convert % to fraction
             net_pnl_usd=float(pf.total_profit()) if pf is not None else 0.0,
             profit_factor=min(float(_get("Profit Factor", 0) or 0), 999.0),
-            max_drawdown_pct=abs(float(_get("Max Drawdown [%]", 0) or 0)),
+            max_drawdown_pct=max_dd_pct,
             sharpe_ratio=float(_get("Sharpe Ratio", 0) or 0),
             sortino_ratio=float(_get("Sortino Ratio", 0) or 0),
             availability=avail,

@@ -919,6 +919,47 @@ class TestVectorbtCooldownFilter:
         assert fl[2]  # 2nd trade (after exit at bar 1)
         assert not fl[4]  # blocked: daily limit reached
 
+    def test_stop_loss_release_allows_reentry_before_time_stop(self):
+        """With entry_prices/stop_losses supplied, a position must release on a
+        stop-loss crossing (not only the fixed time-stop), freeing the timeline
+        for re-entry. Regression for task 1001: the filter held positions a fixed
+        40 bars and starved ~60 entries vs Nova's mean 7.4-bar SL exits."""
+        import numpy as np
+
+        from novatrade.backtest.cross_validation.vectorbt_adapter import VectorbtAdapter
+        from novatrade.backtest.environment import BacktestEnvironment
+
+        n = 30
+        long_entries = np.zeros(n, dtype=bool)
+        short_entries = np.zeros(n, dtype=bool)
+        entry_prices = np.zeros(n)
+        stop_losses = np.zeros(n)
+
+        # Two LONG signals far apart in time, both well within time_stop_bars=40.
+        for sig in (5, 9):
+            long_entries[sig] = True
+            entry_prices[sig] = 1.1003  # below default high (1.1005) -> fills next bar
+            stop_losses[sig] = 1.0990  # above default low (1.0995) only when low dips
+
+        candles = [_make_candle(1700000000.0 + i * 3600, 1.1, 1.1005, 1.0995, 1.1002) for i in range(n)]
+        # Bar 7 dips below the stop, releasing the position entered at bar 6.
+        candles[7] = _make_candle(1700000000.0 + 7 * 3600, 1.1, 1.1005, 1.0985, 1.1002)
+
+        fl, fs = VectorbtAdapter._apply_execution_filter(
+            long_entries,
+            short_entries,
+            candles,
+            env=BacktestEnvironment(cooldown_bars=0, time_stop_bars=40),
+            entry_prices=entry_prices,
+            stop_losses=stop_losses,
+        )
+
+        # First entry fills at bar 6; stop hit at bar 7 releases it; second signal
+        # (bar 9) fills at bar 10 — impossible under a fixed 40-bar hold.
+        assert fl[6]
+        assert fl[10]
+        assert int(fl.sum()) == 2
+
 
 class TestNautilusCooldownState:
     """Test that Nautilus strategy tracks cooldown state correctly via mock records."""
@@ -942,3 +983,97 @@ class TestNautilusCooldownState:
         assert strat._last_flat_bar == -9999
         # After a position close, _last_flat_bar should be set to exit bar
         # (verified by reading the modified code — the field assignment is present)
+
+
+# ==================================================================
+# Vectorbt ↔ Nova execution + accounting parity (real EURUSD data)
+# Pins the cross-validation contract from OUTPUT/parity_spec.md.
+# ==================================================================
+
+_H1_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "candles", "EURUSD_H1.csv")
+_H4_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "candles", "EURUSD_H4.csv")
+
+
+def _vectorbt_available() -> bool:
+    try:
+        from novatrade.backtest.cross_validation.vectorbt_adapter import _import_vectorbt
+
+        _import_vectorbt()
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(
+    not (os.path.exists(_H1_PATH) and os.path.exists(_H4_PATH)),
+    reason="EURUSD candle fixtures not present",
+)
+@pytest.mark.skipif(not _vectorbt_available(), reason="vectorbt not installed")
+class TestVectorbtNovaParity:
+    """Regression guard: the vectorbt adapter reproduces Nova's trades AND money.
+
+    These tolerances mirror OUTPUT/parity_spec.md. If a future change widens any
+    gap, this fails loudly rather than silently eroding cross-validation trust.
+    """
+
+    @pytest.fixture(scope="class")
+    def results(self):
+        from novatrade.backtest.cross_validation.nova_adapter import NovaEngineAdapter
+        from novatrade.backtest.cross_validation.vectorbt_adapter import VectorbtAdapter
+        from novatrade.data.loader import load_candles
+
+        h1 = load_candles(_H1_PATH)
+        h4 = load_candles(_H4_PATH, timeframe="H4")
+        nova = NovaEngineAdapter().run(h1, h4, DEFAULT_ENVIRONMENT)
+        vbt = VectorbtAdapter().run(h1, h4, DEFAULT_ENVIRONMENT)
+        assert nova.error is None and vbt.error is None
+        return nova, vbt
+
+    def test_trade_count_within_2pct(self, results):
+        nova, vbt = results
+        n, v = nova.metrics.total_trades, vbt.metrics.total_trades
+        assert n > 100, "fixture sanity: expect a substantial trade set"
+        assert abs(v - n) <= max(2, round(0.02 * n)), f"count {v} vs nova {n} exceeds ±2%"
+
+    def test_side_balance_matches(self, results):
+        nova, vbt = results
+        nl = sum(1 for t in nova.trades if t.side == "LONG")
+        vl = sum(1 for t in vbt.trades if t.side == "LONG")
+        ns = sum(1 for t in nova.trades if t.side == "SHORT")
+        vs = sum(1 for t in vbt.trades if t.side == "SHORT")
+        assert abs(vl - nl) <= 3 and abs(vs - ns) <= 3
+
+    def test_95pct_trades_matched_by_entry_bar(self, results):
+        nova, vbt = results
+        by_side: dict[str, list[int]] = {"LONG": [], "SHORT": []}
+        for t in vbt.trades:
+            by_side[t.side].append(t.entry_bar)
+        matched, used = 0, set()
+        for t in nova.trades:
+            hit = next(
+                (b for b in by_side[t.side] if abs(b - t.entry_bar) <= 1 and (t.side, b) not in used),
+                None,
+            )
+            if hit is not None:
+                used.add((t.side, hit))
+                matched += 1
+        assert matched / len(nova.trades) >= 0.95, f"only {matched}/{len(nova.trades)} matched"
+
+    def test_net_pnl_within_5pct(self, results):
+        nova, vbt = results
+        n, v = nova.metrics.net_pnl_usd, vbt.metrics.net_pnl_usd
+        assert (n > 0) == (v > 0), "PnL sign must agree (guards the engine-drift sign-flip class)"
+        assert abs(v - n) / abs(n) <= 0.05, f"net PnL {v:.2f} vs nova {n:.2f} exceeds 5%"
+
+    def test_profit_factor_close(self, results):
+        nova, vbt = results
+        assert abs(vbt.metrics.profit_factor - nova.metrics.profit_factor) <= 0.15
+
+    def test_max_drawdown_within_tolerance(self, results):
+        nova, vbt = results
+        # rebased against initial_equity — absolute % within 3pp of Nova
+        assert abs(vbt.metrics.max_drawdown_pct - nova.metrics.max_drawdown_pct) <= 3.0
+
+    def test_sharpe_within_tolerance(self, results):
+        nova, vbt = results
+        assert abs(vbt.metrics.sharpe_ratio - nova.metrics.sharpe_ratio) <= 0.3
