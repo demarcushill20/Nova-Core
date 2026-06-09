@@ -1077,3 +1077,71 @@ class TestVectorbtNovaParity:
     def test_sharpe_within_tolerance(self, results):
         nova, vbt = results
         assert abs(vbt.metrics.sharpe_ratio - nova.metrics.sharpe_ratio) <= 0.3
+
+
+def _backtesting_available() -> bool:
+    try:
+        import backtesting  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(
+    not (os.path.exists(_H1_PATH) and os.path.exists(_H4_PATH)),
+    reason="EURUSD candle fixtures not present",
+)
+@pytest.mark.skipif(not _backtesting_available(), reason="backtesting.py not installed")
+class TestBacktestingPyNovaParity:
+    """Regression guard for the backtesting.py engine.
+
+    backtesting.py is a genuinely INDEPENDENT event-driven engine — it runs Nova's
+    strategy with its own intra-bar fill engine, so the trade count phase-drifts
+    (two independent fill engines can't be bar-for-bar identical). These tolerances
+    are therefore looser than the vectorbt replay: they assert the ECONOMICS agree
+    (net PnL, sign, drawdown, profit factor, win rate) — the layer that catches an
+    engine-drift / sign-flip bug — while allowing bounded execution drift. Sharpe is
+    intentionally NOT asserted (backtesting.py's annualisation is not comparable).
+    """
+
+    @pytest.fixture(scope="class")
+    def results(self):
+        import warnings
+
+        from novatrade.backtest.cross_validation.backtestingpy_adapter import BacktestingPyAdapter
+        from novatrade.backtest.cross_validation.nova_adapter import NovaEngineAdapter
+        from novatrade.data.loader import load_candles
+
+        h1 = load_candles(_H1_PATH)
+        h4 = load_candles(_H4_PATH, timeframe="H4")
+        nova = NovaEngineAdapter().run(h1, h4, DEFAULT_ENVIRONMENT)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            bt = BacktestingPyAdapter().run(h1, h4, DEFAULT_ENVIRONMENT)
+        assert nova.error is None and bt.error is None
+        return nova, bt
+
+    def test_trade_count_drift_bounded(self, results):
+        nova, bt = results
+        n, v = nova.metrics.total_trades, bt.metrics.total_trades
+        # independent fill engines phase-drift; bound it, don't demand exactness
+        assert abs(v - n) / n <= 0.12, f"count {v} vs nova {n} drifted >12%"
+
+    def test_net_pnl_within_5pct_and_sign(self, results):
+        nova, bt = results
+        n, v = nova.metrics.net_pnl_usd, bt.metrics.net_pnl_usd
+        assert (n > 0) == (v > 0), "PnL sign must agree (guards the engine-drift sign-flip class)"
+        assert abs(v - n) / abs(n) <= 0.05, f"net PnL {v:.2f} vs nova {n:.2f} exceeds 5%"
+
+    def test_win_rate_close(self, results):
+        nova, bt = results
+        assert abs(bt.metrics.win_rate - nova.metrics.win_rate) <= 0.05
+
+    def test_max_drawdown_within_tolerance(self, results):
+        nova, bt = results
+        assert abs(bt.metrics.max_drawdown_pct - nova.metrics.max_drawdown_pct) <= 3.0
+
+    def test_profit_factor_close(self, results):
+        nova, bt = results
+        assert abs(bt.metrics.profit_factor - nova.metrics.profit_factor) <= 0.2

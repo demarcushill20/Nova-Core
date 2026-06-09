@@ -70,21 +70,30 @@ class BacktestingPyAdapter(BaseEngineAdapter):
 
             df = self._prepare_dataframe(h1_candles, h4_candles, env)
 
-            # Build strategy class dynamically with env parameters baked in
-            StrategyClass = self._build_strategy_class(env)
+            # Cost model — match Nova's per-trade pip cost (spread + slippage +
+            # the $/lot commission expressed as a constant pip cost). backtesting.py
+            # charges `commission` per SIDE as a fraction of trade value, so a
+            # round-turn 2·f·notional must equal cost_pips·pip·units → solve for f.
+            avg_price = float(df["Close"].mean())
+            lot_val = env.pip_value_per_standard_lot
+            cost_pips = env.spread.total_cost_pips + (env.spread.commission_per_lot_usd / lot_val if lot_val else 0.0)
+            commission_frac = (cost_pips * env.pip_value) / (2.0 * avg_price) if avg_price else 0.0
 
-            # Commission: convert fixed cost to approximate fraction
-            # ECN: commission_per_lot_usd / (avg_price * lot_size * pip_value)
-            avg_price = df["Close"].mean()
-            spread_cost = env.spread.avg_spread_pips * env.pip_value
-            slippage_cost = env.spread.slippage_pips * env.pip_value
-            commission_frac = (spread_cost + slippage_cost) / avg_price
+            # backtesting.py is a genuinely independent EVENT-DRIVEN engine: it runs
+            # Nova's strategy with its own fill engine (risk-fraction sizing, breakeven
+            # + ATR-trail stop ratcheting). Two independent intra-bar fill engines
+            # phase-drift slightly on exit timing, so the trade count is close but not
+            # identical to Nova — by design, this surfaces execution-model sensitivity.
+            StrategyClass = self._build_strategy_class(env)
 
             bt = Backtest(
                 df,
                 StrategyClass,
                 cash=env.initial_equity,
                 commission=commission_frac,
+                # Native margin → high leverage so risk-sized FX positions are
+                # affordable while equity/drawdown stay relative to initial_equity.
+                margin=0.001,
                 exclusive_orders=True,
                 trade_on_close=False,
             )
@@ -101,8 +110,10 @@ class BacktestingPyAdapter(BaseEngineAdapter):
                 elapsed_seconds=time.monotonic() - t0,
                 raw_result=stats,
                 config_notes=[
-                    "commission modelled as fraction of trade value",
-                    "slippage added to spread (no native slippage model)",
+                    "independent event-driven engine: own fills, risk-fraction sizing,"
+                    " breakeven + ATR-trail stop ratcheting",
+                    "trade count phase-drifts vs Nova (independent intra-bar fills)",
+                    "per-trade spread+commission cost via commission fraction",
                     f"effective commission fraction: {commission_frac:.6f}",
                 ],
             )
@@ -317,16 +328,17 @@ class BacktestingPyAdapter(BaseEngineAdapter):
         """Dynamically create a backtesting.Strategy subclass for IRB.
 
         Signal logic is pre-computed in _prepare_dataframe using the full Nova
-        engine filter chain (range-zone IRB, EMA trend, H4 MTF, ADX, overextension).
-        The strategy class reads pre-computed signals and manages exits.
-
-        Execution model matches Nova's state machine:
-        - cooldown_bars: block re-entry for N bars after going flat
-        - max_trades_per_day: cap daily entries (reset at day boundary)
+        engine filter chain. Execution mirrors Nova's state machine so backtesting.py
+        reproduces the same trades AND money via its OWN independent fill engine:
+        risk-fraction sizing off live equity, one position at a time, and exits by
+        RATCHETING the live trade's stop (breakeven at 1R, then ATR close-anchor
+        trail) so backtesting.py fills intra-bar at the ratcheted level like Nova.
         """
         from backtesting import Strategy
 
         _env = env
+        _pip = env.pip_value
+        _lot_val = env.pip_value_per_standard_lot
 
         class IRBCrossValidation(Strategy):
             """IRB strategy using pre-computed Nova-equivalent signals."""
@@ -335,16 +347,39 @@ class BacktestingPyAdapter(BaseEngineAdapter):
             time_stop_bars = _env.time_stop_bars
             cooldown_bars = _env.cooldown_bars
             max_trades_per_day = _env.max_trades_per_day
+            breakeven_r = _env.breakeven_r
+            trail_delay_bars = _env.trail_delay_bars
+            risk_fraction = _env.risk_fraction
+            min_volume = _env.min_volume
+            max_volume = _env.max_volume
 
             def init(self):
                 self.atr = self.I(lambda: self.data.ATR, name="ATR")
                 self._bars_in_trade = 0
-                self._trail_stop = 0.0
                 self._bar_index = -1
                 self._last_exit_bar = -9999
                 self._had_position = False
                 self._trades_today = 0
                 self._last_day_ord = -1
+                self._entry_price = 0.0
+                self._initial_sl = 0.0
+                self._best_close = 0.0
+                self._be_hit = False
+
+            def _set_sl(self, trade, value, is_long):
+                # backtesting.py rejects a stop on the wrong side of the last price;
+                # only ratchet in the protective direction and stay valid.
+                price = self.data.Close[-1]
+                if is_long and value >= price:
+                    return
+                if (not is_long) and value <= price:
+                    return
+                try:
+                    cur = trade.sl
+                    if cur is None or (is_long and value > cur) or ((not is_long) and value < cur):
+                        trade.sl = value
+                except Exception:  # noqa: S110
+                    pass
 
             def next(self):
                 import numpy as np
@@ -368,7 +403,6 @@ class BacktestingPyAdapter(BaseEngineAdapter):
 
                 if not self.position:
                     self._bars_in_trade = 0
-                    self._trail_stop = 0.0
 
                     # v5: Cooldown bars — match Nova engine.py:605-612
                     if self.cooldown_bars > 0 and (self._bar_index - self._last_exit_bar) <= self.cooldown_bars:
@@ -378,40 +412,72 @@ class BacktestingPyAdapter(BaseEngineAdapter):
                     if self.max_trades_per_day > 0 and self._trades_today >= self.max_trades_per_day:
                         return
 
-                    if self.data.Signal_Long[-1]:
-                        entry = float(self.data.Entry_Price[-1])
-                        sl = float(self.data.Stop_Loss[-1])
-                        if entry > sl:
-                            self.buy(stop=entry, sl=sl)
-                            self._trades_today += 1
-                    elif self.data.Signal_Short[-1]:
-                        entry = float(self.data.Entry_Price[-1])
-                        sl = float(self.data.Stop_Loss[-1])
-                        if sl > entry:
-                            self.sell(stop=entry, sl=sl)
-                            self._trades_today += 1
+                    long_sig = bool(self.data.Signal_Long[-1])
+                    short_sig = bool(self.data.Signal_Short[-1])
+                    if not (long_sig or short_sig):
+                        return
+
+                    entry = float(self.data.Entry_Price[-1])
+                    sl = float(self.data.Stop_Loss[-1])
+                    stop_dist = abs(entry - sl)
+                    if stop_dist <= 0:
+                        return
+
+                    # Risk-fraction sizing off live equity (Nova engine.py:816-821)
+                    stop_pips = stop_dist / _pip
+                    volume = (self.equity * self.risk_fraction) / (stop_pips * _lot_val)
+                    volume = max(self.min_volume, min(self.max_volume, round(volume, 2)))
+                    units = round(volume * 100_000)
+                    if units < 1:
+                        return
+
+                    self._entry_price = entry
+                    self._initial_sl = sl
+                    self._best_close = float(self.data.Close[-1])
+                    self._be_hit = False
+
+                    if long_sig and entry > sl:
+                        self.buy(stop=entry, sl=sl, size=units)
+                        self._trades_today += 1
+                    elif short_sig and sl > entry:
+                        self.sell(stop=entry, sl=sl, size=units)
+                        self._trades_today += 1
                 else:
                     self._bars_in_trade += 1
 
+                    # Time stop — Nova closes at market on the ceiling bar
                     if self._bars_in_trade >= self.time_stop_bars:
                         self.position.close()
                         return
 
+                    trade = self.trades[-1]
+                    is_long = self.position.is_long
+                    close = float(self.data.Close[-1])
+
+                    # Breakeven: move stop to entry +/- pip after breakeven_r * R
+                    if self.breakeven_r > 0 and not self._be_hit:
+                        target = abs(self._entry_price - self._initial_sl) * self.breakeven_r
+                        if is_long and (close - self._entry_price) >= target:
+                            self._set_sl(trade, self._entry_price + _pip, True)
+                            self._be_hit = True
+                        elif (not is_long) and (self._entry_price - close) >= target:
+                            self._set_sl(trade, self._entry_price - _pip, False)
+                            self._be_hit = True
+
+                    # ATR trailing (close anchor); ratchet the live stop so the
+                    # framework fills intra-bar at the trailed level.
                     atr_val = self.atr[-1]
-                    if not np.isnan(atr_val) and atr_val > 0:
-                        price = self.data.Close[-1]
-                        if self.position.is_long:
-                            trail = price - atr_val * self.trail_atr_mult
-                            if trail > self._trail_stop:
-                                self._trail_stop = trail
-                            if price <= self._trail_stop:
-                                self.position.close()
+                    if (
+                        not np.isnan(atr_val)
+                        and atr_val > 0
+                        and (self.trail_delay_bars <= 0 or self._bars_in_trade >= self.trail_delay_bars)
+                    ):
+                        if is_long:
+                            self._best_close = max(self._best_close, close)
+                            self._set_sl(trade, self._best_close - atr_val * self.trail_atr_mult, True)
                         else:
-                            trail = price + atr_val * self.trail_atr_mult
-                            if self._trail_stop == 0 or trail < self._trail_stop:
-                                self._trail_stop = trail
-                            if price >= self._trail_stop:
-                                self.position.close()
+                            self._best_close = min(self._best_close, close)
+                            self._set_sl(trade, self._best_close + atr_val * self.trail_atr_mult, False)
 
         return IRBCrossValidation
 
