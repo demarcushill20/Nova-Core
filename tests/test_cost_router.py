@@ -521,7 +521,7 @@ class TestRoutingDecision:
 
     def test_default_values(self):
         rd = RoutingDecision(
-            model="claude-opus-4-6",
+            model="claude-opus-4-8",
             complexity=TaskComplexity.MODERATE,
         )
         assert rd.reasons == []

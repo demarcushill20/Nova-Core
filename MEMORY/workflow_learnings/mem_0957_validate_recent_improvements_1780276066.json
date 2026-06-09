@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0957_validate_recent_improvements_1780276066",
+  "workflow_id": "0957_validate_recent_improvements",
+  "task_summary": "Validated 5 recent commits stable \u2014 348 targeted tests pass, zero failures, all 6 services active, no regressions detected",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Validated 5 recent commits stable \u2014 348 targeted tests pass, zero failures, all 6 services active, no regressions detected"
+  ],
+  "successful_patterns": [
+    "task_failed: 0957_validate_recent_improvements"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Validated 5 recent commits stable \u2014 348 targeted tests pass, zero failures, all 6 services active, no regressions detected",
+  "created_at": "2026-06-01T01:07:46Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0957_validate_recent_improvements_1780290574"
+}

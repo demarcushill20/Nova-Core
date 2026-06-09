@@ -282,7 +282,7 @@ class TestLLMHelpers(unittest.TestCase):
 
     def test_constants(self):
         self.assertGreater(llm.CONVERSATION_TIMEOUT, 0)
-        self.assertEqual(llm.MODEL, "claude-opus-4-6")
+        self.assertEqual(llm.MODEL, "claude-opus-4-8")
 
 
 # ── Integration: Parse → Conversation Buffer ──────────────────────────────

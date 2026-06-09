@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0995_diagnose_and_fix_the_VectorBT_IRB_v5_adapter_s__0_net_P_L_and_-36__trade-count_g_1781010947",
+  "workflow_id": "0995_diagnose_and_fix_the_VectorBT_IRB_v5_adapter_s__0_net_P_L_and_-36__trade-count_g",
+  "task_summary": "Fixed VectorBT adapter $0 P&L (wrong stats keys) and broken trade normalization (itertuples can't access space-containing column names)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed VectorBT adapter $0 P&L (wrong stats keys) and broken trade normalization (itertuples can't access space-containing column names)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0995_diagnose_and_fix_the_VectorBT_IRB_v5_adapter_s__0_net_P_L_and_-36__trade-count_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed VectorBT adapter $0 P&L (wrong stats keys) and broken trade normalization (itertuples can't access space-containing column names)",
+  "created_at": "2026-06-09T13:15:47Z",
+  "confidence": "low"
+}

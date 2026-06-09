@@ -16,6 +16,7 @@ Fill model notes:
 
 from __future__ import annotations
 
+import math
 import time
 
 from novatrade.backtest.cross_validation.base_adapter import BaseEngineAdapter
@@ -26,7 +27,7 @@ from novatrade.backtest.cross_validation.types import (
     NormalizedMetrics,
     NormalizedTrade,
 )
-from novatrade.backtest.engine import compute_atr, compute_ema
+from novatrade.backtest.engine import compute_adx, compute_atr, compute_ema
 from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
 
@@ -126,101 +127,279 @@ class BacktestingPyAdapter(BaseEngineAdapter):
         h4_candles: list[Candle],
         env: BacktestEnvironment,
     ):
-        """Build DataFrame with OHLCV + pre-computed indicator columns."""
+        """Build DataFrame with OHLCV + pre-computed IRB signal columns.
+
+        Pre-computes signals using the full Nova engine filter chain:
+        IRB range-zone geometry, EMA trend, H4 MTF, ADX gate, overextension.
+        """
+        import numpy as np
 
         df = self._candles_to_dataframe(h1_candles)
-
-        # Pre-compute H1 indicators
+        n = len(h1_candles)
         closes = [c.close for c in h1_candles]
-        df["EMA_fast"] = compute_ema(closes, env.ema_period)
-        df["ATR"] = compute_atr(h1_candles, env.atr_period)
 
-        # Pre-compute H4 EMA alignment as extra column
+        ema = compute_ema(closes, env.ema_period)
+        ema_fast = compute_ema(closes, env.ema_fast_period)
+        ema_slow = compute_ema(closes, env.ema_slow_period)
+        atr = compute_atr(h1_candles, env.atr_period)
+        adx = compute_adx(h1_candles, env.adx_period)
+
+        atr_sma: list[float] = []
+        if env.use_volatility_filter:
+            ma_period = env.volatility_atr_ma_period
+            atr_sma = [float("nan")] * n
+            for j in range(ma_period - 1, n):
+                vals = [atr[k] for k in range(j - ma_period + 1, j + 1) if not math.isnan(atr[k])]
+                if len(vals) == ma_period:
+                    atr_sma[j] = sum(vals) / ma_period
+
+        h4_ema: list[float] = []
+        h4_map: list[int] = []
         if h4_candles:
             h4_closes = [c.close for c in h4_candles]
             h4_ema = compute_ema(h4_closes, env.ema_period)
             h4_ts = [c.timestamp for c in h4_candles]
-
-            # Map H4 EMA to H1 bars by timestamp alignment
-            h4_aligned = []
             h4_idx = 0
             for c in h1_candles:
                 while h4_idx < len(h4_ts) - 1 and h4_ts[h4_idx + 1] <= c.timestamp:
                     h4_idx += 1
-                h4_aligned.append(h4_ema[h4_idx] if h4_idx < len(h4_ema) else float("nan"))
-            df["H4_EMA"] = h4_aligned
-        else:
-            df["H4_EMA"] = float("nan")
+                h4_map.append(h4_idx)
+
+        sig_long = np.zeros(n, dtype=bool)
+        sig_short = np.zeros(n, dtype=bool)
+        entry_prices = np.zeros(n)
+        stop_losses = np.zeros(n)
+
+        for i in range(n):
+            if i < env.warmup_bars:
+                continue
+            bar = h1_candles[i]
+            if math.isnan(ema[i]) or math.isnan(atr[i]) or math.isnan(adx[i]) or atr[i] <= 0:
+                continue
+
+            rng = bar.high - bar.low
+            if rng <= 0:
+                continue
+
+            if env.session_filter is not None and bar.timestamp > 0:
+                from datetime import datetime, timezone
+
+                bar_hour = datetime.fromtimestamp(bar.timestamp, tz=timezone.utc).hour
+                if (
+                    (env.session_filter == "london" and not (7 <= bar_hour < 16))
+                    or (env.session_filter == "newyork" and not (13 <= bar_hour < 22))
+                    or (env.session_filter == "london_ny_overlap" and not (13 <= bar_hour < 16))
+                ):
+                    continue
+
+            if (
+                env.use_volatility_filter
+                and atr_sma
+                and i < len(atr_sma)
+                and not math.isnan(atr_sma[i])
+                and atr[i] < atr_sma[i]
+            ):
+                continue
+
+            up_th = bar.high - env.irb_threshold * rng
+            dn_th = bar.low + env.irb_threshold * rng
+            is_up_irb = bar.open <= up_th and bar.close <= up_th
+            is_dn_irb = bar.open >= dn_th and bar.close >= dn_th
+            if not is_up_irb and not is_dn_irb:
+                continue
+
+            side = None
+            if env.use_simple_trend_filter:
+                ef, es = ema_fast[i], ema_slow[i]
+                lb = min(env.ema_slope_lookback, i)
+                if lb < 1:
+                    continue
+                ef_prev = ema_fast[i - lb]
+                if math.isnan(ef) or math.isnan(es) or math.isnan(ef_prev):
+                    continue
+                if is_up_irb and ef > es and ef > ef_prev:
+                    side = "LONG"
+                elif is_dn_irb and ef < es and ef < ef_prev:
+                    side = "SHORT"
+                else:
+                    continue
+            else:
+                lookback = min(20, i)
+                if lookback < 1:
+                    continue
+                slope = (ema[i] - ema[i - lookback]) / atr[i]
+                if is_up_irb and slope >= env.trend_slope_threshold:
+                    side = "LONG"
+                elif is_dn_irb and slope <= -env.trend_slope_threshold:
+                    side = "SHORT"
+                else:
+                    continue
+
+                if env.use_ema_stack_filter:
+                    ef, es = ema_fast[i], ema_slow[i]
+                    if math.isnan(ef) or math.isnan(es):
+                        continue
+                    if side == "LONG" and not (ef > ema[i] > es):
+                        continue
+                    if side == "SHORT" and not (ef < ema[i] < es):
+                        continue
+
+                if env.ema_confirm_bars > 0:
+                    confirm_ok = True
+                    for j in range(env.ema_confirm_bars):
+                        idx = i - j
+                        if idx < 0 or idx >= len(ema_fast) or math.isnan(ema_fast[idx]):
+                            confirm_ok = False
+                            break
+                        if side == "LONG" and h1_candles[idx].close <= ema_fast[idx]:
+                            confirm_ok = False
+                            break
+                        if side == "SHORT" and h1_candles[idx].close >= ema_fast[idx]:
+                            confirm_ok = False
+                            break
+                    if not confirm_ok:
+                        continue
+
+            if h4_map and h4_ema:
+                h4_i = h4_map[i] if i < len(h4_map) else -1
+                if h4_i < 0 or h4_i >= len(h4_ema):
+                    continue
+                h4_lb = min(env.mtf_lookback, h4_i)
+                if h4_lb < 1:
+                    continue
+                h4_cur = h4_ema[h4_i]
+                h4_prev = h4_ema[h4_i - h4_lb]
+                if math.isnan(h4_cur) or math.isnan(h4_prev):
+                    continue
+                if side == "LONG" and not (h4_cur > h4_prev):
+                    continue
+                if side == "SHORT" and not (h4_cur < h4_prev):
+                    continue
+
+            if math.isnan(adx[i]) or adx[i] < env.adx_threshold:
+                continue
+
+            overext = rng / atr[i]
+            if overext > env.overextension_threshold:
+                continue
+            if env.min_signal_atr_mult > 0 and overext < env.min_signal_atr_mult:
+                continue
+
+            spread_cushion = max(0.0, env.sl_spread_buffer_pips) * env.pip_value
+            if side == "LONG":
+                entry = bar.high + env.pip_buffer
+                sl = bar.low - env.pip_buffer - spread_cushion
+                if env.atr_sl_floor_multiplier > 0:
+                    min_sl = atr[i] * env.atr_sl_floor_multiplier
+                    if (entry - sl) < min_sl:
+                        sl = entry - min_sl
+                sig_long[i] = True
+            else:
+                entry = bar.low - env.pip_buffer
+                sl = bar.high + env.pip_buffer + spread_cushion
+                if env.atr_sl_floor_multiplier > 0:
+                    min_sl = atr[i] * env.atr_sl_floor_multiplier
+                    if (sl - entry) < min_sl:
+                        sl = entry + min_sl
+                sig_short[i] = True
+            entry_prices[i] = entry
+            stop_losses[i] = sl
+
+        df["Signal_Long"] = sig_long
+        df["Signal_Short"] = sig_short
+        df["Entry_Price"] = entry_prices
+        df["Stop_Loss"] = stop_losses
+        df["ATR"] = atr
 
         return df
 
     def _build_strategy_class(self, env: BacktestEnvironment):
-        """Dynamically create a backtesting.Strategy subclass for IRB."""
+        """Dynamically create a backtesting.Strategy subclass for IRB.
+
+        Signal logic is pre-computed in _prepare_dataframe using the full Nova
+        engine filter chain (range-zone IRB, EMA trend, H4 MTF, ADX, overextension).
+        The strategy class reads pre-computed signals and manages exits.
+
+        Execution model matches Nova's state machine:
+        - cooldown_bars: block re-entry for N bars after going flat
+        - max_trades_per_day: cap daily entries (reset at day boundary)
+        """
         from backtesting import Strategy
 
-        # Capture env params via closure
         _env = env
 
         class IRBCrossValidation(Strategy):
-            """IRB strategy reimplemented for backtesting.py."""
+            """IRB strategy using pre-computed Nova-equivalent signals."""
 
-            # Parameters exposed for optimization
-            ema_period = _env.ema_period
-            atr_period = _env.atr_period
-            irb_threshold = _env.irb_threshold
             trail_atr_mult = _env.trail_atr_multiplier
-            trigger_window = _env.trigger_window_bars
             time_stop_bars = _env.time_stop_bars
+            cooldown_bars = _env.cooldown_bars
+            max_trades_per_day = _env.max_trades_per_day
 
             def init(self):
-                # Indicators are pre-computed in DataFrame columns
-                self.ema = self.I(lambda: self.data.EMA_fast, name="EMA")
                 self.atr = self.I(lambda: self.data.ATR, name="ATR")
-                self.h4_ema = self.I(lambda: self.data.H4_EMA, name="H4_EMA")
                 self._bars_in_trade = 0
                 self._trail_stop = 0.0
+                self._bar_index = -1
+                self._last_exit_bar = -9999
+                self._had_position = False
+                self._trades_today = 0
+                self._last_day_ord = -1
 
             def next(self):
-                price = self.data.Close[-1]
-                atr_val = self.atr[-1]
-                ema_val = self.ema[-1]
+                import numpy as np
+
+                self._bar_index += 1
+
+                # Day-boundary reset for daily trade counter
+                if self.max_trades_per_day > 0:
+                    try:
+                        day_ord = self.data.index[-1].toordinal()
+                    except Exception:
+                        day_ord = self._bar_index // 24
+                    if day_ord != self._last_day_ord:
+                        self._last_day_ord = day_ord
+                        self._trades_today = 0
+
+                # Detect position exit (framework SL or our explicit close)
+                if self._had_position and not self.position:
+                    self._last_exit_bar = self._bar_index
+                self._had_position = bool(self.position)
 
                 if not self.position:
                     self._bars_in_trade = 0
-                    # Skip if indicators not ready
-                    if np.isnan(atr_val) or np.isnan(ema_val):
+                    self._trail_stop = 0.0
+
+                    # v5: Cooldown bars — match Nova engine.py:605-612
+                    if self.cooldown_bars > 0 and (self._bar_index - self._last_exit_bar) <= self.cooldown_bars:
                         return
 
-                    bar = self.data
-                    o, h, low, c = bar.Open[-1], bar.High[-1], bar.Low[-1], bar.Close[-1]
-                    body = abs(c - o) or 1e-10
-                    upper_wick = h - max(o, c)
-                    lower_wick = min(o, c) - low
+                    # v5: Daily trade limit — match Nova engine.py:600-603
+                    if self.max_trades_per_day > 0 and self._trades_today >= self.max_trades_per_day:
+                        return
 
-                    # IRB geometry: detect imbalance
-                    if upper_wick / body > self.irb_threshold and c > ema_val:
-                        # Bearish IRB (short signal) — upper wick dominant
-                        entry = low - _env.pip_value
-                        sl = h + atr_val * 0.5
-                        if sl > entry:
-                            self.sell(stop=entry, sl=sl)
-
-                    elif lower_wick / body > self.irb_threshold and c < ema_val:
-                        # Bullish IRB (long signal) — lower wick dominant
-                        entry = h + _env.pip_value
-                        sl = low - atr_val * 0.5
+                    if self.data.Signal_Long[-1]:
+                        entry = float(self.data.Entry_Price[-1])
+                        sl = float(self.data.Stop_Loss[-1])
                         if entry > sl:
                             self.buy(stop=entry, sl=sl)
+                            self._trades_today += 1
+                    elif self.data.Signal_Short[-1]:
+                        entry = float(self.data.Entry_Price[-1])
+                        sl = float(self.data.Stop_Loss[-1])
+                        if sl > entry:
+                            self.sell(stop=entry, sl=sl)
+                            self._trades_today += 1
                 else:
                     self._bars_in_trade += 1
 
-                    # Time stop
                     if self._bars_in_trade >= self.time_stop_bars:
                         self.position.close()
                         return
 
-                    # Simple ATR trailing stop
-                    if not np.isnan(atr_val):
+                    atr_val = self.atr[-1]
+                    if not np.isnan(atr_val) and atr_val > 0:
+                        price = self.data.Close[-1]
                         if self.position.is_long:
                             trail = price - atr_val * self.trail_atr_mult
                             if trail > self._trail_stop:
@@ -233,8 +412,6 @@ class BacktestingPyAdapter(BaseEngineAdapter):
                                 self._trail_stop = trail
                             if price >= self._trail_stop:
                                 self.position.close()
-
-        import numpy as np  # ensure available in closure
 
         return IRBCrossValidation
 
@@ -284,8 +461,8 @@ class BacktestingPyAdapter(BaseEngineAdapter):
 
         return NormalizedMetrics(
             total_trades=int(total_trades) if total_trades else 0,
-            win_rate=float(win_rate_raw) if win_rate_raw else 0.0,
-            net_pnl_usd=_get("Equity Final [$]", 0.0) - 100_000.0,
+            win_rate=float(win_rate_raw) / 100.0 if win_rate_raw else 0.0,  # Convert % to fraction
+            net_pnl_usd=_get("Return [$]", _get("Equity Final [$]", 100_000.0) - 100_000.0),
             profit_factor=_get("Profit Factor", 0.0) or 0.0,
             max_drawdown_pct=abs(_get("Max. Drawdown [%]", 0.0) or 0.0),
             sharpe_ratio=_get("Sharpe Ratio", 0.0) or 0.0,

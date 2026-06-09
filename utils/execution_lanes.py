@@ -65,7 +65,7 @@ LANE_CONFIGS = {
     ),
     Lane.HEAVY: LaneConfig(
         lane=Lane.HEAVY,
-        model="claude-opus-4-6",
+        model="claude-opus-4-8",
         tool_profile="fallback",  # broad MCP set
         skill_mode="full",
         memory_enabled=True,

@@ -78,7 +78,7 @@ class TestBudgetEnforcerCore(unittest.TestCase):
 
     def test_record_usage_updates_counters(self):
         """record_usage should update session, daily, and task counters."""
-        self.enforcer.record_usage(1000, 500, model="claude-opus-4-6", task_id="t1")
+        self.enforcer.record_usage(1000, 500, model="claude-opus-4-8", task_id="t1")
 
         self.assertEqual(self.enforcer._session.input_tokens, 1000)
         self.assertEqual(self.enforcer._session.output_tokens, 500)
@@ -181,7 +181,7 @@ class TestBudgetEnforcerCore(unittest.TestCase):
 
     def test_get_cost_summary(self):
         """get_cost_summary returns dollar amounts."""
-        self.enforcer.record_usage(1000, 500, model="claude-opus-4-6")
+        self.enforcer.record_usage(1000, 500, model="claude-opus-4-8")
         summary = self.enforcer.get_cost_summary()
 
         self.assertIn("session_cost_usd", summary)
@@ -192,7 +192,7 @@ class TestBudgetEnforcerCore(unittest.TestCase):
 
     def test_calculate_cost_opus(self):
         """Cost calculation for Opus model."""
-        cost = self.enforcer._calculate_cost(1_000_000, 100_000, "claude-opus-4-6")
+        cost = self.enforcer._calculate_cost(1_000_000, 100_000, "claude-opus-4-8")
         expected = (1_000_000 / 1_000_000) * 15.0 + (100_000 / 1_000_000) * 75.0
         self.assertAlmostEqual(cost, expected)
 

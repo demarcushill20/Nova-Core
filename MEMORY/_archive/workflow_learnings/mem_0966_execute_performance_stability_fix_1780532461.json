@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0966_execute_performance_stability_fix_1780532461",
+  "workflow_id": "0966_execute_performance_stability_fix",
+  "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0966_execute_performance_stability_fix_1780532061 (done)"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-06-04T00:21:01Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0970_execute_performance_stability_improvement_1780619984"
+}

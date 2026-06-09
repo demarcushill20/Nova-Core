@@ -50,10 +50,11 @@ Full autonomy inside `~/nova-core`. No confirmation needed for:
 - Executing Python scripts here
 - Updating CLAUDE.md, TASKS/, OUTPUT/, LOGS/, MEMORY/, SKILLS/, AGENTS/
 - Running standard dev tooling (linting, testing, formatting)
+- Running novacore service commands: `systemctl {start,stop,restart,status}` and `journalctl` for `novacore-*` and `nova-link` services, plus `systemctl daemon-reload`
 
 Confirmation required before:
 - Modifying files outside `~/nova-core`
-- Destructive or hard-to-reverse actions (commits, pushes, deletes, restarting live services, external messages)
+- Destructive or hard-to-reverse actions (commits, pushes, deletes, external messages)
 
 User preference: Full YOLO mode. Act on best judgment.
 

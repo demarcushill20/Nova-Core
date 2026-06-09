@@ -113,6 +113,8 @@ class CrossValidator:
     ) -> MetricDivergence | None:
         val_a = getattr(a.metrics, metric_name, None)
         val_b = getattr(b.metrics, metric_name, None)
+        # Bug #3 fix: Skip comparison for missing metrics (None values)
+        # This prevents missing metrics from being scored as divergent
         if val_a is None or val_b is None:
             return None
 
@@ -147,6 +149,8 @@ class CrossValidator:
     ) -> MetricDivergence | None:
         val_a = getattr(a.metrics, metric_name, None)
         val_b = getattr(b.metrics, metric_name, None)
+        # Bug #3 fix: Skip comparison for missing metrics (None values)
+        # This prevents missing metrics from being scored as divergent
         if val_a is None or val_b is None:
             return None
 

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0994_fix_the_cross-validation_pytest_fixture_error_and_run_the_full-window_trade-coun_1781010129",
+  "workflow_id": "0994_fix_the_cross-validation_pytest_fixture_error_and_run_the_full-window_trade-coun",
+  "task_summary": "Fixed nautilus adapter win_rate test (fraction vs percentage) and ran full-window 4-engine cross-validation \u2014 agreement 46.5/100, trade counts 170/170/109/162",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed nautilus adapter win_rate test (fraction vs percentage) and ran full-window 4-engine cross-validation \u2014 agreement 46.5/100, trade counts 170/170/109/162"
+  ],
+  "successful_patterns": [
+    "task_completed: 0994_fix_the_cross-validation_pytest_fixture_error_and_run_the_full-window_trade-cou"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed nautilus adapter win_rate test (fraction vs percentage) and ran full-window 4-engine cross-validation \u2014 agreement 46.5/100, trade counts 170/170/109/162",
+  "created_at": "2026-06-09T13:02:09Z",
+  "confidence": "low"
+}

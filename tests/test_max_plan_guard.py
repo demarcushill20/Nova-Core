@@ -198,7 +198,7 @@ class TestLedger:
             caller="watcher",
             component="watcher._execute_worker",
             task_id="test_task_1",
-            model="claude-opus-4-6",
+            model="claude-opus-4-8",
         )
         assert rec.caller == "watcher"
         assert rec.task_id == "test_task_1"

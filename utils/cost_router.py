@@ -57,7 +57,7 @@ class TaskComplexity(enum.IntEnum):
 # ---------------------------------------------------------------------------
 
 MODEL_TIERS: dict[str, str] = {
-    "opus": "claude-opus-4-6",
+    "opus": "claude-opus-4-8",
     "sonnet": "claude-sonnet-4-20250514",
     "haiku": "claude-haiku-3-20250307",
 }

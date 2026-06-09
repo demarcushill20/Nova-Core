@@ -37,7 +37,7 @@ from novatrade.backtest.cross_validation.types import (
     NormalizedMetrics,
     NormalizedTrade,
 )
-from novatrade.backtest.engine import compute_atr, compute_ema
+from novatrade.backtest.engine import compute_adx, compute_atr, compute_ema
 from novatrade.backtest.environment import BacktestEnvironment
 from novatrade.models import Candle
 
@@ -110,8 +110,11 @@ class NautilusAdapter(BaseEngineAdapter):
                 bars = self._candles_to_nautilus_bars(h1_candles, instrument)
                 engine.add_data(bars)
 
+                # Pre-compute signals using full Nova filter chain
+                precomputed = self._precompute_signals(h1_candles, h4_candles, env)
+
                 # Build and add strategy
-                strategy = self._build_strategy(env, instrument)
+                strategy = self._build_strategy(env, instrument, precomputed)
                 engine.add_strategy(strategy)
 
                 # Run
@@ -295,7 +298,184 @@ class NautilusAdapter(BaseEngineAdapter):
 
         return bars
 
-    def _build_strategy(self, env: BacktestEnvironment, instrument):
+    def _precompute_signals(
+        self,
+        h1_candles: list[Candle],
+        h4_candles: list[Candle],
+        env: BacktestEnvironment,
+    ) -> dict[int, tuple[str, float, float]]:
+        """Pre-compute IRB signals using the full Nova engine filter chain.
+
+        Returns dict mapping bar_index -> (side, entry_price, stop_loss).
+        """
+        import math as _math
+
+        n = len(h1_candles)
+        closes = [c.close for c in h1_candles]
+
+        ema = compute_ema(closes, env.ema_period)
+        ema_fast = compute_ema(closes, env.ema_fast_period)
+        ema_slow = compute_ema(closes, env.ema_slow_period)
+        atr = compute_atr(h1_candles, env.atr_period)
+        adx = compute_adx(h1_candles, env.adx_period)
+
+        atr_sma: list[float] = []
+        if env.use_volatility_filter:
+            ma_period = env.volatility_atr_ma_period
+            atr_sma = [float("nan")] * n
+            for j in range(ma_period - 1, n):
+                vals = [atr[k] for k in range(j - ma_period + 1, j + 1) if not _math.isnan(atr[k])]
+                if len(vals) == ma_period:
+                    atr_sma[j] = sum(vals) / ma_period
+
+        h4_ema: list[float] = []
+        h4_map: list[int] = []
+        if h4_candles:
+            h4_closes = [c.close for c in h4_candles]
+            h4_ema = compute_ema(h4_closes, env.ema_period)
+            h4_ts = [c.timestamp for c in h4_candles]
+            h4_idx = 0
+            for c in h1_candles:
+                while h4_idx < len(h4_ts) - 1 and h4_ts[h4_idx + 1] <= c.timestamp:
+                    h4_idx += 1
+                h4_map.append(h4_idx)
+
+        signals: dict[int, tuple[str, float, float]] = {}
+        for i in range(n):
+            if i < env.warmup_bars:
+                continue
+            bar = h1_candles[i]
+            if _math.isnan(ema[i]) or _math.isnan(atr[i]) or _math.isnan(adx[i]) or atr[i] <= 0:
+                continue
+
+            rng = bar.high - bar.low
+            if rng <= 0:
+                continue
+
+            if env.session_filter is not None and bar.timestamp > 0:
+                from datetime import datetime, timezone
+
+                bar_hour = datetime.fromtimestamp(bar.timestamp, tz=timezone.utc).hour
+                if (
+                    (env.session_filter == "london" and not (7 <= bar_hour < 16))
+                    or (env.session_filter == "newyork" and not (13 <= bar_hour < 22))
+                    or (env.session_filter == "london_ny_overlap" and not (13 <= bar_hour < 16))
+                ):
+                    continue
+
+            if (
+                env.use_volatility_filter
+                and atr_sma
+                and i < len(atr_sma)
+                and not _math.isnan(atr_sma[i])
+                and atr[i] < atr_sma[i]
+            ):
+                continue
+
+            up_th = bar.high - env.irb_threshold * rng
+            dn_th = bar.low + env.irb_threshold * rng
+            is_up_irb = bar.open <= up_th and bar.close <= up_th
+            is_dn_irb = bar.open >= dn_th and bar.close >= dn_th
+            if not is_up_irb and not is_dn_irb:
+                continue
+
+            side = None
+            if env.use_simple_trend_filter:
+                ef, es = ema_fast[i], ema_slow[i]
+                lb = min(env.ema_slope_lookback, i)
+                if lb < 1:
+                    continue
+                ef_prev = ema_fast[i - lb]
+                if _math.isnan(ef) or _math.isnan(es) or _math.isnan(ef_prev):
+                    continue
+                if is_up_irb and ef > es and ef > ef_prev:
+                    side = "LONG"
+                elif is_dn_irb and ef < es and ef < ef_prev:
+                    side = "SHORT"
+                else:
+                    continue
+            else:
+                lookback = min(20, i)
+                if lookback < 1:
+                    continue
+                slope = (ema[i] - ema[i - lookback]) / atr[i]
+                if is_up_irb and slope >= env.trend_slope_threshold:
+                    side = "LONG"
+                elif is_dn_irb and slope <= -env.trend_slope_threshold:
+                    side = "SHORT"
+                else:
+                    continue
+
+                if env.use_ema_stack_filter:
+                    ef, es = ema_fast[i], ema_slow[i]
+                    if _math.isnan(ef) or _math.isnan(es):
+                        continue
+                    if side == "LONG" and not (ef > ema[i] > es):
+                        continue
+                    if side == "SHORT" and not (ef < ema[i] < es):
+                        continue
+
+                if env.ema_confirm_bars > 0:
+                    confirm_ok = True
+                    for j in range(env.ema_confirm_bars):
+                        idx = i - j
+                        if idx < 0 or idx >= len(ema_fast) or _math.isnan(ema_fast[idx]):
+                            confirm_ok = False
+                            break
+                        if side == "LONG" and h1_candles[idx].close <= ema_fast[idx]:
+                            confirm_ok = False
+                            break
+                        if side == "SHORT" and h1_candles[idx].close >= ema_fast[idx]:
+                            confirm_ok = False
+                            break
+                    if not confirm_ok:
+                        continue
+
+            if h4_map and h4_ema:
+                h4_i = h4_map[i] if i < len(h4_map) else -1
+                if h4_i < 0 or h4_i >= len(h4_ema):
+                    continue
+                h4_lb = min(env.mtf_lookback, h4_i)
+                if h4_lb < 1:
+                    continue
+                h4_cur = h4_ema[h4_i]
+                h4_prev = h4_ema[h4_i - h4_lb]
+                if _math.isnan(h4_cur) or _math.isnan(h4_prev):
+                    continue
+                if side == "LONG" and not (h4_cur > h4_prev):
+                    continue
+                if side == "SHORT" and not (h4_cur < h4_prev):
+                    continue
+
+            if _math.isnan(adx[i]) or adx[i] < env.adx_threshold:
+                continue
+
+            overext = rng / atr[i]
+            if overext > env.overextension_threshold:
+                continue
+            if env.min_signal_atr_mult > 0 and overext < env.min_signal_atr_mult:
+                continue
+
+            spread_cushion = max(0.0, env.sl_spread_buffer_pips) * env.pip_value
+            if side == "LONG":
+                entry = bar.high + env.pip_buffer
+                sl = bar.low - env.pip_buffer - spread_cushion
+                if env.atr_sl_floor_multiplier > 0:
+                    min_sl = atr[i] * env.atr_sl_floor_multiplier
+                    if (entry - sl) < min_sl:
+                        sl = entry - min_sl
+            else:
+                entry = bar.low - env.pip_buffer
+                sl = bar.high + env.pip_buffer + spread_cushion
+                if env.atr_sl_floor_multiplier > 0:
+                    min_sl = atr[i] * env.atr_sl_floor_multiplier
+                    if (sl - entry) < min_sl:
+                        sl = entry + min_sl
+            signals[i] = (side, entry, sl)
+
+        return signals
+
+    def _build_strategy(self, env: BacktestEnvironment, instrument, precomputed: dict | None = None):
         """Build a NautilusTrader Strategy subclass implementing the IRB strategy.
 
         The strategy pre-computes EMA and ATR indicators from the bar history,
@@ -336,6 +516,7 @@ class NautilusAdapter(BaseEngineAdapter):
         _instrument = instrument
         _compute_ema = compute_ema
         _compute_atr = compute_atr
+        _precomputed_signals = precomputed or {}
 
         class IRBNautilusConfig(StrategyConfig, frozen=True):  # type: ignore[call-arg]
             """Configuration for IRB Nautilus strategy."""
@@ -350,6 +531,9 @@ class NautilusAdapter(BaseEngineAdapter):
             risk_fraction: float = env.risk_fraction
             pip_value_per_standard_lot: float = env.pip_value_per_standard_lot
             volume: float = env.min_volume  # position size in lots
+            cooldown_bars: int = env.cooldown_bars
+            max_trades_per_day: int = env.max_trades_per_day
+            trigger_window_bars: int = env.trigger_window_bars
 
         class IRBNautilusStrategy(Strategy):
             """IRB strategy reimplemented for NautilusTrader.
@@ -389,6 +573,17 @@ class NautilusAdapter(BaseEngineAdapter):
                 self._trade_records: list[dict] = []
                 self._current_entry_price = 0.0
                 self._current_stop_loss = 0.0
+                self._pending_side: str | None = None
+                self._pending_entry_price = 0.0
+                self._pending_stop_loss = 0.0
+                self._pending_bar_idx = -1
+                # Execution state — match Nova cooldown/daily-limit
+                self._cooldown_bars = config.cooldown_bars
+                self._max_trades_per_day = config.max_trades_per_day
+                self._trigger_window_bars = config.trigger_window_bars
+                self._last_flat_bar = -9999
+                self._trades_today = 0
+                self._last_day_ord = -1
 
             def on_start(self) -> None:
                 """Subscribe to bar data."""
@@ -426,6 +621,18 @@ class NautilusAdapter(BaseEngineAdapter):
                 ts = bar.ts_event / 1_000_000_000 if bar.ts_event else 0.0
                 self._candle_list.append(Candle(timestamp=ts, open=o, high=h, low=low, close=c, volume=v))
 
+                # Day-boundary reset for daily trade counter
+                if self._max_trades_per_day > 0:
+                    if ts > 0:
+                        from datetime import datetime, timezone
+
+                        day_ord = datetime.fromtimestamp(ts, tz=timezone.utc).toordinal()
+                    else:
+                        day_ord = len(self._bars) // 24
+                    if day_ord != self._last_day_ord:
+                        self._last_day_ord = day_ord
+                        self._trades_today = 0
+
                 # Recompute indicators (incremental would be better but this is
                 # correct and mirrors the pre-compute approach)
                 self._ema_values = _compute_ema(self._closes, self._ema_period)
@@ -435,37 +642,71 @@ class NautilusAdapter(BaseEngineAdapter):
 
                 if self._in_position:
                     self._manage_position(bar_idx, o, h, low, c)
-                else:
-                    self._check_signal(bar_idx, o, h, low, c)
+                    return
+
+                if self._check_pending_fill(bar_idx, o, h, low, c):
+                    return
+
+                self._check_signal(bar_idx, o, h, low, c)
 
             def _check_signal(self, bar_idx: int, o: float, h: float, low: float, c: float) -> None:
-                """Check for IRB entry signal."""
-                if bar_idx < max(self._ema_period, self._atr_period):
+                """Check for pre-computed IRB entry signal at this bar index."""
+                # v5: Cooldown bars — match Nova engine.py:605-612
+                if self._cooldown_bars > 0 and (bar_idx - self._last_flat_bar) <= self._cooldown_bars:
+                    return
+                # v5: Daily trade limit — match Nova engine.py:600-603
+                if self._max_trades_per_day > 0 and self._trades_today >= self._max_trades_per_day:
                     return
 
-                ema_val = self._ema_values[bar_idx]
-                atr_val = self._atr_values[bar_idx]
+                if bar_idx in _precomputed_signals:
+                    side, entry, sl = _precomputed_signals[bar_idx]
+                    if self._pending_side == side:
+                        # Nova replaces same-side pending IRB orders with the fresher signal.
+                        self._pending_side = None
+                    elif self._pending_side is not None:
+                        # Nova ignores opposite-direction signals while a pending order is alive.
+                        return
+                    self._pending_side = side
+                    self._pending_entry_price = entry
+                    self._pending_stop_loss = sl
+                    self._pending_bar_idx = bar_idx
 
-                if math.isnan(ema_val) or math.isnan(atr_val) or atr_val <= 0:
-                    return
+            def _check_pending_fill(self, bar_idx: int, o: float, h: float, low: float, c: float) -> bool:
+                """Fill/expire a pending stop order using Nova's stop-order cadence."""
+                if self._pending_side is None:
+                    return False
 
-                body = abs(c - o) or 1e-10
-                upper_wick = h - max(o, c)
-                lower_wick = min(o, c) - low
+                fill_price = self._pending_entry_price
+                filled = False
+                if self._pending_side == "LONG":
+                    if h >= self._pending_entry_price:
+                        filled = True
+                        if o >= self._pending_entry_price:
+                            fill_price = o
+                else:
+                    if low <= self._pending_entry_price:
+                        filled = True
+                        if o <= self._pending_entry_price:
+                            fill_price = o
 
-                # IRB geometry (same as backtesting.py adapter)
-                if upper_wick / body > self._irb_threshold and c > ema_val:
-                    # Bearish IRB -- short signal
-                    entry = low - self._pip_value
-                    sl = h + atr_val * 0.5
-                    if sl > entry:
-                        self._enter_position("SHORT", bar_idx, entry, sl, c)
-                elif lower_wick / body > self._irb_threshold and c < ema_val:
-                    # Bullish IRB -- long signal
-                    entry = h + self._pip_value
-                    sl = low - atr_val * 0.5
-                    if entry > sl:
-                        self._enter_position("LONG", bar_idx, entry, sl, c)
+                if filled:
+                    side = self._pending_side
+                    sl = self._pending_stop_loss
+                    self._pending_side = None
+                    self._pending_entry_price = 0.0
+                    self._pending_stop_loss = 0.0
+                    self._pending_bar_idx = -1
+                    self._trades_today += 1
+                    self._enter_position(side, bar_idx, fill_price, sl, c)
+                    return True
+
+                if bar_idx - self._pending_bar_idx >= self._trigger_window_bars:
+                    self._pending_side = None
+                    self._pending_entry_price = 0.0
+                    self._pending_stop_loss = 0.0
+                    self._pending_bar_idx = -1
+
+                return False
 
             def _enter_position(
                 self,
@@ -576,6 +817,7 @@ class NautilusAdapter(BaseEngineAdapter):
 
                 self._in_position = False
                 self._position_side = None
+                self._last_flat_bar = bar_idx  # match Nova engine.py:1505
 
                 # Close via Nautilus if we have a position in cache
                 try:
@@ -685,7 +927,7 @@ class NautilusAdapter(BaseEngineAdapter):
         wins = sum(1 for t in trade_records if t["pnl_pips"] > 0)
         longs = sum(1 for t in trade_records if t["side"] == "LONG")
         shorts = total - longs
-        win_rate = (wins / total * 100.0) if total > 0 else 0.0
+        win_rate = (wins / total) if total > 0 else 0.0  # Use fraction (0-1), not percentage
         net_pnl_usd = sum(t["pnl_usd"] for t in trade_records)
         net_pnl_pips = sum(t["pnl_pips"] for t in trade_records)
         avg_trade_pips = net_pnl_pips / total if total > 0 else 0.0
@@ -728,7 +970,7 @@ class NautilusAdapter(BaseEngineAdapter):
             total_trades=total,
             long_trades=longs,
             short_trades=shorts,
-            win_rate=win_rate,
+            win_rate=win_rate,  # Already in fraction format
             net_pnl_usd=net_pnl_usd,
             net_pnl_pips=net_pnl_pips,
             profit_factor=profit_factor,

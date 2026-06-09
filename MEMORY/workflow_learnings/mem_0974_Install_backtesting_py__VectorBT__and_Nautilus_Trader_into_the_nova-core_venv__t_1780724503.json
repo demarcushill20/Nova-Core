@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0974_Install_backtesting_py__VectorBT__and_Nautilus_Trader_into_the_nova-core_venv__t_1780724503",
+  "workflow_id": "0974_Install_backtesting_py__VectorBT__and_Nautilus_Trader_into_the_nova-core_venv__t",
+  "task_summary": "Installed backtesting.py 0.6.5, vectorbt 1.0.0, nautilus_trader 1.202.0 into venv; added backtest extras to pyproject.toml; ran 4-engine cross-validation (agreement 12.3/100, 26 critical divergences, 0 failures)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Installed backtesting.py 0.6.5, vectorbt 1.0.0, nautilus_trader 1.202.0 into venv; added backtest extras to pyproject.toml; ran 4-engine cross-validation (agreement 12.3/100, 26 critical divergences, 0 failures)"
+  ],
+  "successful_patterns": [
+    "task_completed: 0974_Install_backtesting_py__VectorBT__and_Nautilus_Trader_into_the_nova-core_venv__"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Installed backtesting.py 0.6.5, vectorbt 1.0.0, nautilus_trader 1.202.0 into venv; added backtest extras to pyproject.toml; ran 4-engine cross-validation (agreement 12.3/100, 26 critical divergences, 0 failures)",
+  "created_at": "2026-06-06T05:41:43Z",
+  "confidence": "low"
+}

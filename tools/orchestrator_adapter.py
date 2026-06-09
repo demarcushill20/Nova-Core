@@ -654,7 +654,7 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
         f"confidence: <high|medium|low>\n"
     )
 
-    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", "--model", "claude-opus-4-6", prompt]
+    cmd = [CLAUDE_BIN, "-p", "--verbose", "--dangerously-skip-permissions", "--model", "claude-opus-4-8", prompt]
 
     _oa_t0 = time.monotonic()
 
@@ -679,7 +679,7 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
             _mpg_record(
                 caller="orchestrator",
                 component="orchestrator_adapter.run_classifier",
-                model="claude-opus-4-6",
+                model="claude-opus-4-8",
                 success=success,
                 duration_secs=time.monotonic() - _oa_t0,
             )
@@ -691,7 +691,7 @@ def _claude_step_executor(step: PlanStep) -> tuple[str, bool, str]:
             _mpg_record(
                 caller="orchestrator",
                 component="orchestrator_adapter.run_classifier",
-                model="claude-opus-4-6",
+                model="claude-opus-4-8",
                 success=False,
                 duration_secs=time.monotonic() - _oa_t0,
             )

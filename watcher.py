@@ -2178,7 +2178,7 @@ async def _dispatch_inner(task_path: Path):
                 "--max-budget-usd",
                 os.environ.get("NOVA_CLAUDE_RETRY_BUDGET_USD", "1.00"),
                 "--model",
-                "claude-opus-4-6",
+                "claude-opus-4-8",
             ]
             # Phase 2: Fallback profile (all tools) for reflexion retries
             _retry_tool_args = get_allowed_tools_args("fallback")

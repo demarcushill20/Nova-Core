@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0996_run_the_full-window_four-way_trade-count_verification_across_Nova__backtesting_p_1781012422",
+  "workflow_id": "0996_run_the_full-window_four-way_trade-count_verification_across_Nova__backtesting_p",
+  "task_summary": "Ran post-VectorBT-stats-fix 4-engine cross-validation \u2014 VectorBT P&L fixed ($0 -> -$2,555), trade count unchanged (109), agreement 46.5/100",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Ran post-VectorBT-stats-fix 4-engine cross-validation \u2014 VectorBT P&L fixed ($0 -> -$2,555), trade count unchanged (109), agreement 46.5/100"
+  ],
+  "successful_patterns": [
+    "task_completed: 0996_run_the_full-window_four-way_trade-count_verification_across_Nova__backtesting_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Ran post-VectorBT-stats-fix 4-engine cross-validation \u2014 VectorBT P&L fixed ($0 -> -$2,555), trade count unchanged (109), agreement 46.5/100",
+  "created_at": "2026-06-09T13:40:22Z",
+  "confidence": "low"
+}

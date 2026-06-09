@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_0961_I_want_to_do_online_research_to_find_several_completion_winning_forex_strategies_1780442534",
+  "workflow_id": "0961_I_want_to_do_online_research_to_find_several_completion_winning_forex_strategies",
+  "task_summary": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_0961_I_want_to_do_online_research_to_find_several_completion_winning_forex_s"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "3/3 steps succeeded, 3/3 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-06-02T23:22:14Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_0993_What_do_you_think_of_this__-_inspect__in_progress___mostly_done_1781004887"
+}

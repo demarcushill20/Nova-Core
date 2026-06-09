@@ -1,0 +1,23 @@
+{
+  "id": "mem_0957_validate_recent_improvements_1780275289",
+  "task_id": "0957",
+  "timestamp": "2026-06-01T00:54:49Z",
+  "type": "validation",
+  "title": "Validated recent improvements are stable — 270 targeted tests pass, 78 risk guard tests pass, no regressions",
+  "summary": "All 5 recent commits (400be3f..299eda1) validated. 270 tests covering recently changed files pass. 78 risk supervisor tests pass. 5 pre-existing failures in older test files (autoresearch, mutations, anti-ea-detection, state-store) are unrelated to recent work. IRB bridge running stable with expected weekend broker-disconnect errors. All dimensions GREEN.",
+  "dimensions": {
+    "code_quality": "GREEN",
+    "risk_guards": "GREEN",
+    "strategy_integrity": "GREEN",
+    "execution_reliability": "GREEN",
+    "infrastructure": "GREEN"
+  },
+  "overall_score": 88.0,
+  "confidence": "high",
+  "pre_existing_failures": [
+    "test_autoresearch_p5_p6::test_campaign_checkpoints_during_run",
+    "test_mutations::test_campaign_saves_ancestry_json",
+    "test_novatrade_anti_ea_detection::TestRolloverDeadZone (2 tests)",
+    "test_novatrade_state_store::test_agent_persists_on_signal"
+  ]
+}

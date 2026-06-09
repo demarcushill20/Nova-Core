@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0988_Shell_Enqueue_Test_1780953639",
+  "workflow_id": "0988_Shell_Enqueue_Test",
+  "task_summary": "Verified shell enqueue \u2192 dispatch \u2192 execution pipeline works end-to-end",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Verified shell enqueue \u2192 dispatch \u2192 execution pipeline works end-to-end"
+  ],
+  "successful_patterns": [
+    "task_completed: 0988_Shell_Enqueue_Test"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Verified shell enqueue \u2192 dispatch \u2192 execution pipeline works end-to-end",
+  "created_at": "2026-06-08T21:20:39Z",
+  "confidence": "low"
+}

@@ -12,7 +12,7 @@ import watcher
 from watcher import CLAUDE_BIN, DISPATCH_PROMPT_TEMPLATE
 
 
-def _build_worker_cmd(routed_model="claude-opus-4-6"):
+def _build_worker_cmd(routed_model="claude-opus-4-8"):
     """Reconstruct the worker base command exactly as watcher.py builds it.
 
     Mirrors the construction at watcher.py (worker invocation) so the test
@@ -45,7 +45,7 @@ def _build_retry_cmd():
         "--max-budget-usd",
         os.environ.get("NOVA_CLAUDE_RETRY_BUDGET_USD", "1.00"),
         "--model",
-        "claude-opus-4-6",
+        "claude-opus-4-8",
     ]
 
 

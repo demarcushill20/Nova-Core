@@ -1,3 +1,15 @@
+[project]
+name = "nova-core"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+backtest = [
+    "backtesting>=0.6.0",
+    "vectorbt>=0.28.0",
+    "nautilus_trader>=1.185.0",
+]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"

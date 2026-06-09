@@ -568,7 +568,7 @@ class TestBudgetEnforcer:
         assert ok, f"Fresh budget should allow, got: {msg}"
 
     def test_record_usage_tracks(self):
-        self.enforcer.record_usage(10000, 5000, model="claude-opus-4-6")
+        self.enforcer.record_usage(10000, 5000, model="claude-opus-4-8")
         summary = self.enforcer.get_usage_summary()
         assert summary["session"]["used"]["input_tokens"] == 10000
         assert summary["session"]["used"]["output_tokens"] == 5000
@@ -582,7 +582,7 @@ class TestBudgetEnforcer:
 
     def test_cost_tracking(self):
         # Opus: $15/M input, $75/M output
-        self.enforcer.record_usage(1_000_000, 100_000, model="claude-opus-4-6")
+        self.enforcer.record_usage(1_000_000, 100_000, model="claude-opus-4-8")
         cost = self.enforcer.get_cost_summary()
         assert cost["session_cost_usd"] > 0
 

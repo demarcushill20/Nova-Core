@@ -1619,7 +1619,7 @@ ACTIVE_HOURS_START = int(os.environ.get("HEARTBEAT_ACTIVE_START", "0"))
 ACTIVE_HOURS_END = int(os.environ.get("HEARTBEAT_ACTIVE_END", "24"))
 
 # Model for heartbeat reasoning
-HEARTBEAT_MODEL = os.environ.get("HEARTBEAT_MODEL", "claude-opus-4-6")
+HEARTBEAT_MODEL = os.environ.get("HEARTBEAT_MODEL", "claude-opus-4-8")
 HEARTBEAT_TIMEOUT = 90  # seconds
 
 CHECKLIST_FILE = BASE / "HEARTBEAT_CHECKLIST.md"

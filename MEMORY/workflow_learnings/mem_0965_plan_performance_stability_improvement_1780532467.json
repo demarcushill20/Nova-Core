@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0965_plan_performance_stability_improvement_1780532467",
+  "workflow_id": "0965_plan_performance_stability_improvement",
+  "task_summary": "Created 3-phase improvement plan for performance_stability (69\u219270+) \u2014 identified anomaly filter cascade bug and drawdown window mismatch as root causes",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Created 3-phase improvement plan for performance_stability (69\u219270+) \u2014 identified anomaly filter cascade bug and drawdown window mismatch as root causes"
+  ],
+  "successful_patterns": [
+    "task_completed: 0965_plan_performance_stability_improvement"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Created 3-phase improvement plan for performance_stability (69\u219270+) \u2014 identified anomaly filter cascade bug and drawdown window mismatch as root causes",
+  "created_at": "2026-06-04T00:21:07Z",
+  "confidence": "low"
+}

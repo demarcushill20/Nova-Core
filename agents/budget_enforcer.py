@@ -23,6 +23,7 @@ LIMITS_FILE = BUDGETS_DIR / "limits.json"
 # Anthropic pricing per 1M tokens (USD)
 # ---------------------------------------------------------------------------
 MODEL_PRICING: dict[str, dict[str, float]] = {
+    "claude-opus-4-8": {"input": 15.00, "output": 75.00},
     "claude-opus-4-6": {"input": 15.00, "output": 75.00},
     "opus": {"input": 15.00, "output": 75.00},
     "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
@@ -174,7 +175,7 @@ class BudgetEnforcer:
         self,
         input_tokens: int,
         output_tokens: int,
-        model: str = "claude-opus-4-6",
+        model: str = "claude-opus-4-8",
         task_id: str = "",
     ) -> None:
         """Record token usage after an API call completes."""

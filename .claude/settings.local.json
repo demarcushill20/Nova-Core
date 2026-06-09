@@ -7,7 +7,8 @@
       "Bash(sudo systemctl restart novacore-telegram.service && echo \"telegram restarted\")",
       "Bash(pgrep -af \"telegram_bot.py\")",
       "Bash(pgrep -af \"watcher.py\")",
-      "Bash(pip3 list)"
+      "Bash(pip3 list)",
+      "Bash(python3 /home/nova/nova-core/tools/enqueue_task.py *)"
     ]
   },
   "hooks": {

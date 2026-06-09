@@ -146,10 +146,10 @@ class TestCostRoutedModelIntegration:
 
     @pytest.mark.asyncio
     async def test_routed_model_opus_reaches_subprocess(self, tmp_path):
-        """cost_route_task returns opus → cmd must contain --model claude-opus-4-6."""
+        """cost_route_task returns opus → cmd must contain --model claude-opus-4-8."""
         from utils.cost_router import RoutingDecision, TaskComplexity
 
-        expected_model = "claude-opus-4-6"
+        expected_model = "claude-opus-4-8"
         fake_decision = RoutingDecision(
             model=expected_model,
             complexity=TaskComplexity.COMPLEX,
