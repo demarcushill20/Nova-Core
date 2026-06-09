@@ -58,3 +58,4 @@ package-lock.json
 # OS
 .DS_Store
 .bak
+data/ticks/
