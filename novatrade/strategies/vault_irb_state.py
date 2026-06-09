@@ -315,6 +315,17 @@ class IRBStrategyState:
         )
         self.trades.append(ev)
 
+    def _intrabar_path(self, i: int, row: pd.Series) -> list[float]:
+        """Intra-bar price path used to resolve fills on bar ``i``.
+
+        Default: the single-bar OHLC heuristic ``ohlc_path`` (a guess of which
+        extreme came first). Subclasses override this to resolve the real
+        intra-bar order from finer-resolution sub-bars (see
+        ``novatrade.backtest.fidelity``). Behaviour is unchanged unless
+        overridden.
+        """
+        return ohlc_path(row["open"], row["high"], row["low"], row["close"])
+
     def process_bar(self, i: int, row: pd.Series, df: pd.DataFrame) -> list[TradeEvent]:
         """Run one bar of vault's per-bar logic. Returns the list of events
         emitted on THIS bar (subset of self.trades).
@@ -353,7 +364,7 @@ class IRBStrategyState:
             if not still_valid:
                 self.pending = None
             else:
-                path = ohlc_path(row["open"], row["high"], row["low"], row["close"])
+                path = self._intrabar_path(i, row)
                 filled = False
                 for p0, p1 in pairwise(path):
                     if self.pending["side"] == "long" and p1 >= p0:
@@ -433,7 +444,7 @@ class IRBStrategyState:
 
             self.position["runner_stop"] = runner_stop
 
-            path = ohlc_path(row["open"], row["high"], row["low"], row["close"])
+            path = self._intrabar_path(i, row)
 
             for p0, p1 in pairwise(path):
                 if self.position is None:
