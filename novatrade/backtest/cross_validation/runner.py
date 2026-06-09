@@ -41,9 +41,11 @@ def _auto_register() -> None:
     from novatrade.backtest.cross_validation.backtestingpy_adapter import BacktestingPyAdapter
     from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
     from novatrade.backtest.cross_validation.nova_adapter import NovaEngineAdapter
+    from novatrade.backtest.cross_validation.vault_adapter import VaultEngineAdapter
     from novatrade.backtest.cross_validation.vectorbt_adapter import VectorbtAdapter
 
     register_adapter(EngineId.NOVA, NovaEngineAdapter)
+    register_adapter(EngineId.VAULT, VaultEngineAdapter)
     register_adapter(EngineId.BACKTESTING_PY, BacktestingPyAdapter)
     register_adapter(EngineId.VECTORBT, VectorbtAdapter)
     register_adapter(EngineId.NAUTILUS, NautilusAdapter)

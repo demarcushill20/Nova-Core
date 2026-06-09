@@ -14,6 +14,7 @@ class EngineId(Enum):
     """Identifies a backtesting engine."""
 
     NOVA = "nova"
+    VAULT = "vault"
     BACKTESTING_PY = "backtesting_py"
     VECTORBT = "vectorbt"
     NAUTILUS = "nautilus"
