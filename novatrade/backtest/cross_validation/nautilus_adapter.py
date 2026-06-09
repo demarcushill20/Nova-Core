@@ -530,10 +530,20 @@ class NautilusAdapter(BaseEngineAdapter):
             pip_value: float = env.pip_value
             risk_fraction: float = env.risk_fraction
             pip_value_per_standard_lot: float = env.pip_value_per_standard_lot
-            volume: float = env.min_volume  # position size in lots
+            volume: float = env.min_volume  # fallback / min position size in lots
             cooldown_bars: int = env.cooldown_bars
             max_trades_per_day: int = env.max_trades_per_day
             trigger_window_bars: int = env.trigger_window_bars
+            # Risk-based sizing + cost (match Nova engine.py:816-821 / 1379)
+            initial_equity: float = env.initial_equity
+            min_volume: float = env.min_volume
+            max_volume: float = env.max_volume
+            breakeven_r: float = env.breakeven_r
+            total_cost_pips: float = env.spread.total_cost_pips + (
+                env.spread.commission_per_lot_usd / env.pip_value_per_standard_lot
+                if env.pip_value_per_standard_lot
+                else 0.0
+            )
 
         class IRBNautilusStrategy(Strategy):
             """IRB strategy reimplemented for NautilusTrader.
@@ -557,6 +567,15 @@ class NautilusAdapter(BaseEngineAdapter):
                 self._risk_fraction = config.risk_fraction
                 self._pip_value_per_lot = config.pip_value_per_standard_lot
                 self._volume = config.volume
+                # Risk-based sizing state (compounding off realised PnL, like Nova)
+                self._initial_equity = config.initial_equity
+                self._equity = config.initial_equity
+                self._min_volume = config.min_volume
+                self._max_volume = config.max_volume
+                self._cost_pips = config.total_cost_pips
+                self._breakeven_r = config.breakeven_r
+                self._cur_volume = config.volume
+                self._be_hit = False
 
                 # State
                 self._bars: list[Bar] = []
@@ -725,6 +744,17 @@ class NautilusAdapter(BaseEngineAdapter):
                 self._current_stop_loss = sl
                 self._trail_stop = sl
                 self._best_close = current_price
+                self._be_hit = False
+
+                # Risk-fraction position sizing off compounding equity
+                # (Nova engine.py:816-821), in lots, clamped + rounded.
+                stop_pips = abs(entry - sl) / self._pip_value if self._pip_value else 0.0
+                if stop_pips > 0:
+                    vol = (self._equity * self._risk_fraction) / (stop_pips * self._pip_value_per_lot)
+                    vol = max(self._min_volume, min(self._max_volume, round(vol, 2)))
+                else:
+                    vol = self._min_volume
+                self._cur_volume = vol
 
                 # Place order via Nautilus order factory
                 try:
@@ -732,7 +762,7 @@ class NautilusAdapter(BaseEngineAdapter):
                         order = self.order_factory.stop_market(
                             instrument_id=self._instrument_id,
                             order_side=OrderSide.BUY,
-                            quantity=Quantity.from_str(f"{self._volume:.2f}"),
+                            quantity=Quantity.from_str(f"{vol:.2f}"),
                             trigger_price=Price.from_str(f"{entry:.5f}"),
                             time_in_force=TimeInForce.GTC,
                         )
@@ -740,7 +770,7 @@ class NautilusAdapter(BaseEngineAdapter):
                         order = self.order_factory.stop_market(
                             instrument_id=self._instrument_id,
                             order_side=OrderSide.SELL,
-                            quantity=Quantity.from_str(f"{self._volume:.2f}"),
+                            quantity=Quantity.from_str(f"{vol:.2f}"),
                             trigger_price=Price.from_str(f"{entry:.5f}"),
                             time_in_force=TimeInForce.GTC,
                         )
@@ -795,9 +825,15 @@ class NautilusAdapter(BaseEngineAdapter):
                 side = self._position_side
 
                 if side == "LONG":
-                    pnl_pips = (exit_price - entry_price) / self._pip_value
+                    gross_pips = (exit_price - entry_price) / self._pip_value
                 else:
-                    pnl_pips = (entry_price - exit_price) / self._pip_value
+                    gross_pips = (entry_price - exit_price) / self._pip_value
+
+                # Deduct Nova's per-trade cost (spread + slippage + commission as pips)
+                # and book the realised PnL into compounding equity for next sizing.
+                net_pips = gross_pips - self._cost_pips
+                pnl_usd = net_pips * self._pip_value_per_lot * self._cur_volume
+                self._equity += pnl_usd
 
                 self._trade_records.append(
                     {
@@ -808,8 +844,9 @@ class NautilusAdapter(BaseEngineAdapter):
                         "entry_price": entry_price,
                         "exit_price": exit_price,
                         "stop_loss": self._current_stop_loss,
-                        "pnl_pips": pnl_pips,
-                        "pnl_usd": pnl_pips * self._pip_value_per_lot * self._volume,
+                        "pnl_pips": net_pips,
+                        "pnl_usd": pnl_usd,
+                        "volume": self._cur_volume,
                         "hold_bars": bar_idx - self._entry_bar_idx,
                         "exit_reason": reason,
                     }
@@ -953,6 +990,20 @@ class NautilusAdapter(BaseEngineAdapter):
                 cur_wins = 0
                 max_consec_losses = max(max_consec_losses, cur_losses)
 
+        # Max drawdown % from the compounding equity curve, against initial_equity
+        # (matches Nova's equity-based drawdown). Sharpe/Sortino stay NOT_COMPUTED:
+        # their annualisation is not comparable across engines.
+        init_eq = getattr(strategy, "_initial_equity", 100_000.0)
+        eq = init_eq
+        peak = init_eq
+        max_dd = 0.0
+        for t in trade_records:
+            eq += t["pnl_usd"]
+            peak = max(peak, eq)
+            if peak > 0:
+                max_dd = max(max_dd, (peak - eq) / peak)
+        max_drawdown_pct = max_dd * 100.0
+
         avail = {
             "total_trades": MetricAvailability.AVAILABLE,
             "win_rate": MetricAvailability.AVAILABLE,
@@ -961,7 +1012,7 @@ class NautilusAdapter(BaseEngineAdapter):
             "profit_factor": MetricAvailability.AVAILABLE,
             "avg_trade_pips": MetricAvailability.AVAILABLE,
             "avg_hold_bars": MetricAvailability.AVAILABLE,
-            "max_drawdown_pct": MetricAvailability.NOT_COMPUTED,
+            "max_drawdown_pct": MetricAvailability.AVAILABLE,
             "sharpe_ratio": MetricAvailability.NOT_COMPUTED,
             "sortino_ratio": MetricAvailability.NOT_COMPUTED,
         }
@@ -974,6 +1025,7 @@ class NautilusAdapter(BaseEngineAdapter):
             net_pnl_usd=net_pnl_usd,
             net_pnl_pips=net_pnl_pips,
             profit_factor=profit_factor,
+            max_drawdown_pct=max_drawdown_pct,
             avg_trade_pips=avg_trade_pips,
             avg_hold_bars=avg_hold,
             max_consecutive_wins=max_consec_wins,

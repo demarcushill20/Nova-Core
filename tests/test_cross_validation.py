@@ -42,13 +42,18 @@ from novatrade.models import Candle
 
 
 def _nautilus_safe():
-    """Check if NautilusTrader BacktestEngine can be safely instantiated."""
+    """Whether NautilusTrader's BacktestEngine runs in this environment.
+
+    Historically gated behind NAUTILUS_TESTS_ENABLED=1 because an older
+    nautilus/VPS combo aborted (SIGABRT) on engine startup. nautilus_trader 1.202
+    runs cleanly here (verified: full 12k-bar backtest completes), so default to
+    enabled when importable; set NAUTILUS_TESTS_ENABLED=0 to force-disable on a
+    constrained CI runner.
+    """
     try:
         import nautilus_trader  # noqa: F401
 
-        # BacktestEngine crashes with SIGABRT on resource-limited VPS
-        # Only run these tests where the engine is known to work
-        return os.environ.get("NAUTILUS_TESTS_ENABLED", "0") == "1"
+        return os.environ.get("NAUTILUS_TESTS_ENABLED", "1") != "0"
     except ImportError:
         return False
 
@@ -822,7 +827,8 @@ class TestNautilusAdapter:
         metrics = adapter._extract_metrics(None, MockStrategy())
         assert metrics.availability["total_trades"] == MetricAvailability.AVAILABLE
         assert metrics.availability["win_rate"] == MetricAvailability.AVAILABLE
-        assert metrics.availability["max_drawdown_pct"] == MetricAvailability.NOT_COMPUTED
+        # max drawdown is now computed from the equity curve; Sharpe stays NOT_COMPUTED
+        assert metrics.availability["max_drawdown_pct"] == MetricAvailability.AVAILABLE
         assert metrics.availability["sharpe_ratio"] == MetricAvailability.NOT_COMPUTED
 
     def test_adapter_in_registry(self):
@@ -1145,3 +1151,58 @@ class TestBacktestingPyNovaParity:
     def test_profit_factor_close(self, results):
         nova, bt = results
         assert abs(bt.metrics.profit_factor - nova.metrics.profit_factor) <= 0.2
+
+
+@pytest.mark.skipif(
+    not (os.path.exists(_H1_PATH) and os.path.exists(_H4_PATH)),
+    reason="EURUSD candle fixtures not present",
+)
+@pytest.mark.skipif(not _nautilus_safe(), reason="nautilus_trader not available / disabled")
+class TestNautilusNovaParity:
+    """Regression guard for the NautilusTrader engine (full backtest, ~50s).
+
+    Nautilus runs a real BacktestEngine (SIM venue, native stop orders) with
+    risk-fraction sizing + Nova's cost model; metrics agree with Nova within
+    independent-engine tolerances (it's event-driven, so trade count phase-drifts
+    a little). Sharpe/Sortino are NOT_COMPUTED (annualisation not comparable).
+    """
+
+    @pytest.fixture(scope="class")
+    def results(self):
+        import warnings
+
+        from novatrade.backtest.cross_validation.nautilus_adapter import NautilusAdapter
+        from novatrade.backtest.cross_validation.nova_adapter import NovaEngineAdapter
+        from novatrade.data.loader import load_candles
+
+        h1 = load_candles(_H1_PATH)
+        h4 = load_candles(_H4_PATH, timeframe="H4")
+        nova = NovaEngineAdapter().run(h1, h4, DEFAULT_ENVIRONMENT)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            nau = NautilusAdapter().run(h1, h4, DEFAULT_ENVIRONMENT)
+        assert nova.error is None and nau.error is None
+        return nova, nau
+
+    def test_trade_count_drift_bounded(self, results):
+        nova, nau = results
+        n, v = nova.metrics.total_trades, nau.metrics.total_trades
+        assert abs(v - n) / n <= 0.10, f"count {v} vs nova {n} drifted >10%"
+
+    def test_net_pnl_within_10pct_and_sign(self, results):
+        nova, nau = results
+        n, v = nova.metrics.net_pnl_usd, nau.metrics.net_pnl_usd
+        assert (n > 0) == (v > 0), "PnL sign must agree (guards the engine-drift sign-flip class)"
+        assert abs(v - n) / abs(n) <= 0.10, f"net PnL {v:.2f} vs nova {n:.2f} exceeds 10%"
+
+    def test_win_rate_close(self, results):
+        nova, nau = results
+        assert abs(nau.metrics.win_rate - nova.metrics.win_rate) <= 0.05
+
+    def test_max_drawdown_within_tolerance(self, results):
+        nova, nau = results
+        assert abs(nau.metrics.max_drawdown_pct - nova.metrics.max_drawdown_pct) <= 3.0
+
+    def test_profit_factor_close(self, results):
+        nova, nau = results
+        assert abs(nau.metrics.profit_factor - nova.metrics.profit_factor) <= 0.2
