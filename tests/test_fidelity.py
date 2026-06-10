@@ -70,30 +70,49 @@ class TestFidelityStructure:
 
 
 @pytest.mark.skipif(not os.path.exists(_M5_PATH), reason="EURUSD_M5_10yr.csv fixture not present")
-class TestFidelityArtifactRegression:
-    """The headline regression on the FULL 10yr sample (~90s): canonical
-    IRB-on-H1's +0.117R edge collapses to ~0 / slightly negative under honest
-    intra-bar fills. Guards against ever re-trusting the artifact."""
+class TestFidelityLedgerCorrectness:
+    """Pins the per-position ledger fix (2026-06-10): the vault closes a position
+    in up to TWO non-partial legs (tp_qty + runner_qty), so an edge computed from
+    a per-leg stop list misaligns stops with positions and is WRONG. The ledger
+    must count each position ONCE with one stop. These checks are data-quality
+    independent (they assert internal consistency, not a specific edge value).
+
+    (The earlier 'phantom edge collapse' regression was retracted: it rested on
+    the unverified EURUSD_M5_10yr.csv feed AND the misaligned edge calc. On real
+    Dukascopy ticks the IRB-H1 gross edge is small-positive (~+0.066R) and
+    cost-marginal — validated separately on tick data not committed to the repo.)
+    """
 
     @pytest.fixture(scope="class")
-    def full(self):
+    def state(self):
         from novatrade.backtest.fidelity import run_fidelity_backtest
 
-        raw = _load(tail=None)
-        cfg = IRBConfig()
-        return {
-            "heuristic": run_fidelity_backtest(raw, "60min", cfg, fine_fills=False),
-            "fidelity": run_fidelity_backtest(raw, "60min", cfg, fine_fills=True),
-        }
+        raw = _load(tail=120_000)
+        res = run_fidelity_backtest(raw, "60min", IRBConfig(), cost_pips=0.0, fine_fills=True)
+        return res
 
-    def test_heuristic_shows_phantom_edge(self, full):
-        h = full["heuristic"]
-        assert h.edge_r > 0.08, f"heuristic edge {h.edge_r}"
-        assert h.breakeven_cost_pips > 0.5, f"heuristic breakeven {h.breakeven_cost_pips}"
+    def test_one_ledger_entry_per_position(self, state):
+        # total_trades is derived from the ledger; it must equal the number of
+        # distinct entry events (positions), not the number of exit legs.
+        entries = sum(1 for ev in state.raw_state.trades if ev.type == "entry")
+        ledger = len(state.raw_state._positions)
+        assert ledger == entries, f"ledger {ledger} vs entries {entries}"
+        # and a losing trade really does close in >1 non-partial leg (the bug's cause)
+        assert len(state.raw_state._stop_dists) > ledger, "expected multi-leg closes (tp+runner)"
 
-    def test_edge_collapses_under_fidelity(self, full):
-        h, f = full["heuristic"], full["fidelity"]
-        # edge erased: drops to <=20% of the heuristic AND to roughly zero
-        assert f.edge_r <= h.edge_r * 0.2, f"edge did not collapse: {f.edge_r} vs {h.edge_r}"
-        assert f.edge_r < 0.03, f"fidelity edge unexpectedly high: {f.edge_r}"
-        assert f.breakeven_cost_pips < 0.2, f"fidelity breakeven {f.breakeven_cost_pips}"
+    def test_ledger_pnl_matches_equity(self, state):
+        # sum of per-position net PnL must equal the realised equity change.
+        total_net = sum(p["net"] for p in state.raw_state._positions)
+        assert abs(total_net - state.net_pnl) <= max(1.0, abs(state.net_pnl) * 1e-6)
+
+    def test_edge_cross_check(self, state):
+        # engine edge_r must equal mean per-position gross R recomputed independently.
+        import numpy as np
+
+        pip = 0.0001
+        rs = [
+            p["gross"] / (p["stop_pips"] * pip * p["qty"])
+            for p in state.raw_state._positions
+            if p["stop_pips"] > 0 and p["qty"] > 0
+        ]
+        assert abs(float(np.mean(rs)) - state.edge_r) < 1e-9

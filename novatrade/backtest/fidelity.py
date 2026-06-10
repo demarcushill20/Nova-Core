@@ -72,6 +72,10 @@ class FidelityIRBState(IRBStrategyState):
         self._cost_pips = cost_pips
         self._pip = pip
         self._stop_dists: list[float] = []
+        # Per-position ledger — correct by construction (a position can close in
+        # TWO non-partial legs: tp_qty + runner_qty). Keyed by entry identity so
+        # legs accumulate into one position with one stop, not N.
+        self._positions: list[dict] = []
 
     def _intrabar_path(self, i: int, row: pd.Series) -> list[float]:
         path = self._sub_paths.get(i)
@@ -80,24 +84,41 @@ class FidelityIRBState(IRBStrategyState):
     def _close_tranche(self, ts: Any, exit_price: float, qty: float, reason: str) -> None:
         if qty <= 0 or self.position is None:
             return
-        if self.position["side"] == "long":
-            pnl = (exit_price - self.position["entry_price"]) * qty
-        else:
-            pnl = (self.position["entry_price"] - exit_price) * qty
-        pnl -= self._cost_pips * self._pip * qty
-        self.equity += pnl
+        side = self.position["side"]
+        entry = self.position["entry_price"]
+        gross = (exit_price - entry) * qty if side == "long" else (entry - exit_price) * qty
+        net = gross - self._cost_pips * self._pip * qty
+        self.equity += net
+
+        # Accumulate into the position ledger by entry identity (one position can
+        # close across multiple non-partial legs; all share one stop distance).
+        eb = self.position.get("entry_bar")
+        if not self._positions or self._positions[-1]["entry_bar"] != eb:
+            self._positions.append(
+                {
+                    "entry_bar": eb,
+                    "entry_time": self.position.get("entry_time"),
+                    "stop_pips": abs(entry - self.position["initial_stop"]) / self._pip,
+                    "qty": self.position["qty_total"],
+                    "gross": 0.0,
+                    "net": 0.0,
+                }
+            )
+        self._positions[-1]["gross"] += gross
+        self._positions[-1]["net"] += net
+
         if reason != "partial_tp":
-            self._stop_dists.append(abs(self.position["entry_price"] - self.position["initial_stop"]) / self._pip)
+            self._stop_dists.append(abs(entry - self.position["initial_stop"]) / self._pip)
         self.trades.append(
             TradeEvent(
                 time=ts,
                 type="exit",
-                side=self.position["side"],
+                side=side,
                 price=exit_price,
                 qty=qty,
                 equity_after=self.equity,
                 reason=reason,
-                pnl=pnl,
+                pnl=net,
             )
         )
 
@@ -176,44 +197,32 @@ def run_fidelity_backtest(
 
 
 def _summarize(st: FidelityIRBState, cfg: IRBConfig, pip: float, fine_fills: bool, cost_pips: float) -> FidelityResult:
-    # Fold entry/exit events into positions (partial legs accumulate).
-    positions: list[dict] = []
-    cur: dict | None = None
-    for ev in st.trades:
-        if ev.type == "entry":
-            if cur:
-                positions.append(cur)
-            cur = {"qty": ev.qty, "gross": 0.0}
-        elif ev.type == "exit" and cur is not None:
-            cur["gross"] += ev.pnl or 0.0
-    if cur:
-        positions.append(cur)
-
-    stops = st._stop_dists
-    n = min(len(positions), len(stops))
+    # Per-position R from the correct-by-construction ledger. gross_r and net_r
+    # are sizing-independent (gross/(stop_pips*pip*qty)); net already has cost.
     gross_r: list[float] = []
+    net_r: list[float] = []
     stop_pips: list[float] = []
-    wins = 0
-    for k in range(n):
-        risk = stops[k] * pip * positions[k]["qty"]
-        if risk > 0:
-            gross_r.append(positions[k]["gross"] / risk)
-            stop_pips.append(stops[k])
-            if positions[k]["gross"] > 0:
-                wins += 1
+    for p in st._positions:
+        risk = p["stop_pips"] * pip * p["qty"]
+        if risk > 0 and p["stop_pips"] > 0:
+            gross_r.append(p["gross"] / risk)
+            net_r.append(p["net"] / risk)
+            stop_pips.append(p["stop_pips"])
 
     gr = np.array(gross_r) if gross_r else np.array([0.0])
+    nr = np.array(net_r) if net_r else np.array([0.0])
     sp = np.array(stop_pips) if stop_pips else np.array([1.0])
     # breakeven cost solves mean(grossR - c/stop) = 0  ->  c = mean(grossR)/mean(1/stop)
-    breakeven = float(gr.mean() / np.mean(1.0 / sp)) if len(stop_pips) else 0.0
+    breakeven = float(gr.mean() / np.mean(1.0 / sp)) if stop_pips else 0.0
+    wins = int((nr > 0).sum())
 
     return FidelityResult(
         net_pnl=float(st.equity - cfg.initial_capital),
-        total_trades=len(gross_r),
-        edge_r=float(gr.mean()),
+        total_trades=len(net_r),
+        edge_r=float(nr.mean()),
         median_stop_pips=float(np.median(sp)),
         breakeven_cost_pips=breakeven,
-        win_rate=(wins / len(gross_r)) if gross_r else 0.0,
+        win_rate=(wins / len(net_r)) if net_r else 0.0,
         fine_fills=fine_fills,
         cost_pips=cost_pips,
         trades=st.trades,
