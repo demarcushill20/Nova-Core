@@ -1,0 +1,2 @@
+python-dotenv>=1.0
+metaapi-cloud-sdk>=27.0   # only needed when IDF_DRY_RUN=false

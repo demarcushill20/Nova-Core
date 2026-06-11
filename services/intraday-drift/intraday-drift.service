@@ -1,0 +1,30 @@
+# systemd unit for the Intraday EUR-Weakness Drift demo executor.
+# Install:  sudo cp intraday-drift.service /etc/systemd/system/
+#           sudo systemctl daemon-reload
+#           sudo systemctl enable --now intraday-drift
+# Logs:     journalctl -u intraday-drift -f
+#
+# Secrets (METAAPI_TOKEN, METAAPI_ACCOUNT_ID) come from /etc/novacore/intraday-drift.env.
+# Defaults to paper mode (IDF_DRY_RUN=true); flip to false + set a DEDICATED demo
+# account in that env file to execute on the demo.
+
+[Unit]
+Description=Intraday EUR-weakness drift demo executor (short EURUSD 11:00->12:00 UTC, 1%% risk)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nova
+WorkingDirectory=/home/nova/nova-core/services/intraday-drift
+EnvironmentFile=-/etc/novacore/intraday-drift.env
+Environment=IDF_DRY_RUN=true
+Environment=IDF_STOP_PIPS=20
+Environment=IDF_RISK_FRAC=0.01
+Environment=IDF_POLL_SECONDS=60
+ExecStart=/usr/bin/python3 intraday_drift.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
