@@ -1,0 +1,29 @@
+# systemd unit for the Month-End Rebalancing-Flow demo executor.
+# Install:  sudo cp monthend-flow.service /etc/systemd/system/
+#           sudo systemctl daemon-reload
+#           sudo systemctl enable --now monthend-flow
+# Logs:     journalctl -u monthend-flow -f
+#
+# Secrets (METAAPI_TOKEN, METAAPI_ACCOUNT_ID) come from /etc/novacore/monthend.env.
+# Defaults to paper mode (MEF_DRY_RUN=true); flip to false + set a DEDICATED demo
+# account in that env file to execute on the demo.
+
+[Unit]
+Description=Month-End Rebalancing-Flow demo executor (quarter-end FX basket)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nova
+WorkingDirectory=/home/nova/nova-core/services/monthend-flow
+EnvironmentFile=-/etc/novacore/monthend.env
+Environment=MEF_DRY_RUN=true
+Environment=MEF_LEVERAGE=5.0
+Environment=MEF_POLL_SECONDS=300
+ExecStart=/usr/bin/python3 monthend_flow.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
