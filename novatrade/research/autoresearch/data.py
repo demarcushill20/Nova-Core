@@ -15,10 +15,13 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[3]
 CANDLES = ROOT / "data" / "candles"
 
-# FX majors carry sub-hour HistData M1 (resampled to 15m).
-FX_SYMBOLS = ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "NZDUSD", "USDCAD", "AUDNZD")
+# Instruments with sub-hour HistData M1 (resampled to 15m). FX majors + gold.
+FX_SYMBOLS = ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "NZDUSD", "USDCAD", "AUDNZD", "XAUUSD")
 # Instruments stored as a ready-made hourly parquet (no sub-hour bars), e.g. crypto.
 HOURLY_PARQUET = {"BTCUSD": CANDLES / "btcusd_1h.parquet"}
+# High-priced instruments: a "pip" is bps of price, so a fixed stop_pips stays
+# meaningful (gold ~$2000, crypto ~$60k). FX majors use absolute 1e-4 pips.
+RELATIVE_PIP_SYMBOLS = frozenset({"USDJPY", "XAUUSD", "BTCUSD"})
 
 
 def _m1_path(symbol: str) -> Path:
@@ -110,7 +113,7 @@ def make_dataset(instrument: str = "EURUSD", bars15: pd.DataFrame | None = None)
         h = load_hourly(instrument)
         return Dataset(h, h, relative_pip=True)  # crypto: stops in bps of price
     b = load_15m(instrument)
-    return Dataset(b, to_hourly(b))
+    return Dataset(b, to_hourly(b), relative_pip=instrument in RELATIVE_PIP_SYMBOLS)
 
 
 def sealed_split(ds: Dataset, holdout_frac: float = 0.30) -> Split:

@@ -27,8 +27,7 @@ from novatrade.research.autoresearch.gauntlet import (
     train_metrics,
 )
 
-STOPS = (15.0, 20.0, 30.0)  # FX pips
-STOPS_BPS = (150.0, 250.0, 400.0)  # crypto: bps of price (wider, vol-appropriate)
+STOPS = (15.0, 20.0, 30.0)  # FX pips (relative_pip instruments scale stops to vol)
 
 
 # ----------------------------- generation -----------------------------
@@ -150,9 +149,20 @@ def run_search(
     th = th or Thresholds()
     ds = make_dataset(instrument)
     split = sealed_split(ds, holdout_frac)
-    # crypto stops are in bps of price and need a vol-appropriate (wider) scale
-    stops = STOPS_BPS if ds.relative_pip else STOPS
-    session_stops = (200.0, 400.0) if ds.relative_pip else (30.0, 50.0)
+    # FX majors use fixed pip stops; high-priced (relative_pip) instruments —
+    # USDJPY, gold, crypto — get bps stops scaled to their own hourly volatility
+    # (so the stop rarely truncates the signal, keeping discovery fair).
+    stops: tuple[float, ...]
+    session_stops: tuple[float, ...]
+    if ds.relative_pip:
+        h = split.train.hourly
+        rng_bps = float(((h["high"] - h["low"]) / h["open"] * 1e4).median())
+        base = max(rng_bps, 5.0)
+        stops = tuple(float(round(base * m)) for m in (2.0, 4.0, 7.0))
+        session_stops = tuple(float(round(base * m)) for m in (4.0, 8.0))
+    else:
+        stops = STOPS
+        session_stops = (30.0, 50.0)
 
     cands: dict[str, Candidate] = {}
     metrics: dict[str, dict] = {}
