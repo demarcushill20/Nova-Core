@@ -67,15 +67,33 @@ If it couldn't do those three things, it couldn't be trusted to find anything ne
 - The search space is a starting set (drift + two control families). The point
   is the *scoring contract*, not the breadth — see below.
 
-## Extending it (the "Karpathy" layer)
+## The LLM-proposer layer (the "Karpathy" loop) — `proposer.py`
 
-`loop.propose_refinements(leaders)` is the proposer hook. The v1 proposer is
-programmatic (neighbour hours / stops / holds). An **LLM proposer** drops in
-here unchanged: read the leaderboard, emit new `Candidate`s (new families,
-conditional filters, other instruments), and the same gauntlet scores them. The
-scoring contract is what keeps an LLM proposer honest — it cannot talk its way
-past a sealed hold-out.
+An LLM reads the interim leaderboard and proposes the next batch of candidates,
+scored through the same gauntlet:
 
-To add a family: implement `_bt_<family>(ds, params) -> DataFrame[entry_time,
-gross_pips, stop_pips]` in `families.py`, register it in `_FAMILIES`, and add it
-to `GROUNDED_FAMILIES` only if it has a real structural mechanism.
+```bash
+python -m novatrade.research.autoresearch.run --rounds 2 --llm   # needs ANTHROPIC_API_KEY
+```
+
+`run_search(..., proposer=...)` takes any proposer; `LLMProposer(complete_fn)` is
+transport-agnostic (Anthropic SDK via `anthropic_complete_fn`, the `claude` CLI,
+a sub-agent, or a test stub). Two invariants keep the **judge incorruptible**:
+
+1. **`grounded` is forced from family membership, never from the LLM** — a
+   proposer cannot label a `breakout` "structural" to slip past the mechanism
+   gate. `parse_proposals` enforces this.
+2. The LLM may only parameterise EXISTING families; genuinely new mechanisms come
+   back as free-text `new_family_request`s for a human/coding-agent to implement
+   (it cannot inject a backtest function).
+
+**Demonstrated:** a Claude proposer offered 10 economically-plausible candidates
+(WM/R-fix flow, ECB fix, US own-hours, post-fix reversion). The gauntlet rejected
+**all** of them — the two that looked good in-sample (train Sharpe 0.6-0.7)
+collapsed on the sealed hold-out (OOS −0.5). A persuasive narrative cannot beat
+the hold-out. The proposer expands the search; the judge keeps it honest.
+
+To add a family (so the LLM can target it): implement `_bt_<family>(ds, params)
+-> DataFrame[entry_time, gross_pips, stop_pips]` in `families.py`, register it in
+`_FAMILIES` + `FAMILY_PARAM_KEYS`, and add it to `GROUNDED_FAMILIES` only if it
+has a real structural mechanism.

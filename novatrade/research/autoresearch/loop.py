@@ -13,7 +13,9 @@ leaderboard and emit new Candidates — without changing the scoring contract.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from novatrade.research.autoresearch.data import Split, make_dataset, sealed_split
 from novatrade.research.autoresearch.families import Candidate
@@ -115,16 +117,33 @@ def propose_refinements(leaders: list[Candidate]) -> list[Candidate]:
 
 
 # ----------------------------- the loop -----------------------------
+# An LLM proposer: given the interim leaderboard + already-tried keys, returns a
+# batch of new candidates (a proposer.ProposalResult, or a bare list[Candidate]).
+# Kept as a plain callable so the loop never imports a transport.
+Proposer = Callable[[list[Verdict], set[str]], object]
+
+
 @dataclass
 class SearchResult:
     verdicts: list[Verdict]
     n_trials: int
     split: Split
     leaderboard: list[Verdict] = field(default_factory=list)
+    new_family_requests: list[str] = field(default_factory=list)
+
+
+def _interim_verdicts(cands, metrics, n_trials, th) -> list[Verdict]:
+    """Train-only leaderboard (hold-out untouched) to hand the LLM proposer."""
+    vs = [score_candidate(cands[k], metrics[k], n_trials, th) for k in metrics]
+    return sorted(vs, key=lambda v: -v.sharpe)
 
 
 def run_search(
-    rounds: int = 2, refine_top: int = 5, holdout_frac: float = 0.30, th: Thresholds | None = None
+    rounds: int = 2,
+    refine_top: int = 5,
+    holdout_frac: float = 0.30,
+    th: Thresholds | None = None,
+    proposer: Proposer | None = None,
 ) -> SearchResult:
     th = th or Thresholds()
     ds = make_dataset()
@@ -149,6 +168,15 @@ def run_search(
         )[:refine_top]
         add_and_score(propose_refinements(leaders))
 
+    # LLM-proposer round: it sees the interim (train-only) leaderboard and emits
+    # new candidates, scored through the same gauntlet. The hold-out stays sealed.
+    new_family_requests: list[str] = []
+    if proposer is not None:
+        interim = _interim_verdicts(cands, metrics, len(metrics), th)
+        result: Any = proposer(interim, set(metrics.keys()))
+        new_family_requests = list(getattr(result, "new_family_requests", []))
+        add_and_score(list(getattr(result, "candidates", result)))
+
     n_trials = len(metrics)
 
     # train-only verdicts (holdout untouched)
@@ -163,4 +191,10 @@ def run_search(
         verdicts.values(),
         key=lambda v: ({"deploy": 0, "watch": 1, "reject": 2}[v.tier], -(v.holdout_sharpe or -9), -v.sharpe),
     )
-    return SearchResult(verdicts=list(verdicts.values()), n_trials=n_trials, split=split, leaderboard=ordered)
+    return SearchResult(
+        verdicts=list(verdicts.values()),
+        n_trials=n_trials,
+        split=split,
+        leaderboard=ordered,
+        new_family_requests=new_family_requests,
+    )

@@ -28,10 +28,26 @@ def main() -> None:
     ap.add_argument("--holdout", type=float, default=0.30)
     ap.add_argument("--cost", type=float, default=0.30, help="round-turn cost in pips")
     ap.add_argument("--top", type=int, default=25, help="leaderboard rows to print")
+    ap.add_argument("--llm", action="store_true", help="add an LLM-proposer round (needs ANTHROPIC_API_KEY)")
+    ap.add_argument("--llm-model", default="claude-opus-4-8")
     args = ap.parse_args()
 
+    proposer = None
+    if args.llm:
+        from novatrade.research.autoresearch.proposer import LLMProposer, anthropic_complete_fn
+
+        try:
+            proposer = LLMProposer(anthropic_complete_fn(model=args.llm_model))
+            print("LLM-proposer round enabled (Anthropic).")
+        except RuntimeError as e:
+            print(f"LLM-proposer unavailable ({e}); running programmatic search only.")
+
     th = Thresholds(cost_pips=args.cost)
-    res = run_search(rounds=args.rounds, holdout_frac=args.holdout, th=th)
+    res = run_search(rounds=args.rounds, holdout_frac=args.holdout, th=th, proposer=proposer)
+    if res.new_family_requests:
+        print("\nLLM new-family requests (for a human/coding-agent to implement):")
+        for r in res.new_family_requests:
+            print(f"  - {r}")
 
     counts = {"deploy": 0, "watch": 0, "reject": 0}
     for v in res.verdicts:
