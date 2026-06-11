@@ -27,16 +27,17 @@ from novatrade.research.autoresearch.gauntlet import (
     train_metrics,
 )
 
-STOPS = (15.0, 20.0, 30.0)
+STOPS = (15.0, 20.0, 30.0)  # FX pips
+STOPS_BPS = (150.0, 250.0, 400.0)  # crypto: bps of price (wider, vol-appropriate)
 
 
 # ----------------------------- generation -----------------------------
-def seed_grid() -> list[Candidate]:
+def seed_grid(stops: tuple[float, ...] = STOPS, session_stops: tuple[float, ...] = (30.0, 50.0)) -> list[Candidate]:
     cands: list[Candidate] = []
     # hour_drift: every UTC hour, both directions, a few stops (grounded: flow seasonality)
     for hour in range(24):
         for direction in (-1, 1):
-            for stop in STOPS:
+            for stop in stops:
                 cands.append(
                     Candidate.make(
                         "hour_drift",
@@ -47,7 +48,7 @@ def seed_grid() -> list[Candidate]:
                 )
     # session_drift: canonical session holds (grounded)
     for h0, h1, d in ((6, 13, -1), (13, 20, 1), (7, 12, -1), (0, 7, 1), (8, 16, -1)):
-        for stop in (30.0, 50.0):
+        for stop in session_stops:
             cands.append(
                 Candidate.make(
                     "session_drift",
@@ -81,7 +82,7 @@ def seed_grid() -> list[Candidate]:
     return cands
 
 
-def propose_refinements(leaders: list[Candidate]) -> list[Candidate]:
+def propose_refinements(leaders: list[Candidate], stops: tuple[float, ...] = STOPS) -> list[Candidate]:
     """Neighbours of the current grounded leaders: ±1 hour and the other stops.
     (This is the hook an LLM proposer would replace/augment.)"""
     out: list[Candidate] = []
@@ -90,7 +91,7 @@ def propose_refinements(leaders: list[Candidate]) -> list[Candidate]:
         if c.family == "hour_drift":
             for dh in (-1, 1):
                 nh = (int(p["hour"]) + dh) % 24
-                for stop in STOPS:
+                for stop in stops:
                     out.append(
                         Candidate.make(
                             "hour_drift",
@@ -144,10 +145,14 @@ def run_search(
     holdout_frac: float = 0.30,
     th: Thresholds | None = None,
     proposer: Proposer | None = None,
+    instrument: str = "EURUSD",
 ) -> SearchResult:
     th = th or Thresholds()
-    ds = make_dataset()
+    ds = make_dataset(instrument)
     split = sealed_split(ds, holdout_frac)
+    # crypto stops are in bps of price and need a vol-appropriate (wider) scale
+    stops = STOPS_BPS if ds.relative_pip else STOPS
+    session_stops = (200.0, 400.0) if ds.relative_pip else (30.0, 50.0)
 
     cands: dict[str, Candidate] = {}
     metrics: dict[str, dict] = {}
@@ -159,14 +164,14 @@ def run_search(
             cands[c.key] = c
             metrics[c.key] = train_metrics(c, split.train, th.cost_pips)
 
-    add_and_score(seed_grid())
+    add_and_score(seed_grid(stops, session_stops))
     for _ in range(max(rounds - 1, 0)):
         leaders = sorted(
             (cands[k] for k in metrics if cands[k].grounded),
             key=lambda c: metrics[c.key]["sharpe"],
             reverse=True,
         )[:refine_top]
-        add_and_score(propose_refinements(leaders))
+        add_and_score(propose_refinements(leaders, stops))
 
     # LLM-proposer round: it sees the interim (train-only) leaderboard and emits
     # new candidates, scored through the same gauntlet. The hold-out stays sealed.

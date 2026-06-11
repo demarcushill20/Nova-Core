@@ -25,6 +25,7 @@ OUT = ROOT / "OUTPUT" / "autoresearch"
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rounds", type=int, default=2)
+    ap.add_argument("--instrument", default="EURUSD", help="EURUSD, GBPUSD, USDJPY, ... or BTCUSD")
     ap.add_argument("--holdout", type=float, default=0.30)
     ap.add_argument("--cost", type=float, default=0.30, help="round-turn cost in pips")
     ap.add_argument("--top", type=int, default=25, help="leaderboard rows to print")
@@ -43,7 +44,9 @@ def main() -> None:
             print(f"LLM-proposer unavailable ({e}); running programmatic search only.")
 
     th = Thresholds(cost_pips=args.cost)
-    res = run_search(rounds=args.rounds, holdout_frac=args.holdout, th=th, proposer=proposer)
+    res = run_search(
+        rounds=args.rounds, holdout_frac=args.holdout, th=th, proposer=proposer, instrument=args.instrument
+    )
     if res.new_family_requests:
         print("\nLLM new-family requests (for a human/coding-agent to implement):")
         for r in res.new_family_requests:

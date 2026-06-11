@@ -49,9 +49,13 @@ class Candidate:
 
 
 # ----------------------------- drift families (hourly) -----------------------------
-def _hour_block_pnl(hourly: pd.DataFrame, hours: list[int], direction: int, stop_pips: float) -> pd.DataFrame:
+def _hour_block_pnl(
+    hourly: pd.DataFrame, hours: list[int], direction: int, stop_pips: float, relative_pip: bool = False
+) -> pd.DataFrame:
     """Hold `direction` across the given UTC hours each weekday; conservative
-    stop at `stop_pips`. One trade/day per contiguous block (here: one block)."""
+    stop at `stop_pips`. One trade/day per contiguous block (here: one block).
+    `relative_pip`: measure moves/stop in bps of entry price (crypto), so a fixed
+    stop_pips stays meaningful across a wide price range."""
     h = hourly[hourly.index.weekday < 5]
     sub = h[h.index.hour.isin(hours)].copy()
     if sub.empty:
@@ -61,14 +65,15 @@ def _hour_block_pnl(hourly: pd.DataFrame, hours: list[int], direction: int, stop
     for _date, g in sub.groupby("date"):
         g = g.sort_index()
         entry = g["open"].iloc[0]
+        unit = entry * PIP if relative_pip else PIP  # price value of one "pip"
         if direction > 0:  # long: adverse = drop below entry
-            adverse = (entry - g["low"].min()) / PIP
+            adverse = (entry - g["low"].min()) / unit
         else:  # short: adverse = rise above entry
-            adverse = (g["high"].max() - entry) / PIP
+            adverse = (g["high"].max() - entry) / unit
         if adverse >= stop_pips:
             gross = -stop_pips
         else:
-            gross = direction * (g["close"].iloc[-1] - entry) / PIP
+            gross = direction * (g["close"].iloc[-1] - entry) / unit
         rows.append((g.index[0], gross, stop_pips))
     return pd.DataFrame(rows, columns=["entry_time", "gross_pips", "stop_pips"])
 
@@ -77,13 +82,13 @@ def _bt_hour_drift(ds: Dataset, p: dict) -> pd.DataFrame:
     hour = int(p["hour"])
     hold = int(p.get("hold", 1))
     hours = list(range(hour, hour + hold))
-    return _hour_block_pnl(ds.hourly, hours, int(p["direction"]), float(p["stop_pips"]))
+    return _hour_block_pnl(ds.hourly, hours, int(p["direction"]), float(p["stop_pips"]), ds.relative_pip)
 
 
 def _bt_session_drift(ds: Dataset, p: dict) -> pd.DataFrame:
     h0, h1 = int(p["start_hour"]), int(p["end_hour"])
     hours = list(range(h0, h1))
-    return _hour_block_pnl(ds.hourly, hours, int(p["direction"]), float(p["stop_pips"]))
+    return _hour_block_pnl(ds.hourly, hours, int(p["direction"]), float(p["stop_pips"]), ds.relative_pip)
 
 
 # ----------------------------- control families (15m) -----------------------------

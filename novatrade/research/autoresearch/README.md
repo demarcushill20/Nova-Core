@@ -12,10 +12,31 @@ anti-overfitting machine**, not an afterthought.
 
 ```bash
 python -m novatrade.research.autoresearch.run --rounds 2 --cost 0.30
+python -m novatrade.research.autoresearch.run --instrument USDJPY --cost 0.6
+python -m novatrade.research.autoresearch.run --instrument BTCUSD --cost 10   # crypto: cost/stops in bps
 # -> tiered leaderboard + OUTPUT/autoresearch/leaderboard.json
 ```
 
 Data: `data/candles/eurusd_15m.parquet` (auto-built from HistData M1 if absent).
+
+## Multiple instruments
+
+`make_dataset(instrument)` / `run_search(instrument=...)` accept any registered
+instrument: FX majors (EURUSD, GBPUSD, USDJPY, AUDUSD, NZDUSD, USDCAD, AUDNZD —
+resampled from HistData M1) and hourly-only instruments like **BTCUSD** (a cached
+hourly parquet). Crypto sets `relative_pip=True`, so a fixed `stop_pips` is read
+as **bps of price** (vol-appropriate across a 10x price range) and the loop uses
+wider stops + a bps cost.
+
+**Result of pointing it at BTCUSD (2019-2024):** the loop correctly returns
+**deploy=0** — the FX own-hours-flow mechanism does *not* transfer to 24/7 crypto
+(best hour-drift Sharpe 0.14; BTC's only real structure is a weak 21-22 UTC
+US-session drift, ~5 bps, too thin to clear cost). It did *not* hallucinate an
+edge on a new instrument. And the prize for portfolio construction: the EURUSD
+11:00 edge and BTC daily returns are **decorrelated (corr −0.04)** — crypto is the
+right place to hunt a decorrelated edge, but it needs crypto-appropriate families
+(momentum / funding-carry / weekend), i.e. a `new_family_request`, not the FX
+session-drift families.
 
 ## The four anti-overfitting guards
 

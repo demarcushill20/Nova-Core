@@ -13,12 +13,26 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[3]
-HISTDATA_M1 = ROOT / "data" / "candles" / "histdata" / "EURUSD_M1.csv"
-CACHE_15M = ROOT / "data" / "candles" / "eurusd_15m.parquet"
+CANDLES = ROOT / "data" / "candles"
+
+# FX majors carry sub-hour HistData M1 (resampled to 15m).
+FX_SYMBOLS = ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "NZDUSD", "USDCAD", "AUDNZD")
+# Instruments stored as a ready-made hourly parquet (no sub-hour bars), e.g. crypto.
+HOURLY_PARQUET = {"BTCUSD": CANDLES / "btcusd_1h.parquet"}
 
 
-def load_15m(cache: Path = CACHE_15M, m1: Path = HISTDATA_M1) -> pd.DataFrame:
-    """15m OHLC (~UTC). Uses the parquet cache if present, else resamples M1."""
+def _m1_path(symbol: str) -> Path:
+    return CANDLES / "histdata" / f"{symbol}_M1.csv"
+
+
+def _cache15_path(symbol: str) -> Path:
+    return CANDLES / f"{symbol.lower()}_15m.parquet"
+
+
+def load_15m(instrument: str = "EURUSD") -> pd.DataFrame:
+    """15m OHLC (~UTC) for an FX symbol — parquet cache if present, else
+    resample HistData M1 and cache."""
+    cache, m1 = _cache15_path(instrument), _m1_path(instrument)
     if cache.exists():
         b = pd.read_parquet(cache)
     else:
@@ -55,6 +69,10 @@ def to_hourly(bars15: pd.DataFrame) -> pd.DataFrame:
 class Dataset:
     bars15: pd.DataFrame
     hourly: pd.DataFrame
+    # `relative_pip`: interpret a "pip" as a fraction of price (bps) rather than
+    # an absolute 1e-4. FX uses absolute pips; crypto uses bps-of-price so a fixed
+    # stop_pips stays meaningful across a 10x price range.
+    relative_pip: bool = False
 
     def slice(self, start=None, end=None) -> Dataset:
         def _s(df):
@@ -65,7 +83,7 @@ class Dataset:
                 m &= df.index < end
             return df[m]
 
-        return Dataset(_s(self.bars15), _s(self.hourly))
+        return Dataset(_s(self.bars15), _s(self.hourly), relative_pip=self.relative_pip)
 
 
 @dataclass
@@ -75,8 +93,23 @@ class Split:
     cut: pd.Timestamp
 
 
-def make_dataset(bars15: pd.DataFrame | None = None) -> Dataset:
-    b = bars15 if bars15 is not None else load_15m()
+def load_hourly(instrument: str) -> pd.DataFrame:
+    """Ready-made hourly OHLC (e.g. crypto, 24/7). No sub-hour data exists."""
+    h = pd.read_parquet(HOURLY_PARQUET[instrument])
+    h.index = pd.to_datetime(h.index)
+    return h
+
+
+def make_dataset(instrument: str = "EURUSD", bars15: pd.DataFrame | None = None) -> Dataset:
+    """Build a Dataset for any registered instrument. For hourly-only
+    instruments (crypto) bars15 is set to the hourly frame — the drift families
+    use hourly anyway; the 15m control families just run coarser."""
+    if bars15 is not None:
+        return Dataset(bars15, to_hourly(bars15))
+    if instrument in HOURLY_PARQUET:
+        h = load_hourly(instrument)
+        return Dataset(h, h, relative_pip=True)  # crypto: stops in bps of price
+    b = load_15m(instrument)
     return Dataset(b, to_hourly(b))
 
 
