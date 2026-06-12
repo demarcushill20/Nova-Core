@@ -57,15 +57,23 @@ def seed_grid(stops: tuple[float, ...] = STOPS, session_stops: tuple[float, ...]
                 )
             )
     # fix_reversal: fade the pre-fix drift at documented benchmark fixes (grounded).
-    # 16:00 WM/R London, ~13:00 ECB, ~01:00 Tokyo (data ~UTC).
-    for fix_hour in (16, 13, 1):
+    # WM/R 16:00 London, ECB ~13:00, Tokyo ~01:00, plus the LBMA gold AM/PM fixes
+    # (10:30 / 15:00 London — heavier fixing flow than FX). (data ~UTC)
+    fixes = ((16, 0, "WM/R"), (13, 0, "ECB"), (1, 0, "Tokyo"), (10, 30, "LBMA-AM"), (15, 0, "LBMA-PM"))
+    for fix_hour, fix_minute, label in fixes:
         for hold in (2, 4, 6):  # 30 / 60 / 90 min post-fix
             for stop in stops:
                 cands.append(
                     Candidate.make(
                         "fix_reversal",
-                        {"fix_hour": fix_hour, "fix_minute": 0, "pre_bars": 4, "hold_bars": hold, "stop_pips": stop},
-                        mechanism=f"benchmark-fix order-flow reversal @ {fix_hour:02d}:00 UTC",
+                        {
+                            "fix_hour": fix_hour,
+                            "fix_minute": fix_minute,
+                            "pre_bars": 4,
+                            "hold_bars": hold,
+                            "stop_pips": stop,
+                        },
+                        mechanism=f"{label} fix order-flow reversal @ {fix_hour:02d}:{fix_minute:02d} UTC",
                         grounded=True,
                     )
                 )
