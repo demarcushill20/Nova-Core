@@ -59,24 +59,28 @@ def seed_grid(stops: tuple[float, ...] = STOPS, session_stops: tuple[float, ...]
     # fix_reversal: fade the pre-fix drift at documented benchmark fixes (grounded).
     # WM/R 16:00 London, ECB ~13:00, Tokyo ~01:00, plus the LBMA gold AM/PM fixes
     # (10:30 / 15:00 London — heavier fixing flow than FX). (data ~UTC)
+    # fix_reversal fades the pre-fix drift (FX rebalancing unwind); fix_momentum
+    # follows it (one-sided directional fixing flow, e.g. gold). Data picks which.
     fixes = ((16, 0, "WM/R"), (13, 0, "ECB"), (1, 0, "Tokyo"), (10, 30, "LBMA-AM"), (15, 0, "LBMA-PM"))
-    for fix_hour, fix_minute, label in fixes:
-        for hold in (2, 4, 6):  # 30 / 60 / 90 min post-fix
-            for stop in stops:
-                cands.append(
-                    Candidate.make(
-                        "fix_reversal",
-                        {
-                            "fix_hour": fix_hour,
-                            "fix_minute": fix_minute,
-                            "pre_bars": 4,
-                            "hold_bars": hold,
-                            "stop_pips": stop,
-                        },
-                        mechanism=f"{label} fix order-flow reversal @ {fix_hour:02d}:{fix_minute:02d} UTC",
-                        grounded=True,
+    for family in ("fix_reversal", "fix_momentum"):
+        kind = family.split("_")[1]
+        for fix_hour, fix_minute, label in fixes:
+            for hold in (2, 4, 6):  # 30 / 60 / 90 min post-fix
+                for stop in stops:
+                    cands.append(
+                        Candidate.make(
+                            family,
+                            {
+                                "fix_hour": fix_hour,
+                                "fix_minute": fix_minute,
+                                "pre_bars": 4,
+                                "hold_bars": hold,
+                                "stop_pips": stop,
+                            },
+                            mechanism=f"{label} fix order-flow {kind} @ {fix_hour:02d}:{fix_minute:02d} UTC",
+                            grounded=True,
+                        )
                     )
-                )
     # mr_fade: Bollinger fade (UNGROUNDED control — expected to fail)
     for k in (2.0, 2.5):
         for atr_stop in (1.0, 1.5):

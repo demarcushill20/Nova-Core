@@ -223,14 +223,11 @@ def _bt_breakout(ds: Dataset, p: dict) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["entry_time", "gross_pips", "stop_pips"])
 
 
-def _bt_fix_reversal(ds: Dataset, p: dict) -> pd.DataFrame:
-    """Benchmark-fix reversal (Krohn & Sushko 2024; Evans 2017). Dealers absorb
-    fixing order flow into a benchmark fix (WM/R 16:00 London, ECB ~13:00, Tokyo
-    ~01:00 UTC) and unwind after, so the pre-fix drift tends to REVERSE post-fix.
-    Enter at the fix bar's open OPPOSITE the pre-fix drift; hold `hold_bars`;
-    conservative stop. Structural order-flow mechanism (grounded) — but the
-    literature warns it is marginal-to-negative net of retail cost, so the cost +
-    hold-out + stability gates decide. relative_pip-aware."""
+def _fix_trades(ds: Dataset, p: dict, mode_sign: int) -> pd.DataFrame:
+    """Shared benchmark-fix window logic. At a fix (WM/R 16:00 London, ECB ~13:00,
+    Tokyo ~01:00, LBMA gold 10:30/15:00), measure the pre-fix drift and trade the
+    fix bar's open: `mode_sign=-1` fades it (reversal), `+1` follows it (momentum).
+    Hold `hold_bars`; conservative stop; relative_pip-aware."""
     df = ds.bars15
     fix_h, fix_m = int(p["fix_hour"]), int(p.get("fix_minute", 0))
     pre, hold = int(p.get("pre_bars", 2)), int(p.get("hold_bars", 4))
@@ -253,7 +250,7 @@ def _bt_fix_reversal(ds: Dataset, p: dict) -> pd.DataFrame:
         pre_drift = o[i] - o[i - pre]
         if pre_drift == 0:
             continue
-        direction = -1 if pre_drift > 0 else 1  # fade the pre-fix move
+        direction = mode_sign * (1 if pre_drift > 0 else -1)  # fade (-1) or follow (+1)
         unit = entry * PIP if relative else PIP
         stop = entry - direction * stop_pips * unit
         gross = None
@@ -270,16 +267,32 @@ def _bt_fix_reversal(ds: Dataset, p: dict) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["entry_time", "gross_pips", "stop_pips"])
 
 
+def _bt_fix_reversal(ds: Dataset, p: dict) -> pd.DataFrame:
+    """Fade the pre-fix drift (Krohn & Sushko 2024; Evans 2017): dealers absorb
+    benchmark-fixing flow and unwind, so the pre-fix move tends to REVERSE. Real
+    but marginal-to-negative net of retail cost (the gates decide)."""
+    return _fix_trades(ds, p, -1)
+
+
+def _bt_fix_momentum(ds: Dataset, p: dict) -> pd.DataFrame:
+    """Follow the pre-fix drift: one-sided directional fixing flow (ETF / central-
+    bank accumulation, e.g. gold's LBMA fix) pushes price THROUGH the fix rather
+    than reverting it, so the pre-fix move CONTINUES. The economic mirror of
+    fix_reversal — surfaced by gold showing continuation, not reversion."""
+    return _fix_trades(ds, p, 1)
+
+
 _FAMILIES = {
     "hour_drift": _bt_hour_drift,
     "session_drift": _bt_session_drift,
     "fix_reversal": _bt_fix_reversal,
+    "fix_momentum": _bt_fix_momentum,
     "mr_fade": _bt_mr_fade,
     "breakout": _bt_breakout,
 }
 
 # Families with a structural (flow/order-imbalance) mechanism — pass the gate.
-GROUNDED_FAMILIES = {"hour_drift", "session_drift", "fix_reversal"}
+GROUNDED_FAMILIES = {"hour_drift", "session_drift", "fix_reversal", "fix_momentum"}
 
 
 def backtest(c: Candidate, ds: Dataset) -> pd.DataFrame:

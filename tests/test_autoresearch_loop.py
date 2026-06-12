@@ -85,6 +85,30 @@ class TestFamilies:
         # faded the up-drift (sold) into a reversal down -> net positive
         assert t["gross_pips"].mean() > 0
 
+    def test_fix_momentum_follows_prefix_drift(self):
+        # price RISES into the 16:00 fix and KEEPS rising after -> a long-at-fix
+        # (momentum) should profit, and the reversal of the same data should lose.
+        idx = pd.date_range("2021-01-04", periods=20 * 96, freq="15min")
+        c = []
+        for ts in idx:
+            if ts.hour == 15:  # pre-fix: drift up
+                base = 1.1000 + 0.0010 * (ts.minute / 45)
+            elif ts.hour == 16:  # post-fix: keep rising (continuation)
+                base = 1.1010 + 0.0008 * (ts.minute / 45)
+            elif ts.hour == 17:
+                base = 1.1018 + 0.0008 * (ts.minute / 45)
+            else:
+                base = 1.1000
+            c.append(base)
+        s = pd.Series(c, index=idx)
+        bars = pd.DataFrame({"open": s, "high": s + 1e-4, "low": s - 1e-4, "close": s})
+        ds = Dataset(bars, to_hourly(bars))
+        params = {"fix_hour": 16, "fix_minute": 0, "pre_bars": 4, "hold_bars": 4, "stop_pips": 30.0}
+        mom = backtest(Candidate.make("fix_momentum", params, "m", True), ds)
+        rev = backtest(Candidate.make("fix_reversal", params, "m", True), ds)
+        assert mom["gross_pips"].mean() > 0  # following continuation profits
+        assert rev["gross_pips"].mean() < 0  # fading it loses (the mirror)
+
 
 class TestTiering:
     GOOD: ClassVar[dict] = {
