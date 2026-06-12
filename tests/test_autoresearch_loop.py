@@ -56,6 +56,35 @@ class TestFamilies:
         c2 = Candidate.make("hour_drift", {"direction": -1, "hour": 11}, "m", True)
         assert c1 == c2 and hash(c1) == hash(c2)
 
+    def test_fix_reversal_fades_prefix_drift(self):
+        # price RISES into the 16:00 fix (peak at the fix bar) then DECLINES after
+        # -> a short-at-fix (fade) should be profitable.
+        idx = pd.date_range("2021-01-04", periods=20 * 96, freq="15min")
+        c = []
+        for ts in idx:
+            if ts.hour == 15:  # pre-fix: drift up to the peak at 16:00
+                base = 1.1000 + 0.0010 * (ts.minute / 45)
+            elif ts.hour == 16:  # post-fix: decline from the peak
+                base = 1.1010 - 0.0008 * (ts.minute / 45)
+            elif ts.hour == 17:  # keep declining
+                base = 1.1002 - 0.0008 * (ts.minute / 45)
+            else:
+                base = 1.1000
+            c.append(base)
+        s = pd.Series(c, index=idx)
+        bars = pd.DataFrame({"open": s, "high": s + 1e-4, "low": s - 1e-4, "close": s})
+        ds = Dataset(bars, to_hourly(bars))
+        cand = Candidate.make(
+            "fix_reversal",
+            {"fix_hour": 16, "fix_minute": 0, "pre_bars": 4, "hold_bars": 4, "stop_pips": 30.0},
+            "m",
+            True,
+        )
+        t = backtest(cand, ds)
+        assert len(t) > 5
+        # faded the up-drift (sold) into a reversal down -> net positive
+        assert t["gross_pips"].mean() > 0
+
 
 class TestTiering:
     GOOD: ClassVar[dict] = {

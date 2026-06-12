@@ -223,14 +223,63 @@ def _bt_breakout(ds: Dataset, p: dict) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["entry_time", "gross_pips", "stop_pips"])
 
 
+def _bt_fix_reversal(ds: Dataset, p: dict) -> pd.DataFrame:
+    """Benchmark-fix reversal (Krohn & Sushko 2024; Evans 2017). Dealers absorb
+    fixing order flow into a benchmark fix (WM/R 16:00 London, ECB ~13:00, Tokyo
+    ~01:00 UTC) and unwind after, so the pre-fix drift tends to REVERSE post-fix.
+    Enter at the fix bar's open OPPOSITE the pre-fix drift; hold `hold_bars`;
+    conservative stop. Structural order-flow mechanism (grounded) — but the
+    literature warns it is marginal-to-negative net of retail cost, so the cost +
+    hold-out + stability gates decide. relative_pip-aware."""
+    df = ds.bars15
+    fix_h, fix_m = int(p["fix_hour"]), int(p.get("fix_minute", 0))
+    pre, hold = int(p.get("pre_bars", 2)), int(p.get("hold_bars", 4))
+    stop_pips, relative = float(p["stop_pips"]), ds.relative_pip
+    idx = df.index
+    o, hi, lo = df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy()
+    hours, mins = idx.hour.to_numpy(), idx.minute.to_numpy()
+    ns = idx.asi8
+    bar_ns = 15 * 60 * 1_000_000_000
+    fix_pos = np.where((hours == fix_h) & (mins == fix_m))[0]
+    n = len(df)
+    rows = []
+    for i in fix_pos:
+        if i - pre < 0 or i + hold >= n:
+            continue
+        # windows must be contiguous (no weekend/missing-bar gap across the fix)
+        if ns[i] - ns[i - pre] > (pre + 1) * bar_ns or ns[i + hold] - ns[i] > (hold + 1) * bar_ns:
+            continue
+        entry = o[i]
+        pre_drift = o[i] - o[i - pre]
+        if pre_drift == 0:
+            continue
+        direction = -1 if pre_drift > 0 else 1  # fade the pre-fix move
+        unit = entry * PIP if relative else PIP
+        stop = entry - direction * stop_pips * unit
+        gross = None
+        for j in range(i, i + hold):  # holding bars
+            if direction == 1 and lo[j] <= stop:
+                gross = -stop_pips
+                break
+            if direction == -1 and hi[j] >= stop:
+                gross = -stop_pips
+                break
+        if gross is None:
+            gross = direction * (o[i + hold] - entry) / unit
+        rows.append((idx[i], gross, stop_pips))
+    return pd.DataFrame(rows, columns=["entry_time", "gross_pips", "stop_pips"])
+
+
 _FAMILIES = {
     "hour_drift": _bt_hour_drift,
     "session_drift": _bt_session_drift,
+    "fix_reversal": _bt_fix_reversal,
     "mr_fade": _bt_mr_fade,
     "breakout": _bt_breakout,
 }
 
-GROUNDED_FAMILIES = {"hour_drift", "session_drift"}
+# Families with a structural (flow/order-imbalance) mechanism — pass the gate.
+GROUNDED_FAMILIES = {"hour_drift", "session_drift", "fix_reversal"}
 
 
 def backtest(c: Candidate, ds: Dataset) -> pd.DataFrame:

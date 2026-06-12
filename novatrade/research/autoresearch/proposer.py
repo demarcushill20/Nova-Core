@@ -30,6 +30,7 @@ from novatrade.research.autoresearch.gauntlet import Verdict
 FAMILY_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "hour_drift": ("hour", "direction", "hold", "stop_pips"),
     "session_drift": ("start_hour", "end_hour", "direction", "stop_pips"),
+    "fix_reversal": ("fix_hour", "fix_minute", "pre_bars", "hold_bars", "stop_pips"),
     "mr_fade": ("bb_n", "bb_k", "atr_stop", "max_hold"),
     "breakout": ("session_open", "or_bars", "rr", "min_w", "max_w", "sess_hours"),
 }
@@ -41,6 +42,9 @@ mechanism, add a "new_family_request" string instead):
                short/long a single UTC hour block. Structural (flow seasonality).
   session_drift{start_hour, end_hour (UTC, end>start), direction:-1|+1, stop_pips:20-80}
                hold across a session window. Structural (own-hours flow).
+  fix_reversal {fix_hour (UTC), fix_minute:0, pre_bars:2-4, hold_bars:2-6, stop_pips}
+               fade the pre-fix drift at a benchmark fix (16:00 WM/R London,
+               ~13:00 ECB, ~01:00 Tokyo). Structural (fixing order-flow reversal).
   mr_fade      {bb_n, bb_k, atr_stop, max_hold}  Bollinger fade. NOT structural.
   breakout     {session_open, or_bars, rr, min_w, max_w, sess_hours}  ORB. NOT structural.
 direction: -1 = SELL EURUSD (EUR weakness), +1 = BUY. All times UTC."""
@@ -146,6 +150,14 @@ def parse_proposals(raw: str, tried_keys: set[str] | None = None) -> ProposalRes
                 "start_hour": int(params["start_hour"]),
                 "end_hour": int(params["end_hour"]),
                 "direction": int(params["direction"]),
+            }
+        if fam == "fix_reversal":
+            params = {
+                **params,
+                "fix_hour": int(params["fix_hour"]),
+                "fix_minute": int(params["fix_minute"]),
+                "pre_bars": int(params["pre_bars"]),
+                "hold_bars": int(params["hold_bars"]),
             }
         cand = Candidate.make(
             fam,
