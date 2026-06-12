@@ -42,6 +42,7 @@ class Thresholds:
     min_frac_pos_years: float = 0.60
     min_dsr: float = 0.90  # López de Prado survival bar
     min_holdout_sharpe: float = 0.25
+    max_stability_z: float = 4.0  # reject if |OOS - train| exceeds this many Sharpe-SEs
 
 
 @dataclass
@@ -94,11 +95,26 @@ def train_metrics(c: Candidate, train: Dataset, cost_pips: float) -> dict:
     }
 
 
-def holdout_sharpe(c: Candidate, holdout: Dataset, cost_pips: float) -> float:
+def holdout_eval(c: Candidate, holdout: Dataset, cost_pips: float) -> tuple[float, int]:
+    """Hold-out Sharpe AND its day count (needed for the stability test)."""
     trades = backtest(c, holdout)
     if len(trades) < 2:
-        return 0.0
-    return _sharpe(_daily_r(trades, cost_pips))
+        return 0.0, 0
+    daily = _daily_r(trades, cost_pips)
+    return _sharpe(daily), len(daily)
+
+
+def holdout_sharpe(c: Candidate, holdout: Dataset, cost_pips: float) -> float:
+    return holdout_eval(c, holdout, cost_pips)[0]
+
+
+def _sharpe_se(sharpe_ann: float, n_days: int) -> float:
+    """Standard error of an annualised Sharpe over n daily obs (Lo 2002).
+    Returns inf for tiny samples so the stability test can't pass on noise."""
+    if n_days < 30:
+        return float("inf")
+    sr_p = sharpe_ann / np.sqrt(ANNUALIZATION)
+    return float(np.sqrt((1 + 0.5 * sr_p**2) / n_days) * np.sqrt(ANNUALIZATION))
 
 
 def score_candidate(
@@ -107,9 +123,10 @@ def score_candidate(
     n_trials: int,
     th: Thresholds,
     holdout_sr: float | None = None,
+    holdout_n_days: int | None = None,
 ) -> Verdict:
     """Combine train metrics + the loop's trial count into a tiered verdict.
-    `holdout_sr` is provided only for survivors (else stays None)."""
+    `holdout_sr` (and its `holdout_n_days`) are provided only for survivors."""
     dsr = deflated_sharpe_ratio(
         train_m["sharpe"],
         n_obs=max(train_m["n_days"], 2),
@@ -141,6 +158,16 @@ def score_candidate(
         tier, reason = "watch", "passed train; awaiting hold-out confirm"
     elif holdout_sr < th.min_holdout_sharpe:
         tier, reason = "reject", f"hold-out sharpe {holdout_sr:.2f}<{th.min_holdout_sharpe} (overfit)"
+    elif holdout_n_days and abs(holdout_sr - train_m["sharpe"]) > th.max_stability_z * _sharpe_se(
+        train_m["sharpe"], holdout_n_days
+    ):
+        # OOS diverges from train by more than sampling error -> non-stationary /
+        # small-sample artifact; neither estimate is a trustworthy forward number.
+        tier, reason = (
+            "reject",
+            f"OOS {holdout_sr:.2f} vs train {train_m['sharpe']:.2f} unstable "
+            f"(>{th.max_stability_z:.0f}σ — regime/small-sample artifact)",
+        )
     elif not c.grounded:
         tier, reason = "watch", "confirmed on hold-out but NO structural mechanism — watch, do not deploy"
     else:

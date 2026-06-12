@@ -88,6 +88,21 @@ class TestTiering:
     def test_train_pass_no_holdout_is_watch(self):
         assert score_candidate(self._c(True), self.GOOD, 200, self.th, holdout_sr=None).tier == "watch"
 
+    def test_oos_wildly_above_train_rejected_as_unstable(self):
+        # the AUDNZD case: train 1.2, OOS 6.6 over a real holdout -> mirage
+        v = score_candidate(self._c(True), self.GOOD, 200, self.th, holdout_sr=6.6, holdout_n_days=1200)
+        assert v.tier == "reject" and "unstable" in v.reason
+
+    def test_oos_close_to_train_deploys(self):
+        # the EURUSD case: train 1.2, OOS 1.3 -> stable, deploys
+        v = score_candidate(self._c(True), self.GOOD, 200, self.th, holdout_sr=1.3, holdout_n_days=1200)
+        assert v.tier == "deploy"
+
+    def test_stability_skipped_without_day_count(self):
+        # backward compat: no holdout_n_days -> stability test not applied
+        v = score_candidate(self._c(True), self.GOOD, 200, self.th, holdout_sr=6.6)
+        assert v.tier == "deploy"
+
 
 def test_real_data_smoke_if_present():
     try:

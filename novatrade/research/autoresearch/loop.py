@@ -22,7 +22,7 @@ from novatrade.research.autoresearch.families import Candidate
 from novatrade.research.autoresearch.gauntlet import (
     Thresholds,
     Verdict,
-    holdout_sharpe,
+    holdout_eval,
     score_candidate,
     train_metrics,
 )
@@ -199,8 +199,8 @@ def run_search(
     # survivors of the train gate get the one-shot sealed hold-out confirm
     for k, v in list(verdicts.items()):
         if v.tier != "reject":
-            hs = holdout_sharpe(cands[k], split.holdout, th.cost_pips)
-            verdicts[k] = score_candidate(cands[k], metrics[k], n_trials, th, holdout_sr=hs)
+            hs, hn = holdout_eval(cands[k], split.holdout, th.cost_pips)
+            verdicts[k] = score_candidate(cands[k], metrics[k], n_trials, th, holdout_sr=hs, holdout_n_days=hn)
 
     ordered = sorted(
         verdicts.values(),
