@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1029_Lets_try_this_strategy__Yes__I_found_a_written_system_breakdown_for_this_exact_v_1781688956",
+  "workflow_id": "1029_Lets_try_this_strategy__Yes__I_found_a_written_system_breakdown_for_this_exact_v",
+  "task_summary": "Implemented & backtested the MTF EMA + MACD-divergence strategy (EUR/USD M5, both-HTF + relaxed) on the validated harness; REJECTED \u2014 gross-flat (PF 0.97) and net-negative (PF 0.77, \u221245.5%), entry has no edge at the 2R coin-flip line.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented & backtested the MTF EMA + MACD-divergence strategy (EUR/USD M5, both-HTF + relaxed) on the validated harness; REJECTED \u2014 gross-flat (PF 0.97) and net-negative (PF 0.77, \u221245.5%), entry has no edge at the 2R coin-flip line."
+  ],
+  "successful_patterns": [
+    "task_completed: 1029_Lets_try_this_strategy__Yes__I_found_a_written_system_breakdown_for_this_exact_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented & backtested the MTF EMA + MACD-divergence strategy (EUR/USD M5, both-HTF + relaxed) on the validated harness; REJECTED \u2014 gross-flat (PF 0.97) and net-negative (PF 0.77, \u221245.5%), entry has no edge at the 2R coin-flip line.",
+  "created_at": "2026-06-17T09:35:56Z",
+  "confidence": "low"
+}

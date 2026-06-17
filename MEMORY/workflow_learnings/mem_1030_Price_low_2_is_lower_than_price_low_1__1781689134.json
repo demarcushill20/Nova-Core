@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1030_Price_low_2_is_lower_than_price_low_1__1781689134",
+  "workflow_id": "1030_Price_low_2_is_lower_than_price_low_1_",
+  "task_summary": "Implemented MACD bullish/bearish divergence reversal strategy (3/3 swing pivots, 5-60 bar gap, strict zero-line rule) and backtested it via the validated harness; REJECTED \u2014 net-negative on EURUSD H1 (PF 0.842) and M15 (PF 0.889); gross-negative on H1, gross-positive but cost-fragile on M15 (PF 1.090, +0.054R/trade).",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented MACD bullish/bearish divergence reversal strategy (3/3 swing pivots, 5-60 bar gap, strict zero-line rule) and backtested it via the validated harness; REJECTED \u2014 net-negative on EURUSD H1 (PF 0.842) and M15 (PF 0.889); gross-negative on H1, gross-positive but cost-fragile on M15 (PF 1.090, +0.054R/trade)."
+  ],
+  "successful_patterns": [
+    "task_completed: 1030_Price_low_2_is_lower_than_price_low_1_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented MACD bullish/bearish divergence reversal strategy (3/3 swing pivots, 5-60 bar gap, strict zero-line rule) and backtested it via the validated harness; REJECTED \u2014 net-negative on EURUSD H1 (PF 0.842) and M15 (PF 0.889); gross-negative on H1, gross-positive but cost-fragile on M15 (PF 1.090, +0.054R/trade).",
+  "created_at": "2026-06-17T09:38:54Z",
+  "confidence": "low"
+}

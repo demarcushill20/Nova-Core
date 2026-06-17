@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1028_Lets_test_another_strategy_1781688479",
+  "workflow_id": "1028_Lets_test_another_strategy",
+  "task_summary": "Tested a Donchian breakout (different alpha family) on EURUSD H1 via the validated harness; REJECTED \u2014 net AND gross negative (PF 0.541-0.729) across default + Turtle-style configs, entry has no raw edge.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Tested a Donchian breakout (different alpha family) on EURUSD H1 via the validated harness; REJECTED \u2014 net AND gross negative (PF 0.541-0.729) across default + Turtle-style configs, entry has no raw edge."
+  ],
+  "successful_patterns": [
+    "task_completed: 1028_Lets_test_another_strategy"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Tested a Donchian breakout (different alpha family) on EURUSD H1 via the validated harness; REJECTED \u2014 net AND gross negative (PF 0.541-0.729) across default + Turtle-style configs, entry has no raw edge.",
+  "created_at": "2026-06-17T09:27:59Z",
+  "confidence": "low"
+}

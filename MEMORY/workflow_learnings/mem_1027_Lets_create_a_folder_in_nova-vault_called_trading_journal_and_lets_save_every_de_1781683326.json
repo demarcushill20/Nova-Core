@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1027_Lets_create_a_folder_in_nova-vault_called_trading_journal_and_lets_save_every_de_1781683326",
+  "workflow_id": "1027_Lets_create_a_folder_in_nova-vault_called_trading_journal_and_lets_save_every_de",
+  "task_summary": "Created nova-vault/trading-journal/ folder and saved the full 3 EMA + Stoch RSI + ATR test record (spec, conditions, all 1024/1026 result tables, REJECTED verdict) plus a journal index; mirrored to Fusion Memory.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Created nova-vault/trading-journal/ folder and saved the full 3 EMA + Stoch RSI + ATR test record (spec, conditions, all 1024/1026 result tables, REJECTED verdict) plus a journal index; mirrored to Fusion Memory."
+  ],
+  "successful_patterns": [
+    "task_completed: 1027_Lets_create_a_folder_in_nova-vault_called_trading_journal_and_lets_save_every_d"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Created nova-vault/trading-journal/ folder and saved the full 3 EMA + Stoch RSI + ATR test record (spec, conditions, all 1024/1026 result tables, REJECTED verdict) plus a journal index; mirrored to Fusion Memory.",
+  "created_at": "2026-06-17T08:02:06Z",
+  "confidence": "low"
+}

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1024_-_Stop_loss___entry_price_-_3___ATR_at_entry_1781676327",
+  "workflow_id": "1024_-_Stop_loss___entry_price_-_3___ATR_at_entry",
+  "task_summary": "Implemented & backtested the 1024 mechanical spec (3 EMA+Stoch RSI entry, 3\u00d7ATR SL / 2\u00d7ATR TP) via a new runner reusing the validated strategy+engine; net-negative on EURUSD H1 (\u221274.8R, PF 0.894) and M15 (\u22121316R, PF 0.811) after costs.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented & backtested the 1024 mechanical spec (3 EMA+Stoch RSI entry, 3\u00d7ATR SL / 2\u00d7ATR TP) via a new runner reusing the validated strategy+engine; net-negative on EURUSD H1 (\u221274.8R, PF 0.894) and M15 (\u22121316R, PF 0.811) after costs."
+  ],
+  "successful_patterns": [
+    "task_completed: 1024_-_Stop_loss___entry_price_-_3___ATR_at_entry"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented & backtested the 1024 mechanical spec (3 EMA+Stoch RSI entry, 3\u00d7ATR SL / 2\u00d7ATR TP) via a new runner reusing the validated strategy+engine; net-negative on EURUSD H1 (\u221274.8R, PF 0.894) and M15 (\u22121316R, PF 0.811) after costs.",
+  "created_at": "2026-06-17T06:05:27Z",
+  "confidence": "low"
+}

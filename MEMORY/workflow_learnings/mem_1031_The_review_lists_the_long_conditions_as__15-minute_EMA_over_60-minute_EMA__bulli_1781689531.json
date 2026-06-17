@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1031_The_review_lists_the_long_conditions_as__15-minute_EMA_over_60-minute_EMA__bulli_1781689531",
+  "workflow_id": "1031_The_review_lists_the_long_conditions_as__15-minute_EMA_over_60-minute_EMA__bulli",
+  "task_summary": "Backtested the FULL task-1031 MACD-divergence union (MTF-EMA bias + divergence + zero-line + histogram gap + MACD-cross trigger) on EURUSD M5; REJECTED \u2014 GROSS PF 0.992 / expectancy \u22120.0036R over 1,108 trades (coin flip at 2R), NET PF 0.717 / \u221257%.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Backtested the FULL task-1031 MACD-divergence union (MTF-EMA bias + divergence + zero-line + histogram gap + MACD-cross trigger) on EURUSD M5; REJECTED \u2014 GROSS PF 0.992 / expectancy \u22120.0036R over 1,108 trades (coin flip at 2R), NET PF 0.717 / \u221257%."
+  ],
+  "successful_patterns": [
+    "task_completed: 1031_The_review_lists_the_long_conditions_as__15-minute_EMA_over_60-minute_EMA__bull"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Backtested the FULL task-1031 MACD-divergence union (MTF-EMA bias + divergence + zero-line + histogram gap + MACD-cross trigger) on EURUSD M5; REJECTED \u2014 GROSS PF 0.992 / expectancy \u22120.0036R over 1,108 trades (coin flip at 2R), NET PF 0.717 / \u221257%.",
+  "created_at": "2026-06-17T09:45:31Z",
+  "confidence": "low"
+}

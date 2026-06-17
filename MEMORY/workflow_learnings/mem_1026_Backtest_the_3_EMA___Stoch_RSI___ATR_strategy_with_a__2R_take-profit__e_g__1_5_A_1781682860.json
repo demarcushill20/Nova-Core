@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1026_Backtest_the_3_EMA___Stoch_RSI___ATR_strategy_with_a__2R_take-profit__e_g__1_5_A_1781682860",
+  "workflow_id": "1026_Backtest_the_3_EMA___Stoch_RSI___ATR_strategy_with_a__2R_take-profit__e_g__1_5_A",
+  "task_summary": "\u22652R take-profit geometries (1.5\u00d7/3\u00d7 and 1\u00d7/2\u00d7) for the 3 EMA+Stoch RSI+ATR strategy are net-negative and strictly worse than the original 3\u00d7/2\u00d7 shape on EURUSD H1 and M15 after ECN cost \u2014 the entry signal has no edge, so widening RR only lowers win rate and PF.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "\u22652R take-profit geometries (1.5\u00d7/3\u00d7 and 1\u00d7/2\u00d7) for the 3 EMA+Stoch RSI+ATR strategy are net-negative and strictly worse than the original 3\u00d7/2\u00d7 shape on EURUSD H1 and M15 after ECN cost \u2014 the entry signal has no edge, so widening RR only lowers win rate and PF."
+  ],
+  "successful_patterns": [
+    "task_completed: 1026_Backtest_the_3_EMA___Stoch_RSI___ATR_strategy_with_a__2R_take-profit__e_g__1_5_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "\u22652R take-profit geometries (1.5\u00d7/3\u00d7 and 1\u00d7/2\u00d7) for the 3 EMA+Stoch RSI+ATR strategy are net-negative and strictly worse than the original 3\u00d7/2\u00d7 shape on EURUSD H1 and M15 after ECN cost \u2014 the entry signal has no edge, so widening RR only lowers win rate and PF.",
+  "created_at": "2026-06-17T07:54:20Z",
+  "confidence": "low"
+}
