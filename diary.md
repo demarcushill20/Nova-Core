@@ -4,6 +4,29 @@ Reverse-chronological. Each entry covers one working session.
 
 ---
 
+## 2026-06-17 — Trading journal: Markov Regime (task-1040) standalone BTCUSD — DO NOT TRADE
+
+Re-ran `scripts/backtest_1040_markov_regime.py --mode standalone` on BTCUSD daily
+(2192 bars, 2019-01-01 → 2024-12-31, exec=open, stride=20). Full metrics saved to
+`OUTPUT/1040_markov_standalone_metrics.txt`.
+
+Net @ 5bps/rebal: total **+88.4%**, CAGR +11.13%, Sharpe +1.48, Sortino +1.64,
+max DD -17.6%, Calmar +0.63, win rate 50.0%, profit factor 1.28, turnover 33.05,
+248 trades, 48.3% time exposed. Label self-check PASS.
+
+**Verdict: DO NOT TRADE.** The standalone numbers look healthy in isolation, but
+the benchmark kills the case: BTC buy-&-hold returned **+2312%** over the same
+window — the model turns a >20x asset move into <2x equity while paying 248
+rebalances of cost and eating a 17.6% drawdown. The +1.48 Sharpe is a single-asset,
+single secular-bull artifact (50% win rate, PF 1.28 = thin per-trade edge), not
+shown to survive deflation, an OOS split, or a second uncorrelated asset. No
+incremental alpha over a benchmark it is structurally long. Holds the line with the
+prior 1038/1040 conclusion and the standing research-log finding that mechanical
+price-action TA does not clear the deflation/portfolio bar. No code changed, no
+trades placed.
+
+---
+
 ## 2026-03-08 (Session 46) — Phase 7.19: Extended Stage D Monitoring Window
 
 **Session span:** Mar 8 UTC
