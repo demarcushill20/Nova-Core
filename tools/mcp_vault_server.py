@@ -73,6 +73,7 @@ VAULT_FOLDERS = frozenset(
         "70-debugging",
         "80-references",
         "90-diary",
+        "trading-journal",
         "_meta",
     }
 )
@@ -99,6 +100,7 @@ WRITABLE_FOLDERS = frozenset(
         "30-workflow-learnings",
         "40-research",
         "70-debugging",
+        "trading-journal",
     }
 )
 
