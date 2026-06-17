@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1016_repair_strategy_validity_regression_1781481960",
+  "workflow_id": "1016_repair_strategy_validity_regression",
+  "task_summary": "Fixed recurring false strategy_validity regression by making the StrategyCollector silent-failure/signal-rate detectors intent-aware \u2014 a deliberately-disabled novacore-novatrade is no longer scored as a fault (dimension now 78.0 >= 70); did not restart the disabled service or send a false CRITICAL alert.",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed recurring false strategy_validity regression by making the StrategyCollector silent-failure/signal-rate detectors intent-aware \u2014 a deliberately-disabled novacore-novatrade is no longer scored as a fault (dimension now 78.0 >= 70); did not restart the disabled service or send a false CRITICAL alert."
+  ],
+  "successful_patterns": [
+    "task_completed: 1016_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed recurring false strategy_validity regression by making the StrategyCollector silent-failure/signal-rate detectors intent-aware \u2014 a deliberately-disabled novacore-novatrade is no longer scored as a fault (dimension now 78.0 >= 70); did not restart the disabled service or send a false CRITICAL alert.",
+  "created_at": "2026-06-15T00:06:00Z",
+  "confidence": "low"
+}

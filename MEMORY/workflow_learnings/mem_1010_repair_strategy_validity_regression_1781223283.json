@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1010_repair_strategy_validity_regression_1781223283",
+  "workflow_id": "1010_repair_strategy_validity_regression",
+  "task_summary": "strategy_validity \"silent failure\" is a false regression \u2014 novacore-novatrade is deliberately disabled (not crashed) and unrestartable under NoNewPrivileges; shipped an intent-aware fix so the autonomy engine stops treating a disabled unit as a strategy fault, breaking the ~2-hourly doomed REPAIR\u2192ESCALATE loop while preserving real-crash detection.",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "strategy_validity \"silent failure\" is a false regression \u2014 novacore-novatrade is deliberately disabled (not crashed) and unrestartable under NoNewPrivileges; shipped an intent-aware fix so the autonomy engine stops treating a disabled unit as a strategy fault, breaking the ~2-hourly doomed REPAIR\u2192ESCALATE loop while preserving real-crash detection."
+  ],
+  "successful_patterns": [
+    "task_completed: 1010_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "strategy_validity \"silent failure\" is a false regression \u2014 novacore-novatrade is deliberately disabled (not crashed) and unrestartable under NoNewPrivileges; shipped an intent-aware fix so the autonomy engine stops treating a disabled unit as a strategy fault, breaking the ~2-hourly doomed REPAIR\u2192ESCALATE loop while preserving real-crash detection.",
+  "created_at": "2026-06-12T00:14:43Z",
+  "confidence": "low"
+}

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1002_Lets_fix_it_1781024057",
+  "workflow_id": "1002_Lets_fix_it",
+  "task_summary": "Fixed the VectorBT IRB v5 adapter's _apply_execution_filter to release positions on stop-loss crossing (40-bar time stop now a fallback), raising exec-filter trade count 113\u2192146 and final VBT trades 109\u2192127 toward Nova's 170; added a regression test.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Fixed the VectorBT IRB v5 adapter's _apply_execution_filter to release positions on stop-loss crossing (40-bar time stop now a fallback), raising exec-filter trade count 113\u2192146 and final VBT trades 109\u2192127 toward Nova's 170; added a regression test."
+  ],
+  "successful_patterns": [
+    "task_completed: 1002_Lets_fix_it"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Fixed the VectorBT IRB v5 adapter's _apply_execution_filter to release positions on stop-loss crossing (40-bar time stop now a fallback), raising exec-filter trade count 113\u2192146 and final VBT trades 109\u2192127 toward Nova's 170; added a regression test.",
+  "created_at": "2026-06-09T16:54:17Z",
+  "confidence": "low"
+}

@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1005_repair_strategy_validity_regression_1781075164",
+  "workflow_id": "1005_repair_strategy_validity_regression",
+  "task_summary": "Diagnosed strategy_validity regression as novacore-novatrade service being inactive (dead, clean shutdown, unit disabled); restart blocked by NoNewPrivileges in watcher sandbox, so escalated to operator via Telegram with exact recovery commands.",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed strategy_validity regression as novacore-novatrade service being inactive (dead, clean shutdown, unit disabled); restart blocked by NoNewPrivileges in watcher sandbox, so escalated to operator via Telegram with exact recovery commands."
+  ],
+  "successful_patterns": [
+    "task_completed: 1005_repair_strategy_validity_regression"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed strategy_validity regression as novacore-novatrade service being inactive (dead, clean shutdown, unit disabled); restart blocked by NoNewPrivileges in watcher sandbox, so escalated to operator via Telegram with exact recovery commands.",
+  "created_at": "2026-06-10T07:06:04Z",
+  "confidence": "low"
+}

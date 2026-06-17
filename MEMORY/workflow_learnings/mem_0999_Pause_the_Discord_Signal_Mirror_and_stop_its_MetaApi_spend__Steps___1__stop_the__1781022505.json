@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_0999_Pause_the_Discord_Signal_Mirror_and_stop_its_MetaApi_spend__Steps___1__stop_the__1781022505",
+  "workflow_id": "0999_Pause_the_Discord_Signal_Mirror_and_stop_its_MetaApi_spend__Steps___1__stop_the_",
+  "task_summary": "Stopped the discord_mirror live process (SIGTERM, confirmed dead, no restart wrapper); read final balance $95,464.30 USD; undeploy BLOCKED \u2014 the .env METAAPI_TOKEN is reader-only on trading-account-management-api so the account stays DEPLOYED and cloud billing continues; queued follow-up task 1000.",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Stopped the discord_mirror live process (SIGTERM, confirmed dead, no restart wrapper); read final balance $95,464.30 USD; undeploy BLOCKED \u2014 the .env METAAPI_TOKEN is reader-only on trading-account-management-api so the account stays DEPLOYED and cloud billing continues; queued follow-up task 1000."
+  ],
+  "successful_patterns": [
+    "task_completed: 0999_Pause_the_Discord_Signal_Mirror_and_stop_its_MetaApi_spend__Steps___1__stop_the"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Stopped the discord_mirror live process (SIGTERM, confirmed dead, no restart wrapper); read final balance $95,464.30 USD; undeploy BLOCKED \u2014 the .env METAAPI_TOKEN is reader-only on trading-account-management-api so the account stays DEPLOYED and cloud billing continues; queued follow-up task 1000.",
+  "created_at": "2026-06-09T16:28:25Z",
+  "confidence": "low"
+}

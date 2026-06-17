@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1018_escalate_strategy_validity_for_human_review_1781558120",
+  "workflow_id": "1018_escalate_strategy_validity_for_human_review",
+  "task_summary": "Diagnosed the recurring strategy_validity escalation as a residual gap in the OUTPUT/1016 fix \u2014 the trades_last_24h sub-metric was still scoring 20 on the intentionally-disabled novacore-novatrade during market hours, tripping decision_engine Priority Rule 0's standalone CRITICAL REPAIR (independent of the now-healthy 78/GREEN dimension), feeding the doomed REPAIR\u2192ESCALATE loop; fixed at root by making _check_trade_count intent-aware (disabled\u219280) without restarting the service or sending a fals",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Diagnosed the recurring strategy_validity escalation as a residual gap in the OUTPUT/1016 fix \u2014 the trades_last_24h sub-metric was still scoring 20 on the intentionally-disabled novacore-novatrade during market hours, tripping decision_engine Priority Rule 0's standalone CRITICAL REPAIR (independent of the now-healthy 78/GREEN dimension), feeding the doomed REPAIR\u2192ESCALATE loop; fixed at root by making _check_trade_count intent-aware (disabled\u219280) without restarting the service or sending a fals"
+  ],
+  "successful_patterns": [
+    "task_completed: 1018_escalate_strategy_validity_for_human_review"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Diagnosed the recurring strategy_validity escalation as a residual gap in the OUTPUT/1016 fix \u2014 the trades_last_24h sub-metric was still scoring 20 on the intentionally-disabled novacore-novatrade during market hours, tripping decision_engine Priority Rule 0's standalone CRITICAL REPAIR (independent of the now-healthy 78/GREEN dimension), feeding the doomed REPAIR\u2192ESCALATE loop; fixed at root by making _check_trade_count intent-aware (disabled\u219280) without restarting the service or sending a fals",
+  "created_at": "2026-06-15T21:15:20Z",
+  "confidence": "low"
+}
