@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1036_Next_sampled_state___Sideways_1781690561",
+  "workflow_id": "1036_Next_sampled_state___Sideways",
+  "task_summary": "Built the task-1036 Markov regime transition matrix (Bear/Sideways/Bull) on EURUSD daily with naive vs stride=lookback sampling; the autocorrelation fix collapses stickiness from 83.8% to 33.5% (~base rate) \u2014 regime is near-memoryless, REJECTED as an edge; from current Bear state P(next=Sideways)=41.3%.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Built the task-1036 Markov regime transition matrix (Bear/Sideways/Bull) on EURUSD daily with naive vs stride=lookback sampling; the autocorrelation fix collapses stickiness from 83.8% to 33.5% (~base rate) \u2014 regime is near-memoryless, REJECTED as an edge; from current Bear state P(next=Sideways)=41.3%."
+  ],
+  "successful_patterns": [
+    "task_completed: 1036_Next_sampled_state___Sideways"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Built the task-1036 Markov regime transition matrix (Bear/Sideways/Bull) on EURUSD daily with naive vs stride=lookback sampling; the autocorrelation fix collapses stickiness from 83.8% to 33.5% (~base rate) \u2014 regime is near-memoryless, REJECTED as an edge; from current Bear state P(next=Sideways)=41.3%.",
+  "created_at": "2026-06-17T10:02:41Z",
+  "confidence": "high"
+}

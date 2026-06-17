@@ -69,21 +69,27 @@ def label_regimes(close: pd.Series, lookback: int, bull_thr: float, bear_thr: fl
     return lab
 
 
-def transition_matrix(labels: np.ndarray, stride: int, stickiness: float) -> np.ndarray:
+def transition_matrix(labels: np.ndarray, stride: int, stickiness: float) -> tuple[np.ndarray, np.ndarray]:
     """3x3 row-stochastic matrix with diagonal Laplace smoothing.
 
     ``stride`` sub-samples the (state_t -> state_{t+1}) pairs to dampen the
     overlapping-window autocorrelation that rolling-return labels induce.
+
+    Returns ``(P, raw_counts)`` where ``raw_counts`` holds the *observed*
+    transition counts only (no smoothing prior). The caller uses ``raw_counts``
+    to enforce the spec §23/§24 minimum-sample-size checks — gating on real
+    evidence, never on the Laplace prior that would otherwise mask a thin row.
     """
-    counts = np.full((3, 3), 0.0)
-    np.fill_diagonal(counts, stickiness)  # prior favouring regime persistence
+    raw = np.zeros((3, 3))
     valid = labels[labels >= 0]
     for k in range(0, len(valid) - 1, stride):
         i, j = valid[k], valid[k + 1]
-        counts[i, j] += 1.0
+        raw[i, j] += 1.0
+    counts = raw.copy()
+    counts[np.diag_indices(3)] += stickiness  # prior favouring regime persistence
     row_sums = counts.sum(axis=1, keepdims=True)
     row_sums[row_sums == 0] = 1.0
-    return counts / row_sums
+    return counts / row_sums, raw
 
 
 def run_backtest(
@@ -100,6 +106,8 @@ def run_backtest(
     sizing: str = "binary",
     max_edge: float = 1.0,
     exec_mode: str = "close",
+    min_total_transitions: int = 30,
+    min_current_state_transitions: int = 10,
 ) -> dict:
     close = daily["close"]
     labels = label_regimes(close, lookback, bull_thr, bear_thr)
@@ -119,12 +127,23 @@ def run_backtest(
     positions = np.zeros(n)
     edges = np.full(n, np.nan)
     start = max(warmup, lookback + 2)
+    insufficient = 0  # bars forced flat by the §23/§24 sample-size gate
 
     for t in range(start, n - 1):
         if labels[t] < 0:
             continue
-        P = transition_matrix(labels[: t + 1], stride, stickiness)
-        edge = P[labels[t], BULL] - P[labels[t], BEAR]
+        cur = labels[t]
+        # Walk-forward matrix from labels strictly <= t (no lookahead, spec §24).
+        P, raw = transition_matrix(labels[: t + 1], stride, stickiness)
+        # §23/§24 minimum-sample-size checks: require enough *observed*
+        # transitions overall AND out of the current state's row before the
+        # probability row is trusted. Too-thin evidence -> stay flat, never
+        # trade on the smoothing prior alone.
+        if raw.sum() < min_total_transitions or raw[cur].sum() < min_current_state_transitions:
+            insufficient += 1
+            continue
+        # Find the current state's probability row, then the directional edge.
+        edge = P[cur, BULL] - P[cur, BEAR]
         edges[t] = edge
         # §19 exit logic: inside the deadband -> flat (exit). Outside ->
         # directional. Re-deriving the target each bar means a sign-flip closes
@@ -169,6 +188,7 @@ def run_backtest(
         "bars": n,
         "exposed_days": n_days,
         "exposure_pct": 100.0 * n_days / n,
+        "insufficient_sample_days": insufficient,
         "n_trades": n_trades,
         "hit_rate_pct": (100.0 * wins / n_days) if n_days else 0.0,
         "total_return_pct": 100.0 * total_ret,
@@ -189,6 +209,7 @@ def fmt(tag: str, m: dict) -> str:
         f"  sizing / exec     : {m['sizing']} / {m['exec_mode']} (mean |pos|={m['mean_abs_pos']:.3f})\n"
         f"  daily bars        : {m['bars']}\n"
         f"  exposed days      : {m['exposed_days']} ({m['exposure_pct']:.1f}% of bars)\n"
+        f"  flat (low sample) : {m['insufficient_sample_days']} bars below min-transition gate\n"
         f"  trades (flips)    : {m['n_trades']}\n"
         f"  hit rate          : {m['hit_rate_pct']:.1f}%\n"
         f"  total return      : {m['total_return_pct']:+.1f}%\n"
@@ -220,6 +241,18 @@ def main() -> int:
     )
     ap.add_argument("--max-edge", type=float, default=1.0, help="edge that maps to 100%% exposure under linear sizing")
     ap.add_argument(
+        "--min-total-transitions",
+        type=int,
+        default=30,
+        help="spec §23: min observed transitions in the whole matrix before trusting it (else flat)",
+    )
+    ap.add_argument(
+        "--min-current-state-transitions",
+        type=int,
+        default=10,
+        help="spec §23: min observed transitions out of the current state's row before trading it (else flat)",
+    )
+    ap.add_argument(
         "--exec",
         dest="exec_mode",
         choices=["close", "open"],
@@ -246,6 +279,8 @@ def main() -> int:
         sizing=args.sizing,
         max_edge=args.max_edge,
         exec_mode=args.exec_mode,
+        min_total_transitions=args.min_total_transitions,
+        min_current_state_transitions=args.min_current_state_transitions,
     )
     gross = run_backtest(daily, cost_bps=0.0, **common)
     net = run_backtest(daily, cost_bps=args.cost_bps, **common)
