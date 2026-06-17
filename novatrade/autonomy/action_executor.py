@@ -513,6 +513,29 @@ class DirectActionExecutor:
         except (subprocess.SubprocessError, OSError):
             return False
 
+    @staticmethod
+    def _is_service_enabled(service: str) -> bool:
+        """Return True only if systemd reports the unit as enabled.
+
+        Used to distinguish an *intentionally disabled* unit (operator stopped
+        and disabled it on purpose — `is-enabled` -> "disabled"/"masked") from a
+        unit that is enabled-but-crashed (a real regression).  A disabled unit is
+        an operator-intent signal, not a fault: scoring it as a fault drives the
+        doomed REPAIR->ESCALATE loop (see OUTPUT/1008 escalation).
+        """
+        try:
+            cp = subprocess.run(
+                ["systemctl", "is-enabled", f"{service}.service"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            # "enabled", "enabled-runtime", "static", "indirect", "alias" -> intended to run.
+            # "disabled", "masked", "linked" (and exit!=0) -> not intended to run.
+            return cp.returncode == 0 and cp.stdout.strip() not in {"disabled", "masked", "linked"}
+        except (subprocess.SubprocessError, OSError):
+            return False
+
     def _restart_service(self, service: str, result: ActionResult) -> None:
         """Attempt to restart a systemd service."""
         if service not in self.RESTARTABLE_SERVICES:
@@ -687,6 +710,15 @@ class DirectActionExecutor:
             # The most actionable check: is novacore-novatrade running?
             if self._is_service_active("novacore-novatrade"):
                 return True, "novacore-novatrade is active"
+            # An intentionally-disabled unit is operator intent, not a fault.
+            # Treat as resolved so the engine stops the doomed REPAIR->ESCALATE
+            # loop against a daemon it (a) cannot restart under NoNewPrivileges
+            # and (b) was deliberately stopped + disabled. See OUTPUT/1008.
+            if not self._is_service_enabled("novacore-novatrade"):
+                return True, (
+                    "novacore-novatrade is inactive but DISABLED (operator intent) "
+                    "— not treated as a strategy_validity fault"
+                )
             return False, "novacore-novatrade is still inactive"
 
         # Default: check all 4 core services

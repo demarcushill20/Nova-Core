@@ -60,7 +60,10 @@ class TestSignalRatePipelineAliveFloor:
         (state / "live_metrics.json").write_text(json.dumps({"ticks": 500}))
         os.utime(state / "live_metrics.json", (time.time(), time.time()))
 
-        with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        with (
+            patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt,
+            patch.object(StrategyCollector, "_novatrade_intentionally_disabled", return_value=False),
+        ):
             mock_now = type(
                 "MockNow",
                 (),
@@ -80,7 +83,10 @@ class TestSignalRatePipelineAliveFloor:
         (state / "live_metrics.json").write_text(json.dumps({"ticks": 0}))
         os.utime(state / "live_metrics.json", (time.time(), time.time()))
 
-        with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
+        with (
+            patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt,
+            patch.object(StrategyCollector, "_novatrade_intentionally_disabled", return_value=False),
+        ):
             mock_now = type(
                 "MockNow",
                 (),

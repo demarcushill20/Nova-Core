@@ -464,7 +464,13 @@ async def test_pipeline_degraded_feed(pipe_collector, tmp_path):
 
 @pytest.fixture
 def strat_collector(tmp_path):
-    return StrategyCollector(str(tmp_path))
+    # Default the operator-intent guard OFF so these tests exercise their
+    # intended market-hours scoring paths deterministically, regardless of
+    # whether novacore-novatrade is disabled on the test host. The True-path
+    # (deliberately-disabled => expected, not a fault) is covered explicitly
+    # by test_strategy_intentionally_disabled_no_fault.
+    with patch.object(StrategyCollector, "_novatrade_intentionally_disabled", return_value=False):
+        yield StrategyCollector(str(tmp_path))
 
 
 def _write_trade_journal(state_dir, count, offset_hours=1):
@@ -520,7 +526,9 @@ async def test_strategy_no_trades_market_hours(strat_collector, tmp_path):
     state_dir.mkdir(parents=True)
     (state_dir / "trade_journal.jsonl").write_text("")
 
-    # Mock a Wednesday at 14:00 UTC (market hours)
+    # Mock a Wednesday at 14:00 UTC (market hours). The operator-intent guard is
+    # forced off by the strat_collector fixture so this isolates the
+    # "market open, no trades = concerning" path.
     market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
     with patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt:
         mock_dt.now.return_value = market_time
@@ -529,6 +537,29 @@ async def test_strategy_no_trades_market_hours(strat_collector, tmp_path):
 
     tc = next(m for m in result.sub_metrics if m.name == "trades_last_24h")
     assert tc.value == 20.0
+
+
+@pytest.mark.asyncio
+async def test_strategy_intentionally_disabled_no_fault(strat_collector, tmp_path):
+    """When novacore-novatrade is deliberately disabled, 0 trades during market
+    hours is EXPECTED (operator intent) and scores 80, not 20 — so it cannot
+    drive the decision_engine REPAIR->ESCALATE loop. Covers the guard added in
+    OUTPUT/1018."""
+    state_dir = tmp_path / "STATE" / "novatrade"
+    state_dir.mkdir(parents=True)
+    (state_dir / "trade_journal.jsonl").write_text("")
+
+    market_time = datetime(2026, 3, 25, 14, 0, 0, tzinfo=timezone.utc)
+    with (
+        patch("novatrade.autonomy.collectors.strategy.datetime") as mock_dt,
+        patch.object(StrategyCollector, "_novatrade_intentionally_disabled", return_value=True),
+    ):
+        mock_dt.now.return_value = market_time
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = await strat_collector.collect()
+
+    tc = next(m for m in result.sub_metrics if m.name == "trades_last_24h")
+    assert tc.value == 80.0
 
 
 @pytest.mark.asyncio

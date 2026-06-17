@@ -54,6 +54,10 @@ def _eval_services_running(base_path: Path) -> EvalResult:
             if status == "active":
                 running += 1
                 evidence.append(f"{svc}: active")
+            elif _service_intentionally_disabled(svc):
+                # Operator turned it off on purpose — intent satisfied, not a fault.
+                running += 1
+                evidence.append(f"{svc}: {status} but DISABLED (operator intent)")
             else:
                 evidence.append(f"{svc}: {status}")
         except (subprocess.TimeoutExpired, OSError):
@@ -107,6 +111,27 @@ def _eval_state_file(
         return 0.3, [f"{rel_path} stale ({age / 3600:.1f}h old)"], f"{rel_path} is stale"
 
 
+def _service_intentionally_disabled(service: str) -> bool:
+    """True if systemd reports the unit as deliberately not-to-run.
+
+    `disabled`/`masked`/`linked` (or a non-zero is-enabled exit) means the
+    operator turned the unit off on purpose. That is intent, not a fault, and
+    must not score a dimension to 0 — otherwise the autonomy engine spins a
+    REPAIR->ESCALATE loop it can neither win (NoNewPrivileges blocks restart)
+    nor should win (the daemon is off by design). See OUTPUT/1008.
+    """
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-enabled", service],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode != 0 or result.stdout.strip() in {"disabled", "masked", "linked"}
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
 def _eval_webhook_live(base_path: Path) -> EvalResult:
     """Check if novacore-novatrade service is active (proxy for webhook)."""
     try:
@@ -118,6 +143,8 @@ def _eval_webhook_live(base_path: Path) -> EvalResult:
         )
         if result.stdout.strip() == "active":
             return 1.0, ["novacore-novatrade: active (webhook proxy)"], None
+        if _service_intentionally_disabled("novacore-novatrade"):
+            return 1.0, ["novacore-novatrade: inactive but DISABLED (operator intent)"], None
         return 0.0, [f"novacore-novatrade: {result.stdout.strip()}"], "novacore-novatrade not active"
     except (subprocess.TimeoutExpired, OSError):
         return 0.0, ["novacore-novatrade: check failed"], "service check failed"

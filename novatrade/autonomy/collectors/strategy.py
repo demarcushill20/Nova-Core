@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -303,10 +304,47 @@ class StrategyCollector(BaseCollector):
             now = datetime.now(timezone.utc)
             if now.weekday() >= 5 or now.hour < 7 or now.hour >= 21:
                 score = 80.0  # off-hours, 0 trades is normal
+            elif self._novatrade_intentionally_disabled():
+                # Service is deliberately disabled (operator intent): zero trades
+                # during market hours is EXPECTED, not a fault. Without this guard
+                # the score is 20, which trips decision_engine Priority Rule 0
+                # (_detect_novatrade_not_trading, trades_metric.value <= 20) and
+                # emits a CRITICAL REPAIR that can never succeed (NoNewPrivileges
+                # blocks restart) — 3+ accumulate and Rule 0c escalates, even
+                # though the dimension itself is healthy. Mirrors the silent-failure
+                # /signal-rate guards added in OUTPUT/1016; this completes them so
+                # the trades sub-metric no longer drives the doomed REPAIR->ESCALATE
+                # loop. See OUTPUT/1018.
+                score = 80.0
             else:
                 score = 20.0  # market open but no trades — concerning
 
         return score, float(count)
+
+    @staticmethod
+    def _novatrade_intentionally_disabled() -> bool:
+        """True if novacore-novatrade is deliberately turned off (operator intent).
+
+        ``systemctl is-enabled`` returns ``disabled``/``masked``/``linked`` (or a
+        non-zero exit) when the operator stopped + disabled the unit on purpose.
+        No signals from a daemon that is *off by design* is expected behaviour,
+        NOT a strategy fault.  Detection paths (silent-failure, signal-rate) must
+        honour this or they score strategy_validity to 0 and drive the autonomy
+        engine into a doomed REPAIR->ESCALATE loop against a unit it cannot
+        restart under NoNewPrivileges.  This mirrors the resolution-side guard
+        added to decomposition/engine.py + action_executor.py (2026-06-12); see
+        OUTPUT/1008 and OUTPUT/1016.
+        """
+        try:
+            cp = subprocess.run(
+                ["systemctl", "is-enabled", "novacore-novatrade.service"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return cp.returncode != 0 or cp.stdout.strip() in {"disabled", "masked", "linked"}
+        except (subprocess.SubprocessError, OSError):
+            return False
 
     def _check_silent_failure(self) -> tuple[float, float]:
         """Detect silent failure with regime-aware thresholds.
@@ -320,6 +358,12 @@ class StrategyCollector(BaseCollector):
 
         # Weekend — no trading expected
         if now.weekday() >= 5:
+            return 85.0, 0.0
+
+        # Operator intent: if novacore-novatrade is deliberately disabled, the
+        # absence of signals is expected, not a silent failure.  Scoring it 0
+        # here is what spawns the recurring strategy_validity repair tasks.
+        if self._novatrade_intentionally_disabled():
             return 85.0, 0.0
 
         # Load regime from persisted state (written by live_loop health monitor)
@@ -595,6 +639,11 @@ class StrategyCollector(BaseCollector):
         # Only relevant during market hours
         if now.weekday() >= 5 or now.hour < 7 or now.hour >= 21:
             return 80.0, -1.0  # off-hours, assume OK
+
+        # Operator intent: a deliberately-disabled novatrade unit produces no
+        # signals by design — treat as expected, not a zero-rate regression.
+        if self._novatrade_intentionally_disabled():
+            return 80.0, -1.0
 
         pipeline = self._get_pipeline_mode()
 
