@@ -69,6 +69,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**/*.py" = ["S101", "S105", "S106", "S108", "PT009", "PT019", "PT017", "PT015", "PT011", "PT027"]  # assert, test tokens, /tmp paths, and pytest style rules are standard in tests
 "**/scripts/**/*.py" = ["S108"]  # temp file usage acceptable in scripts
+"novatrade/research/dreamer/**/*.py" = ["S101"]  # asserts are load-bearing internal invariants (feature-count / config guards) in research code
 "nova_kill_switch.py" = ["S108"]  # /tmp sentinel files are the intended kill-switch mechanism
 "utils/security_monitor.py" = ["S105", "C901"]  # secret_status variable names are false positives; complex auth failure collection
 "tools/runner.py" = ["S105", "E731", "C901", "TRY301", "TRY004", "RUF005"]  # intentional patterns: confirm token, lambda dispatch, complex dispatch, raise-in-try, ValueError for args, list concat
