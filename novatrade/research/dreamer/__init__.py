@@ -6,6 +6,8 @@ Model-based RL trading agent for XAUUSD M5. This package contains the
     data.py     - M1 -> {M5,M15,H1,H4,D1,W1} resample + no-lookahead alignment
     features.py - 152-feature multi-timeframe matrix + train-only scaler
     env.py      - long/flat trading environment (cost=1e-4, t+1 fill)
+    execution.py- H1-decision / M1-execution engine: ATR stop, RR take-profit,
+                  flip + manual exits (task-1057)
     config.py   - single source of truth for all hyperparameters / split dates
 
 The DreamerV3 world model (RSSM), actor-critic, imagination rollout, the
@@ -17,4 +19,4 @@ not run until these leakage tests pass review. See
 
 from . import config
 
-__all__ = ["config", "data", "env", "features"]
+__all__ = ["config", "data", "env", "execution", "features"]
