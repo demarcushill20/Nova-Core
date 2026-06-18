@@ -1,4 +1,4 @@
-"""Phase C — minimal long/flat trading environment (no gym dependency).
+"""Phase C — minimal trading environment (no gym dependency).
 
 Deliberately tiny: a ``reset()/step()`` protocol over pre-built arrays, so the
 DreamerV3 replay loop (Phase E) can drive it without pulling in gymnasium.
@@ -10,8 +10,12 @@ Fill / reward timing (matches the analyze-step leakage notes):
     * Reward at step ``t`` = ``position_t * fwd_ret[t] - cost * |position_t -
       position_{t-1}|`` where ``fwd_ret[t]`` is the close[t]->close[t+1] return.
 
-Actions: ``0 = flat``, ``1 = long``. Long-only (``allow_short=False``); the
-short branch is wired but disabled to match the spec.
+Actions: ``0 = flat/hold``, ``1 = long/buy``, ``2 = short/sell``.
+
+CORRECTED (task-1056): the transcript's agent is NOT long-only — it can buy,
+sell, or hold — so ``allow_short`` now defaults to ``True`` (see config). The
+long-only path (``allow_short=False``, ``n_actions=2``) remains supported for
+the foundation's ablations and is still exercised by the test suite.
 """
 
 from __future__ import annotations

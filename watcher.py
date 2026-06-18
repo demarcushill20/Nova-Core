@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import yaml
@@ -474,7 +475,12 @@ logger.propagate = False  # Prevent duplication via root logger handlers
 if not logger.handlers:
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
-    file_handler = logging.FileHandler(LOG_FILE)
+    # Self-rotating handler: caps watcher.log at 25MB x 8 backups (~225MB total),
+    # so a long-lived process can never grow the log unbounded across a logrotate
+    # boundary (see task 1049 — the plain FileHandler kept an fd open to a renamed
+    # inode for 9 days, growing watcher.log.1 to 423MB). No external logrotate
+    # dependency required; each rotated file stays under the 50MB health-check warn.
+    file_handler = RotatingFileHandler(LOG_FILE, maxBytes=25 * 1024 * 1024, backupCount=8, encoding="utf-8")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 

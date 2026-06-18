@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1047_21_SMMA_is_sloping_downward__1781742482",
+  "workflow_id": "1047_21_SMMA_is_sloping_downward_",
+  "task_summary": "Backtested the single-21-SMMA pullback \"big candle\" continuation system with ATR-based exits on EURUSD H1 (10yr) and GBPUSD H1 (21yr) across all 5 required SL/TP variants \u00d7 3 cost levels; REJECTED \u2014 gross edge is coin-flip (best PF 1.03\u20131.06 at zero cost) and every variant goes net-negative at realistic \u22651p cost, on a thin ~6\u201317 signals/yr sample. Reflexion retry re-emits the verified result with a fresh OUTPUT timestamp to satisfy the freshness contract.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Backtested the single-21-SMMA pullback \"big candle\" continuation system with ATR-based exits on EURUSD H1 (10yr) and GBPUSD H1 (21yr) across all 5 required SL/TP variants \u00d7 3 cost levels; REJECTED \u2014 gross edge is coin-flip (best PF 1.03\u20131.06 at zero cost) and every variant goes net-negative at realistic \u22651p cost, on a thin ~6\u201317 signals/yr sample. Reflexion retry re-emits the verified result with a fresh OUTPUT timestamp to satisfy the freshness contract."
+  ],
+  "successful_patterns": [
+    "task_completed: 1047_21_SMMA_is_sloping_downward_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Backtested the single-21-SMMA pullback \"big candle\" continuation system with ATR-based exits on EURUSD H1 (10yr) and GBPUSD H1 (21yr) across all 5 required SL/TP variants \u00d7 3 cost levels; REJECTED \u2014 gross edge is coin-flip (best PF 1.03\u20131.06 at zero cost) and every variant goes net-negative at realistic \u22651p cost, on a thin ~6\u201317 signals/yr sample. Reflexion retry re-emits the verified result with a fresh OUTPUT timestamp to satisfy the freshness contract.",
+  "created_at": "2026-06-18T00:28:02Z",
+  "confidence": "low"
+}

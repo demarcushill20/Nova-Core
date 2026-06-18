@@ -97,6 +97,61 @@ class TestAuthMode:
         assert status.auth_mode == "max_plan_login"
         assert status.api_key_present is False
 
+    def test_oauth_token_firstparty_is_max_plan(self, monkeypatch):
+        """Long-lived OAuth-token login (autonomous/watcher context) is Max, not drift.
+
+        Regression for task 1049: the CLI reports authMethod="oauth_token" and
+        omits subscriptionType when CLAUDE_CODE_OAUTH_TOKEN is set, which used to
+        fall through to "unknown" and emit a spurious "Auth mode drift" alert.
+        """
+        auth_json = json.dumps(
+            {
+                "loggedIn": True,
+                "authMethod": "oauth_token",
+                "apiProvider": "firstParty",
+                "subscriptionType": "unknown",
+            }
+        )
+
+        def fake_run(*args, **kwargs):
+            class R:
+                stdout = auth_json
+                returncode = 0
+
+            return R()
+
+        monkeypatch.setattr("utils.max_plan_guard.subprocess.run", fake_run)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        status = _run_auth_check()
+        assert status.auth_mode == "max_plan_login"
+        assert status.logged_in is True
+        assert status.api_key_present is False
+
+    def test_oauth_token_not_logged_in_is_unknown(self, monkeypatch):
+        """oauth_token but not logged in must NOT be promoted to max_plan_login."""
+        auth_json = json.dumps(
+            {
+                "loggedIn": False,
+                "authMethod": "oauth_token",
+                "apiProvider": "firstParty",
+                "subscriptionType": "unknown",
+            }
+        )
+
+        def fake_run(*args, **kwargs):
+            class R:
+                stdout = auth_json
+                returncode = 0
+
+            return R()
+
+        monkeypatch.setattr("utils.max_plan_guard.subprocess.run", fake_run)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        status = _run_auth_check()
+        assert status.auth_mode == "unknown"
+
     def test_api_key_present(self, monkeypatch):
         """API key present should result in api_key_mode."""
         auth_json = json.dumps(

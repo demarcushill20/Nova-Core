@@ -183,6 +183,12 @@ def _run_auth_check() -> AuthStatus:
 
     if sub_type == "max" and auth_method == "claude.ai" and logged_in:
         mode = "max_plan_login"
+    elif auth_method == "oauth_token" and raw.get("apiProvider") == "firstParty" and logged_in:
+        # Long-lived OAuth-token login (autonomous/watcher context). The CLI
+        # reports authMethod="oauth_token" and omits subscriptionType when
+        # CLAUDE_CODE_OAUTH_TOKEN is set, but this is still the same first-party
+        # Max account — not API-key mode, not a real drift. (task 1049)
+        mode = "max_plan_login"
     elif api_key_present:
         mode = "api_key_mode"
     else:

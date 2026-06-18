@@ -92,6 +92,8 @@ def main() -> None:
 
     ckpt = torch.load(run / "checkpoint.pt", map_location="cpu", weights_only=False)
     scaler = features.FeatureScaler.from_dict(json.loads((run / "scaler.json").read_text()))
+    # NOTE (task-1056): 2-action long/flat foundation read; corrected spec is
+    # buy/sell/hold (n_actions=3), rewired in task-1060.
     agent = Dreamer(obs_dim=ckpt["obs_dim"], n_actions=2, horizon=cfg.horizon, device="cpu")
     agent.load_state_dict(ckpt["model"])
     agent.eval()

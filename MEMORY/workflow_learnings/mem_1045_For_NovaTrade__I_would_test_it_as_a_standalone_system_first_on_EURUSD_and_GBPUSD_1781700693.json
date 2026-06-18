@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1045_For_NovaTrade__I_would_test_it_as_a_standalone_system_first_on_EURUSD_and_GBPUSD_1781700693",
+  "workflow_id": "1045_For_NovaTrade__I_would_test_it_as_a_standalone_system_first_on_EURUSD_and_GBPUSD",
+  "task_summary": "Backtested London Daybreak standalone on EURUSD+GBPUSD with M1 execution data across the faithful contrarian-majority rule + 5 target variants (A max50/R, B 1R, C 1.5R, D 2R, E ATR-min); REJECTED \u2014 EURUSD net-negative on all variants, GBPUSD shows a thin gross edge (PF~1.06\u20131.12) that dies at realistic ~2\u20132.5p cost and is front-loaded into 2004\u20132010 with net-negative 2020\u20132024.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Backtested London Daybreak standalone on EURUSD+GBPUSD with M1 execution data across the faithful contrarian-majority rule + 5 target variants (A max50/R, B 1R, C 1.5R, D 2R, E ATR-min); REJECTED \u2014 EURUSD net-negative on all variants, GBPUSD shows a thin gross edge (PF~1.06\u20131.12) that dies at realistic ~2\u20132.5p cost and is front-loaded into 2004\u20132010 with net-negative 2020\u20132024."
+  ],
+  "successful_patterns": [
+    "task_completed: 1045_For_NovaTrade__I_would_test_it_as_a_standalone_system_first_on_EURUSD_and_GBPUS"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Backtested London Daybreak standalone on EURUSD+GBPUSD with M1 execution data across the faithful contrarian-majority rule + 5 target variants (A max50/R, B 1R, C 1.5R, D 2R, E ATR-min); REJECTED \u2014 EURUSD net-negative on all variants, GBPUSD shows a thin gross edge (PF~1.06\u20131.12) that dies at realistic ~2\u20132.5p cost and is front-loaded into 2004\u20132010 with net-negative 2020\u20132024.",
+  "created_at": "2026-06-17T12:51:33Z",
+  "confidence": "low"
+}

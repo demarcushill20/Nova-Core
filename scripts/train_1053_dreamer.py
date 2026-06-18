@@ -76,6 +76,9 @@ def main() -> None:
     obs_dim = feat.shape[1] + 1  # + current position
     print(f"[load] train rows={n} ({idx[0]} -> {idx[-1]}), obs_dim={obs_dim}", flush=True)
 
+    # NOTE (task-1056): the corrected spec is buy/sell/hold (n_actions=3,
+    # cfg.allow_short=True). This foundation run is still the long/flat 2-action
+    # read; the 3-action rewire lands in task-1060 (action space / close_hold).
     agent = Dreamer(obs_dim=obs_dim, n_actions=2, horizon=cfg.horizon, device="cpu")
     buf = ReplayBuffer(capacity=min(n, 200_000), obs_dim=obs_dim, n_actions=2)
 

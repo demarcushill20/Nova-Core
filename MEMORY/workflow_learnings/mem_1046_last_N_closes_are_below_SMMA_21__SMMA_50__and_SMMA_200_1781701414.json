@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1046_last_N_closes_are_below_SMMA_21__SMMA_50__and_SMMA_200_1781701414",
+  "workflow_id": "1046_last_N_closes_are_below_SMMA_21__SMMA_50__and_SMMA_200",
+  "task_summary": "Backtested the SMMA-stack \"big fat candle\" trend-pullback system on EURUSD H1 (10yr) and GBPUSD H1 (21yr); REJECTED \u2014 faithful spec fires \u22643 times/decade (no tradeable sample), and every loosening that yields a real sample is net-negative after cost (PF 0.6\u20130.8).",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Backtested the SMMA-stack \"big fat candle\" trend-pullback system on EURUSD H1 (10yr) and GBPUSD H1 (21yr); REJECTED \u2014 faithful spec fires \u22643 times/decade (no tradeable sample), and every loosening that yields a real sample is net-negative after cost (PF 0.6\u20130.8)."
+  ],
+  "successful_patterns": [
+    "task_completed: 1046_last_N_closes_are_below_SMMA_21__SMMA_50__and_SMMA_200"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Backtested the SMMA-stack \"big fat candle\" trend-pullback system on EURUSD H1 (10yr) and GBPUSD H1 (21yr); REJECTED \u2014 faithful spec fires \u22643 times/decade (no tradeable sample), and every loosening that yields a real sample is net-negative after cost (PF 0.6\u20130.8).",
+  "created_at": "2026-06-17T13:03:34Z",
+  "confidence": "low"
+}

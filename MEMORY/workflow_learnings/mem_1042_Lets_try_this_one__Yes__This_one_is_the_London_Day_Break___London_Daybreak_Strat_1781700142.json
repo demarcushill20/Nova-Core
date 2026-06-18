@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1042_Lets_try_this_one__Yes__This_one_is_the_London_Day_Break___London_Daybreak_Strat_1781700142",
+  "workflow_id": "1042_Lets_try_this_one__Yes__This_one_is_the_London_Day_Break___London_Daybreak_Strat",
+  "task_summary": "Backtested the London Daybreak (3AM-ET H1 session breakout, 10p buffer, opposite-wick stop, 50p/1:1 target) on EURUSD ~10yr across 3 bias readings \u2014 REJECTED, gross-negative (PF 0.82\u20130.97, exp \u22640R) and decisively net-negative (PF 0.76\u20130.89, \u221246% to \u221253%); entry is a coin-flip at the 35.7% breakeven win-rate line.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Backtested the London Daybreak (3AM-ET H1 session breakout, 10p buffer, opposite-wick stop, 50p/1:1 target) on EURUSD ~10yr across 3 bias readings \u2014 REJECTED, gross-negative (PF 0.82\u20130.97, exp \u22640R) and decisively net-negative (PF 0.76\u20130.89, \u221246% to \u221253%); entry is a coin-flip at the 35.7% breakeven win-rate line."
+  ],
+  "successful_patterns": [
+    "task_completed: 1042_Lets_try_this_one__Yes__This_one_is_the_London_Day_Break___London_Daybreak_Stra"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Backtested the London Daybreak (3AM-ET H1 session breakout, 10p buffer, opposite-wick stop, 50p/1:1 target) on EURUSD ~10yr across 3 bias readings \u2014 REJECTED, gross-negative (PF 0.82\u20130.97, exp \u22640R) and decisively net-negative (PF 0.76\u20130.89, \u221246% to \u221253%); entry is a coin-flip at the 35.7% breakeven win-rate line.",
+  "created_at": "2026-06-17T12:42:22Z",
+  "confidence": "high"
+}
