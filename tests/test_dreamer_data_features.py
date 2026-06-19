@@ -137,7 +137,8 @@ def test_env_reward_and_fill_timing():
     feats = np.tile(close.reshape(-1, 1), (1, 4)).astype("float32")
     fwd = env.forward_returns(close)
 
-    e = env.TradingEnv(feats, fwd, window=window, cost=0.0)
+    # holding_penalty=0.0 isolates fill timing from Term 3 (task-1058).
+    e = env.TradingEnv(feats, fwd, window=window, cost=0.0, holding_penalty=0.0)
     e.reset()
     _, r_long, _, info = e.step(1)
     # Reward uses the forward return at the entry bar, position applied next bar.
@@ -155,7 +156,8 @@ def test_env_turnover_cost_charged_on_position_change():
     fwd = np.zeros(n, dtype="float32")  # isolate cost from PnL
     cost = 0.001
 
-    e = env.TradingEnv(feats, fwd, window=window, cost=cost)
+    # holding_penalty=0.0 isolates turnover cost from Term 3 (task-1058).
+    e = env.TradingEnv(feats, fwd, window=window, cost=cost, holding_penalty=0.0)
     e.reset()
     _, r1, _, _ = e.step(1)  # flat -> long: charged once
     assert r1 == pytest.approx(-cost, rel=1e-5)

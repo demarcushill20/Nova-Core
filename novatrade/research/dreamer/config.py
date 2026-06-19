@@ -100,6 +100,24 @@ class DreamerConfig:
     # --- data / env ---
     window: int = 64  # bars of feature history per observation
     cost: float = 0.0001  # per-unit transaction cost on position change
+    # --- reward shaping: Term 3, holding penalty (task-1058) ---------------- #
+    # A tiny negative constant subtracted from the reward on every H1 bar a
+    # position stays open. Purpose: discourage the agent from sitting in a
+    # trade forever; reward trades that resolve quickly.
+    #
+    #     holding_penalty_applied = holding_penalty if position != 0 else 0.0
+    #     reward = realized + unrealized - holding_penalty_applied   (per spec)
+    #
+    # AMBIGUITY (task-1058): the transcript is unclear on the exact decimal —
+    # it reads as "-0.00002 or -0.0002" and names ``environment.py`` lines
+    # 297-300 as the source of truth. That canonical file is NOT in this tree
+    # (our foundation env is ``env.py``), so the value cannot be lifted
+    # verbatim. We take the SMALLER reading, 2e-5, because the env's reward is
+    # in raw fwd-return units where a typical gold H1 bar moves ~1e-3: at 2e-5
+    # the penalty is ~1-4% of a typical bar (a genuine "tiny" nudge), whereas
+    # 2e-4 would be 10-40% of a bar and would dominate rather than nudge.
+    # Tunable; set to 0.0 to disable the term entirely.
+    holding_penalty: float = 2e-5
     # CORRECTED (task-1056): the agent is NOT long-only. It can buy, sell, or
     # hold, so shorts are enabled and the action space is {hold, buy, sell}
     # (env: {flat=0, long=1, short=2}).
@@ -113,6 +131,13 @@ class DreamerConfig:
     atr_stop_mult: float = 1.5  # stop = entry -/+ atr_stop_mult * ATR
     take_profit_rr: float = 2.0  # take profit at take_profit_rr * risk
 
+    # --- position sizing (task-1060, spec "Position risk") ------------------- #
+    # Each entry risks a FIXED percent of current equity between entry and the
+    # ATR stop. Units = (equity * risk_pct) / (stop_distance * value_per_point).
+    # The transcript uses ~0.5%; kept small so a string of stops can't ruin the
+    # account. See ``policy.position_size``.
+    risk_pct: float = 0.005  # fraction of equity risked per trade (0.5%)
+
     # --- agent ---
     horizon: int = 15  # imagination rollout length (H1 decision grid)
 
@@ -123,6 +148,31 @@ class DreamerConfig:
     train_every: int = 4
     save_every: int = 10_000
 
+    # --- overfitting / training horizon (task-1059, spec section 14) --------- #
+    # The transcript observed training reward rising while validation reward
+    # fell after a point (classic overfit). The useful learning region was
+    # roughly before ~2M steps; a final overfit model was trained to ~5M and
+    # looked great on train but weaker on validation/test. We therefore train UP
+    # TO max_training_steps but let the checkpoint selector — NOT a hard-coded
+    # "2M is best" — pick the champion using validation. ``expected_good_region``
+    # is a documented prior for sanity-checking the pick, never a constraint.
+    max_training_steps: int = 5_000_000
+    checkpoint_interval: int = 10_000  # steps between saved checkpoints
+    early_selection_uses_validation: bool = True
+    expected_good_region: tuple[int, int] = (1_000_000, 2_000_000)
+
+    # --- drawdown-penalized scoring (task-1059, spec section 13) ------------- #
+    # score = cumulative_reward - drawdown_penalty, where
+    #   drawdown_penalty = drawdown_penalty_weight * max_drawdown.
+    # This punishes a model that makes money with dangerous drawdown.
+    drawdown_penalty_weight: float = 1.0
+
+    # --- cross-fold consistency gate (task-1059, spec section 15) ------------ #
+    # After all walk-forward folds finish: at least this fraction of folds must
+    # be independently profitable, else reject the edge as luck. 0.60 = lenient,
+    # 0.70 = stricter; configurable per the spec.
+    min_profitable_fold_ratio: float = 0.60
+
     # --- bookkeeping ---
     timeframes: list[str] = field(default_factory=lambda: list(TIMEFRAMES))
     n_features: int = N_FEATURES
@@ -130,11 +180,20 @@ class DreamerConfig:
     def __post_init__(self) -> None:  # cheap invariants
         assert self.window > 0
         assert 0.0 <= self.cost < 0.01
+        # Holding penalty must be a small, non-negative "tiny nudge" (the env
+        # subtracts it). Cap at the cost scale so it can never dominate reward.
+        assert 0.0 <= self.holding_penalty <= 0.01
         assert self.horizon > 0
         assert self.n_features == N_FEATURES
         assert self.atr_period > 0
         assert self.atr_stop_mult > 0.0
         assert self.take_profit_rr > 0.0
+        assert self.max_training_steps >= self.training_steps
+        assert self.checkpoint_interval > 0
+        assert self.drawdown_penalty_weight >= 0.0
+        assert 0.0 < self.min_profitable_fold_ratio <= 1.0
+        lo, hi = self.expected_good_region
+        assert 0 < lo <= hi <= self.max_training_steps
 
 
 DEFAULT = DreamerConfig()

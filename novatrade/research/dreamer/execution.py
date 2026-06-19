@@ -101,6 +101,11 @@ class Trade:
     stop: float
     target: float
     entry_index: int  # H1 decision-bar index at which it opened
+    # decision parameters chosen at entry (kept so the reporting layer — task
+    # 1061 — can build the SL-multiplier and TP-R distributions without having
+    # to re-derive them from prices + ATR).
+    sl_atr_mult: float = config.DEFAULT.atr_stop_mult
+    tp_rr: float = config.DEFAULT.take_profit_rr
     # filled on close:
     exit_price: float | None = None
     exit_index: int | None = None
@@ -178,6 +183,8 @@ def open_trade(
         stop=stop,
         target=target,
         entry_index=entry_index,
+        sl_atr_mult=decision.sl_atr_mult,
+        tp_rr=decision.tp_rr,
     )
 
 

@@ -8,6 +8,16 @@ Model-based RL trading agent for XAUUSD M5. This package contains the
     env.py      - long/flat trading environment (cost=1e-4, t+1 fill)
     execution.py- H1-decision / M1-execution engine: ATR stop, RR take-profit,
                   flip + manual exits (task-1057)
+    selection.py- drawdown-penalized scoring, worst-case checkpoint selection,
+                  cross-fold consistency gate + champion promotion (task-1059)
+    policy.py   - trained-actor -> execution.Decision bridge + fixed-%-equity
+                  position sizing (task-1060)
+    walkforward.py- fixed-size sliding walk-forward folds + orchestration tying
+                  folds -> selection -> consistency gate -> one test run (task-1061)
+    reports.py  - performance reports: returns, drawdown, monthly/weekday/hour,
+                  exit-reason + SL/TP distributions, rolling Sharpe, EMA baseline (task-1061)
+    orchestrator.py- end-to-end glue: DecisionSeries -> folds -> (injected) train ->
+                  selection/gate -> gate-gated single test backtest -> report (task-1065)
     config.py   - single source of truth for all hyperparameters / split dates
 
 The DreamerV3 world model (RSSM), actor-critic, imagination rollout, the
@@ -19,4 +29,15 @@ not run until these leakage tests pass review. See
 
 from . import config
 
-__all__ = ["config", "data", "env", "execution", "features"]
+__all__ = [
+    "config",
+    "data",
+    "env",
+    "execution",
+    "features",
+    "orchestrator",
+    "policy",
+    "reports",
+    "selection",
+    "walkforward",
+]

@@ -8,7 +8,21 @@ Fill / reward timing (matches the analyze-step leakage notes):
     * The agent observes the 64-bar feature window ending at bar ``t``.
     * Its action sets the position held over the *next* bar (no same-bar fill).
     * Reward at step ``t`` = ``position_t * fwd_ret[t] - cost * |position_t -
-      position_{t-1}|`` where ``fwd_ret[t]`` is the close[t]->close[t+1] return.
+      position_{t-1}| - holding_penalty * (position_t != 0)`` where
+      ``fwd_ret[t]`` is the close[t]->close[t+1] return.
+
+Reward terms (spec sections, task-1054/1058):
+
+    * ``gross = position_t * fwd_ret[t]`` — the realized+unrealized PnL of the
+      position held into the next bar, in fwd-return units.
+    * ``turnover_cost = cost * |position_t - position_{t-1}|`` — Term 2,
+      transaction cost charged only when the position changes.
+    * ``holding_penalty * (position_t != 0)`` — Term 3 (task-1058): a tiny
+      negative constant subtracted on every bar a position stays open, to
+      discourage sitting in trades forever and reward quick resolution. It is
+      applied to the bar's *resulting* position (the one held into ``t+1``);
+      flat bars pay nothing. See ``config.holding_penalty`` for the value and
+      the transcript-ambiguity note.
 
 Actions: ``0 = flat/hold``, ``1 = long/buy``, ``2 = short/sell``.
 
@@ -44,6 +58,7 @@ class TradingEnv:
         window: int = config.DEFAULT.window,
         cost: float = config.DEFAULT.cost,
         allow_short: bool = config.DEFAULT.allow_short,
+        holding_penalty: float = config.DEFAULT.holding_penalty,
     ) -> None:
         features = np.asarray(features, dtype="float32")
         fwd_returns = np.asarray(fwd_returns, dtype="float32")
@@ -56,6 +71,9 @@ class TradingEnv:
         self.fwd_returns = fwd_returns
         self.window = window
         self.cost = float(cost)
+        self.holding_penalty = float(holding_penalty)
+        if self.holding_penalty < 0.0:
+            raise ValueError("holding_penalty must be >= 0 (it is subtracted)")
         self.allow_short = bool(allow_short)
         self.n_features = features.shape[1]
         self.n_actions = 3 if allow_short else 2  # {flat,long[,short]}
@@ -90,7 +108,9 @@ class TradingEnv:
 
         gross = position * float(self.fwd_returns[self._t])
         turnover_cost = self.cost * abs(position - prev_position)
-        reward = gross - turnover_cost
+        # Term 3 (task-1058): tiny per-bar penalty while a position is open.
+        holding_penalty = self.holding_penalty if position != 0.0 else 0.0
+        reward = gross - turnover_cost - holding_penalty
 
         self._position = position
         self._t += 1
@@ -100,6 +120,7 @@ class TradingEnv:
             "position": position,
             "gross": gross,
             "cost": turnover_cost,
+            "holding_penalty": holding_penalty,
             "t": self._t,
         }
         return self._obs(), reward, done, info
