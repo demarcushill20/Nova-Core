@@ -59,9 +59,8 @@ def build_decision_series(
 
     # 152-feature matrix on the M5 base grid (committed, leakage-tested builder).
     matrix = features.build_features(m1)  # index = M5 open labels
-    feat_by_close = matrix.copy()
-    feat_by_close.index = matrix.index + config.TF_DURATION[config.BASE_TF]  # M5 close time
-    feat_by_close = feat_by_close.sort_index()
+    # Re-key by M5 close time WITHOUT copying the (large) feature blocks.
+    feat_by_close = matrix.set_axis(matrix.index + config.TF_DURATION[config.BASE_TF], axis=0).sort_index()
 
     # H1 decision bars (open-labelled), Wilder ATR on H1 close.
     h1 = data.resample_ohlc(m1, "H1")
@@ -92,6 +91,7 @@ def build_decision_series(
         paths.setdefault(k, []).append(Bar(high=float(hi), low=float(lo), close=float(cl)))
 
     m1_paths = [paths.get(ts, []) for ts in kept_ts]
+    del m1, matrix, feat_by_close, aligned, paths, highs, lows, closes, keys  # free before training
     series = DecisionSeries(
         features=feat_df,
         decision_close=decision_close,

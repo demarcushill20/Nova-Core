@@ -133,9 +133,14 @@ class Trade:
         return self.pnl() / self.risk
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Bar:
-    """A minimal OHLC bar for the M1 execution path."""
+    """A minimal OHLC bar for the M1 execution path.
+
+    ``slots=True``: a full backtest materialises one ``Bar`` per M1 candle
+    (millions over a multi-year feed), so dropping the per-instance ``__dict__``
+    is a large, behaviour-neutral memory saving.
+    """
 
     high: float
     low: float
