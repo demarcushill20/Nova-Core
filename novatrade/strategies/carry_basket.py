@@ -3,9 +3,11 @@
 Mirrors novatrade.strategies.intraday_drift: NO network/file I/O, fully unit-testable.
 Given monthly spot (USD per 1 unit foreign; USD column = 1.0) and lagged 3M annualized
 rate panels, produces dollar-neutral long-high-yield / short-low-yield target weights and
-a DE-RISK-ONLY volatility scalar (never levers above lev_cap=1.0x). Validated against
-scripts/probe_carry_portfolio.py (de-risk-only: Sharpe ~0.47, maxDD ~-22%). Data fetching
-lives in the caller, never here.
+a DE-RISK-ONLY volatility scalar (never levers above lev_cap=1.0x). carry_backtest uses
+rank_weights as the SINGLE basket constructor (k = round(n_available*k_frac)) so the live
+shadow path and the backtest produce identical target weights and the long/short legs can
+never overlap. Coherent full-history numbers: Sharpe ~0.54, maxDD ~-31% (de-risk-only).
+Data fetching lives in the caller, never here.
 """
 
 from __future__ import annotations
@@ -77,17 +79,19 @@ def carry_backtest(spot: pd.DataFrame, rates: pd.DataFrame, cfg: CarryConfig | N
     rows: dict = {}
     prev_long: set[str] = set()
     prev_short: set[str] = set()
-    k = max(1, round(len(ccys) * cfg.k_frac))
     for dt in xs.index[2:]:
         rk = rrank.loc[dt].dropna()
         x = xs.loc[dt].dropna()
         avail = [c for c in rk.index if c in x.index]
         if len(avail) < 4:
             continue
-        rk = rk[avail].sort_values()
-        longs = set(rk.index[-k:])
-        shorts = set(rk.index[:k])
-        ret = float(x[list(longs)].mean() - x[list(shorts)].mean())
+        w = rank_weights(rk[avail], cfg.k_frac)
+        if (w == 0.0).all():
+            continue
+        longs = set(w[w > 0].index)
+        shorts = set(w[w < 0].index)
+        ret = float((w * x.reindex(w.index).fillna(0.0)).sum())
+        k = max(1, len(longs))
         turn = len(longs ^ prev_long) + len(shorts ^ prev_short)
         c = float(np.mean([cfg.cost_bps.get(name, 5.0) for name in (longs | shorts)])) * 1e-4
         ret -= turn / (2 * k) * c

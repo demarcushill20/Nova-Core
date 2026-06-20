@@ -45,7 +45,13 @@ class TestDeriskScalar:
 
 
 class TestCarryBacktestReproducesResearch:
-    def test_derisk_only_matches_probe(self):
+    def test_derisk_only_coherent_basket(self):
+        # Bands bracket the COHERENT construction: carry_backtest uses rank_weights
+        # as the single basket constructor (k = round(n_available * k_frac)), so the
+        # long/short legs never overlap and live == backtest. These are NOT the
+        # numbers from the probe's flawed fixed-k basket (which held some currencies
+        # long AND short simultaneously in ~44% of months). Full-history measured:
+        # Sharpe 0.535 / maxDD -0.311 (vs the old overlapping 0.47 / -0.22).
         from scripts.probe_carry_portfolio import build_panel
 
         S, R = build_panel()
@@ -54,5 +60,37 @@ class TestCarryBacktestReproducesResearch:
         sharpe = r.mean() / r.std() * np.sqrt(12)
         eq = (1 + r).cumprod()
         maxdd = (eq / eq.cummax() - 1).min()
-        assert 0.40 <= sharpe <= 0.55
-        assert -0.26 <= maxdd <= -0.18
+        assert 0.49 <= sharpe <= 0.58
+        assert -0.34 <= maxdd <= -0.28
+
+
+class TestNoOverlappingLegs:
+    def test_no_overlapping_legs(self):
+        # Over the full build_panel history, reconstruct each traded month's basket
+        # via rank_weights on its available lagged rates and assert the long/short
+        # name-sets are disjoint (the coherence guarantee of the single constructor).
+        from scripts.probe_carry_portfolio import build_panel
+
+        S, R = build_panel()
+        cfg = CarryConfig()
+        ccys = [c for c in cfg.currencies if c in S.columns and c in R.columns]
+        Rr = R[ccys]
+        spot_ret = S[ccys].pct_change()
+        rdiff = Rr.sub(Rr["USD"], axis=0) / 1200.0
+        xs = spot_ret + rdiff.shift(1)
+        rrank = Rr.shift(1)
+        traded = 0
+        for dt in xs.index[2:]:
+            rk = rrank.loc[dt].dropna()
+            x = xs.loc[dt].dropna()
+            avail = [c for c in rk.index if c in x.index]
+            if len(avail) < 4:
+                continue
+            w = rank_weights(rk[avail], cfg.k_frac)
+            if (w == 0.0).all():
+                continue
+            traded += 1
+            longs = set(w[w > 0].index)
+            shorts = set(w[w < 0].index)
+            assert not (longs & shorts), f"overlap at {dt}: {longs & shorts}"
+        assert traded > 0
