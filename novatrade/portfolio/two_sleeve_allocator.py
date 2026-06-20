@@ -47,13 +47,27 @@ def sleeve_sizing(equity: float, cfg: AllocatorConfig | None = None) -> dict:
     }
 
 
-def combined_backtest(eur_monthly: pd.Series, carry_monthly: pd.Series, w_eur: float, w_carry: float) -> dict:
+def combined_backtest(
+    eur_monthly: pd.Series,
+    carry_monthly: pd.Series,
+    w_eur: float,
+    w_carry: float,
+    target_book_vol: float = 0.17,
+) -> dict:
     """Align the two monthly streams, blend at the given risk weights (each scaled to
-    unit vol first), and report corr, blended annualized Sharpe, and maxDD."""
+    unit vol first), and report corr, blended annualized Sharpe, and maxDD.
+
+    The unit-vol blend is rescaled to a realistic monthly volatility before the
+    equity curve is built so the drawdown is meaningful (the unscaled z-score blend
+    drives ``(1 + comb).cumprod()`` below zero and explodes maxDD). Scaling is
+    Sharpe-invariant, so ``blended_sharpe`` is unaffected.
+    """
     df = pd.concat([carry_monthly.rename("carry"), eur_monthly.rename("eur")], axis=1).dropna()
     corr = float(df["carry"].corr(df["eur"]))
-    comb = w_eur * df["eur"] / df["eur"].std() + w_carry * df["carry"] / df["carry"].std()
-    blended_sharpe = float(comb.mean() / comb.std() * np.sqrt(12))
-    eq = (1 + comb).cumprod()
+    blend = w_eur * df["eur"] / df["eur"].std() + w_carry * df["carry"] / df["carry"].std()
+    blended_sharpe = float(blend.mean() / blend.std() * np.sqrt(12))
+    monthly_vol = target_book_vol / np.sqrt(12)
+    ret = blend / blend.std() * monthly_vol
+    eq = (1 + ret).cumprod()
     maxdd = float((eq / eq.cummax() - 1).min())
     return {"corr": corr, "blended_sharpe": blended_sharpe, "maxdd": maxdd, "n": len(df)}

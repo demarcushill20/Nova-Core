@@ -43,3 +43,11 @@ class TestCombinedBacktest:
         assert -0.25 < out["corr"] < 0.25
         assert out["blended_sharpe"] >= 0.0
         assert out["n"] == 120
+
+    def test_maxdd_is_sane_not_degenerate(self):
+        rng = np.random.default_rng(1)
+        idx = pd.date_range("2010-01-31", periods=200, freq="ME")
+        eur = pd.Series(rng.normal(0.010, 0.03, 200), index=idx)
+        carry = pd.Series(rng.normal(0.003, 0.02, 200), index=idx)
+        out = combined_backtest(eur, carry, 0.73, 0.27)
+        assert -1.0 < out["maxdd"] <= 0.0  # realistic drawdown, not degenerate
