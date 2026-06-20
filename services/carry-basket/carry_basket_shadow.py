@@ -24,7 +24,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pandas as pd  # noqa: TC002 -- runtime data dep (DataFrame panel); not typing-only
 
-from novatrade.strategies.carry_basket import CarryConfig, derisk_scalar, rank_weights
+from novatrade.strategies.carry_basket import (
+    CarryConfig,
+    carry_backtest,
+    carry_returns_raw,
+    derisk_scalar,
+    rank_weights,
+)
 from scripts.probe_carry_portfolio import build_panel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -40,23 +46,21 @@ def load_panel() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def build_shadow_entry(spot: pd.DataFrame, rates: pd.DataFrame, cfg: CarryConfig | None = None) -> dict:
-    """Latest-month target weights + de-risk scalar + a simulated P&L from last month's
-    weights applied to the realized spot move."""
+    """Latest-month target weights + de-risk scalar + a simulated P&L, all de-risked off
+    the SAME HML carry series the backtest uses (carry_returns_raw / carry_backtest)."""
     cfg = cfg or CarryConfig()
     ccys = [c for c in cfg.currencies if c in spot.columns and c in rates.columns]
-    S, R = spot[ccys], rates[ccys]
+    R = rates[ccys]
     rrank = R.shift(1)
     dt = rrank.dropna(how="all").index[-1]
     rk = rrank.loc[dt].dropna()
     w = rank_weights(rk, cfg.k_frac)
-    raw_hist = (S.pct_change() + (R.sub(R["USD"], axis=0) / 1200.0).shift(1)).dropna(how="all")
-    sleeve_hist = raw_hist.mean(axis=1).dropna()
-    scalar = derisk_scalar(sleeve_hist, cfg)
-    if len(raw_hist) >= 1:
-        last = raw_hist.iloc[-1]
-        sim_pnl = float((w.reindex(last.index).fillna(0.0) * last.fillna(0.0)).sum()) * scalar
-    else:
-        sim_pnl = 0.0
+    # De-risk off the HML carry strategy's own return stream — the single source of
+    # truth shared with carry_backtest (NOT the equal-weight dollar-basket mean).
+    raw_carry = carry_returns_raw(spot, rates, cfg)
+    scalar = derisk_scalar(raw_carry, cfg)
+    managed = carry_backtest(spot, rates, cfg)
+    sim_pnl = float(managed.iloc[-1]) if len(managed) >= 1 else 0.0
     return {
         "as_of": dt.strftime("%Y-%m-%d"),
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -74,8 +78,23 @@ def main() -> None:
     entry = build_shadow_entry(S, R)
     ledger = Path(os.environ.get("CBS_LEDGER", "LOGS/carry_shadow_ledger.jsonl"))
     ledger.parent.mkdir(parents=True, exist_ok=True)
-    with ledger.open("a") as f:
-        f.write(json.dumps(entry) + "\n")
+    # UPSERT by as_of: drop any existing line for this month, then append (a re-run in
+    # the same month replaces, never duplicates). Rewrite via a temp file for atomicity.
+    kept: list[str] = []
+    if ledger.exists():
+        for line in ledger.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                if json.loads(line).get("as_of") == entry["as_of"]:
+                    continue
+            except json.JSONDecodeError:
+                pass  # preserve any non-JSON line rather than silently drop it
+            kept.append(line)
+    kept.append(json.dumps(entry))
+    tmp = ledger.with_suffix(ledger.suffix + ".tmp")
+    tmp.write_text("\n".join(kept) + "\n")
+    tmp.replace(ledger)
     log.info(
         "SHADOW (no orders) %s  scalar=%.2f  sim_pnl=%.1fbps  weights=%s",
         entry["as_of"],

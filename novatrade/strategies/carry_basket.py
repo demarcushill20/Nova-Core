@@ -65,10 +65,10 @@ def derisk_scalar(recent_returns: pd.Series, cfg: CarryConfig | None = None) -> 
     return float(min(cfg.lev_cap, cfg.vol_target / rv))
 
 
-def carry_backtest(spot: pd.DataFrame, rates: pd.DataFrame, cfg: CarryConfig | None = None) -> pd.Series:
-    """Monthly net carry returns with de-risk-only vol scaling. spot = USD per 1 unit
-    foreign (USD column = 1.0); rates = 3M annualized %. Reproduces the de-risk-only
-    carry of scripts/probe_carry_portfolio.py."""
+def carry_returns_raw(spot: pd.DataFrame, rates: pd.DataFrame, cfg: CarryConfig | None = None) -> pd.Series:
+    """Monthly HML carry returns BEFORE de-risk scaling, net of cost. The single source
+    of the carry strategy's return stream — both carry_backtest and the shadow job
+    de-risk off THIS series."""
     cfg = cfg or CarryConfig()
     ccys = [c for c in cfg.currencies if c in spot.columns and c in rates.columns]
     S, R = spot[ccys], rates[ccys]
@@ -97,7 +97,16 @@ def carry_backtest(spot: pd.DataFrame, rates: pd.DataFrame, cfg: CarryConfig | N
         ret -= turn / (2 * k) * c
         rows[dt] = ret
         prev_long, prev_short = longs, shorts
-    raw = pd.Series(rows).sort_index()
+    return pd.Series(rows).sort_index().rename("carry_raw")
+
+
+def carry_backtest(spot: pd.DataFrame, rates: pd.DataFrame, cfg: CarryConfig | None = None) -> pd.Series:
+    """Monthly net carry returns with de-risk-only vol scaling (de-risks off the HML
+    series from carry_returns_raw). spot = USD per 1 unit foreign (USD column = 1.0);
+    rates = 3M annualized %. Reproduces the de-risk-only carry of
+    scripts/probe_carry_portfolio.py."""
+    cfg = cfg or CarryConfig()
+    raw = carry_returns_raw(spot, rates, cfg)
     rv = raw.rolling(cfg.vol_window).std() * np.sqrt(12)
     lev = (cfg.vol_target / rv.shift(1)).clip(upper=cfg.lev_cap).fillna(cfg.lev_cap)
     return (lev * raw).rename("carry")
