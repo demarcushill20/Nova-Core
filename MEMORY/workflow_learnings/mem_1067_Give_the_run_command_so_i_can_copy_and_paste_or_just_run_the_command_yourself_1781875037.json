@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1067_Give_the_run_command_so_i_can_copy_and_paste_or_just_run_the_command_yourself_1781875037",
+  "workflow_id": "1067_Give_the_run_command_so_i_can_copy_and_paste_or_just_run_the_command_yourself",
+  "task_summary": "Delivered and end-to-end-verified the DreamerV3 gold-bot run command (scripts/run_dreamer_walkforward.py); torch+entrypoint now exist (CPU-only, ~3.2s/step), smoke run completed exit 0 with gate-failed honest negative, and documented the short-window dropna IndexError pitfall.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Delivered and end-to-end-verified the DreamerV3 gold-bot run command (scripts/run_dreamer_walkforward.py); torch+entrypoint now exist (CPU-only, ~3.2s/step), smoke run completed exit 0 with gate-failed honest negative, and documented the short-window dropna IndexError pitfall."
+  ],
+  "successful_patterns": [
+    "task_completed: 1067_Give_the_run_command_so_i_can_copy_and_paste_or_just_run_the_command_yourself"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Delivered and end-to-end-verified the DreamerV3 gold-bot run command (scripts/run_dreamer_walkforward.py); torch+entrypoint now exist (CPU-only, ~3.2s/step), smoke run completed exit 0 with gate-failed honest negative, and documented the short-window dropna IndexError pitfall.",
+  "created_at": "2026-06-19T13:17:17Z",
+  "confidence": "low"
+}

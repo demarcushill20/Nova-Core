@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1063_Give_me_the_run_command_1781869558",
+  "workflow_id": "1063_Give_me_the_run_command",
+  "task_summary": "Provided and verified the run command for the DreamerV3 gold-bot engine \u2014 the pytest dreamer suite (108 passed in 5.17s); documented that no end-to-end CLI entrypoint exists yet and how to drive run_walk_forward programmatically.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Provided and verified the run command for the DreamerV3 gold-bot engine \u2014 the pytest dreamer suite (108 passed in 5.17s); documented that no end-to-end CLI entrypoint exists yet and how to drive run_walk_forward programmatically."
+  ],
+  "successful_patterns": [
+    "task_completed: 1063_Give_me_the_run_command"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Provided and verified the run command for the DreamerV3 gold-bot engine \u2014 the pytest dreamer suite (108 passed in 5.17s); documented that no end-to-end CLI entrypoint exists yet and how to drive run_walk_forward programmatically.",
+  "created_at": "2026-06-19T11:45:58Z",
+  "confidence": "low"
+}

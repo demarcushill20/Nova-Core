@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1056_Yes__The_transcript_does_change_the_strategy_spec_in_major_ways__My_previous_ans_1781819357",
+  "workflow_id": "1056_Yes__The_transcript_does_change_the_strategy_spec_in_major_ways__My_previous_ans",
+  "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_1056_Yes__The_transcript_does_change_the_strategy_spec_in_major_ways__My_pre"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.84)",
+  "created_at": "2026-06-18T21:49:17Z",
+  "confidence": "high"
+}

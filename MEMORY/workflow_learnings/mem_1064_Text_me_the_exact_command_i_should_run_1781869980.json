@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1064_Text_me_the_exact_command_i_should_run_1781869980",
+  "workflow_id": "1064_Text_me_the_exact_command_i_should_run",
+  "task_summary": "Texted the exact single-line run command for the DreamerV3 gold-bot engine (the scoped dreamer pytest suite, 108 passed); re-verified no CLI entrypoint exists and torch is absent, and flagged the two paths to run the real training pipeline.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Texted the exact single-line run command for the DreamerV3 gold-bot engine (the scoped dreamer pytest suite, 108 passed); re-verified no CLI entrypoint exists and torch is absent, and flagged the two paths to run the real training pipeline."
+  ],
+  "successful_patterns": [
+    "task_completed: 1064_Text_me_the_exact_command_i_should_run"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Texted the exact single-line run command for the DreamerV3 gold-bot engine (the scoped dreamer pytest suite, 108 passed); re-verified no CLI entrypoint exists and torch is absent, and flagged the two paths to run the real training pipeline.",
+  "created_at": "2026-06-19T11:53:00Z",
+  "confidence": "low"
+}

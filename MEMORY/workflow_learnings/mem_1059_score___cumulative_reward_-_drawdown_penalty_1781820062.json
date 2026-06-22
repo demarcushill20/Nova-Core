@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1059_score___cumulative_reward_-_drawdown_penalty_1781820062",
+  "workflow_id": "1059_score___cumulative_reward_-_drawdown_penalty",
+  "task_summary": "Implemented DreamerV3 model-selection layer (drawdown-penalized scoring, worst-case checkpoint selection, cross-fold consistency gate + champion promotion) as selection.py with config params and 19 passing tests.",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Implemented DreamerV3 model-selection layer (drawdown-penalized scoring, worst-case checkpoint selection, cross-fold consistency gate + champion promotion) as selection.py with config params and 19 passing tests."
+  ],
+  "successful_patterns": [
+    "task_completed: 1059_score___cumulative_reward_-_drawdown_penalty"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Implemented DreamerV3 model-selection layer (drawdown-penalized scoring, worst-case checkpoint selection, cross-fold consistency gate + champion promotion) as selection.py with config params and 19 passing tests.",
+  "created_at": "2026-06-18T22:01:02Z",
+  "confidence": "low"
+}

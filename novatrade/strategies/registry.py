@@ -72,6 +72,7 @@ def _auto_register() -> None:
     from novatrade.strategies.breakout import BreakoutStrategy
     from novatrade.strategies.irb import IRBStrategy
     from novatrade.strategies.mean_reversion import MeanReversionStrategy
+    from novatrade.strategies.seykota_trend import SeykotaTrendStrategy
     from novatrade.strategies.three_ema_stoch_rsi import ThreeEmaStochRsiStrategy
     from novatrade.strategies.trend_following import TrendFollowingStrategy
 
@@ -80,6 +81,7 @@ def _auto_register() -> None:
     register_strategy("breakout", BreakoutStrategy)
     register_strategy("trend_following", TrendFollowingStrategy)
     register_strategy("three_ema_stoch_rsi", ThreeEmaStochRsiStrategy)
+    register_strategy("seykota_trend", SeykotaTrendStrategy)
 
 
 _auto_register()
