@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1075_queue_an_actual_backtest_run_on_whatever_gold_BTC_equity_data_we_ve_got_and_repo_1782149580",
+  "workflow_id": "1075_queue_an_actual_backtest_run_on_whatever_gold_BTC_equity_data_we_ve_got_and_repo",
+  "task_summary": "Ran the validated Seykota trend harness (net/gross/control) on in-repo gold (XAUUSD M15) and BTC (BTCUSD H1) data; both show negative GROSS expectancy (gold \u22120.174R, BTC \u22120.107R) so the trend core has no raw edge \u2014 NET\u2248GROSS (cost not the killer), EMA filter only marginally beats the plain-Donchian control; no equity-index data exists in-repo.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Ran the validated Seykota trend harness (net/gross/control) on in-repo gold (XAUUSD M15) and BTC (BTCUSD H1) data; both show negative GROSS expectancy (gold \u22120.174R, BTC \u22120.107R) so the trend core has no raw edge \u2014 NET\u2248GROSS (cost not the killer), EMA filter only marginally beats the plain-Donchian control; no equity-index data exists in-repo."
+  ],
+  "successful_patterns": [
+    "task_completed: 1075_queue_an_actual_backtest_run_on_whatever_gold_BTC_equity_data_we_ve_got_and_rep"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Ran the validated Seykota trend harness (net/gross/control) on in-repo gold (XAUUSD M15) and BTC (BTCUSD H1) data; both show negative GROSS expectancy (gold \u22120.174R, BTC \u22120.107R) so the trend core has no raw edge \u2014 NET\u2248GROSS (cost not the killer), EMA filter only marginally beats the plain-Donchian control; no equity-index data exists in-repo.",
+  "created_at": "2026-06-22T17:33:00Z",
+  "confidence": "low"
+}

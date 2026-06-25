@@ -62,3 +62,6 @@ data/ticks/
 
 # DreamerV3 training run artifacts (checkpoints, scalers, eval reports)
 runs/
+
+# intraday-drift runtime state (mutable, not versioned)
+services/intraday-drift/intraday_drift_state.json

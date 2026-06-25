@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1083_ce_the_gas_pedal_has_a_heavier_foot_that_s_pressing_on_it_which_will_increase_th_1782391757",
+  "workflow_id": "1083_ce_the_gas_pedal_has_a_heavier_foot_that_s_pressing_on_it_which_will_increase_th",
+  "task_summary": "Evaluated GEX/dealer-gamma YouTube transcript \u2014 concept is real and accurately explained, but it's an equity-options signal that doesn't fit NovaCore's spot-FX/MetaApi stack (no options-chain data, edge crowded + broken by 0DTE); verdict = real-but-PARK, out of scope.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Evaluated GEX/dealer-gamma YouTube transcript \u2014 concept is real and accurately explained, but it's an equity-options signal that doesn't fit NovaCore's spot-FX/MetaApi stack (no options-chain data, edge crowded + broken by 0DTE); verdict = real-but-PARK, out of scope."
+  ],
+  "successful_patterns": [
+    "task_completed: 1083_ce_the_gas_pedal_has_a_heavier_foot_that_s_pressing_on_it_which_will_increase_t"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Evaluated GEX/dealer-gamma YouTube transcript \u2014 concept is real and accurately explained, but it's an equity-options signal that doesn't fit NovaCore's spot-FX/MetaApi stack (no options-chain data, edge crowded + broken by 0DTE); verdict = real-but-PARK, out of scope.",
+  "created_at": "2026-06-25T12:49:17Z",
+  "confidence": "low"
+}

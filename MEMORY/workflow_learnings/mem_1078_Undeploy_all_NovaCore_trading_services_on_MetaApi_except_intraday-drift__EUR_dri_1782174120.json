@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1078_Undeploy_all_NovaCore_trading_services_on_MetaApi_except_intraday-drift__EUR_dri_1782174120",
+  "workflow_id": "1078_Undeploy_all_NovaCore_trading_services_on_MetaApi_except_intraday-drift__EUR_dri",
+  "task_summary": "Stopped irb-bridge + timbot-bridge (via SIGTERM; system units, no root) and confirmed novatrade already down; irb & novatrade verified FLAT, timbot account already UNDEPLOYED; intraday-drift confirmed still running (PID 654649).",
+  "task_class": "system",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Stopped irb-bridge + timbot-bridge (via SIGTERM; system units, no root) and confirmed novatrade already down; irb & novatrade verified FLAT, timbot account already UNDEPLOYED; intraday-drift confirmed still running (PID 654649)."
+  ],
+  "successful_patterns": [
+    "task_completed: 1078_Undeploy_all_NovaCore_trading_services_on_MetaApi_except_intraday-drift__EUR_dr"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Stopped irb-bridge + timbot-bridge (via SIGTERM; system units, no root) and confirmed novatrade already down; irb & novatrade verified FLAT, timbot account already UNDEPLOYED; intraday-drift confirmed still running (PID 654649).",
+  "created_at": "2026-06-23T00:22:00Z",
+  "confidence": "low"
+}
