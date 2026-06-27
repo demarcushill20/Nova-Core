@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1094_86_which_again_if_I_kept_going_with_this_I_could_probably_get_over_sharp_one_rig_1782601828",
+  "workflow_id": "1094_86_which_again_if_I_kept_going_with_this_I_could_probably_get_over_sharp_one_rig",
+  "task_summary": "Critiqued task-1094 video transcript (\"Sharpe 0.86, could get >1 if I kept iterating\") \u2014 it is overfitting commentary, not a strategy; one correct idea (real-time = OOS) already embodied in NovaCore's gauntlet, its optimize-net-profit/ignore-IS-OOS-divergence philosophy is the exact failure mode this branch has reproduced 3\u00d7 (DSR 0.957 \u2192 negative on sealed hold-out, etc.). NO new candidate.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Critiqued task-1094 video transcript (\"Sharpe 0.86, could get >1 if I kept iterating\") \u2014 it is overfitting commentary, not a strategy; one correct idea (real-time = OOS) already embodied in NovaCore's gauntlet, its optimize-net-profit/ignore-IS-OOS-divergence philosophy is the exact failure mode this branch has reproduced 3\u00d7 (DSR 0.957 \u2192 negative on sealed hold-out, etc.). NO new candidate."
+  ],
+  "successful_patterns": [
+    "task_completed: 1094_86_which_again_if_I_kept_going_with_this_I_could_probably_get_over_sharp_one_ri"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Critiqued task-1094 video transcript (\"Sharpe 0.86, could get >1 if I kept iterating\") \u2014 it is overfitting commentary, not a strategy; one correct idea (real-time = OOS) already embodied in NovaCore's gauntlet, its optimize-net-profit/ignore-IS-OOS-divergence philosophy is the exact failure mode this branch has reproduced 3\u00d7 (DSR 0.957 \u2192 negative on sealed hold-out, etc.). NO new candidate.",
+  "created_at": "2026-06-27T23:10:28Z",
+  "confidence": "low"
+}
