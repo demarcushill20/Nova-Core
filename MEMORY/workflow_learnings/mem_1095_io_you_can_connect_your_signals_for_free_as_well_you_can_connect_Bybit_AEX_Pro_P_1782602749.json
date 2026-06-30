@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1095_io_you_can_connect_your_signals_for_free_as_well_you_can_connect_Bybit_AEX_Pro_P_1782602749",
+  "workflow_id": "1095_io_you_can_connect_your_signals_for_free_as_well_you_can_connect_Bybit_AEX_Pro_P",
+  "task_summary": "Honest opportunity/risk assessment of an operator-shared alpha-stage crypto bot/signal marketplace platform (Bybit/AEX/Pionex connectors, drag-and-drop optimizer, marketplace revenue-share). Verdict \u2014 the platform's \"auto-optimize + stress-test + robustness badge\" is the same selection-bias trap NovaCore has repeatedly killed (DSR 0.957 \u2192 negative on sealed OOS); crypto is a legitimate alpha pivot but the platform's validation is marketing, not methodology; HIGH security risk on API-key custody ",
+  "task_class": "code_impl",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Honest opportunity/risk assessment of an operator-shared alpha-stage crypto bot/signal marketplace platform (Bybit/AEX/Pionex connectors, drag-and-drop optimizer, marketplace revenue-share). Verdict \u2014 the platform's \"auto-optimize + stress-test + robustness badge\" is the same selection-bias trap NovaCore has repeatedly killed (DSR 0.957 \u2192 negative on sealed OOS); crypto is a legitimate alpha pivot but the platform's validation is marketing, not methodology; HIGH security risk on API-key custody "
+  ],
+  "successful_patterns": [
+    "task_completed: 1095_io_you_can_connect_your_signals_for_free_as_well_you_can_connect_Bybit_AEX_Pro_"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Honest opportunity/risk assessment of an operator-shared alpha-stage crypto bot/signal marketplace platform (Bybit/AEX/Pionex connectors, drag-and-drop optimizer, marketplace revenue-share). Verdict \u2014 the platform's \"auto-optimize + stress-test + robustness badge\" is the same selection-bias trap NovaCore has repeatedly killed (DSR 0.957 \u2192 negative on sealed OOS); crypto is a legitimate alpha pivot but the platform's validation is marketing, not methodology; HIGH security risk on API-key custody ",
+  "created_at": "2026-06-27T23:25:49Z",
+  "confidence": "low"
+}

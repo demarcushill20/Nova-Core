@@ -1,0 +1,22 @@
+{
+  "artifact_id": "mem_1097_Can_you_build_a_forex_strategy_using_the_information_in_the_video__1782602678",
+  "workflow_id": "1097_Can_you_build_a_forex_strategy_using_the_information_in_the_video_",
+  "task_summary": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)"
+  ],
+  "successful_patterns": [
+    "plan_created: plan plan_1097_Can_you_build_a_forex_strategy_using_the_information_in_the_video__1782"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "4/4 steps succeeded, 4/4 contracts valid, aggregate B (0.85)",
+  "created_at": "2026-06-27T23:24:38Z",
+  "confidence": "high",
+  "promotion_status": "superseded",
+  "superseded_by": "mem_1107_Port_the_quantum-sector_momentum_strategy_to_forex_blocs__commodity_bloc__AUD_NZ_1782710143"
+}

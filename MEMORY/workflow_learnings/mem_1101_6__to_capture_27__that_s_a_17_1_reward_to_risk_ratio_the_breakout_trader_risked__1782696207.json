@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1101_6__to_capture_27__that_s_a_17_1_reward_to_risk_ratio_the_breakout_trader_risked__1782696207",
+  "workflow_id": "1101_6__to_capture_27__that_s_a_17_1_reward_to_risk_ratio_the_breakout_trader_risked_",
+  "task_summary": "Extracted and assessed the task-1101 \"pullback / anchored-VWAP\" trading-video transcript \u2014 formalized a falsifiable rule set, flagged 4 overfit traps, specified the validation gauntlet; verdict = central R:R claim is geometry not alpha, methodology UNPROVEN (single cherry-picked NVDA example), not refuted.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Extracted and assessed the task-1101 \"pullback / anchored-VWAP\" trading-video transcript \u2014 formalized a falsifiable rule set, flagged 4 overfit traps, specified the validation gauntlet; verdict = central R:R claim is geometry not alpha, methodology UNPROVEN (single cherry-picked NVDA example), not refuted."
+  ],
+  "successful_patterns": [
+    "task_completed: 1101_6__to_capture_27__that_s_a_17_1_reward_to_risk_ratio_the_breakout_trader_risked"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Extracted and assessed the task-1101 \"pullback / anchored-VWAP\" trading-video transcript \u2014 formalized a falsifiable rule set, flagged 4 overfit traps, specified the validation gauntlet; verdict = central R:R claim is geometry not alpha, methodology UNPROVEN (single cherry-picked NVDA example), not refuted.",
+  "created_at": "2026-06-29T01:23:27Z",
+  "confidence": "low"
+}

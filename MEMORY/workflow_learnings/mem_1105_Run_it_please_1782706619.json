@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1105_Run_it_please_1782706619",
+  "workflow_id": "1105_Run_it_please",
+  "task_summary": "Re-ran WORK/1102_quantum_momentum_backtest.py (only staged runnable artifact); reproduced the task-1104 result byte-for-byte \u2014 sector confirmation lifts basket expectancy 2.7\u00d7 (+0.084R\u2192+0.225R), 11 trades >+5R, still survivorship-biased and not deployable.",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Re-ran WORK/1102_quantum_momentum_backtest.py (only staged runnable artifact); reproduced the task-1104 result byte-for-byte \u2014 sector confirmation lifts basket expectancy 2.7\u00d7 (+0.084R\u2192+0.225R), 11 trades >+5R, still survivorship-biased and not deployable."
+  ],
+  "successful_patterns": [
+    "task_completed: 1105_Run_it_please"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Re-ran WORK/1102_quantum_momentum_backtest.py (only staged runnable artifact); reproduced the task-1104 result byte-for-byte \u2014 sector confirmation lifts basket expectancy 2.7\u00d7 (+0.084R\u2192+0.225R), 11 trades >+5R, still survivorship-biased and not deployable.",
+  "created_at": "2026-06-29T04:16:59Z",
+  "confidence": "low"
+}
