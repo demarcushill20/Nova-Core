@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1125_fx_alpha_loop_iter6_sharpe15_1783822918",
+  "workflow_id": "1125_fx_alpha_loop_iter6_sharpe15",
+  "task_summary": "iter-6 FX blend \u2014 BTC & FX TSMOM both FAIL the frozen corr\u22640.10 bar (0.326/0.314 to carry); the 1.66 \"win\" is a 2020\u201324 window + rule-relaxation artifact (3s baseline is 1.37 same-window); FX drags full-history blend 1.243\u21921.065; gold refreshed to 2026-06 with standalone OOS Sharpe +2.03; Sharpe-1.5 target NOT legitimately reached.",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "iter-6 FX blend \u2014 BTC & FX TSMOM both FAIL the frozen corr\u22640.10 bar (0.326/0.314 to carry); the 1.66 \"win\" is a 2020\u201324 window + rule-relaxation artifact (3s baseline is 1.37 same-window); FX drags full-history blend 1.243\u21921.065; gold refreshed to 2026-06 with standalone OOS Sharpe +2.03; Sharpe-1.5 target NOT legitimately reached."
+  ],
+  "successful_patterns": [
+    "task_completed: 1125_fx_alpha_loop_iter6_sharpe15"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "iter-6 FX blend \u2014 BTC & FX TSMOM both FAIL the frozen corr\u22640.10 bar (0.326/0.314 to carry); the 1.66 \"win\" is a 2020\u201324 window + rule-relaxation artifact (3s baseline is 1.37 same-window); FX drags full-history blend 1.243\u21921.065; gold refreshed to 2026-06 with standalone OOS Sharpe +2.03; Sharpe-1.5 target NOT legitimately reached.",
+  "created_at": "2026-07-12T02:21:58Z",
+  "confidence": "low"
+}

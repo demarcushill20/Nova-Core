@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1111_24_right_and_if_you_wanted_to_add_in_a_bit_more_you_can_see_that_once_we_approac_1782842577",
+  "workflow_id": "1111_24_right_and_if_you_wanted_to_add_in_a_bit_more_you_can_see_that_once_we_approac",
+  "task_summary": "Tested the market-profile video's break-and-reclaim confirmation (+inside-day merge) on EURUSD; in-sample looks great (60% win, Sharpe +1.12, DSR 0.87) but a random-direction control earns +0.83 of it and the sealed OOS collapses to \u22120.16 \u2192 confirming NEGATIVE (bracket geometry, not signal).",
+  "task_class": "unknown",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Tested the market-profile video's break-and-reclaim confirmation (+inside-day merge) on EURUSD; in-sample looks great (60% win, Sharpe +1.12, DSR 0.87) but a random-direction control earns +0.83 of it and the sealed OOS collapses to \u22120.16 \u2192 confirming NEGATIVE (bracket geometry, not signal)."
+  ],
+  "successful_patterns": [
+    "task_completed: 1111_24_right_and_if_you_wanted_to_add_in_a_bit_more_you_can_see_that_once_we_approa"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Tested the market-profile video's break-and-reclaim confirmation (+inside-day merge) on EURUSD; in-sample looks great (60% win, Sharpe +1.12, DSR 0.87) but a random-direction control earns +0.83 of it and the sealed OOS collapses to \u22120.16 \u2192 confirming NEGATIVE (bracket geometry, not signal).",
+  "created_at": "2026-06-30T18:02:57Z",
+  "confidence": "low"
+}

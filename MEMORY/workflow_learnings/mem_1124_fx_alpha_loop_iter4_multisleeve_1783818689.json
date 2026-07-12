@@ -1,0 +1,20 @@
+{
+  "artifact_id": "mem_1124_fx_alpha_loop_iter4_multisleeve_1783818689",
+  "workflow_id": "1124_fx_alpha_loop_iter4_multisleeve",
+  "task_summary": "Built 3-sleeve FX portfolio (probe_multisleeve_portfolio.py); 11:00-EUR-short \u22a5 crash-gated-carry blend = Sharpe +1.07 but 30% CAGR needs ~16x leverage \u2192 \u221244% maxDD; H4 trend sleeve did not reproduce (negative); 30% unreachable at survivable DD.",
+  "task_class": "research",
+  "roles_involved": [
+    "router"
+  ],
+  "key_decisions": [
+    "Built 3-sleeve FX portfolio (probe_multisleeve_portfolio.py); 11:00-EUR-short \u22a5 crash-gated-carry blend = Sharpe +1.07 but 30% CAGR needs ~16x leverage \u2192 \u221244% maxDD; H4 trend sleeve did not reproduce (negative); 30% unreachable at survivable DD."
+  ],
+  "successful_patterns": [
+    "task_completed: 1124_fx_alpha_loop_iter4_multisleeve"
+  ],
+  "failure_patterns": [],
+  "verification_outcome": "not_verified",
+  "reusable_guidance": "Built 3-sleeve FX portfolio (probe_multisleeve_portfolio.py); 11:00-EUR-short \u22a5 crash-gated-carry blend = Sharpe +1.07 but 30% CAGR needs ~16x leverage \u2192 \u221244% maxDD; H4 trend sleeve did not reproduce (negative); 30% unreachable at survivable DD.",
+  "created_at": "2026-07-12T01:11:29Z",
+  "confidence": "low"
+}
