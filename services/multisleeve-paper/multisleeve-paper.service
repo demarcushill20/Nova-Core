@@ -1,0 +1,14 @@
+[Unit]
+Description=Multi-sleeve paper book daily reconciler (measurement only, no orders)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/nova/nova-core
+ExecStart=/usr/bin/python3 /home/nova/nova-core/services/multisleeve-paper/multisleeve_paper.py
+TimeoutStartSec=1800
+Nice=10
+
+[Install]
+WantedBy=default.target

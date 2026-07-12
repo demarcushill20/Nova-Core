@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily 22:40 UTC run of the multi-sleeve paper reconciler
+
+[Timer]
+OnCalendar=*-*-* 22:40:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
