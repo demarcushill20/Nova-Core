@@ -3,8 +3,8 @@ name: brainstorming
 description: "Use before any creative engineering work — designing a feature, adding a component, or modifying behavior. Explores intent, constraints, and design options before implementation. Also use when the user says 'brainstorm', 'design', 'let's think through', or describes a new capability without an implementation plan."
 source:
   upstream: obra/superpowers
-  tag: v5.0.7
-  commit: 1f20bef3f59b85ad7b52718f822e37c4478a3ff5
+  tag: v6.2.0
+  commit: 3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9
   path: skills/brainstorming/SKILL.md
   license: MIT
 ---
@@ -13,7 +13,7 @@ source:
 
 Turn ideas into fully formed designs and specs through autonomous engineering judgment. Understand project context first, then ultrathink each tactical decision and pick the best path — asking the operator only for genuinely operator-only judgment (intent, risk tolerance, business priority, information only they have). Present the resulting design and get a single explicit approval before any implementation begins.
 
-> **NovaCore adaptations (vendored from Superpowers v5.0.7):**
+> **NovaCore adaptations (vendored from Superpowers v6.2.0):**
 > - The upstream **Visual Companion** (browser-served HTML mockups) is **out of scope** for this vendoring. Text-only brainstorming only.
 > - Spec output currently lands in `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`. Retargeting spec output through `plan-tracker` into the Obsidian vault is **deferred** (tracked in `.claude/skills/_vendored/SUPERPOWERS.md`). `writing-plans` *is* already retargeted to the vault.
 > - Upstream's "MUST" language is kept where it protects the HARD-GATE; elsewhere this skill is recommended, not mandatory, consistent with NovaCore's path-choice autonomy policy.
@@ -142,12 +142,3 @@ Wait for a response. If changes requested, make them and re-run self-review. Onl
 - Invoke the `writing-plans` skill to create a detailed implementation plan.
 - Do not invoke any other skill from here. `writing-plans` is the next step.
 
-## Key Principles
-
-- Ultrathink each tactical decision; ask the operator only for operator-only judgment
-- When asking IS needed: one question at a time, multiple-choice preferred
-- YAGNI ruthlessly — remove unnecessary features
-- Explore alternatives — surface 2–3 approaches with trade-offs in the design (you pick the recommendation; operator can redirect)
-- Single approval gate at the end of the design — full design presented in one pass
-- Be flexible — when the operator pushes back on a specific decision, revise that section and re-present
-- Preserve the HARD-GATE — no implementation until the design is approved, regardless of how confident the autonomous decisions feel
