@@ -3,8 +3,8 @@ name: using-git-worktrees
 description: "Use when starting feature work that needs isolation from the current workspace or before executing an implementation plan. Creates an isolated git worktree with systematic directory selection, ignore-verification, dependency install, and clean test baseline. Invoke on 'worktree this', 'isolate this work', or before implementation-team picks up a risky plan."
 source:
   upstream: obra/superpowers
-  tag: v5.0.7
-  commit: 1f20bef3f59b85ad7b52718f822e37c4478a3ff5
+  tag: v6.2.0
+  commit: 3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9
   path: skills/using-git-worktrees/SKILL.md
   license: MIT
 ---
@@ -13,107 +13,122 @@ source:
 
 ## Overview
 
-Git worktrees create isolated workspaces sharing the same repository, allowing work on multiple branches simultaneously without switching.
+Ensure work happens in an isolated workspace. Prefer your platform's native worktree tools. Fall back to manual git worktrees only when no native tool is available.
 
-**Core principle:** systematic directory selection + safety verification = reliable isolation.
+**Core principle:** "Detect existing isolation first. Then use native tools. Then fall back to git. Never fight the harness."
 
 **Announce at start:** "I'm using the using-git-worktrees skill to set up an isolated workspace."
 
-> **NovaCore adaptations (vendored from Superpowers v5.0.7):**
-> - Default directory preference for NovaCore repos is `.worktrees/` (hidden, project-local). If a CLAUDE.md preference exists, it wins.
-> - The "fix broken things immediately" rule (add missing `.gitignore` entry + commit) is preserved as a generic principle.
+> **NovaCore adaptations (vendored from Superpowers v6.2.0):**
+> - Default global directory for NovaCore repos is `~/.config/nova-core/worktrees/<project-name>/` (not the upstream `~/.config/superpowers/worktrees/`).
+> - Step 2 Project Setup detects Python (pyproject.toml / requirements.txt) first, since NovaCore is Python-default.
+> - Baseline test command defaults to `pytest`.
+> - Upstream's "Jesse's rule" attribution removed — rendered as a generic principle.
+> - v6.2.0 re-pull: adopted Step 0 (Detect Existing Isolation) including the submodule guard; adopted Step 1a (Native Worktree Tools) / Step 1b (Git Worktree Fallback) structure. "Common Mistakes" renamed to "Common Rationalizations" per upstream.
 
-## Directory Selection Process
+## Step 0: Detect Existing Isolation
 
-Follow this priority order:
-
-### 1. Check Existing Directories
-
-```bash
-ls -d .worktrees 2>/dev/null     # Preferred (hidden)
-ls -d worktrees 2>/dev/null      # Alternative
-```
-
-**If found:** use that directory. If both exist, `.worktrees` wins.
-
-### 2. Check CLAUDE.md
+**Before creating anything, check if you are already in an isolated workspace.**
 
 ```bash
-grep -i "worktree.*director" CLAUDE.md 2>/dev/null
+GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
+GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P)
+BRANCH=$(git branch --show-current)
 ```
 
-**If a preference is specified:** use it without asking.
+**Submodule guard:** `GIT_DIR != GIT_COMMON` is also true inside git submodules. Before concluding "already in a worktree," verify you are not in a submodule:
 
-### 3. Ask the Operator
-
-If no directory exists and no CLAUDE.md preference:
-
-```
-No worktree directory found. Where should I create worktrees?
-
-1. .worktrees/ (project-local, hidden)
-2. ~/.config/nova-core/worktrees/<project-name>/ (global location)
-
-Which would you prefer?
+```bash
+# If this returns a path, you're in a submodule, not a worktree — treat as normal repo
+git rev-parse --show-superproject-working-tree 2>/dev/null
 ```
 
-## Safety Verification
+**If `GIT_DIR != GIT_COMMON` (and not a submodule):** You are already in a linked worktree. Skip to Step 2 (Project Setup). Do NOT create another worktree.
 
-### For Project-Local Directories (.worktrees or worktrees)
+Report with branch state:
+- On a branch: "Already in isolated workspace at `<path>` on branch `<name>`."
+- Detached HEAD: "Already in isolated workspace at `<path>` (detached HEAD, externally managed). Branch creation needed at finish time."
 
-**Verify directory is ignored before creating the worktree:**
+**If `GIT_DIR == GIT_COMMON` (or in a submodule):** You are in a normal repo checkout.
+
+Has the operator already indicated their worktree preference in your instructions? If not, ask for consent before creating a worktree:
+
+> "Would you like me to set up an isolated worktree? It protects your current branch from changes."
+
+Honor any existing declared preference without asking. If the operator declines consent, work in place and skip to Step 2.
+
+## Step 1: Create Isolated Workspace
+
+**You have two mechanisms. Try them in this order.**
+
+### 1a. Native Worktree Tools (preferred)
+
+The operator has asked for an isolated workspace (Step 0 consent). Do you already have a way to create a worktree? It might be a tool with a name like `EnterWorktree`, `WorktreeCreate`, a `/worktree` command, or a `--worktree` flag. If you do, use it and skip to Step 2.
+
+Native tools handle directory placement, branch creation, and cleanup automatically. Using `git worktree add` when you have a native tool creates phantom state your harness can't see or manage.
+
+Only proceed to Step 1b if you have no native worktree tool available.
+
+### 1b. Git Worktree Fallback
+
+**Only use this if Step 1a does not apply** — you have no native worktree tool available. Create a worktree manually using git.
+
+#### Directory Selection
+
+Follow this priority order. Explicit operator preference always beats observed filesystem state.
+
+1. **Check your instructions for a declared worktree directory preference.** If the operator has already specified one (e.g., in CLAUDE.md), use it without asking.
+
+2. **Check for an existing project-local worktree directory:**
+   ```bash
+   ls -d .worktrees 2>/dev/null     # Preferred (hidden)
+   ls -d worktrees 2>/dev/null      # Alternative
+   ```
+   If found, use it. If both exist, `.worktrees` wins.
+
+3. **If there is no other guidance available**, ask the operator:
+   ```
+   No worktree directory found. Where should I create worktrees?
+
+   1. .worktrees/ (project-local, hidden)
+   2. ~/.config/nova-core/worktrees/<project-name>/ (global location)
+
+   Which would you prefer?
+   ```
+
+#### Safety Verification (project-local directories only)
+
+**MUST verify directory is ignored before creating worktree:**
 
 ```bash
 git check-ignore -q .worktrees 2>/dev/null || git check-ignore -q worktrees 2>/dev/null
 ```
 
-**If NOT ignored:**
-
-Fix broken things immediately:
-1. Add appropriate line to `.gitignore`.
-2. Commit the change.
-3. Proceed with worktree creation.
+**If NOT ignored:** Add to `.gitignore`, commit the change, then proceed.
 
 **Why critical:** prevents accidentally committing worktree contents to the repository.
 
-### For Global Directory (`~/.config/nova-core/worktrees`)
-
-No `.gitignore` verification needed — outside the project entirely.
-
-## Creation Steps
-
-### 1. Detect Project Name
+#### Create the Worktree
 
 ```bash
-project=$(basename "$(git rev-parse --show-toplevel)")
-```
-
-### 2. Create Worktree
-
-```bash
-case $LOCATION in
-  .worktrees|worktrees)
-    path="$LOCATION/$BRANCH_NAME"
-    ;;
-  ~/.config/nova-core/worktrees/*)
-    path="~/.config/nova-core/worktrees/$project/$BRANCH_NAME"
-    ;;
-esac
+path="$LOCATION/$BRANCH_NAME"
 
 git worktree add "$path" -b "$BRANCH_NAME"
 cd "$path"
 ```
 
-### 3. Run Project Setup
+**Sandbox fallback:** If `git worktree add` fails with a permission error (sandbox denial), tell the operator the sandbox blocked worktree creation and you're working in the current directory instead. Then run setup and baseline tests in place.
 
-Auto-detect and run setup:
+## Step 2: Project Setup
+
+Auto-detect and run appropriate setup:
 
 ```bash
-# Python (NovaCore default)
+# Python (NovaCore default — checked first)
 if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 if [ -f pyproject.toml ]; then poetry install 2>/dev/null || pip install -e .; fi
 
-# Node
+# Node.js
 if [ -f package.json ]; then npm install; fi
 
 # Rust
@@ -123,20 +138,20 @@ if [ -f Cargo.toml ]; then cargo build; fi
 if [ -f go.mod ]; then go mod download; fi
 ```
 
-### 4. Verify Clean Baseline
+## Step 3: Verify Clean Baseline
 
-Run tests to ensure the worktree starts clean:
+Run tests to ensure workspace starts clean:
 
 ```bash
 pytest               # NovaCore default
 # or project-appropriate: npm test, cargo test, go test ./...
 ```
 
-**If tests fail:** report failures, ask whether to proceed or investigate.
+**If tests fail:** Report failures, ask whether to proceed or investigate.
 
-**If tests pass:** report ready.
+**If tests pass:** Report ready.
 
-### 5. Report Location
+### Report
 
 ```
 Worktree ready at <full-path>
@@ -148,50 +163,28 @@ Ready to implement <feature-name>
 
 | Situation | Action |
 |-----------|--------|
+| Already in linked worktree | Skip creation (Step 0) |
+| In a submodule | Treat as normal repo (Step 0 guard) |
+| Native worktree tool available | Use it (Step 1a) |
+| No native tool | Git worktree fallback (Step 1b) |
 | `.worktrees/` exists | Use it (verify ignored) |
 | `worktrees/` exists | Use it (verify ignored) |
 | Both exist | Use `.worktrees/` |
-| Neither exists | Check CLAUDE.md → ask operator |
+| Neither exists | Check instruction file, then ask operator |
 | Directory not ignored | Add to `.gitignore` + commit |
+| Permission error on create | Sandbox fallback, work in place |
 | Tests fail during baseline | Report failures + ask |
 | No `pyproject.toml` / `package.json` / `Cargo.toml` | Skip dependency install |
 
-## Common Mistakes
+## Common Rationalizations
 
-### Skipping ignore verification
-
-- **Problem:** worktree contents get tracked, polluting git status.
-- **Fix:** always use `git check-ignore` before creating a project-local worktree.
-
-### Assuming directory location
-
-- **Problem:** creates inconsistency, violates project conventions.
-- **Fix:** follow priority: existing > CLAUDE.md > ask.
-
-### Proceeding with failing tests
-
-- **Problem:** can't distinguish new bugs from pre-existing issues.
-- **Fix:** report failures; get explicit permission to proceed.
-
-### Hardcoding setup commands
-
-- **Problem:** breaks on projects using different tools.
-- **Fix:** auto-detect from project files.
-
-## Red Flags
-
-**Never:**
-- Create worktree without verifying it's ignored (project-local)
-- Skip baseline test verification
-- Proceed with failing tests without asking
-- Assume directory location when ambiguous
-- Skip CLAUDE.md check
-
-**Always:**
-- Follow directory priority: existing > CLAUDE.md > ask
-- Verify directory is ignored for project-local
-- Auto-detect and run project setup
-- Verify clean test baseline
+| Excuse | Reality |
+|--------|---------|
+| "I'm obviously not in a worktree — no need to check" | Run Step 0. Harness-created isolation and submodules both fool eyeballing; the detection commands settle it. |
+| "`git worktree add` is quicker than hunting for a native tool" | A native tool (e.g. `EnterWorktree`) owns placement, branching, and cleanup. Bypassing it is the #1 mistake — it creates phantom state your harness can't see or manage. |
+| "The worktree directory is surely ignored already" | Run `git check-ignore`. An unignored worktree directory commits the whole tree into the repo. |
+| "Any directory name works" | Explicit instructions beat an existing project-local directory, which beats the `.worktrees/` default. |
+| "The workspace is fresh — baseline tests can wait" | A dirty baseline makes every later failure ambiguous. Run the tests now; proceeding past failures is the operator's call. |
 
 ## Integration
 

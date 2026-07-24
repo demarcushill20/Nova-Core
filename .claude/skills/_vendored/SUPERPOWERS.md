@@ -6,11 +6,12 @@ This document records the upstream provenance, cherry-pick decisions, and deviat
 
 - **Repository:** [obra/superpowers](https://github.com/obra/superpowers)
 - **License:** MIT
-- **Pinned tag:** `v5.0.7`
-- **Pinned tag SHA:** `dd7a63ac45233dce0a6c6222a77f205ee7c78750`
-- **Pinned commit SHA:** `1f20bef3f59b85ad7b52718f822e37c4478a3ff5`
-- **Release date:** 2026-03-31
+- **Pinned tag:** `v6.2.0`
+- **Pinned tag SHA:** `0e5cc50e782429b95f933e46443898435b8b37a8`
+- **Pinned commit SHA:** `3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9`
+- **Release date:** 2026-07-23
 - **Vendored into NovaCore:** 2026-04-24
+- **Last re-pulled:** 2026-07-24
 
 ## Install approach: vendor, don't install
 
@@ -125,9 +126,47 @@ When a new upstream release lands:
 6. Append a new "Deviations from upstream (re-pull YYYY-MM-DD)" section if any new adaptations were made.
 7. Commit with a message referencing the upstream tag.
 
+## Deviations from upstream (re-pull 2026-07-24)
+
+Changes applied from v5.0.7 → v6.2.0 and any new adaptations required.
+
+### Global changes adopted
+- **Prose removal:** upstream v6.2.0 deleted "Bottom Line / Key Principles / Real-World Impact" sections across the library. Applied: removed `## Key Principles` from `brainstorming`. Not applicable to other vendored skills (those sections were absent or not tracked).
+- **Frontmatter updated** in all 7 vendored SKILL.md files: `tag` → `v6.2.0`, `commit` → `3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9`.
+- **NovaCore adaptations callout** version reference updated in all 7 skills.
+
+### `using-git-worktrees` — major restructure adopted
+- **Step 0 (Detect Existing Isolation):** new upstream section adopted verbatim, including the submodule guard (`git rev-parse --show-superproject-working-tree`). This prevents false-positive isolation detection inside submodules.
+- **Step 1a / 1b split:** upstream now distinguishes native worktree tools (Step 1a, preferred) from git worktree fallback (Step 1b). Adopted. `EnterWorktree` / `/worktree` named explicitly as examples of native tools.
+- **"Common Mistakes" → "Common Rationalizations":** section renamed per upstream; content updated.
+- **NovaCore directory deviation preserved:** global directory remains `~/.config/nova-core/worktrees/<project-name>/` (not `superpowers`).
+- **Python-first detection and `pytest` default preserved** in Step 2 / Step 3.
+- **Operator ask preserved** in Step 1b directory selection (upstream v6.2.0 removed the explicit ask; NovaCore retains it as a UX preference).
+
+### `finishing-a-development-branch` — structural changes adopted + deviation overlap flagged
+- **"Discard" removed from main menu (adopted):** upstream v6.2.0 removed "Discard work" as Option 4. Now lives in a separate "If the operator asks to discard the work" section. The `Type 'discard' to confirm` ritual is preserved.
+- **Step 2 (Detect Environment) adopted:** new upstream step using `GIT_DIR == GIT_COMMON` check + `WORKTREE_PATH` capture before directory changes. Enables correct detached-HEAD menu and provenance-based cleanup.
+- **Step 6 (provenance-based Cleanup Workspace) adopted:** cleanup now keys on whether `WORKTREE_PATH` is under `.worktrees/` or `worktrees/` (Superpowers/NovaCore-owned) vs. host-managed. Cleaner than the previous `git worktree list | grep` approach.
+- **Detached HEAD 2-option menu adopted** from upstream v6.2.0.
+- **⚠ DEVIATION OVERLAP — forge-agnostic PR (needs operator review):** upstream v6.2.0 changed Option 2 to be forge-agnostic ("forge's tooling — its CLI if one is available, or the creation URL most forges print when you push"). NovaCore's Option 2 explicitly uses `gh pr create` as part of the `/ship` contract. These two approaches conflict. **Resolution deferred to operator.** NovaCore's `/ship`-contract Option 2 is preserved unchanged pending review.
+
+### `test-driven-development` — content changes adopted
+- **"Why Order Matters" section removed** (upstream v6.2.0 migrated these arguments into the Common Rationalizations table; NovaCore's table already contained equivalent entries).
+- **`writing-good-tests.md` reference added** to "Good Tests" section with a note that this skill is not vendored in NovaCore. The upstream renamed `testing-anti-patterns.md` → `writing-good-tests.md` in v6.2.0.
+- **"Example: Bug Fix" section added** (new in upstream v6.2.0; converted from TypeScript to Python per NovaCore's standard).
+
+### `dispatching-parallel-agents` — minor additions adopted
+- **"Real Example from Session" section added** (present in upstream v6.2.0, absent from NovaCore's v5.0.7 vendoring). File names converted from TypeScript (`.test.ts`) to Python (`.py`).
+
+### Skills with frontmatter-only updates (no confirmed content changes)
+- **`writing-plans`**: WebFetch retrieved a summary only; no structural changes detected. Frontmatter bumped. NovaCore deviations (plan-tracker / implementation-team) still apply against upstream v6.2.0.
+- **`systematic-debugging`**: Same. The 4-phase + 3-attempt escalation and Critic-agent routing are NovaCore additions not present in upstream; they are preserved.
+- **Manual review recommended** for both skills: fetch full raw content from `obra/superpowers/skills/*/SKILL.md?ref=v6.2.0` and diff against the vendored files to catch any prose-removal changes missed in this automated re-pull.
+
 ## Audit trail
 
 | Date | Event | Tag | Commit SHA |
 |---|---|---|---|
 | 2026-04-24 | Initial Phase 1 vendoring | v5.0.7 | `1f20bef3f59b85ad7b52718f822e37c4478a3ff5` |
 | 2026-04-24 | Phase 2 wiring — finishing-branch Option 2 auto-delegation | v5.0.7 | `1f20bef3f59b85ad7b52718f822e37c4478a3ff5` |
+| 2026-07-24 | Quarterly re-pull from upstream | v6.2.0 | `3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9` |

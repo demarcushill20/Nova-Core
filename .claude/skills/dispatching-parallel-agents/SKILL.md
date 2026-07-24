@@ -3,8 +3,8 @@ name: dispatching-parallel-agents
 description: "Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies. Dispatches one focused subagent per independent problem domain, concurrently, preserving the main context for coordination. Invoke on 'fan this out', 'parallelize', 'send these in parallel', or when 3+ unrelated test files are failing."
 source:
   upstream: obra/superpowers
-  tag: v5.0.7
-  commit: 1f20bef3f59b85ad7b52718f822e37c4478a3ff5
+  tag: v6.2.0
+  commit: 3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9
   path: skills/dispatching-parallel-agents/SKILL.md
   license: MIT
 ---
@@ -19,7 +19,7 @@ When you have multiple unrelated failures (different test files, different subsy
 
 **Core principle:** one agent per independent problem domain. Let them work concurrently.
 
-> **NovaCore adaptations (vendored from Superpowers v5.0.7):**
+> **NovaCore adaptations (vendored from Superpowers v6.2.0):**
 > - **Cost-optimized subagent model selection** (adopted from Superpowers v5): for well-specified, bounded implementation subtasks, prefer the cheapest model capable of the task — typically **Haiku 4.5** for single-file edits with clear specs, escalating to Sonnet/Opus only when the subtask requires deeper reasoning or cross-file architectural judgment. The orchestrator chooses; the operator can override.
 > - Parallel dispatch must respect the budget rules referenced in `AGENTS/orchestrator/AGENT.md`. Making this a **programmatic hard gate** (budget-check hook) is **deferred** (tracked in `.claude/skills/_vendored/SUPERPOWERS.md`); for now it is a documented expectation the orchestrator is responsible for honoring.
 > - For disciplined multi-agent *implementation workflows* (validate → implement → review → verify), use `implementation-team`. This skill covers the narrower case of ad-hoc parallel dispatch for independent problems.
@@ -147,6 +147,31 @@ Return: summary of what you found and what you fixed.
 - **Need full context:** understanding requires seeing the whole system.
 - **Exploratory debugging:** you don't know what's broken yet.
 - **Shared state:** agents would interfere (editing same files, using same resources).
+
+## Real Example from Session
+
+**Scenario:** 6 test failures across 3 files after major refactoring
+
+**Failures:**
+- `tests/agent_tool_abort.py`: 3 failures (timing issues)
+- `tests/batch_completion_behavior.py`: 2 failures (tools not executing)
+- `tests/tool_approval_race_conditions.py`: 1 failure (execution count = 0)
+
+**Decision:** Independent domains — abort logic separate from batch completion separate from race conditions
+
+**Dispatch:**
+```
+Agent 1 → Fix tests/agent_tool_abort.py
+Agent 2 → Fix tests/batch_completion_behavior.py
+Agent 3 → Fix tests/tool_approval_race_conditions.py
+```
+
+**Results:**
+- Agent 1: Replaced timeouts with event-based waiting
+- Agent 2: Fixed event structure bug (thread_id in wrong place)
+- Agent 3: Added wait for async tool execution to complete
+
+**Integration:** All fixes independent, no conflicts, full suite green
 
 ## Verification
 

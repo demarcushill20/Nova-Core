@@ -3,8 +3,8 @@ name: writing-plans
 description: "Use when you have a spec or requirements for a multi-step task, before touching code. Produces bite-sized, paste-ready tasks with exact file paths, code, and verification. Invoke when the operator says 'write the plan', 'plan this out', 'break this into tasks', or hands over an approved design doc."
 source:
   upstream: obra/superpowers
-  tag: v5.0.7
-  commit: 1f20bef3f59b85ad7b52718f822e37c4478a3ff5
+  tag: v6.2.0
+  commit: 3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9
   path: skills/writing-plans/SKILL.md
   license: MIT
 ---
@@ -23,7 +23,7 @@ Assume they are a skilled developer but know almost nothing about the toolset or
 
 **Save plans to the Obsidian vault via `plan-tracker`** — the canonical store for NovaCore implementation plans. File path: `10-plans/plan-<plan-id>.md`. Frontmatter must match the plan-tracker schema (see "Plan Tracker Handoff" below). Optionally queue a `TASKS/<plan-id>.md` entry so the task pipeline picks it up.
 
-> **NovaCore adaptations (vendored from Superpowers v5.0.7):**
+> **NovaCore adaptations (vendored from Superpowers v6.2.0):**
 > - Upstream references to `subagent-driven-development` and `executing-plans` are replaced with NovaCore's **`implementation-team`** orchestration skill in the execution handoff.
 > - Plan output is written to the Obsidian vault via `plan-tracker` (replaces upstream's `docs/superpowers/plans/` path).
 > - Scope-decomposition rules are unchanged from upstream.

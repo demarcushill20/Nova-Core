@@ -3,8 +3,8 @@ name: test-driven-development
 description: "Use when implementing any feature or bugfix, before writing implementation code. Enforces red-green-refactor and the Iron Law: no production code without a failing test first. Invoke when the operator says 'add tests', 'TDD this', 'write a test for X', or is about to add new behavior to existing code."
 source:
   upstream: obra/superpowers
-  tag: v5.0.7
-  commit: 1f20bef3f59b85ad7b52718f822e37c4478a3ff5
+  tag: v6.2.0
+  commit: 3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9
   path: skills/test-driven-development/SKILL.md
   license: MIT
 ---
@@ -19,7 +19,7 @@ Write the test first. Watch it fail. Write minimal code to pass.
 
 **Violating the letter of the rules is violating the spirit of the rules.**
 
-> **NovaCore adaptations (vendored from Superpowers v5.0.7):**
+> **NovaCore adaptations (vendored from Superpowers v6.2.0):**
 > - Python is the default stack — `pytest` is the test runner. For Pine Script, route work through `pinescript-developer` (no runtime test framework exists for Pine; its review loop is the closest equivalent).
 > - The Iron Law is preserved. Exceptions still require explicit operator approval — NovaCore's path-choice autonomy does not waive the Iron Law; it only waives asking permission for *execution* choices within an approved task.
 > - Upstream phrasing "your human partner" is rendered here as "operator".
@@ -196,27 +196,7 @@ Next failing test for the next feature.
 | **Clear** | Name describes behavior | `test_test1` |
 | **Shows intent** | Demonstrates desired API | Obscures what code should do |
 
-## Why Order Matters
-
-**"I'll write tests after to verify it works"**
-
-Tests written after code pass immediately. Passing immediately proves nothing: might test the wrong thing, might test implementation (not behavior), might miss edge cases you forgot, you never saw it catch the bug. Test-first forces you to see the test fail, proving it actually tests something.
-
-**"I already manually tested all the edge cases"**
-
-Manual testing is ad-hoc. No record, can't re-run, easy to forget cases under pressure. Automated tests are systematic — same way every time.
-
-**"Deleting X hours of work is wasteful"**
-
-Sunk cost fallacy. The time is gone. The choice is: delete and rewrite with TDD (high confidence), or keep it and add tests after (low confidence, likely bugs). Working code without real tests is technical debt.
-
-**"TDD is dogmatic, pragmatic means adapting"**
-
-TDD *is* pragmatic — finds bugs before commit, prevents regressions, documents behavior, enables refactoring. "Pragmatic" shortcuts = debugging in production = slower.
-
-**"Tests after achieve the same goals — it's spirit not ritual"**
-
-No. Tests-after answer "what does this do?" Tests-first answer "what should this do?" Tests-after are biased by your implementation. Tests-first force edge-case discovery before implementing.
+> **Note (NovaCore):** upstream v6.2.0 references `writing-good-tests.md` (a positive test-quality catalog with six rules, falsifiability discipline, and hard stops for string-presence and change-detector traps). That skill is not vendored in NovaCore. Consult upstream at `obra/superpowers/skills/writing-good-tests/SKILL.md` when needed.
 
 ## Common Rationalizations
 
@@ -246,6 +226,40 @@ No. Tests-after answer "what does this do?" Tests-first answer "what should this
 - "Already spent X hours, deleting is wasteful"
 
 **All of these mean: delete code, start over with TDD.**
+
+## Example: Bug Fix
+
+**Bug:** Empty email accepted
+
+**RED**
+```python
+def test_rejects_empty_email():
+    result = submit_form({"email": ""})
+    assert result["error"] == "Email required"
+```
+
+**Verify RED**
+```bash
+$ pytest tests/test_form.py::test_rejects_empty_email -v
+FAIL: AssertionError: assert None == "Email required"
+```
+
+**GREEN**
+```python
+def submit_form(data):
+    if not data.get("email", "").strip():
+        return {"error": "Email required"}
+    # ...
+```
+
+**Verify GREEN**
+```bash
+$ pytest tests/test_form.py::test_rejects_empty_email -v
+PASS
+```
+
+**REFACTOR**
+Extract validation for multiple fields if needed.
 
 ## Verification Checklist
 

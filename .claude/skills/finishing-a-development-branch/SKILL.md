@@ -1,10 +1,10 @@
 ---
 name: finishing-a-development-branch
-description: "Use when implementation is complete, tests pass, and you need to decide how to integrate the work. Runs pre-ship gates (tests, clean tree) then presents merge/PR/keep/discard options. Invoke on 'finish this branch', 'wrap this up', 'are we ready to ship', or before /ship on a feature branch."
+description: "Use when implementation is complete, tests pass, and you need to decide how to integrate the work. Runs pre-ship gates (tests, clean tree) then presents merge/PR/keep options. Invoke on 'finish this branch', 'wrap this up', 'are we ready to ship', or before /ship on a feature branch."
 source:
   upstream: obra/superpowers
-  tag: v5.0.7
-  commit: 1f20bef3f59b85ad7b52718f822e37c4478a3ff5
+  tag: v6.2.0
+  commit: 3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9
   path: skills/finishing-a-development-branch/SKILL.md
   license: MIT
 ---
@@ -15,18 +15,18 @@ source:
 
 Guide completion of development work by running pre-ship gates, presenting clear options, and handling the chosen workflow.
 
-**Core principle:** verify tests → present options → execute choice → clean up.
+**Core principle:** Verify tests → Detect environment → Present options → Execute choice → Clean up.
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
-> **NovaCore adaptations (vendored from Superpowers v5.0.7):**
+> **NovaCore adaptations (vendored from Superpowers v6.2.0):**
 > - This skill is a **pre-`/ship` gate**. `/ship` handles the checkpoint → commit → push mechanics. This skill answers "should we ship at all, and how?"
 > - Option 2 (Ship + PR) executes the `/ship` contract (`.claude/commands/ship.md` steps 1-3) **inline** using an announce-and-continue pattern, then owns `gh pr create` with a plan-tracker-aware PR draft. See Option 2 below for the full flow.
+> - **⚠ DEVIATION OVERLAP (v6.2.0 re-pull):** upstream v6.2.0 changed Option 2 to be forge-agnostic ("forge's tooling — its CLI if one is available, or the creation URL most forges print when you push"). NovaCore deliberately keeps `gh pr create` as the standard path because the `/ship` contract requires it. If support for non-GitHub forges becomes relevant, this deviation needs operator review.
 > - Upstream references to `subagent-driven-development` and `executing-plans` as callers are replaced with NovaCore's `implementation-team`.
+> - v6.2.0 re-pull: adopted Step 2 environment detection (GIT_DIR/GIT_COMMON check + WORKTREE_PATH capture); adopted removal of "Discard" from the main menu (now explicit-request only); adopted provenance-based cleanup in Step 6.
 
-## The Process
-
-### Step 1: Verify Tests
+## Step 1: Verify Tests
 
 Before presenting options, verify tests pass:
 
@@ -49,17 +49,31 @@ Stop. Don't proceed to Step 2.
 
 **If tests pass:** continue to Step 2.
 
-### Step 2: Determine Base Branch
+## Step 2: Detect Environment
 
 ```bash
-git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null
+GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
+GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P)
+# Capture now, while still inside the workspace — Step 5 changes directory
+# before cleanup (Step 6) needs this value
+WORKTREE_PATH=$(git rev-parse --show-toplevel)
 ```
 
-Or ask: "This branch split from main — is that correct?"
+This determines which menu to show and how cleanup works:
 
-### Step 3: Present Options
+| State | Menu | Cleanup |
+|-------|------|---------|
+| `GIT_DIR == GIT_COMMON` (normal repo) | Standard 3 options | No worktree to clean up |
+| `GIT_DIR != GIT_COMMON`, named branch | Standard 3 options | Provenance-based (see Step 6) |
+| `GIT_DIR != GIT_COMMON`, detached HEAD | Reduced 2 options (no merge) | Externally managed — leave in place |
 
-Present exactly these 4 options:
+## Step 3: Determine Base Branch
+
+The base branch is whatever this work forked from — usually named in the plan, the conversation, or the branch's upstream. If it is not already known, ask: "This branch split from `<your best guess>` — is that correct?" Confirm before merging: merging into the wrong base is expensive to undo.
+
+## Step 4: Present Options
+
+**Normal repo and named-branch worktree — present exactly these 3 options:**
 
 ```
 Implementation complete. What would you like to do?
@@ -67,28 +81,47 @@ Implementation complete. What would you like to do?
 1. Merge back to <base-branch> locally
 2. Push and create a Pull Request (runs /ship)
 3. Keep the branch as-is (I'll handle it later)
-4. Discard this work
 
 Which option?
 ```
 
-Don't add explanation — keep options concise.
+**Detached HEAD — present exactly these 2 options:**
 
-### Step 4: Execute Choice
+```
+Implementation complete. You're on a detached HEAD (externally managed workspace).
 
-#### Option 1: Merge Locally
+1. Push as new branch and create a Pull Request
+2. Keep as-is (I'll handle it later)
+
+Which option?
+```
+
+Present the menu exactly as written — concise, with every option coming from the list above. Discarding the work happens only in response to the operator explicitly asking for it (see "If the operator asks to discard the work" below). Wait for their answer; the integration decision is theirs.
+
+## Step 5: Execute Choice
+
+### Option 1: Merge Locally
 
 ```bash
+MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
+cd "$MAIN_ROOT"
+
 git checkout <base-branch>
 git pull
 git merge <feature-branch>
+
 pytest   # or project test command
+```
+
+If tests fail on the merged result: stop, leave the worktree and branch in place, and investigate — nothing has been pushed, so the merge is local and recoverable.
+
+Once the merged result is green: clean up the worktree (Step 6), then delete the branch:
+
+```bash
 git branch -d <feature-branch>
 ```
 
-Then: cleanup worktree (Step 5).
-
-#### Option 2: Ship + PR (push via `/ship` contract, then create PR)
+### Option 2: Ship + PR (push via `/ship` contract, then create PR)
 
 > **Delegation model:** the `/ship` slash command cannot be invoked from inside a skill. Instead, this subsection executes the `/ship` contract inline — the canonical specification lives in `.claude/commands/ship.md` and this skill follows it. Any change to `ship.md` step semantics must be reflected here in the same commit.
 
@@ -123,7 +156,7 @@ Cap the title at 70 characters. Truncate with ellipsis on overflow.
 
 Both templates end with: `Generated by finishing-a-development-branch skill. Edit before merging if needed.`
 
-**Base branch:** reuse the value computed in Step 2 of this skill. Do not recompute.
+**Base branch:** reuse the value computed in Step 3 of this skill. Do not recompute.
 
 **Plan-linkage lookup:** best-effort. If `plan-tracker` errors or takes more than ~3 seconds, silently fall through to Template B. Plan-tracker must never block shipping.
 
@@ -161,17 +194,15 @@ No free-form prose editor — for prose-length edits, cancel here and run `gh pr
 - Checkpoint: <session_id> (seq: <last_event_seq>)
 ```
 
-Then: cleanup worktree (Step 5). Option 2 **keeps** the worktree (matches existing convention; PR follow-up commits have somewhere to land).
+Then: cleanup worktree (Step 6). Option 2 **keeps** the worktree (PR follow-up commits have somewhere to land).
 
-#### Option 3: Keep As-Is
+### Option 3: Keep As-Is
 
-Report: "Keeping branch <name>. Worktree preserved at <path>."
+Report: "Keeping branch `<name>`. Worktree preserved at `<path>`."
 
-Don't cleanup worktree.
+### If the operator asks to discard the work
 
-#### Option 4: Discard
-
-**Confirm first:**
+This path exists only as a response to an explicit operator request to throw the work away. Confirm first:
 
 ```
 This will permanently delete:
@@ -182,34 +213,33 @@ This will permanently delete:
 Type 'discard' to confirm.
 ```
 
-Wait for exact confirmation.
-
-If confirmed:
+Wait for that exact confirmation. When it arrives:
 
 ```bash
-git checkout <base-branch>
+MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
+cd "$MAIN_ROOT"
+```
+
+Then clean up the worktree (Step 6) and force-delete the branch:
+
+```bash
 git branch -D <feature-branch>
 ```
 
-Then: cleanup worktree (Step 5).
+## Step 6: Cleanup Workspace
 
-### Step 5: Cleanup Worktree
+**Runs for Option 1 and confirmed discards.** Options 2 and 3 always preserve the worktree. Both callers have already changed directory to the main repo root — worktree removal must run from outside the worktree — and use the `GIT_DIR`/`GIT_COMMON`/`WORKTREE_PATH` values captured in Step 2, from before that directory change.
 
-**For Options 1, 4:**
+**If `GIT_DIR == GIT_COMMON`:** Normal repo, no worktree to clean up. Done.
 
-Check if in a worktree:
-
-```bash
-git worktree list | grep $(git branch --show-current)
-```
-
-If yes:
+**If `WORKTREE_PATH` is under `.worktrees/` or `worktrees/`:** Superpowers/NovaCore created this worktree — we own cleanup:
 
 ```bash
-git worktree remove <worktree-path>
+git worktree remove "$WORKTREE_PATH"
+git worktree prune  # Self-healing: clean up any stale registrations
 ```
 
-**For Options 2, 3:** keep the worktree.
+**Otherwise:** The host environment owns this workspace — leave it in place. If your platform provides a workspace-exit tool (e.g. `ExitWorktree`), use it.
 
 ## Quick Reference
 
@@ -218,7 +248,7 @@ git worktree remove <worktree-path>
 | 1. Merge locally | ✓ | - | - | ✓ |
 | 2. Ship + PR | - | ✓ | ✓ | - |
 | 3. Keep as-is | - | - | ✓ | - |
-| 4. Discard | - | - | - | ✓ (force) |
+| Discard (explicit request only) | - | - | - | ✓ (force) |
 
 ## Common Mistakes
 
@@ -228,11 +258,11 @@ git worktree remove <worktree-path>
 
 **Open-ended questions**
 - **Problem:** "what should I do next?" → ambiguous.
-- **Fix:** present exactly 4 structured options.
+- **Fix:** present exactly 3 structured options (or 2 for detached HEAD).
 
 **Automatic worktree cleanup**
 - **Problem:** remove worktree when it might still be needed (Options 2, 3).
-- **Fix:** only cleanup for Options 1 and 4.
+- **Fix:** only cleanup for Option 1 and confirmed discards.
 
 **No confirmation for discard**
 - **Problem:** accidentally delete work.
@@ -245,12 +275,13 @@ git worktree remove <worktree-path>
 - Merge without verifying tests on the result
 - Delete work without confirmation
 - Force-push without explicit request
+- Offer "Discard" as a menu option — wait for the operator to ask
 
 **Always:**
 - Verify tests before offering options
-- Present exactly 4 options
-- Get typed confirmation for Option 4
-- Clean up worktree for Options 1 & 4 only
+- Present exactly 3 options (or 2 for detached HEAD)
+- Get typed confirmation for discards
+- Clean up worktree for Option 1 and confirmed discards only
 
 ## Integration
 

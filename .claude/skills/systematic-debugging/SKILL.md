@@ -3,8 +3,8 @@ name: systematic-debugging
 description: "Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes. Enforces a 4-phase root-cause process with a 3-attempt escalation to architectural review. Invoke when the operator says 'debug', 'investigate', 'figure out why', or pastes an error message / failing test."
 source:
   upstream: obra/superpowers
-  tag: v5.0.7
-  commit: 1f20bef3f59b85ad7b52718f822e37c4478a3ff5
+  tag: v6.2.0
+  commit: 3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9
   path: skills/systematic-debugging/SKILL.md
   license: MIT
 ---
@@ -19,7 +19,7 @@ Random fixes waste time and create new bugs. Quick patches mask underlying issue
 
 **Violating the letter of this process is violating the spirit of debugging.**
 
-> **NovaCore adaptations (vendored from Superpowers v5.0.7):**
+> **NovaCore adaptations (vendored from Superpowers v6.2.0):**
 > - For *general* structured reasoning (architecture trade-offs, multi-phase planning), prefer `sequential-thinking`. This skill is specifically for bug/failure/incident investigation.
 > - The 3-attempt escalation routes to the **Critic agent** (`AGENTS/critic/AGENT.md`) via Task dispatch, and the root-cause summary is logged via **`memory-store`** with `memory_type: research` and tag `debug`. See the "3+ Failed Fixes — Escalation" section below.
 > - Upstream phrasing "your human partner" is rendered here as "operator".
